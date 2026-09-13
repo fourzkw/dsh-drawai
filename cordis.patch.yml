@@ -1,0 +1,14 @@
+# dsh-drawai bundle patch
+#
+# 这个文件是 `dsh.bundle.patch` 层：当本包通过 bundle 通道安装时，
+# `dsh plugin --profile <name> add` 会把它并入 profile 的 bundle 栈，
+# 由下面这一行把插件挂到宿主 Cordis 树上。
+#
+# 开发期走本地 link 时，也可以把同一行手动加进
+# `$DSH_HOME/profiles/<name>/cordis.patch.yml`（该文件被 watch，
+# patchReload: live 时改对即重组，不必重启）。
+#
+# 注意：patch 文件不能是空的或只有注释——loader 会启动失败。留空请写 `[]`。
+- insert:
+    - id: drawai
+      name: 'dsh-drawai'

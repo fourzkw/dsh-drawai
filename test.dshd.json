@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "revision": 6,
+  "meta": {
+    "engine": "drawio-svg",
+    "pinned": true
+  },
+  "nodes": [
+    {
+      "id": "n1",
+      "shape": "stadium",
+      "style": "green",
+      "w": 130,
+      "h": 56,
+      "label": "起点",
+      "x": 85,
+      "y": 0
+    },
+    {
+      "id": "n2",
+      "shape": "rect",
+      "style": "blue",
+      "w": 130,
+      "h": 56,
+      "label": "处理数据",
+      "x": 85,
+      "y": 146
+    },
+    {
+      "id": "n3",
+      "shape": "diamond",
+      "style": "orange",
+      "w": 130,
+      "h": 56,
+      "label": "结果合格？",
+      "x": 85,
+      "y": 292
+    },
+    {
+      "id": "n4",
+      "shape": "rect",
+      "style": "purple",
+      "w": 130,
+      "h": 56,
+      "label": "写回文件",
+      "x": 0,
+      "y": 438
+    },
+    {
+      "id": "n5",
+      "shape": "rect",
+      "style": "red",
+      "w": 130,
+      "h": 56,
+      "label": "重试一次",
+      "x": 170,
+      "y": 438
+    },
+    {
+      "id": "n6",
+      "shape": "ellipse",
+      "style": "grey",
+      "w": 130,
+      "h": 56,
+      "label": "完成",
+      "x": 85,
+      "y": 584
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "n1",
+      "to": "n2"
+    },
+    {
+      "id": "e2",
+      "from": "n2",
+      "to": "n3",
+      "label": "算出结果"
+    },
+    {
+      "id": "e3",
+      "from": "n3",
+      "to": "n4",
+      "label": "是"
+    },
+    {
+      "id": "e4",
+      "from": "n4",
+      "to": "n6",
+      "arrow": "both"
+    },
+    {
+      "id": "e5",
+      "from": "n3",
+      "to": "n5",
+      "label": "否"
+    },
+    {
+      "id": "e6",
+      "from": "n5",
+      "to": "n2",
+      "label": "再试一次",
+      "dash": "dashed"
+    }
+  ]
+}

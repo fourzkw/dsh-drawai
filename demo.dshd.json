@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "revision": 23,
+  "meta": {
+    "engine": "drawio-svg",
+    "pinned": true
+  },
+  "nodes": [
+    {
+      "id": "doc",
+      "shape": "document",
+      "style": "yellow",
+      "x": 60,
+      "y": 60,
+      "w": 186,
+      "h": 86,
+      "label": "demo.dshd.json（真相源）"
+    },
+    {
+      "id": "canvas",
+      "shape": "rect",
+      "style": "purple",
+      "x": 60,
+      "y": 290,
+      "w": 186,
+      "h": 56,
+      "label": "右栏画布自动重绘"
+    },
+    {
+      "id": "human",
+      "shape": "stadium",
+      "style": "green",
+      "x": 340,
+      "y": 60,
+      "w": 160,
+      "h": 56,
+      "label": "人拖拽 / AI 改文件"
+    },
+    {
+      "id": "n1",
+      "shape": "rect",
+      "style": "blue",
+      "x": 350,
+      "y": 150,
+      "w": 130,
+      "h": 56,
+      "label": "新节点"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e2",
+      "from": "doc",
+      "to": "canvas",
+      "label": "变更流 + 兜底轮询"
+    }
+  ]
+}

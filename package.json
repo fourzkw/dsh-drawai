@@ -1,0 +1,39 @@
+{
+  "name": "dsh-drawai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH 右侧栏 draw.io 风格画布 + AI 语义绘图工具（diagram_apply / diagram_read）",
+  "main": "lib/index.js",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "watch": "node tools/watch.mjs",
+    "check": "node tools/check-package.mjs",
+    "test": "node tools/check-route-preview.mjs && node tools/check-host.mjs && node tools/check-render.mjs && node tools/check-component.mjs"
+  },
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-api-workspace-files"
+      ]
+    }
+  }
+}

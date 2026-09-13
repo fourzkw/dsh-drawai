@@ -1,0 +1,9 @@
+# 本机自测用的 @deepseek-ai/* junction，机器相关，不要提交
+node_modules/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.log
