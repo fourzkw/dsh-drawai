@@ -210,7 +210,8 @@ console.log('\n障碍避让：能绕开时确实绕开')
   ok(seeded.points.length >= 2 && finite(seeded.points) && orthogonal(seeded.points), '钉住引出侧时预览依然正交且有限')
   // 折线从**形状边框**起笔（视觉上就是贴着形状出来的），但要经过该侧的 stub 折点 —— 那个 stub 才是
   // 真正钉住"从这一边引出"的东西（和 onNodePointerUp 落盘时写的 points 是同一个点）。
-  const stub = { x: geoA.byId.a.geo.x + geoA.byId.a.geo.w + 24, y: geoA.byId.a.geo.y + geoA.byId.a.geo.h / 2 }
+  // stub 坐标直接用产物里的函数算（它是单源）：手抄一遍公式的话，吸附规则一变这里就假失败。
+  const stub = internals.stubPointFor(geoA.byId.a.geo, 'e')
   const onPath = seeded.points.some((p) => Math.abs(p.x - stub.x) < 0.51 && Math.abs(p.y - stub.y) < 0.51)
   ok(onPath, '钉住引出侧时折线经过该侧的 stub（与落盘一致）')
   ok(Math.abs(seeded.points[0].x - (geoA.byId.a.geo.x + geoA.byId.a.geo.w)) < 0.51, '折线从形状边框起笔')
@@ -700,6 +701,62 @@ console.log('\n微小差距不该留下台阶（真机报过：竖线上 1px 的
   ok(last !== null && prev !== null && Math.abs(last.x - prev.x) < 0.51, '最后一跳是竖直的（正对接入点，不横跳）')
   // 折点是**用户数据**：路由可以决定接在哪，但绝不改写它。
   ok(edge.points[0].x === 244 && edge.points[1].x === 244 && edge.points[1].y === 86, '路由不改用户的折点坐标')
+}
+
+console.log('\n自动路由：每条线段都落在整格/半格线上')
+{
+  // 故意用**非整格尺寸**的节点（56 高、186 宽、86 高）—— 旧版会把线段放在"节点中心"上
+  // （56 高的中心在 y+28、186 宽的中心在 x+93），于是自动路由出来的线不在格线上。
+  const d = {
+    nodes: [
+      { id: 'a', x: 10, y: 20, w: 130, h: 56 },
+      { id: 'b', x: 300, y: 210, w: 186, h: 86 },
+      { id: 'c', x: 40, y: 400, w: 143, h: 62 },
+    ],
+    edges: [],
+  }
+  /** 一条路径里每条线段"所在的那条线"的坐标（竖线取 x，横线取 y）。 */
+  const lineCoords = (pts) => {
+    const out = []
+    for (let i = 1; pts !== null && i < pts.length; i += 1) {
+      const p = pts[i - 1]
+      const q = pts[i]
+      if (Math.abs(p.x - q.x) < 0.51) out.push({ axis: 'x', v: p.x })
+      else if (Math.abs(p.y - q.y) < 0.51) out.push({ axis: 'y', v: p.y })
+    }
+    return out
+  }
+  const onHalfGrid = (v) => Math.abs(v / internals.EDGE_GRID - Math.round(v / internals.EDGE_GRID)) < 0.001
+
+  const pairs = [
+    ['a', 'b'],
+    ['b', 'a'],
+    ['a', 'c'],
+    ['c', 'b'],
+  ]
+  let offGrid = []
+  let routed = 0
+  for (const [from, to] of pairs) {
+    const edge = { id: 'e-' + from + to, from: from, to: to }
+    const pts = internals.edgeRoutePoints({ nodes: d.nodes, edges: [edge] }, edge)
+    if (pts === null) continue
+    routed += 1
+    ok(orthogonal(pts) && finite(pts), from + ' → ' + to + '：折线正交且有限（' + pts.length + ' 点）')
+    for (const line of lineCoords(pts)) {
+      if (!onHalfGrid(line.v)) offGrid.push(from + '→' + to + ' ' + line.axis + '=' + line.v)
+    }
+  }
+  ok(routed === pairs.length, '四条边都算出了路径（' + routed + '/' + pairs.length + '）')
+  ok(offGrid.length === 0, '每条线段所在的线都在半格上（不在的：' + (offGrid.join(', ') || '无') + '）')
+
+  // 贴边那一轴必须**精确**：不能为了对齐把线从节点边框上挪开。
+  const edge2 = { id: 'e1', from: 'a', to: 'b' }
+  const pts2 = internals.edgeRoutePoints({ nodes: d.nodes, edges: [edge2] }, edge2)
+  const first = pts2[0]
+  const last = pts2[pts2.length - 1]
+  const onBorderA = Math.abs(first.x - (10 + 130)) < 0.01 || Math.abs(first.x - 10) < 0.01 || Math.abs(first.y - 20) < 0.01 || Math.abs(first.y - (20 + 56)) < 0.01
+  const onBorderB = Math.abs(last.x - 300) < 0.01 || Math.abs(last.x - (300 + 186)) < 0.01 || Math.abs(last.y - 210) < 0.01 || Math.abs(last.y - (210 + 86)) < 0.01
+  ok(onBorderA && onBorderB, '起点/终点仍然精确落在两侧节点的边框上（不被吸附挪开）')
 }
 
 console.log('\n画布真图的连线不变量（直接读 demo.dshd.json）')
