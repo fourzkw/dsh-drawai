@@ -8,18 +8,15 @@
           <mxCell parent="1" />
         </object>
         <mxCell id="n2" value="新节点" style="fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="160" y="-80" width="130" height="60" as="geometry" />
+          <mxGeometry x="100" y="-30" width="130" height="60" as="geometry" />
         </mxCell>
         <mxCell id="n3" value="新节点" style="fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="-50" y="-130" width="130" height="60" as="geometry" />
+          <mxGeometry x="-50" y="-220" width="130" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="e1" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n3" target="n2">
-          <mxGeometry relative="1" as="geometry">
-          <Array as="points">
-            <mxPoint x="130" y="-50" />
-          </Array>
-        </mxGeometry>
+        <mxCell id="e1" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;entryX=0.5;entryY=0;endArrow=classic;" edge="1" parent="1" source="n3" target="n2">
+          <mxGeometry relative="1" as="geometry"></mxGeometry>
         </mxCell>
+        
       </root>
     </mxGraphModel>
   </diagram>

@@ -1,51 +1,42 @@
 {
   "version": 2,
-  "revision": 46,
+  "revision": 165,
   "meta": {
     "engine": "drawio-svg",
     "pinned": true
   },
   "nodes": [
     {
-      "id": "canvas",
-      "label": "右栏画布自动重绘",
-      "style": "fillColor=#e1d5e7;strokeColor=#9673a6;",
-      "x": 10,
-      "y": 150,
-      "w": 186,
-      "h": 56
-    },
-    {
-      "id": "human",
-      "label": "人拖拽 / AI 改文件",
-      "style": "rounded=1;arcSize=50;fillColor=#d5e8d4;strokeColor=#82b366;",
-      "x": 340,
-      "y": 60,
-      "w": 160,
-      "h": 56
-    },
-    {
-      "id": "n1",
+      "id": "n2",
       "label": "新节点",
       "style": "fillColor=#dae8fc;strokeColor=#6c8ebf;",
-      "x": 350,
-      "y": 150,
+      "x": 160,
+      "y": -80,
       "w": 130,
-      "h": 56
+      "h": 60
+    },
+    {
+      "id": "n3",
+      "label": "新节点",
+      "style": "fillColor=#dae8fc;strokeColor=#6c8ebf;",
+      "x": -50,
+      "y": -130,
+      "w": 130,
+      "h": 60
     }
   ],
   "edges": [
     {
       "id": "e1",
-      "from": "canvas",
-      "to": "n1",
-      "style": "rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;exitX=1;exitY=0.5;entryX=0;entryY=0.5;endArrow=classic;"
-    },
-    {
-      "id": "e2",
-      "from": "n1",
-      "to": "canvas",
-      "style": "rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;exitX=0;exitY=0.5;entryX=1;entryY=0.5;endArrow=classic;"
+      "from": "n3",
+      "to": "n2",
+      "style": "rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;",
+      "points": [
+        {
+          "x": 130,
+          "y": -50
+        }
+      ]
     }
   ]
 }
