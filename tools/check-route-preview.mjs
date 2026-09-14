@@ -636,6 +636,29 @@ console.log('\n真机报过的组合：新节点上方 → 目标的下方/右�
   ok(internals.dropTargetOf(null, null) === null, '预览为空也不炸')
 }
 
+console.log('\n微小差距不该留下台阶（真机报过：竖线上 1px 的横跳）')
+{
+  // 用户拖出折点后折点在 x=244，而落点按"侧中点"算出来是 x=245 —— 最后一跳曾凭空多出
+  // `244→245` 的 1px 横跳，竖线上就出现一个小台阶（两条线段差一像素、合不成一条）。
+  const nodes = [
+    { id: 'n1', x: -30, y: -20, w: 130, h: 56 },
+    { id: 'n2', x: 180, y: 110, w: 130, h: 56 },
+  ]
+  const edge = { id: 'e1', from: 'n1', to: 'n2', points: [{ x: 244, y: 8 }, { x: 244, y: 86 }] }
+  const pts = internals.edgeRoutePoints({ nodes: nodes, edges: [edge] }, edge)
+  ok(pts !== null && finite(pts) && orthogonal(pts), '这条边算得出路径（' + (pts === null ? 'null' : pts.length + ' 点') + '）')
+  let minSeg = Infinity
+  for (let i = 1; pts !== null && i < pts.length; i += 1) {
+    minSeg = Math.min(minSeg, Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y))
+  }
+  ok(minSeg >= 5, '最短段 ≥ 5px，没有 1px 台阶（实际 ' + minSeg + 'px：' + JSON.stringify(pts) + '）')
+  const last = pts === null ? null : pts[pts.length - 1]
+  const prev = pts === null ? null : pts[pts.length - 2]
+  ok(last !== null && prev !== null && Math.abs(last.x - prev.x) < 0.51, '最后一跳是竖直的（正对接入点，不横跳）')
+  // 折点是**用户数据**：路由可以决定接在哪，但绝不改写它。
+  ok(edge.points[0].x === 244 && edge.points[1].x === 244 && edge.points[1].y === 86, '路由不改用户的折点坐标')
+}
+
 console.log('\n画布真图的连线不变量（直接读 demo.dshd.json）')
 {
   // 直接拿工作区里那份真文档跑 —— 它就是用户看的那张图。
