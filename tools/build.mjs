@@ -31,6 +31,9 @@ const CLIENT_TAIL_MARK = INDENT + 'return module.exports'
 /** 样式内核的源路径：宿主 import 它，客户端由本构建器内联它。 */
 const KERNEL_PATH = 'src/style-kernel.js'
 
+/** mxfile（`.drawio`）编解码的源路径：只给宿主半边用（要 node:zlib）。 */
+const MXFILE_PATH = 'src/mxfile.js'
+
 /**
  * 客户端 bundle body 的起点：**内核的第一行**（哨兵）。
  * 内联之后 body 不再是"从 React 那行开始"，校验必须按同一个起点取回。
@@ -137,6 +140,10 @@ export function buildAll() {
 
   // 宿主半边 import 的样式内核：原样拷（保留 export），加生成横幅。
   writeFileSync('lib/style-kernel.js', GENERATED + readFileSync(KERNEL_PATH, 'utf8'), 'utf8')
+
+  // 宿主半边的 mxfile 编解码（读/写 .drawio）：同样原样拷。
+  // 只有宿主半边用它（浏览器没有 zlib，解不开 drawio 压过的 diagram），所以不进客户端 bundle。
+  writeFileSync('lib/mxfile.js', GENERATED + readFileSync(MXFILE_PATH, 'utf8'), 'utf8')
 
   const body = composeClientBody()
   for (const [index, line] of body.split('\n').entries()) {

@@ -13,7 +13,7 @@
  *
  * 用法：node tools/check-host.mjs
  */
-import { mkdirSync, existsSync } from 'node:fs'
+import { mkdirSync, existsSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
@@ -57,6 +57,8 @@ const mod = await import('../lib/index.js')
 const store = new Map()
 const WORKSPACE = 'D:\\fake-workspace'
 const SESSION = { header: { cwd: WORKSPACE } }
+/** 第二个会话：工作区指向一个**真实**目录（list 用 node:readdir，内存桩骗不过它）。 */
+const SESSION2 = { header: { cwd: '' } }
 
 /**
  * 真实 DSH 的 ctx.fs 里，resolve() 返回的是一个**目标句柄**（绝对路径是它的一部分），
@@ -92,6 +94,8 @@ const fs = {
 }
 
 const tools = new Map()
+/** 写回路由：捕获下来，好在自测里直接打它（它是"导入/导出"的唯一入口）。 */
+const routes = []
 const ctx = {
   tools: {
     register(tool) {
@@ -99,16 +103,27 @@ const ctx = {
       return () => {}
     },
   },
-  webServer: { register: () => () => {} },
+  webServer: {
+    register(route) {
+      routes.push(route)
+      return () => {}
+    },
+  },
   fs: fs,
   sessions: {
     get(id) {
-      return id === 's1' ? SESSION : undefined
+      if (id === 's1') return SESSION
+      if (id === 's2') return SESSION2
+      return undefined
     },
   },
   sandboxPolicy: {
-    resolve() {
-      return { mode: 'workspace-write', workspaceRoot: WORKSPACE }
+    // 忠实建模：真实 DSH 的 resolve({ session }) 以**会话的 cwd** 作为可写根。
+    resolve(options) {
+      const session = options !== undefined && options !== null ? options.session : undefined
+      const cwd = session !== undefined && session !== null && session.header !== undefined ? session.header.cwd : undefined
+      const root = typeof cwd === 'string' && cwd.length > 0 ? cwd : WORKSPACE
+      return { mode: 'workspace-write', workspaceRoot: root }
     },
   },
   effect(fn) {
@@ -136,6 +151,60 @@ function seed(doc) {
 
 function current() {
   return JSON.parse(store.get(WORKSPACE + '\\doc.dshd.json'))
+}
+
+// ---- 打写回路由的小工具（导入 / 导出 / 列表都挂在它上面）----------------------
+//
+// readBody 用 req.on('data'/'end') 读整段 body；这里造一个把 body 一次性喂进去的假 req。
+// 事件要等 handler 挂上监听之后再发，所以放进微任务里，而不是构造时就同步发。
+function fakeReq(bodyObject) {
+  const listeners = {}
+  const req = {
+    method: 'POST',
+    headers: { 'x-drawai-save': '1' },
+    on(name, fn) {
+      listeners[name] = fn
+      return req
+    },
+  }
+  const text = JSON.stringify(bodyObject)
+  queueMicrotask(() => {
+    if (listeners.data !== undefined) listeners.data(Buffer.from(text, 'utf8'))
+    if (listeners.end !== undefined) listeners.end()
+  })
+  return req
+}
+
+function fakeRes() {
+  return {
+    status: 0,
+    body: '',
+    writeHead(status) {
+      this.status = status
+    },
+    end(text) {
+      this.body = text
+    },
+  }
+}
+
+/** POST 一次写回路由，返回 { status, payload }。 */
+async function api(bodyObject) {
+  const res = fakeRes()
+  await route().handler(fakeReq(bodyObject), res)
+  let payload = null
+  try {
+    payload = JSON.parse(res.body)
+  } catch (error) {
+    payload = null
+  }
+  return { status: res.status, payload: payload, raw: res.body }
+}
+
+function route() {
+  const found = routes.filter((r) => r.path === '/drawai/api/save')[0]
+  if (found === undefined) throw new Error('写回路由没注册上')
+  return found
 }
 
 /** 调色板名的落盘形态（等价于 UI 里点了蓝/绿之后写进文档的东西）。 */
@@ -490,6 +559,116 @@ console.log('\n新建节点的尺寸也是整格（与画布 10px 的移动单�
   const two = JSON.parse(store.get(WORKSPACE + '\\size.dshd.json'))
   const widths = two.nodes.map((n) => n.w)
   ok(widths.every((w) => w % 10 === 0 && w >= 130 && w <= 300), '每个宽度都是整格且在 [130, 300] 内：' + widths.join(', '))
+}
+
+console.log('\n导入 / 导出 .drawio（走写回路由，和界面点的是同一条）')
+{
+  // 夹具：一份两页的 drawio 文件（第 2 页会被如实报成"只导入了第 1 页"）。
+  const drawio = [
+    '<mxfile host="test" compressed="false" type="device">',
+    '  <diagram id="p1" name="Page-1">',
+    '    <mxGraphModel dx="0" dy="0" grid="1" gridSize="10" pageWidth="827" pageHeight="1169"><root>',
+    '      <mxCell id="0" /><mxCell id="1" parent="0" />',
+    '      <mxCell id="a" value="起点" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">',
+    '        <mxGeometry x="40" y="40" width="140" height="60" as="geometry" />',
+    '      </mxCell>',
+    '      <mxCell id="b" value="终点" style="rhombus;fillColor=#d5e8d4;" vertex="1" parent="1">',
+    '        <mxGeometry x="300" y="220" width="160" height="80" as="geometry" />',
+    '      </mxCell>',
+    '      <mxCell id="e1" value="走这里" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;exitX=1;exitY=0.5;" edge="1" parent="1" source="a" target="b">',
+    '        <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="240" y="70" /></Array></mxGeometry>',
+    '      </mxCell>',
+    '    </root></mxGraphModel>',
+    '  </diagram>',
+    '  <diagram id="p2" name="Page-2"><mxGraphModel><root><mxCell id="0" /><mxCell id="1" parent="0" /></root></mxGraphModel></diagram>',
+    '</mxfile>',
+    '',
+  ].join('\n')
+
+  store.clear()
+  store.set(WORKSPACE + '\\flow.drawio', drawio)
+  store.set(WORKSPACE + '\\doc.dshd.json', JSON.stringify({ version: 2, revision: 4, meta: { pinned: true }, nodes: [{ id: 'n1', label: '一个节点', style: '', x: 0, y: 0, w: 130, h: 60 }], edges: [] }, null, 2) + '\n')
+
+  // ── list：.drawio 单列一区（混进画布列表会让"打开"去按 JSON 读一个 XML 文件）──
+  //
+  // list 走的是**真实目录**（宿主用 node:readdir 列目录，不是 ctx.fs），
+  // 所以这里真的在工作区里建一个小目录当"会话工作区"，用完删掉。
+  const listDir = resolve(root, '.tmp-check-host-list')
+  rmSync(listDir, { recursive: true, force: true })
+  mkdirSync(listDir, { recursive: true })
+  SESSION2.header.cwd = listDir
+  try {
+    writeFileSync(resolve(listDir, 'real.dshd.json'), JSON.stringify({ version: 2, revision: 1, nodes: [], edges: [] }))
+    writeFileSync(resolve(listDir, 'real.drawio'), drawio)
+    const listed = await api({ action: 'list', sessionId: 's2' })
+    ok(listed.status === 200 && listed.payload.ok === true, 'list 正常返回')
+    ok(listed.payload.files.indexOf('real.dshd.json') >= 0, 'list 里画布照旧出现在 files：' + JSON.stringify(listed.payload.files))
+    ok(listed.payload.files.indexOf('real.drawio') < 0, '.drawio **不在** files 里（它不是画布）')
+    ok(Array.isArray(listed.payload.drawio) && listed.payload.drawio.indexOf('real.drawio') >= 0, '.drawio 出现在 drawio 一列：' + JSON.stringify(listed.payload.drawio))
+    ok(listed.payload.drawioAbsolute.length === listed.payload.drawio.length, '同时给出绝对路径（客户端拿它当身份）')
+  } finally {
+    rmSync(listDir, { recursive: true, force: true })
+  }
+
+  // ── import：读成文档 + 落一份 .dshd.json ──
+  const imported = await api({ action: 'import', sessionId: 's1', path: 'flow.drawio' })
+  ok(imported.status === 200 && imported.payload.ok === true, 'import 成功（' + imported.status + ' ' + String(imported.payload && imported.payload.error) + '）')
+  ok(imported.payload.path === 'flow.dshd.json', '落到同目录的同名画布：' + imported.payload.path)
+  ok(store.get(WORKSPACE + '\\flow.drawio') === drawio, '**原件一个字节都没动**')
+  const importedDoc = JSON.parse(store.get(WORKSPACE + '\\flow.dshd.json'))
+  ok(importedDoc.version === 2 && importedDoc.revision === 1, '导入结果是 v2、revision 1')
+  ok(importedDoc.nodes.length === 2 && importedDoc.edges.length === 1, '导入出 2 个节点 / 1 条边')
+  ok(importedDoc.nodes[0].style === 'rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;', 'style 串原样带过来了')
+  ok(importedDoc.edges[0].from === 'a' && importedDoc.edges[0].to === 'b' && importedDoc.edges[0].label === '走这里', '端点与标签都对')
+  ok(importedDoc.edges[0].points.length === 1 && importedDoc.edges[0].points[0].x === 240, '折点也带过来了')
+  ok(importedDoc.meta.pinned === true && importedDoc.meta.importedFrom === 'flow.drawio', '导入的画布打 pinned，并记住来源文件')
+  ok(imported.payload.notes.join(' | ').indexOf('2 页') >= 0, '损失说明回传给界面：' + imported.payload.notes.join(' | '))
+  ok(imported.payload.doc.nodes.length === 2, '响应里直接带上文档（界面不用再读一次盘）')
+
+  // 再导一次：目标被占用就顺延，绝不覆盖（覆盖等于抹掉用户刚从 drawio 导出的那份画布）
+  const again = await api({ action: 'import', sessionId: 's1', path: 'flow.drawio' })
+  ok(again.payload.path === 'flow-2.dshd.json', '同名目标被占用时顺延成 -2：' + again.payload.path)
+  ok(store.get(WORKSPACE + '\\flow.dshd.json') === store.get(WORKSPACE + '\\flow-2.dshd.json'), '两次导入内容一致，且第一份没被改写')
+
+  // 坏输入
+  const notDrawio = await api({ action: 'import', sessionId: 's1', path: 'doc.dshd.json' })
+  ok(notDrawio.status === 400 && notDrawio.payload.ok !== true, '拒绝导入非 .drawio：' + notDrawio.payload.error)
+  store.set(WORKSPACE + '\\broken.drawio', '<mxfile><diagram></diagram></mxfile>')
+  const broken = await api({ action: 'import', sessionId: 's1', path: 'broken.drawio' })
+  ok(broken.status === 400 && /mxGraphModel|mxfile/.test(String(broken.payload.error)), '读不出 mxfile 的文件报错而不是给半张图：' + broken.payload.error)
+  ok(store.get(WORKSPACE + '\\broken.dshd.json') === undefined, '失败时**不落盘**（不留空文件）')
+
+  // ── export：文档 → mxfile ──
+  const exported = await api({ action: 'export', sessionId: 's1', path: 'doc.dshd.json' })
+  ok(exported.status === 200 && exported.payload.ok === true, 'export 成功（' + exported.status + ' ' + String(exported.payload && exported.payload.error) + '）')
+  ok(exported.payload.path === 'doc.drawio', '写在同目录的同名 .drawio：' + exported.payload.path)
+  const exportedText = store.get(WORKSPACE + '\\doc.drawio')
+  ok(typeof exportedText === 'string' && exportedText.indexOf('<mxfile') === 0, '产物是一份 mxfile')
+  const { parseMxfile } = await import('../src/mxfile.js')
+  const back = parseMxfile(exportedText).doc
+  ok(back.nodes.length === 1 && back.nodes[0].label === '一个节点', '导出的文件能被读回来（1 个节点、标签在）')
+  ok(exported.payload.suffixed === false, '第一次导出没有改名')
+
+  // 再导一次：不覆盖已有 .drawio（可能是用户的原稿）
+  const exported2 = await api({ action: 'export', sessionId: 's1', path: 'doc.dshd.json' })
+  ok(exported2.payload.path === 'doc-2.drawio' && exported2.payload.suffixed === true, '同名 .drawio 已存在 → 写成 doc-2.drawio')
+  ok(store.get(WORKSPACE + '\\doc.drawio') === exportedText, '第一份导出没被覆盖')
+
+  // 带 doc：导的是"屏幕上这张"（含还没落盘的改动），而不是盘上的旧版本
+  const unsaved = { version: 2, revision: 4, meta: {}, nodes: [{ id: 'n1', label: '改过的', style: '', x: 0, y: 0, w: 130, h: 60 }, { id: 'n2', label: '新的', style: '', x: 200, y: 0, w: 130, h: 60 }], edges: [] }
+  const exported3 = await api({ action: 'export', sessionId: 's1', path: 'doc.dshd.json', doc: unsaved })
+  ok(exported3.payload.nodes === 2, '带 doc 导出时按界面上的版本（2 个节点）')
+  ok(parseMxfile(store.get(WORKSPACE + '\\doc-3.drawio')).doc.nodes.length === 2, '落盘的确实是 2 个节点那版')
+  ok(JSON.parse(store.get(WORKSPACE + '\\doc.dshd.json')).nodes[0].label === '一个节点', '导出**不会**顺手改画布文档')
+
+  // 压缩形态：drawio 的默认形态，产物必须仍能被自己读回
+  const exported4 = await api({ action: 'export', sessionId: 's1', path: 'doc.dshd.json', compressed: true })
+  const packed = store.get(WORKSPACE + '\\' + exported4.payload.path)
+  ok(packed.indexOf('<mxGraphModel') < 0, 'compressed:true 时正文是压缩的')
+  ok(parseMxfile(packed).doc.nodes.length === 1, '压缩产物仍能读回（1 个节点）')
+
+  const badExport = await api({ action: 'export', sessionId: 's1', path: 'flow.drawio' })
+  ok(badExport.status === 403 && badExport.payload.ok !== true, '拒绝把非 .dshd.json 当画布导出')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')

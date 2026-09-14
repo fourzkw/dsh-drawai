@@ -18,16 +18,19 @@ DSH 右侧栏的 **draw.io 风格画布** + 让 AI 直接绘图的**语义工具
 | 宿主 | 稳定 id 分配（`n1…` / `e1…`）、按字符宽度估算节点尺寸 |
 | 宿主 | 自动布局四种：`dagre-tb`（默认，贴合右栏窄高形状）/ `dagre-lr` / `grid` / `none`；显式重排会清掉端点已移动的边上的**过期折点** |
 | 宿主 | **v1 → v2 读时升级**：旧文档（`shape` 枚举 / `style` 颜色名 / `dash`·`arrow`·`color` / 桩点混在 `points` 里）读入即迁移，读不改盘、一改就落 v2 |
+| 宿主 | `.drawio` **导入**：解 mxfile（含 drawio 默认的压缩形态）→ 语义文档 → 落一份同目录的 `.dshd.json`（同名被占用就顺延 `-2`，**绝不覆盖原件**） |
+| 宿主 | `.drawio` **导出**：当前画布 → mxfile（默认不压缩，diff 友好；drawio 两种都认），已存在同名文件时顺延，不覆盖 |
 | 客户端 | 右栏 tab 类型 `drawai:diagram`（`kind: diagram`），认领 `**/*.dshd.json` |
 | 客户端 | **工作栏在标签页之上**：`文件 / 编辑 / 视图 / 导出` 常驻在面板最上方，下面才是多画布标签条，再下面是画布。一张画布都没有时它也在（否则「新建/打开」就点不到了） |
-| 客户端 | **打开后为空**：进入面板时不预先开任何画布（没有"未绑定画布"这种中间态），用「文件 → 新建画布…」或「文件 → 打开…」开始；关掉最后一个标签就回到这个空舞台 |
+| 客户端 | **打开后为空**：进入面板时不预先开任何画布（没有"未绑定画布"这种中间态），用「文件 → 新建画布…」或「文件 → 打开 / 导入…」开始；关掉最后一个标签就回到这个空舞台 |
+| 客户端 | 「打开 / 导入…」把 `.drawio` 单列一区：点一下就是**导入**（转换并另存），不是打开原文件；导入的损失（多页只取第 1 页、分组被摊平…）在工作栏上一句句说明 |
 | 客户端 | draw.io 经典外观：9 种形状（由 `shape=`/`ellipse`/`rhombus`/`rounded=`/`arcSize=` 驱动）、8 色 mxGraph 调色板（`fillColor`/`strokeColor`）、白纸 + 网格、正交折线 + 障碍避让、边标签衬底、自动换行、明暗切换 |
 | 客户端 | **拖拽连线预览**：从四面的引出端点拖出线时，实时显示**与落盘同一套路由**算出的正交折线（不是直线）；靠近目标节点时列出它的**四个端点**并高亮将连接的那个（可挪指针改选），折线终点贴到该端点 |
 | 客户端 | **多选对齐 / 分布**：Shift 加选后右键 → 左/中/右、顶/中/底对齐，水平/垂直等距 |
 | 双方 | **连线画法**：线型（实线/虚线/点线，含 `dashPattern` 间距）× 箭头（单向/双向/无/反向）× 颜色 × 折角圆滑 × 引出段长度（`jettySize`）—— 全部是**文档里的 drawio style 键**，与 drawio 同构 |
 | 客户端 | 刷新：宿主变更流 `remote.workspaceFiles.changes()` 为主 + 5s 低频轮询兜底 |
 
-**未实现**：`.drawio` 导入导出、设置页、自环、分组/子图、`.drawio.svg`/`.png`/`.html` 内嵌载体（本轮只改数据模型，载体仍是单个 `.dshd.json`）。
+**未实现**：设置页、自环、分组/子图、`.drawio.svg`/`.png`/`.html` 内嵌载体（载体仍是单个 `.dshd.json`）；导入的多页只取第 1 页（其余页如实报为损失，不静默丢弃）。
 
 ---
 
@@ -91,6 +94,42 @@ DSH 右侧栏的 **draw.io 风格画布** + 让 AI 直接绘图的**语义工具
 `exitX/exitY` 与 `entryX/entryY`，其余点才是折点。升级逻辑只有一份
 （`src/style-kernel.js` 的 `normalizeDrawioDoc`），宿主与客户端共用 —— 同一份文件在画布上和 AI
 眼里一定是同一张图。**读**不改盘；一旦被修改，落盘就是 v2。
+
+## 与 `.drawio` 互转
+
+drawio 的文件就是 mxfile：`<mxfile><diagram><mxGraphModel><root>` 里一堆
+`<mxCell id value style parent source target vertex edge>` + `<mxGeometry>`。我们的文档层已经
+按同样的语义组织（见上一节），所以互转时**style 串是原样搬运的** —— 颜色、虚线、箭头、
+`exitX/exitY` 到了 drawio 里还是那些键，不需要翻译；真正要翻译的只有**几何与结构**：
+
+| 结构 | 读进来 | 写出去 |
+|---|---|---|
+| 顶点 | `mxGeometry@x/y/width/height`；**容器子单元的坐标是相对父级的**，沿 `parent` 链累加成绝对坐标 | 扁平地写在默认图层 `parent="1"` 下 |
+| 单元 id | `id` 一般在 `mxCell` 上，但 `<object label id>` 包装的单元 **id/label 在外层** | 一律写回 `mxCell`（用户对象的自定义属性不保留） |
+| 标签 | `value`（或 `object@label`）；`<br>` 折成空格、其余标签去掉，实体解码 | 纯文本 + XML 转义 |
+| 折点 | `<Array as="points"><mxPoint/></Array>` | 同左 |
+| 悬空端 | `as="sourcePoint"` / `as="targetPoint"` —— **只在该端没有真实顶点时才生效**（有顶点时忽略，与 drawio 一致） | 同左 |
+| 边端点 | `source` / `target` | 同左 |
+
+**压缩**：drawio 默认把 `<diagram>` 的内容压成 `base64(raw deflate(URI 编码的 XML))`
+（`Graph.compress`）。解压靠宿主（Node 有 `node:zlib`，浏览器没有），而且判形态是**看内容**
+而不是看 `compressed` 属性 —— 属性标错的文件照样读得开。导出默认**不压缩**（人可读、diff 友好；
+drawio 两种都认），`compressed: true` 才压。
+
+**编码**：UTF-8 首部的 BOM 会被摘掉（有的编辑器会加）；若文件其实是 UTF-16（记事本的"Unicode"
+另存），按 UTF-8 读进来会在字节之间夹满空字符 —— 这时**报一句明确的编码错**（请用 UTF-8 另存），
+而不是硬按 UTF-16 重解释：那会把中日韩标签变成乱码，而乱码是看不见的损失。
+
+**有损的地方一律如实报**，绝不静默丢弃：多页只导入第 1 页、分组/容器被摊平、图片/自定义形状
+按矩形导入、`<br>` 之类的 HTML 标签折成纯文本、两端都找不到落点的边被跳过 —— 这些都会作为
+`notes` 回到界面上（导入后面板里那一句句说明），因为**用户会拿导出覆盖原稿**，不说明就等于骗人。
+
+**命名策略：谁都不覆盖。** 导入 `foo.drawio` 写 `foo.dshd.json`，已存在就 `foo-2.dshd.json`；
+导出反向同理（`foo.dshd.json` → `foo.drawio`，已存在就 `foo-2.drawio`）。导出经常发生在
+"我把 foo.drawio 导入进来看了看"之后，直接覆盖等于抹掉用户的原稿。
+
+代码只有一份：`src/mxfile.js`（`parseMxfile` / `buildMxfile`），由构建器原样拷成
+`lib/mxfile.js` 供宿主半边 import；它**不进客户端 bundle**（浏览器没有 zlib，放进去只会白占体积）。
 
 ## 画布单位与吸附
 
@@ -260,13 +299,19 @@ doc 中心 153、fs 中心 151.5 时生成
 这套几何逻辑可以在命令行里自测，不需要浏览器：
 
 ```sh
-npm test        # 136 项路由/格式断言 + 100 项宿主断言 + 149 项渲染断言 + 63 项组件断言（合计 448）
+npm test        # 43 项 mxfile 编解码 + 136 项路由/格式 + 134 项宿主 + 149 项渲染 + 64 项组件（合计 526）
 ```
 
+- `tools/check-mxfile.mjs` —— mxfile ↔ 文档：拿**真实产物形状**的夹具读（`<object>` 包装、
+  root/layer 的 id 带前缀、容器子单元的相对坐标、多页），压缩形态**在测试里现压**（与
+  `Graph.compress` 同一套算法）再读回，文档 → `.drawio` → 文档的往返逐字段比对，
+  坏输入必须报错而不是给半张图；
 - `tools/check-route-preview.mjs` —— 折线正交性、吸附容差边界、**预览与落盘逐点一致**（含改接端点
   两个方向、带折点的边）、**拖动线段松手不跳变**、避让、共线化简保首尾、中心对齐容差，
   以及直接读 `demo.dshd.json` 的**真图连线不变量**（最短段 ≥5px、段把手不重叠 —— 就是「一条线上两个点」那类毛病）；
-- `tools/check-host.mjs` —— 用**内存文件系统**跑完整的 `diagram_apply` / `diagram_read`：
+- `tools/check-host.mjs` —— 用**内存文件系统**跑完整的 `diagram_apply` / `diagram_read`，
+  并直接打写回路由验证 `.drawio` 的**导入/导出**（原件不被改写、同名顺延、失败不落盘、
+  `compressed` 产物能被自己读回）：
   `meta.pinned` 是否被保住、非法 ops 是否在写盘前失败（全或无）、revision 语义、边样式落盘；
   宿主半边没有热重载（改完要重启 `dsh web`），这个自测把反馈压到一秒内；
 - `tools/check-render.mjs` —— 用极简 React 桩驱动 `renderDiagram`：预览折线/收尾线/提示环
@@ -333,14 +378,17 @@ npm run check     # 安装前烟测（含 lib 与 src 是否同步）
 package.json            # dsh.bundle.patch + dsh.client 声明 + scripts
 cordis.patch.yml        # bundle patch：insert 一行 drawai
 src/style-kernel.js     # ← 源：格式判据（style 键解析/默认省略/v1 读时升级），两半共用
-src/index.js            # ← 源：宿主半边（工具 + 布局 + 读写）
+src/mxfile.js           # ← 源：mxfile（.drawio）编解码，**只给宿主**（要 node:zlib）
+src/index.js            # ← 源：宿主半边（工具 + 布局 + 读写 + 导入导出路由）
 src/client.js           # ← 源：浏览器半边（画布 + tab 类型）
 lib/style-kernel.js     # 产物（勿改）
+lib/mxfile.js           # 产物（勿改）
 lib/index.js            # 产物（勿改）
 lib/client.js           # 产物（勿改）
 tools/build.mjs         # 零依赖构建器（含内核内联）
 tools/watch.mjs         # 构建监视器（HMR 的那一环）
 tools/check-package.mjs # 安装前烟测（含 lib 与 src 是否同步）
+tools/check-mxfile.mjs  # mxfile 编解码自测（真实夹具 + 现压的压缩形态 + 往返）
 tools/check-route-preview.mjs # 连线预览的路由自测（纯几何，无需浏览器）
 tools/check-host.mjs    # 宿主半边行为自测（内存文件系统，无需 DSH）
 tools/check-render.mjs  # 渲染 + 对齐/连线画法自测（React 桩驱动 renderDiagram）

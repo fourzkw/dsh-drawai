@@ -2490,8 +2490,18 @@ function CanvasView(props) {
       const identity = typeof abs[i] === 'string' && abs[i].length > 0 ? abs[i] : rel[i]
       entries.push({ path: identity, display: rel[i] })
     }
+    // .drawio：**不是**画布，点它要先导入。所以单独一列，界面上也分区显示 ——
+    // 混在画布列表里会让"打开"去按 JSON 读一个 XML 文件。
+    const relDrawio = Array.isArray(payload.drawio) ? payload.drawio : []
+    const absDrawio = Array.isArray(payload.drawioAbsolute) ? payload.drawioAbsolute : []
+    const drawioEntries = []
+    for (let i = 0; i < relDrawio.length; i += 1) {
+      const identity = typeof absDrawio[i] === 'string' && absDrawio[i].length > 0 ? absDrawio[i] : relDrawio[i]
+      drawioEntries.push({ path: identity, display: relDrawio[i] })
+    }
     setFileList({
       files: entries,
+      drawio: drawioEntries,
       error: '',
       notes: Array.isArray(payload.notes) ? payload.notes : [],
       dir: typeof payload.dir === 'string' ? payload.dir : '',
@@ -2626,6 +2636,100 @@ function CanvasView(props) {
     setNewName('')
     setFileList(null)
     setSaveNote('已另存为 ' + withExt + '（revision ' + payload.revision + '）')
+  }
+
+  /**
+   * 「导入 .drawio」：让宿主把它读成画布文档、落一份 .dshd.json，然后打开那张画布。
+   *
+   * 为什么转换在**宿主**做：drawio 默认把 diagram 压成 base64(raw deflate(xml))，
+   * 浏览器没有 zlib —— 解压这一步客户端根本做不了。宿主是 Node，还有写盘通道。
+   * 客户端只负责"点了哪个文件"和"把损失说明显示给人看"。
+   *
+   * 宿主**不会覆盖**任何东西：目标名被占用时顺延成 `foo-2.dshd.json`（原件一个字节都不动）。
+   */
+  async function importDrawio(relPath) {
+    if (typeof relPath !== 'string' || relPath.length === 0) return
+    if (client === null) return
+    setSaveNote('导入 ' + relPath + ' …')
+    let raw = null
+    try {
+      raw = await fetch(SAVE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [SAVE_HEADER]: '1' },
+        body: JSON.stringify({ action: 'import', sessionId: sessionId, path: relPath }),
+      })
+    } catch (error) {
+      setFileList({ files: null, drawio: [], error: '导入失败：' + (error && error.message ? error.message : String(error)) })
+      return
+    }
+    let payload = null
+    try {
+      payload = await raw.json()
+    } catch (error) {
+      setFileList({ files: null, drawio: [], error: '导入失败：返回不是 JSON（HTTP ' + raw.status + '）' })
+      return
+    }
+    if (payload === null || payload.ok !== true) {
+      setFileList({ files: null, drawio: [], error: String(payload !== null && payload.error ? payload.error : 'HTTP ' + raw.status) })
+      return
+    }
+    const opened = typeof payload.absolute === 'string' && payload.absolute.length > 0 ? payload.absolute : String(payload.path)
+    const notes = Array.isArray(payload.notes) ? payload.notes : []
+    const doc = payload.doc !== null && typeof payload.doc === 'object' ? payload.doc : null
+    const counts = doc !== null ? (Array.isArray(doc.nodes) ? doc.nodes.length : 0) + ' 个节点 / ' + (Array.isArray(doc.edges) ? doc.edges.length : 0) + ' 条边' : ''
+    setDocMenu(null)
+    setDocMenuPos(null)
+    setFileList(null)
+    onOpenTab(opened)
+    // 损失说明必须显示：多页只导入了第 1 页、分组被摊平这类事，
+    // 不说用户就会以为"导入是全保真的"，然后拿导出覆盖掉原稿。
+    setSaveNote('已导入 ' + relPath + ' → ' + String(payload.path) + (counts.length > 0 ? '（' + counts + '）' : '') + (notes.length > 0 ? ' ｜ ' + notes.join('；') : ''))
+  }
+
+  /**
+   * 「导出 .drawio」：把当前画布交给宿主写成 drawio 能直接打开的 mxfile。
+   *
+   * 带 `doc` 而不是只给路径：界面上可能还有没落盘的拖动，用户点了导出就该导"屏幕上这张"，
+   * 而不是磁盘上 300ms 防抖之前的旧版本。
+   *
+   * style 串是原样搬运的 —— 这正是本轮把文档格式对齐 drawio 的收益：
+   * 颜色/虚线/箭头/进出侧到了 drawio 里仍然是那些键，不需要翻译。
+   */
+  async function exportDrawio() {
+    if (client === null) return
+    if (!hasPath) {
+      setSaveNote('还没有画布可导出：先「新建画布…」或「打开…」')
+      return
+    }
+    const snapshot = docRef.current
+    setSaveNote('导出 .drawio …')
+    let raw = null
+    try {
+      raw = await fetch(SAVE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [SAVE_HEADER]: '1' },
+        body: JSON.stringify({ action: 'export', sessionId: sessionId, path: target, doc: snapshot }),
+      })
+    } catch (error) {
+      setSaveNote('导出失败：' + (error && error.message ? error.message : String(error)))
+      return
+    }
+    let payload = null
+    try {
+      payload = await raw.json()
+    } catch (error) {
+      setSaveNote('导出失败：返回不是 JSON（HTTP ' + raw.status + '）')
+      return
+    }
+    if (payload === null || payload.ok !== true) {
+      setSaveNote('导出失败：' + String(payload !== null && payload.error ? payload.error : 'HTTP ' + raw.status))
+      return
+    }
+    setSaveNote(
+      '已导出 ' + String(payload.path) +
+        '（' + String(payload.nodes) + ' 个节点 / ' + String(payload.edges) + ' 条边）' +
+        (payload.suffixed === true ? ' ｜ 同名文件已存在，改用了这个新名字（原件没动）' : ''),
+    )
   }
 
   /**
@@ -4107,6 +4211,8 @@ function CanvasView(props) {
     const list = fileList !== null && typeof fileList === 'object' ? fileList : null
     const listError = list !== null && typeof list.error === 'string' ? list.error : ''
     const listFiles = list !== null && Array.isArray(list.files) ? list.files : null
+    // .drawio 一列：宿主单独给的（不是画布，点了走导入）。
+    const listDrawio = list !== null && Array.isArray(list.drawio) ? list.drawio : []
 
     // 工具条下拉菜单（文件 / 编辑 / 视图 / 导出）：docMenu 的值就是菜单的 key。
     const toolbarMenu = toolbarMenus().filter((m) => m.key === docMenu)[0]
@@ -4145,8 +4251,8 @@ function CanvasView(props) {
         rows.push(React.createElement('div', { className: 'drawai-err' }, listError))
       } else if (listFiles === null) {
         rows.push(React.createElement('div', { className: 'drawai-note' }, '读取中…'))
-      } else if (listFiles.length === 0) {
-        rows.push(React.createElement('div', { className: 'drawai-note' }, '这个目录里没有 .dshd.json —— 换一个目录，或用「新建」建一张'))
+      } else if (listFiles.length === 0 && listDrawio.length === 0) {
+        rows.push(React.createElement('div', { className: 'drawai-note' }, '这个目录里没有 .dshd.json，也没有 .drawio —— 换一个目录，或用「新建」建一张'))
       } else {
         const items = []
         for (let i = 0; i < listFiles.length; i += 1) {
@@ -4170,7 +4276,34 @@ function CanvasView(props) {
             ),
           )
         }
-        rows.push(React.createElement('div', null, items))
+        if (items.length === 0) rows.push(React.createElement('div', { className: 'drawai-note' }, '这个目录里没有 .dshd.json'))
+        else rows.push(React.createElement('div', null, items))
+        // .drawio 单列一区：点它**是导入**（转换并另存一份 .dshd.json），不是打开。
+        // 放在同一区里会让人以为点开就能编辑原文件 —— 而原文件我们一个字节都不动。
+        if (listDrawio.length > 0) {
+          rows.push(React.createElement('div', { className: 'drawai-note' }, 'drawio 文件（点一下导入成画布，原文件不动）'))
+          const drawioItems = []
+          for (let i = 0; i < listDrawio.length; i += 1) {
+            const item = listDrawio[i]
+            const identity = item !== null && typeof item === 'object' && typeof item.path === 'string' ? item.path : null
+            const label = item !== null && typeof item === 'object' && typeof item.display === 'string' ? item.display : identity
+            if (identity === null || identity.length === 0 || label === null) continue
+            drawioItems.push(
+              React.createElement(
+                'button',
+                {
+                  key: identity,
+                  className: 'drawai-btn',
+                  style: { display: 'block', width: '100%', textAlign: 'left', marginBottom: '3px' },
+                  onClick: () => importDrawio(identity),
+                  title: '读成画布文档并另存为同目录下的 .dshd.json',
+                },
+                label + '  → 导入',
+              ),
+            )
+          }
+          rows.push(React.createElement('div', null, drawioItems))
+        }
       }
       for (let i = 0; i < listNotes.length; i += 1) {
         rows.push(React.createElement('div', { className: 'drawai-note', key: 'note' + i }, '⚠ ' + listNotes[i]))
@@ -4419,7 +4552,7 @@ function CanvasView(props) {
         title: '新建 / 打开 / 保存',
         items: [
           item('新建画布…', openNewCanvasPanel, { hint: '自己起个名字（默认预填下一个可用的 untitled*）' }),
-          item('打开…', openFilePicker, { hint: '列出上次用过的目录里已有的画布' }),
+          item('打开 / 导入…', openFilePicker, { hint: '列出现有画布；.drawio 点一下就导入成画布' }),
           item(hasPath ? '保存' : '另存为…', () => (hasPath ? saveNow() : openSaveAsPanel()), {
             hint: empty ? '还没有画布可保存' : hasPath ? '立刻落盘（平时会自动保存）' : '给这张画布一个文件名',
             disabled: empty || (hasPath && !canSave),
@@ -4450,7 +4583,7 @@ function CanvasView(props) {
       {
         key: 'export',
         label: '导出',
-        title: '导出为图片或矢量',
+        title: '导出为图片、矢量或 drawio 文件',
         items: [
           item(
             '导出 SVG',
@@ -4468,6 +4601,7 @@ function CanvasView(props) {
             },
             { hint: '位图，适合贴到文档里', disabled: empty },
           ),
+          item('导出 drawio（.drawio）', exportDrawio, { hint: 'drawio 能直接打开；旁边多一份同名文件', disabled: empty }),
         ],
       },
     ]
@@ -4511,7 +4645,7 @@ function CanvasView(props) {
       { className: 'drawai-empty' },
       React.createElement('div', { className: 'drawai-empty-title' }, '还没有打开画布'),
       React.createElement('div', { className: 'drawai-empty-hint' }, '用工作栏的「文件 → 新建画布…」创建一个新画布'),
-      React.createElement('div', { className: 'drawai-empty-hint' }, '或用「文件 → 打开…」挑一个已有的 .dshd.json'),
+      React.createElement('div', { className: 'drawai-empty-hint' }, '或用「文件 → 打开 / 导入…」挑一个已有的 .dshd.json，或把 .drawio 导入进来'),
     )
   } else if (doc === null) {
     body = React.createElement('div', { className: 'drawai-note' }, '读取中…')

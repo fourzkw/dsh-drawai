@@ -39,6 +39,11 @@ try {
   const kernelLib = readFileSync(new URL('../lib/style-kernel.js', import.meta.url), 'utf8')
   const kernelSrc = readFileSync(new URL('../src/style-kernel.js', import.meta.url), 'utf8')
   check('lib/style-kernel.js 含 src/style-kernel.js', kernelLib.includes(kernelSrc))
+  const mxLib = readFileSync(new URL('../lib/mxfile.js', import.meta.url), 'utf8')
+  const mxSrc = readFileSync(new URL('../src/mxfile.js', import.meta.url), 'utf8')
+  check('lib/mxfile.js 含 src/mxfile.js', mxLib.includes(mxSrc))
+  // mxfile 只在宿主半边用（要 node:zlib）：漏拷会让 lib/index.js 直接 import 失败。
+  check('mxfile 没有混进客户端 bundle（浏览器没有 zlib）', bundle.includes('deflateRawSync') === false)
   const host = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8')
   const hostSource = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8')
   check('lib/index.js 含 src/index.js', host.includes(hostSource))
