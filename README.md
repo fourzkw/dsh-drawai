@@ -13,18 +13,82 @@ DSH 右侧栏的 **draw.io 风格画布** + 让 AI 直接绘图的**语义工具
 | 半边 | 能力 |
 |---|---|
 | 宿主 | `diagram_apply`：结构化 ops（`addNode`/`addEdge`/`setLabel`/`setStyle`/`remove`）→ 分层自动布局 → 原子写回 |
-| 宿主 | `diagram_read`：读回节点/边/标签/形状/配色 |
+| 宿主 | `diagram_read`：读回节点/边/标签/**style 键**（并给出派生的形状/线型/箭头/颜色名便于阅读） |
 | 宿主 | 语义校验：边指向不存在的节点直接报错并列出已知 id，**写盘之前**失败 |
 | 宿主 | 稳定 id 分配（`n1…` / `e1…`）、按字符宽度估算节点尺寸 |
-| 宿主 | 自动布局四种：`dagre-tb`（默认，贴合右栏窄高形状）/ `dagre-lr` / `grid` / `none` |
+| 宿主 | 自动布局四种：`dagre-tb`（默认，贴合右栏窄高形状）/ `dagre-lr` / `grid` / `none`；显式重排会清掉端点已移动的边上的**过期折点** |
+| 宿主 | **v1 → v2 读时升级**：旧文档（`shape` 枚举 / `style` 颜色名 / `dash`·`arrow`·`color` / 桩点混在 `points` 里）读入即迁移，读不改盘、一改就落 v2 |
 | 客户端 | 右栏 tab 类型 `drawai:diagram`（`kind: diagram`），认领 `**/*.dshd.json` |
-| 客户端 | draw.io 经典外观：9 种形状、8 色 mxGraph 调色板、白纸 + 网格、正交折线 + 障碍避让、边标签衬底、自动换行、明暗切换 |
+| 客户端 | draw.io 经典外观：9 种形状（由 `shape=`/`ellipse`/`rhombus`/`rounded=`/`arcSize=` 驱动）、8 色 mxGraph 调色板（`fillColor`/`strokeColor`）、白纸 + 网格、正交折线 + 障碍避让、边标签衬底、自动换行、明暗切换 |
 | 客户端 | **拖拽连线预览**：从四面的引出端点拖出线时，实时显示**与落盘同一套路由**算出的正交折线（不是直线）；靠近目标节点时列出它的**四个端点**并高亮将连接的那个（可挪指针改选），折线终点贴到该端点 |
 | 客户端 | **多选对齐 / 分布**：Shift 加选后右键 → 左/中/右、顶/中/底对齐，水平/垂直等距 |
-| 双方 | **连线画法**：线型（实线/虚线/点线）× 箭头（单向/双向/无/反向）× 颜色。文档存语义，渲染参数在客户端 |
+| 双方 | **连线画法**：线型（实线/虚线/点线，含 `dashPattern` 间距）× 箭头（单向/双向/无/反向）× 颜色 × 折角圆滑 × 引出段长度（`jettySize`）—— 全部是**文档里的 drawio style 键**，与 drawio 同构 |
 | 客户端 | 刷新：宿主变更流 `remote.workspaceFiles.changes()` 为主 + 5s 低频轮询兜底 |
 
-**未实现**：`.drawio` 导入导出、设置页、自环、分组/子图。
+**未实现**：`.drawio` 导入导出、设置页、自环、分组/子图、`.drawio.svg`/`.png`/`.html` 内嵌载体（本轮只改数据模型，载体仍是单个 `.dshd.json`）。
+
+---
+
+## 数据格式（v2）：照 drawio 的逻辑
+
+真源仍是工作区里的一个 JSON 文件（`.dshd.json`），但**字段按 drawio 的语义组织**：形状、配色、
+线型、箭头、端点约束都是 drawio 的 style 键，不再有一套自己的封闭枚举。键名逐个对着 drawio
+源码核实过（`mxConstants.js`、`Graph.js`、`mxConnector.js`、`docs/claude/libavoid-routing.md`），
+所以同一个文件在 `drawio → 本插件 → drawio` 之间往返不会丢东西。
+
+```jsonc
+{
+  "version": 2,
+  "revision": 23,
+  "meta": { "engine": "drawio-svg", "pinned": true },
+  "nodes": [
+    { "id": "doc", "label": "真相源", "style": "shape=document;fillColor=#fff2cc;strokeColor=#d6b656;",
+      "x": 60, "y": 60, "w": 186, "h": 86 }
+  ],
+  "edges": [
+    { "id": "e2", "from": "doc", "to": "canvas", "label": "变更流",
+      "style": "edgeStyle=orthogonalEdgeStyle;rounded=0;jettySize=auto;orthogonalLoop=1;html=1;endArrow=classic;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" }
+  ]
+}
+```
+
+三条规则，与 drawio 一致：
+
+1. **默认值一律省略。** `Graph.prototype.defaultVertexStyle = {}` —— 普通矩形就是**空样式**
+   （"rect = 没有 shape 键"）。`endArrow` 缺省 = 不画箭头（`mxConnector` 拿 `NONE` 当缺省）。
+2. **开放键值集合。** 认不出的键**原样保留、原样写回**，只是不认识就不渲染 —— 于是 drawio 导出的
+   文件在这里编辑一轮再拿回去，陌生键不会消失（v1 的"认不出的只能丢"就是这么修掉的）。
+3. **折点与端点是两套模型。** `points` 只放人摆的折点；"从哪一侧进出"是 `exitX/exitY`（源端）与
+   `entryX/entryY`（目标端）的**比例约束**（0 / 0.5 / 1 = 左·中·右、上·中·下）；悬空端的自由点才是
+   `sourcePoint`/`targetPoint`，且仅在该端**没有**真实顶点时生效（`mxGeometry` 的原话）——
+   悬空边照常渲染（v1 会把它整条丢掉），两端都悬空也能画。
+
+| 用途 | 键（drawio 名） |
+|---|---|
+| 形状 | `shape=`、`ellipse`、`rhombus`、`rounded=`、`arcSize=` |
+| 配色 | `fillColor`、`strokeColor`、`fontColor`、`strokeWidth` |
+| 线型 | `dashed=1`、`dashPattern`（画布缺省 `3 3`） |
+| 箭头 | `endArrow`、`startArrow`（`classic` / `none` / …） |
+| 路由 | `edgeStyle=orthogonalEdgeStyle`（`none` = 直线）、`rounded=`（折角是否圆滑） |
+| 端点 | `exitX`/`exitY`、`entryX`/`entryY`、`jettySize`（引出段长度，数字或 `auto`） |
+| 避让 | `libavoidRouting=1`（drawio 里它就是一个 per-edge 键） |
+| 文本 | `html=1`、`whiteSpace=wrap`、`fontSize`、`fontColor` |
+
+> **哪些键真的驱动渲染**：形状 / 配色 / 线型（含 `dashPattern` 间距）/ 箭头 / 路由（`edgeStyle=orthogonalEdgeStyle`
+> 与 `none` 直线）/ 折角（`rounded`）/ 端点约束（`exitX·exitY`、`entryX·entryY`）/ `jettySize` /
+> `fontSize`·`fontColor`·`whiteSpace` 都**真正生效**；而 `html=1`（本画布始终按纯文本渲染标签）、
+> `endSize`·`startSize`·`endFill` 这类箭头几何、`libavoidRouting`（本画布的路由本来就带避让惩罚）
+> 以及任何陌生键，只是**原样保留**、不影响画面 —— 这不影响往返：它们不会丢。
+
+**工具语言 ≠ 文档语言。** AI 侧的 ops 仍然收 `shape:'diamond'`、`dash:'虚线'`、`arrow:'双向'`、
+`style:'yellow'`、`exit:'e'` 这些**糖**，宿主翻成上面的键再落盘；`keys:{…}` 用来写任意 drawio 键
+（值给 `null` = 删键回缺省）。drawio 自己也是这个分工：面板上给名字，文档里只有十六进制。
+
+**旧文档读时升级。** v1（`shape` 枚举、`style` 当颜色名、`dash`/`arrow`/`color` 字段、把引出侧
+混在 `points` 里的桩点）在**读入时**升级成 v2：枚举 → style 键，贴在节点边框上的首/尾桩点 →
+`exitX/exitY` 与 `entryX/entryY`，其余点才是折点。升级逻辑只有一份
+（`src/style-kernel.js` 的 `normalizeDrawioDoc`），宿主与客户端共用 —— 同一份文件在画布上和 AI
+眼里一定是同一张图。**读**不改盘；一旦被修改，落盘就是 v2。
 
 ### meta.pinned：人手工摆过的版面不会被 AI 冲掉
 
@@ -153,8 +217,10 @@ doc 中心 153、fs 中心 151.5 时生成
   于是它照常从 6 个候选里挑一条正交走法 —— 预览里看到的绕行，就是松手后的绕行。
 - **端点由用户选，不由算法猜。** 拖线靠近某个节点时，该节点四个端点（上/右/下/左）会画出来，
   **选中的那个放大高亮**，预览线就接在它上面；想换一边，把指针往那个端点挪近一点即可。
-  选中的两个端点会以桩点形式**写进 `edge.points`**，所以"看到接哪边"和"存下来接哪边"是同一件事 ——
-  这条有一组断言盯着（`check-route-preview.mjs` 的"端点选择"一节：四个方向逐点比对预览与落盘）。
+  选中的两个端点会写成 style 里的 `exitX/exitY` 与 `entryX/entryY`（drawio 的固定连接点），
+  **不写进 `edge.points`** —— 折点只放人真摆的折点，所以"看到接哪边"和"存下来接哪边"是同一件事，
+  而 AI 重排图形也不会把端点约束当成过期折点清掉。这条有一组断言盯着
+  （`check-route-preview.mjs` 的"端点选择"与"改接端点"两节：四个方向 × 两个方向逐点比对预览与落盘）。
 - **吸附判定用几何，不用 `elementFromPoint`。** 预览要提前知道落点，而 DOM 命中测试
   只在松手那一刻才成立；顺带也就有了"靠近即接"的容差（draw.io 的语义）。
   松手落点仍然由 `elementFromPoint` 最终裁决。
@@ -165,7 +231,7 @@ doc 中心 153、fs 中心 151.5 时生成
 这套几何逻辑可以在命令行里自测，不需要浏览器：
 
 ```sh
-npm test        # 83 项路由断言 + 44 项宿主断言 + 69 项渲染断言
+npm test        # 99 项路由/格式断言 + 96 项宿主断言 + 148 项渲染断言 + 53 项组件断言（合计 396）
 ```
 
 - `tools/check-route-preview.mjs` —— 折线正交性、吸附容差边界、**预览与落盘逐点一致**（含改接端点
@@ -180,14 +246,21 @@ npm test        # 83 项路由断言 + 44 项宿主断言 + 69 项渲染断言
 
 ---
 
-## 为什么构建器只有 40 行
+## 为什么构建器仍然很小
 
 本机**没有** typescript / tsdown / esbuild / react，无法跑构建链。
 而本项目不需要代码转换：客户端半边全部用 `React.createElement`（无 JSX），
 宿主半边是普通 ESM（无 TS 类型）。
 
-所以 `src/` → `lib/` 只需要"套外壳 + 加缩进"，`tools/build.mjs` 用 **40 行零依赖 Node** 完成，
-不需要 tsdown / typescript / esbuild —— **本机也一个都没装**。
+`src/` → `lib/` 只做三件事：拷宿主半边、拷样式内核、把内核**内联**进客户端 bundle 再套外壳加缩进 ——
+仍是**零依赖 Node**，不需要 tsdown / typescript / esbuild（**本机也一个都没装**）。
+
+> **样式内核为什么要内联。** `src/style-kernel.js` 是宿主与客户端共用的格式判据（解析 style 串、
+> 默认省略、v1 读时升级…）。宿主是 ESM，直接 `import` 它；客户端的 bundle 是一个单文件 factory，
+> 只有一份冻结的 `require` 表，不能 import 兄弟文件。于是构建器把它去掉 `export`、包成
+> **IIFE 命名空间**（`const styleKernel = (function(){…})()`）再内联 —— 包一层是因为两边有同名符号
+> （都有 `SIDES`），平铺进同一作用域会直接 SyntaxError。源码只有一份，`check-package` 会断言
+> 客户端里那份确实是内联进去的。
 
 `lib/client.js` 的包装格式逐字对照官方产物
 （`dsh-client-ui-sidebar-right/lib/client.js`）确认：
@@ -216,6 +289,7 @@ npm run check     # 安装前烟测（含 lib 与 src 是否同步）
 |---|---|---|
 | `src/client.js` | watch 重建 `lib/client.js` → `dsh-client-hmr` 轮询到内容变化 → SSE → 浏览器**自动重挂载插件** | 约 1 秒，**不用刷页面** |
 | `src/index.js` | `npm run build` 后**重启 `dsh web`**（宿主半边只在启动时加载） | 一次重启 |
+| `src/style-kernel.js` | 两半都受影响：客户端那份走上面的热重载；宿主那份要**重启 `dsh web`** | 两者都要 |
 | `package.json` / `cordis.patch.yml` | 这两个文件被 watch，多数情况实时重组 | 立即 |
 
 `dsh-client-hmr` 的要求只是"有进程在写 `lib/client.js`"——不限定是 tsdown。
@@ -229,11 +303,13 @@ npm run check     # 安装前烟测（含 lib 与 src 是否同步）
 ```
 package.json            # dsh.bundle.patch + dsh.client 声明 + scripts
 cordis.patch.yml        # bundle patch：insert 一行 drawai
+src/style-kernel.js     # ← 源：格式判据（style 键解析/默认省略/v1 读时升级），两半共用
 src/index.js            # ← 源：宿主半边（工具 + 布局 + 读写）
 src/client.js           # ← 源：浏览器半边（画布 + tab 类型）
+lib/style-kernel.js     # 产物（勿改）
 lib/index.js            # 产物（勿改）
 lib/client.js           # 产物（勿改）
-tools/build.mjs         # 零依赖构建器
+tools/build.mjs         # 零依赖构建器（含内核内联）
 tools/watch.mjs         # 构建监视器（HMR 的那一环）
 tools/check-package.mjs # 安装前烟测（含 lib 与 src 是否同步）
 tools/check-route-preview.mjs # 连线预览的路由自测（纯几何，无需浏览器）

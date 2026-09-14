@@ -607,5 +607,85 @@ console.log('\n适应内容：居中、覆盖，且缩放锚点不漂移')
   ok(/h: current\.h,/.test(srcText), 'panRef 记下了当前高度')
 }
 
+console.log('\n文本与直线：fontSize / fontColor / whiteSpace / edgeStyle=none')
+{
+  const textOf = (tree) => walk(tree, (n) => n.type === 'text', [])[0]
+  const lineCount = (el) => {
+    if (el === undefined || el === null) return -1
+    const first = el.children[0]
+    return Array.isArray(first) ? first.length : el.children.length
+  }
+  const twoNodes = [
+    { id: 'a', x: 0, y: 0, w: 120, h: 60 },
+    { id: 'b', x: 400, y: 300, w: 120, h: 60 },
+  ]
+  const edgePathOf = (tree) =>
+    walk(tree, (n) => n.type === 'path' && n.props.pointerEvents === 'none' && typeof n.props.d === 'string', [])[0]
+
+  // fontSize / fontColor：标签的画法也是文档的一部分
+  const styled = renderDiagram(
+    { nodes: [{ id: 'a', x: 0, y: 0, w: 200, h: 60, label: '大字号', style: 'fontSize=22;fontColor=#b85450;' }], edges: [] },
+    'light',
+    'u1',
+    { current: null },
+    { selectedIds: [] },
+    null,
+  )
+  const labelEl = textOf(styled)
+  ok(labelEl !== undefined && labelEl.props.fontSize === 22, 'fontSize 进入文档后真的驱动了标签字号（' + (labelEl === undefined ? '-' : labelEl.props.fontSize) + '）')
+  ok(labelEl !== undefined && labelEl.props.fill === '#b85450', 'fontColor 驱动标签字色')
+
+  // whiteSpace：缺省换行，nowrap 不换行（drawio 的语义）
+  const longLabel = '这是一条很长很长很长很长很长很长的标签'
+  const wrapped = renderDiagram({ nodes: [{ id: 'a', x: 0, y: 0, w: 120, h: 60, label: longLabel }], edges: [] }, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const nowrap = renderDiagram(
+    { nodes: [{ id: 'a', x: 0, y: 0, w: 120, h: 60, label: longLabel, style: 'whiteSpace=nowrap;' }], edges: [] },
+    'light',
+    'u1',
+    { current: null },
+    { selectedIds: [] },
+    null,
+  )
+  ok(lineCount(textOf(wrapped)) > 1, '缺省 whiteSpace 会按宽度换行（' + lineCount(textOf(wrapped)) + ' 行）')
+  ok(lineCount(textOf(nowrap)) === 1, 'whiteSpace=nowrap 不换行')
+
+  // edgeStyle=none = 直线；缺省（orthogonalEdgeStyle）走正交折线
+  const straight = renderDiagram(
+    { nodes: twoNodes, edges: [{ id: 'e1', from: 'a', to: 'b', style: stylePatch(DEFAULT_EDGE_STYLE, { edgeStyle: 'none' }) }] },
+    'light',
+    'u1',
+    { current: null },
+    { selectedIds: [] },
+    null,
+  )
+  const ortho = renderDiagram(
+    { nodes: twoNodes, edges: [{ id: 'e1', from: 'a', to: 'b', style: DEFAULT_EDGE_STYLE }] },
+    'light',
+    'u1',
+    { current: null },
+    { selectedIds: [] },
+    null,
+  )
+  const straightPath = edgePathOf(straight)
+  const orthoPath = edgePathOf(ortho)
+  ok(straightPath !== undefined && straightPath.props.d.split('L').length === 2, 'edgeStyle=none 画成一条直线（只有两个点）')
+  ok(orthoPath !== undefined && orthoPath.props.d.split('L').length > 2, '缺省 edgeStyle 走正交折线（多于两个点）')
+}
+
+console.log('\n悬空端：解析不丢边，渲染画得出来')
+{
+  const dangling = {
+    version: 2,
+    nodes: [{ id: 'a', x: 0, y: 0, w: 160, h: 60 }],
+    edges: [{ id: 'e1', from: 'a', targetPoint: { x: 500, y: 300 }, style: DEFAULT_EDGE_STYLE }],
+  }
+  const parsed = internals.parseDocument(JSON.stringify(dangling))
+  ok(parsed.error === undefined && parsed.doc.edges.length === 1, '带悬空端的边不会被解析器丢掉（v1 会整条消失）')
+  const tree = renderDiagram(parsed.error === undefined ? parsed.doc : { nodes: [], edges: [] }, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  // 只认**可见的连线 path**：命中层有 className，网格线没有 pointerEvents:none。
+  const paths = walk(tree, (n) => n.type === 'path' && n.props.pointerEvents === 'none' && typeof n.props.d === 'string', [])
+  ok(paths.length === 1 && paths[0].props.d.indexOf('NaN') < 0, '悬空端的边真的画出了一条合法路径（paths=' + paths.length + '，d=' + (paths.length > 0 ? String(paths[0].props.d).slice(0, 70) : '-') + '）')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

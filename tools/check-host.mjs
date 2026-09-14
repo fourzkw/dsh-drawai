@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 // 自测直接引用样式内核：文档格式的"真相"只有一份，测试跟着它走，而不是把键名再抄一遍。
-import { DEFAULT_EDGE_STYLE, formatStyle, parseStyle, styleGet, styleWithSide } from '../src/style-kernel.js'
+import { DEFAULT_EDGE_STYLE, edgeFreePoint, formatStyle, parseStyle, styleGet, styleWithSide } from '../src/style-kernel.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -463,6 +463,14 @@ console.log('\n格式逻辑：默认省略 / 开放集合 / 折点与端点分�
   await apply([{ op: 'setLabel', id: 'n1', label: '迁移后' }])
   ok(current().version === 2, '迁移过的文档一旦被修改，落盘就是 v2')
   ok(current().edges[0].dash === undefined && current().edges[0].arrow === undefined && current().nodes[0].shape === undefined, 'v2 文档里不再有 dash/arrow/shape 这些旧字段')
+
+  // ── sourcePoint / targetPoint：drawio 语义是"该端**没有**真实顶点时的自由点" ──
+  // 有这个规则，才谈得上"端点与折点是两套模型"：连着顶点时端点由 exit*/entry* 约束，
+  // 悬空时才用绝对坐标点。宿主与客户端共用内核，所以这里直接对内核断言。
+  ok(edgeFreePoint({ from: 'a', to: 'b', sourcePoint: { x: 1, y: 2 } }, 'source') === null, '端点连着真实顶点时 sourcePoint 被忽略（drawio 语义）')
+  const freePoint = edgeFreePoint({ to: 'b', sourcePoint: { x: 1, y: 2 } }, 'source')
+  ok(freePoint !== null && freePoint.x === 1 && freePoint.y === 2, '端点没有真实顶点时 sourcePoint 生效')
+  ok(edgeFreePoint({ from: 'a', to: 'b', targetPoint: { x: 3, y: 4 } }, 'target') === null, 'targetPoint 同理（有顶点就忽略）')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')

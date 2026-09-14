@@ -30,7 +30,10 @@ const {
   colorsFromStyle,
   dashFromStyle,
   dashPatternFromStyle,
+  edgeFreePoint,
   formatStyle,
+  isOrthogonalEdgeStyle,
+  jettyFromStyle,
   nodeShapeFromStyle,
   normalizeDrawioDoc,
   parseStyle,
@@ -642,18 +645,60 @@ function axisToward(geo, target) {
 /**
  * 从某一侧引出连线时，先在那一侧外面放一个折点。
  *
- * 这是"从哪边出来"的固定手段：折点直接位于那一侧的正外方，
- * borderPointToward 就会选中那一条边，连线也就从那儿出来。
- * 不需要给数据模型加 exitX/exitY 之类的字段 —— 折点本身就是最自然的表达。
+ * 这是"从哪边出来"的**几何表达**：桩点位于那一侧的正外方，borderPointToward 就会选中那条边。
+ *
+ * v1 把桩点直接写进 edge.points（于是"端点约束"和"折点"混成了一锅，AI 一重排就散架）；
+ * v1.1 起端点约束存在 style 的 `exitX/exitY`、`entryX/entryY` 里，桩点只活在路由内部。
  */
-function stubPointFor(geo, side) {
-  const inset = 24
+function stubPointFor(geo, side, jetty) {
+  // 长度取文档里的 `jettySize`（drawio 的键），没写就用缺省 24px。
+  const inset = Number.isFinite(jetty) && jetty > 0 ? jetty : 24
   const cx = geo.x + geo.w / 2
   const cy = geo.y + geo.h / 2
   if (side === 'n') return { x: cx, y: geo.y - inset }
   if (side === 's') return { x: cx, y: geo.y + geo.h + inset }
   if (side === 'w') return { x: geo.x - inset, y: cy }
   return { x: geo.x + geo.w + inset, y: cy }
+}
+
+/**
+ * 从一条边的 style 串读出两端约束与桩点长度。
+ *
+ * 「从哪一侧进出」在 v1.1 起就是文档里的 `exitX/exitY`（源端）与 `entryX/entryY`（目标端）——
+ * 不再是把一个贴在边框外的桩点混进 edge.points（v1 的老办法）。缺省样式 = 两端都不钉。
+ */
+function sidesFromStyle(style) {
+  const text = typeof style === 'string' ? style : DEFAULT_EDGE_STYLE
+  return {
+    source: sideFromStyle(text, 'source'),
+    target: sideFromStyle(text, 'target'),
+    jetty: jettyFromStyle(text, undefined),
+  }
+}
+
+/** 某一端在文档里钉住的侧（没有约束返回 null = 由路由器自己挑）。 */
+function pinnedSideOf(edge, end) {
+  return sideFromStyle(typeof edge.style === 'string' ? edge.style : DEFAULT_EDGE_STYLE, end)
+}
+
+/**
+ * 把「两端约束 + 用户折点」拼成 routeThroughWaypoints 的必经点链。
+ *
+ * 顺序就是边的真实方向（fromBox → toBox）：源端桩点、用户折点、目标端桩点。
+ * **预览与落盘都走这一个函数** —— 于是"看到接哪边"和"存下来接哪边"是同一件事，
+ * 不会出现"松手瞬间整条线跳掉"。
+ */
+function chainForRoute(fromBox, toBox, waypoints, sides) {
+  const chain = []
+  const source = sides === undefined || sides === null ? null : sides.source
+  const target = sides === undefined || sides === null ? null : sides.target
+  const jetty = sides === undefined || sides === null ? null : sides.jetty
+  if (typeof source === 'string' && source.length > 0) chain.push(stubPointFor(fromBox.geo, source, jetty))
+  if (Array.isArray(waypoints)) {
+    for (let i = 0; i < waypoints.length; i += 1) chain.push({ x: waypoints[i].x, y: waypoints[i].y })
+  }
+  if (typeof target === 'string' && target.length > 0) chain.push(stubPointFor(toBox.geo, target, jetty))
+  return chain
 }
 
 /**
@@ -759,7 +804,7 @@ function ensurePinned(pts, points, vertexIndex) {
  *
  * `bounds` 不再参与绕行 —— 那是之前"边绕整个画布一圈"的来源。
  */
-function routeEdge(fromBox, toBox, boxes, bounds, waypoints) {
+function routeEdge(fromBox, toBox, boxes, bounds, waypoints, sides, straight) {
   // 入参是 box（{ id, node, geo, label }），几何在 .geo 上。
   // 这里曾经直接读 from.x / from.y —— box 上没有这些字段，于是 NaN 一路传染：
   // 连线 d="M NaN NaN" 被浏览器丢弃（边全部消失），边标签 x="NaN" 被忽略（全部塌到原点重叠）。
@@ -772,8 +817,16 @@ function routeEdge(fromBox, toBox, boxes, bounds, waypoints) {
     const r = 36
     return [{ x: x, y: cy - 12 }, { x: x + r, y: cy - 12 }, { x: x + r, y: cy + 12 }, { x: x, y: cy + 12 }]
   }
-  if (Array.isArray(waypoints) && waypoints.length > 0) {
-    return routeThroughWaypoints(fromBox, toBox, waypoints, boxes)
+  // 有端点约束或有用户折点 → 手动：逐个穿过必经点，人摆的优先级高于算法。
+  const chain = chainForRoute(fromBox, toBox, waypoints, sides)
+  if (chain.length > 0) {
+    return routeThroughWaypoints(fromBox, toBox, chain, boxes)
+  }
+  // edgeStyle=none = 直线（drawio 的语义）：两端各取朝向对方的边框点，中间一条直线。
+  if (straight === true) {
+    const a = borderPointToward(from, { x: to.x + to.w / 2, y: to.y + to.h / 2 })
+    const b = borderPointToward(to, { x: a.x, y: a.y })
+    return [{ x: a.x, y: a.y }, { x: b.x, y: b.y }]
   }
   void bounds
   // 中心几乎对齐时先统一（见 snapNearAxis）：否则 orthoV/viaY 会在两者之间走一个
@@ -1131,53 +1184,13 @@ function pickSides(geo, cursor, toward) {
 }
 
 /**
- * 改接端点时，落盘该写哪些折点。
+ * （已退役）v1 的 `waypointsForRetarget` 在这里：它把"被拖端/固定端的端点约束"折算成
+ * 贴在该侧外面的**桩点**，再混进 edge.points 一起落盘。
  *
- * **预览与落盘必须共用这一个函数**。之前两边各判一次"要不要钉住这一端"，
- * 判据不同（预览用钉住那一端的位置、落盘用 node 上的原始坐标）就分道扬镳了：
- * 把 to 端拖到目标**左边**时，预览从左边接进去，落盘却按"算法本来会选下边"处理，
- * 松手瞬间整条线跳掉 —— 用户看到的就是"预览与实际画出来的不是一条线"。
- *
- * 拼装顺序：
- *   1. 原有折点里**不属于被拖那一端**的那些（那一端换节点了，旧折点没意义）；
- *   2. 固定端：若算法不会落在它现在这一侧，补桩点钉住；
- *   3. 被拖那一端：选中的端点不是"自然侧"时补桩点 —— 就是用户点选的那个端点。
+ * v1.1 起这个函数不需要了：端点约束存在 style 的 `exitX/exitY`、`entryX/entryY` 里，
+ * 由 `chainForRoute` 在**路由时**把桩点拼进必经点链。于是预览与落盘共用同一份拼装，
+ * 而 edge.points 只剩用户真正摆下的折点 —— 两套模型不再互相污染。
  */
-function waypointsForRetarget(fromBox, toBox, existing, kind, movedSide, fixedSide) {
-  const list = Array.isArray(existing) ? existing : []
-  const movedBox = kind === 'from' ? fromBox : toBox
-  const fixedBox = kind === 'from' ? toBox : fromBox
-  const movedCenter = { x: movedBox.geo.x + movedBox.geo.w / 2, y: movedBox.geo.y + movedBox.geo.h / 2 }
-  const fixedCenter = { x: fixedBox.geo.x + fixedBox.geo.w / 2, y: fixedBox.geo.y + fixedBox.geo.h / 2 }
-  // 「自然侧」= 算法不加干预时会落的那一边。等于自然侧就不必钉桩点。
-  const naturalMoved = borderPointToward(fixedBox.geo, movedCenter).side
-  const naturalFixed = borderPointToward(movedBox.geo, fixedCenter).side
-  const movedStub =
-    typeof movedSide === 'string' && movedSide.length > 0 && movedSide !== naturalMoved ? stubPointFor(fixedBox.geo, movedSide) : null
-  const fixedStub =
-    typeof fixedSide === 'string' && fixedSide.length > 0 && fixedSide !== naturalFixed ? stubPointFor(movedBox.geo, fixedSide) : null
-  // 顺序按**边的真实方向**（fromBox → toBox）拼，不能按"被拖/固定"拼 ——
-  // 否则拖 from 端时折点表会是 [固定端桩点, 被拖端桩点]，routeThroughWaypoints 就倒着走，
-  // 预览与落盘一正一反（渲染反转折线只影响显示，救不了路径本身）。
-  const out = []
-  if (kind === 'from') {
-    if (movedStub !== null) out.push(movedStub)
-  } else if (fixedStub !== null) {
-    out.push(fixedStub)
-  }
-  for (let i = 0; i < list.length; i += 1) {
-    const p = list[i]
-    // 旧折点：丢掉属于被拖那一端的（那端换节点了，挂在它身上的折点没意义）。
-    if (borderPointToward(movedBox.geo, p).side === naturalMoved) continue
-    out.push({ x: p.x, y: p.y })
-  }
-  if (kind === 'from') {
-    if (fixedStub !== null) out.push(fixedStub)
-  } else if (movedStub !== null) {
-    out.push(movedStub)
-  }
-  return out
-}
 
 /**
  * 把一个落在节点内部的点推到该节点外面（推最短的一侧）。
@@ -1233,13 +1246,47 @@ function boxContaining(boxes, point, skip) {
   return null
 }
 
+/** 一条边的某一端是否"有着落"：连着真实节点，或者有自由点（drawio 的悬空端）。 */
+function edgeHasEnd(edge, end) {
+  const id = end === 'source' ? edge.from : edge.to
+  if (typeof id === 'string' && id.length > 0) return true
+  return edgeFreePoint(edge, end) !== null
+}
+
+/**
+ * 把一条边的一端解析成"盒子"：连着节点就用节点盒，悬空端用**自由点**合成一个零尺寸盒。
+ *
+ * 零尺寸盒正是预览给"空白处光标"用的那个技巧 —— 于是悬空端的路由与预览走同一条通路。
+ * 优先顶点、自由点次之，正是 drawio 的规则（`sourcePoint`/`targetPoint` 只在该端
+ * **没有**真实顶点时才生效，见 mxGeometry 的说明）。
+ *
+ * @returns 盒子，或 null（这一端既没顶点也没自由点 —— 这条边画不出来）
+ */
+function endpointBoxOf(byId, edge, end) {
+  const id = end === 'source' ? edge.from : edge.to
+  if (typeof id === 'string' && byId[id] !== undefined) return byId[id]
+  const point = edgeFreePoint(edge, end)
+  if (point === null) return null
+  return { id: '__free-' + end, geo: { x: point.x, y: point.y, w: 0, h: 0 } }
+}
+
 /** 一条边当前的折线路径（命中与定位都要用，和渲染同一套逻辑）。 */
 function edgeRoutePoints(doc, edge) {
   const geometry = buildGeometry(doc)
-  const from = geometry.byId[edge.from]
-  const to = geometry.byId[edge.to]
-  if (from === undefined || to === undefined) return null
-  return routeEdge(from, to, geometry.boxes, geometry.bounds, edge.points)
+  const from = endpointBoxOf(geometry.byId, edge, 'source')
+  const to = endpointBoxOf(geometry.byId, edge, 'target')
+  if (from === null || to === null) return null
+  return routeEdgeStyled(from, to, geometry.boxes, geometry.bounds, edge)
+}
+
+/**
+ * 按一条边的 style 路由：折点、端点约束（`exitX/exitY` 与 `entryX/entryY`）、以及"是不是直线"
+ * （`edgeStyle=none`）统统从文档的 style 键读。渲染、命中、标签定位、预览全走它 ——
+ * 一条边在哪儿只有一个答案。
+ */
+function routeEdgeStyled(fromBox, toBox, boxes, bounds, edge) {
+  const style = typeof edge.style === 'string' ? edge.style : DEFAULT_EDGE_STYLE
+  return routeEdge(fromBox, toBox, boxes, bounds, edge.points, sidesFromStyle(style), !isOrthogonalEdgeStyle(style))
 }
 
 /** 节点的几何（渲染与路由共用同一套默认值）。 */
@@ -1285,21 +1332,22 @@ function hitNodeAt(doc, geometry, x, y, padding, excludeId) {
  *  - 目标是空白处的指针：造一个零尺寸的虚拟盒，于是 routeEdge 会从它现有的 6 个候选里挑一个
  *    L 形/绕行走法 —— 预览在空白处也是折线，而不是斜线。
  */
+/**
+ * 预览用的路由：把"这一帧选中的两端"当**约束**喂给 routeEdge。
+ *
+ * seed = { source, target, jetty }（侧名或 null）。与落盘写进 style 的 exitX/exitY、
+ * entryX/entryY 是同一批值 —— 这是"预览即结果"的根据。
+ */
 function routePreview(fromBox, target, seed) {
   if (fromBox === undefined || fromBox === null || target === null || target === undefined) return null
   if (fromBox.id === target.id) return null
-  const fromGeo = fromBox.geo
   const toBox = { id: '__preview', geo: target.geo }
   const boxes = []
   for (let i = 0; i < target.boxes.length; i += 1) boxes.push(target.boxes[i])
   boxes.push(toBox)
-  // 必经点：钉住引出侧（只有写明 side 的手势才钉，改接端点时不知引出侧，保持自动路由）。
-  const waypoints =
-    seed !== null && seed !== undefined && typeof seed.side === 'string' && seed.side.length > 0
-      ? [stubPointFor(fromGeo, seed.side)]
-      : null
-  let raw = waypoints === null ? null : routeThroughWaypoints(fromBox, toBox, waypoints)
-  if (raw === null) raw = routeEdge(fromBox, toBox, boxes, target.bounds, null)
+  const sides =
+    seed === null || seed === undefined ? null : { source: seed.source, target: seed.target, jetty: seed.jetty }
+  const raw = routeEdge(fromBox, toBox, boxes, target.bounds, null, sides)
   const pts = simplifyCollinear(dedupePoints(raw))
   for (let i = 0; i < pts.length; i += 1) {
     if (!Number.isFinite(pts[i].x) || !Number.isFinite(pts[i].y)) return null
@@ -1327,28 +1375,18 @@ function routePreviewFor(doc, geometry, cursor, fromId, fromGeo, seed, padding, 
   if (seedSide !== null && seedAnchor === undefined) return null
 
   let toSide = null
-  const waypoints = []
-  if (seedAnchor !== null) waypoints.push({ x: seedAnchor.sx, y: seedAnchor.sy })
   if (hot !== null) {
-    // 指针落在节点上：按"离哪个端点近"选边，并把目标桩点也带上 ——
-    // 于是预览线的进线方向和落点边就是松手后的那一条。
+    // 指针落在节点上：按"离哪个端点近"选边 —— 目标侧也由用户选，不由算法猜。
     const toward = { x: fromGeo.x + fromGeo.w / 2, y: fromGeo.y + fromGeo.h / 2 }
-    const pickedTo = pickSides(hot.geo, cursor, toward)
-    toSide = pickedTo.side
-    waypoints.push({ x: pickedTo.sx, y: pickedTo.sy })
+    toSide = pickSides(hot.geo, cursor, toward).side
   }
 
   const fromBox = { id: fromId, geo: fromGeo, label: fromId }
   const targetGeo = hot === null ? { x: cursor.x, y: cursor.y, w: 0, h: 0 } : hot.geo
   const targetBox = { id: hot === null ? '__cursor' : hot.id, geo: targetGeo, boxes: geometry.boxes, bounds: geometry.bounds }
-  // 有桩点就走"必经点"路由（确定性，且与落盘写法一致）；没有桩点（改接端点）才退回自动路由。
-  const pts = waypoints.length > 0 ? routeThroughWaypoints(fromBox, targetBox, waypoints) : routePreview(fromBox, targetBox, null)
-  if (pts === null) return null
-  const clean = simplifyCollinear(dedupePoints(pts))
-  for (let i = 0; i < clean.length; i += 1) {
-    if (!Number.isFinite(clean[i].x) || !Number.isFinite(clean[i].y)) return null
-  }
-  if (clean.length < 2) return null
+  // 两侧选中的端点作为**约束**喂给同一条路由：预览与落盘共用 chainForRoute，不存在两套判据。
+  const clean = routePreview(fromBox, targetBox, { source: seedSide, target: toSide, jetty: null })
+  if (clean === null) return null
   return {
     points: clean,
     hot: hot === null ? null : { id: hot.id, x: hot.geo.x, y: hot.geo.y, w: hot.geo.w, h: hot.geo.h },
@@ -1385,26 +1423,22 @@ function edgePreviewRoute(doc, geometry, edge, kind, cursor, padding) {
     const toward = { x: fixedBox.geo.x + fixedBox.geo.w / 2, y: fixedBox.geo.y + fixedBox.geo.h / 2 }
     movedSide = pickSides(hot.geo, cursor, toward).side
   }
-  // 固定端当前贴在哪一侧：文档里有折点就按折点算，没有就是用自然侧（也就是不钉）。
-  const towardMoved = { x: movedBox.geo.x + movedBox.geo.w / 2, y: movedBox.geo.y + movedBox.geo.h / 2 }
-  const fixedSide = edgeSideOf(fixedBox, edge.points, towardMoved)
+  // 固定端保持文档里现有的约束 —— **只读不猜**。
+  // （v1 这里是"从 edge.points 反推它现在贴哪一侧"再补一个桩点；v1.1 起约束本来就在 style 里。）
+  const fixedEnd = kind === 'from' ? 'target' : 'source'
+  const fixedSide = pinnedSideOf(edge, fixedEnd)
+  const sides = kind === 'from' ? { source: movedSide, target: fixedSide } : { source: fixedSide, target: movedSide }
 
-  // 与落盘共用同一个折点拼装函数 —— 预览和结果是同一条线的保证就在这里。
+  // 与落盘共用 routeEdge + chainForRoute —— 预览和结果是同一条线的保证就在这里。
   // 折点表始终按边的真实方向（fromBox → toBox）排列，所以**不反转**折线：
-  // 拖 from 端时被拖的那个盒本来就是 fromBox，routeThroughWaypoints 出来的顺序就是对的。
-  const waypoints = kind === 'from'
-    ? waypointsForRetarget(movedBox, fixedBox, edge.points, 'from', movedSide, fixedSide)
-    : waypointsForRetarget(fixedBox, movedBox, edge.points, 'to', movedSide, fixedSide)
-
-  let pts = null
-  if (waypoints.length > 0) {
-    pts = kind === 'from' ? routeThroughWaypoints(movedBox, fixedBox, waypoints) : routeThroughWaypoints(fixedBox, movedBox, waypoints)
-  } else {
-    const boxes = []
-    for (let i = 0; i < geometry.boxes.length; i += 1) boxes.push(geometry.boxes[i])
-    boxes.push(movedBox)
-    pts = kind === 'from' ? routeEdge(movedBox, fixedBox, boxes, geometry.bounds, null) : routeEdge(fixedBox, movedBox, boxes, geometry.bounds, null)
-  }
+  // 拖 from 端时被拖的那个盒本来就是 fromBox，出来的顺序就是对的。
+  const boxes = []
+  for (let i = 0; i < geometry.boxes.length; i += 1) boxes.push(geometry.boxes[i])
+  boxes.push(movedBox)
+  const straight = !isOrthogonalEdgeStyle(typeof edge.style === 'string' ? edge.style : DEFAULT_EDGE_STYLE)
+  const pts = kind === 'from'
+    ? routeEdge(movedBox, fixedBox, boxes, geometry.bounds, edge.points, sides, straight)
+    : routeEdge(fixedBox, movedBox, boxes, geometry.bounds, edge.points, sides, straight)
   const out = simplifyCollinear(dedupePoints(pts))
   for (let i = 0; i < out.length; i += 1) {
     if (!Number.isFinite(out[i].x) || !Number.isFinite(out[i].y)) return null
@@ -1415,22 +1449,6 @@ function edgePreviewRoute(doc, geometry, edge, kind, cursor, padding) {
     hot: hot === null ? null : { id: hot.id, x: hot.geo.x, y: hot.geo.y, w: hot.geo.w, h: hot.geo.h },
     side: movedSide,
   }
-}
-
-/**
- * 一个端点在当前文档里实际贴在哪一侧。
- *
- * 有折点时取"离它最近的那个折点所决定的一侧"（人摆的折点就是这个端点的出口），
- * 没折点就是自然侧 —— 和 borderPointToward 的语义一致，落盘与预览都走这里。
- */
-function edgeSideOf(box, points, toward) {
-  const natural = borderPointToward(box.geo, toward).side
-  const list = Array.isArray(points) ? points : []
-  for (let i = 0; i < list.length; i += 1) {
-    const p = list[i]
-    if (borderPointToward(box.geo, p).side !== natural) return borderPointToward(box.geo, p).side
-  }
-  return natural
 }
 
 /** 边标签落在哪：最长那一段的中点（与渲染保持一致）。 */
@@ -1514,10 +1532,10 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
 
   for (let i = 0; i < doc.edges.length; i += 1) {
     const edge = doc.edges[i]
-    const from = byId[edge.from]
-    const to = byId[edge.to]
-    if (from === undefined || to === undefined) continue
-    let pts = routeEdge(from, to, boxes, bounds, edge.points)
+    const from = endpointBoxOf(byId, edge, 'source')
+    const to = endpointBoxOf(byId, edge, 'target')
+    if (from === null || to === null) continue
+    let pts = routeEdgeStyled(from, to, boxes, bounds, edge)
     // 安全网：路由若产出非有限坐标，退化成"中心直线"。
     // 宁可画得难看，也不要让边无声消失 —— 浏览器会静默丢弃 d="M NaN NaN" 的路径，
     // 这正是上面那个 box/geo 混用 bug 能藏这么久的原因。
@@ -1579,7 +1597,11 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
       const b = pts.length >= 3 ? pts[2] : pts[1]
       const mx = (a.x + b.x) / 2
       const my = (a.y + b.y) / 2
-      const lw = textWidth(edge.label, 10) + 6
+      // 边标签的画法同样来自文档：fontSize / fontColor。
+      const edgeFontSize = numberOr(styleGet(edgeStyle, 'fontSize', null), 10)
+      const edgeFontColor = styleGet(edgeStyle, 'fontColor', null)
+      const edgeFontFill = edgeFontColor !== null ? edgeFontColor : skin.text
+      const lw = textWidth(edge.label, edgeFontSize) + 6
       children.push(React.createElement('rect', { key: 'edge-bg-' + i, x: mx - lw / 2, y: my - 8, width: lw, height: 13, rx: 2, fill: skin.labelBg, opacity: 0.92 }))
       children.push(
         React.createElement(
@@ -1590,12 +1612,12 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             y: my + 1,
             textAnchor: 'middle',
             dominantBaseline: 'middle',
-            fontSize: 10,
+            fontSize: edgeFontSize,
             fontFamily: FONT,
-            fill: skin.text,
+            fill: edgeFontFill,
             // inline style：CSS 规则优先级高于 SVG presentation attribute，
             // 万一 shell 有 svg text{...} 之类的全局规则，只有 inline style 能压住。
-            style: { fill: skin.text, fontFamily: FONT, fontSize: '10px', dominantBaseline: 'middle' },
+            style: { fill: edgeFontFill, fontFamily: FONT, fontSize: edgeFontSize + 'px', dominantBaseline: 'middle' },
           },
           edge.label,
         ),
@@ -1760,15 +1782,22 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
         }),
       )
     }
+    // 标签的画法也在文档里：fontSize / fontColor / whiteSpace。
+    // whiteSpace=nowrap 不换行（drawio 的语义就是这个），其余（含缺省）按宽度换行。
+    const labelStyle = typeof node.style === 'string' ? node.style : ''
+    const labelFontSize = numberOr(styleGet(labelStyle, 'fontSize', null), FSIZE)
+    const labelFill = colorOf(node, mode).font
+    const wrap = styleGet(labelStyle, 'whiteSpace', 'wrap') !== 'nowrap'
     let maxText = geo.w - 12
     if (shape === 'diamond') maxText = geo.w * 0.6
     if (shape === 'ellipse') maxText = geo.w * 0.72
-    const lines = wrapLabel(box.label, maxText)
+    const lines = wrap ? wrapLabel(box.label, maxText) : [String(box.label)]
     const cx = geo.x + geo.w / 2
-    const first = geo.y + geo.h / 2 - ((lines.length - 1) * LHEIGHT) / 2
+    const lineHeight = LHEIGHT * (labelFontSize / FSIZE)
+    const first = geo.y + geo.h / 2 - ((lines.length - 1) * lineHeight) / 2
     const spans = []
     for (let li = 0; li < lines.length; li += 1) {
-      spans.push(React.createElement('tspan', { key: 'l' + li, x: cx, dy: li === 0 ? 0 : LHEIGHT }, lines[li]))
+      spans.push(React.createElement('tspan', { key: 'l' + li, x: cx, dy: li === 0 ? 0 : lineHeight }, lines[li]))
     }
     groupChildren.push(
       React.createElement(
@@ -1779,11 +1808,11 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
           y: first,
           textAnchor: 'middle',
           dominantBaseline: 'middle',
-          fontSize: FSIZE,
+          fontSize: labelFontSize,
           fontFamily: FONT,
-          fill: skin.text,
+          fill: labelFill,
           pointerEvents: 'none',
-          style: { fill: skin.text, fontFamily: FONT, fontSize: FSIZE + 'px', dominantBaseline: 'middle' },
+          style: { fill: labelFill, fontFamily: FONT, fontSize: labelFontSize + 'px', dominantBaseline: 'middle' },
         },
         spans,
       ),
@@ -1990,7 +2019,9 @@ function parseDocument(text) {
   // 两边**必须**用同一个函数 —— 否则同一份文件在画布上和 AI 眼里会是两张不同的图。
   const doc = normalizeDrawioDoc(raw)
   const nodes = doc.nodes.filter((n) => n !== null && typeof n === 'object' && typeof n.id === 'string')
-  const edges = doc.edges.filter((e) => e !== null && typeof e === 'object' && typeof e.from === 'string' && typeof e.to === 'string')
+  // 两端各自"有着落"就收：连着节点，或带自由点（drawio 的悬空端）。
+  // v1 这里要求两端都是真实节点，于是 drawio 导出的**悬空边**会被整条丢掉。
+  const edges = doc.edges.filter((e) => e !== null && typeof e === 'object' && edgeHasEnd(e, 'source') && edgeHasEnd(e, 'target'))
   // **0 个节点不是错误** —— 空画布是完全合法的状态（刚「新建」出来就是这样，
   // 用户还要靠右键往里面加节点）。这里曾经返回 error，于是新建出来的画布一进去就是红字，
   // 连右键都点不了 —— 等于「新建」功能废掉。
@@ -2607,26 +2638,12 @@ function CanvasView(props) {
       }
     }
 
-    // 用户显式点选/靠近的那两个端点要**固定下来**：
-    // 只有当"算法本来也会选这一边"时才不加折点（那种情况保持自动路由，好继续享有避让）；
-    // 否则就落一个贴在该侧外面的折点，把这一端钉在用户看到的那一边。
-    const fromNode = nodeById(linking.from)
-    const toNode = nodeById(id)
-    let points = null
-    if (fromNode !== null && toNode !== null) {
-      const fromGeo = nodeGeoOf(fromNode)
-      const toGeo = nodeGeoOf(toNode)
-      const towardTarget = { x: toGeo.x + toGeo.w / 2, y: toGeo.y + toGeo.h / 2 }
-      const towardSource = { x: fromGeo.x + fromGeo.w / 2, y: fromGeo.y + fromGeo.h / 2 }
-      const pts = []
-      if (typeof linking.side === 'string' && borderPointToward(fromGeo, towardTarget).side !== linking.side) {
-        pts.push(stubPointFor(fromGeo, linking.side))
-      }
-      if (chosenTo !== null && borderPointToward(toGeo, towardSource).side !== chosenTo) {
-        pts.push(stubPointFor(toGeo, chosenTo))
-      }
-      if (pts.length > 0) points = pts
-    }
+    // 用户选中的两个端点写进 style 的 exitX/exitY 与 entryX/entryY（drawio 的固定连接点）。
+    // v1 是把桩点塞进 edge.points —— 那等于把"接在哪一侧"伪装成一个折点，
+    // 端点一动它就成了过期坐标（宿主重排时只能清掉，约束也就丢了）。
+    let style = DEFAULT_EDGE_STYLE
+    if (typeof linking.side === 'string' && linking.side.length > 0) style = styleWithSide(style, 'source', linking.side)
+    if (typeof chosenTo === 'string' && chosenTo.length > 0) style = styleWithSide(style, 'target', chosenTo)
 
     applyLocal((next) => {
       let max = 0
@@ -2638,9 +2655,7 @@ function CanvasView(props) {
           if (n > max) max = n
         }
       }
-      const edge = { id: 'e' + (max + 1), from: linking.from, to: id }
-      if (points !== null) edge.points = points
-      next.edges.push(edge)
+      next.edges.push({ id: 'e' + (max + 1), from: linking.from, to: id, style: style })
     })
   }
 
@@ -3370,22 +3385,15 @@ function CanvasView(props) {
     const movedNode = nodeById(targetId)
     const dragged = edgeById(drag.edgeId)
     if (movedNode === null || dragged === null) return
-
-    // 落盘这一端换成了 targetId，另一端（固定端）在文档里没动。
-    const movedBox = { id: targetId, geo: nodeGeoOf(movedNode) }
     const fixedNode = nodeById(drag.kind === 'from' ? dragged.to : dragged.from)
     if (fixedNode === null) return
     const fixedBox = { id: fixedNode.id, geo: nodeGeoOf(fixedNode) }
-    const towardMoved = { x: movedBox.geo.x + movedBox.geo.w / 2, y: movedBox.geo.y + movedBox.geo.h / 2 }
-    const fixedSide = edgeSideOf(fixedBox, dragged.points, towardMoved)
+    const fixedEnd = drag.kind === 'from' ? 'target' : 'source'
+    // 固定端保持文档里既有的约束（没有约束就继续不钉）—— 与预览用同一个读法。
+    const fixedSide = pinnedSideOf(dragged, fixedEnd)
     // 被拖那一端选中的端点：就是最后一帧预览记下来的那个。
     const preview = edgePreviewRef.current
     const movedSide = preview === null || preview === undefined || typeof preview.side !== 'string' ? null : preview.side
-
-    const waypoints =
-      drag.kind === 'from'
-        ? waypointsForRetarget(movedBox, fixedBox, dragged.points, 'from', movedSide, fixedSide)
-        : waypointsForRetarget(fixedBox, movedBox, dragged.points, 'to', movedSide, fixedSide)
 
     applyLocal((next) => {
       for (let i = 0; i < next.edges.length; i += 1) {
@@ -3393,8 +3401,11 @@ function CanvasView(props) {
         if (e.id !== drag.edgeId) continue
         if (drag.kind === 'from') e.from = targetId
         else e.to = targetId
-        if (waypoints.length === 0) delete e.points
-        else e.points = waypoints
+        // 两端约束写回 style；用户原有折点原样保留（它们是折点，不是端点表示）。
+        let style = typeof e.style === 'string' ? e.style : DEFAULT_EDGE_STYLE
+        style = styleWithSide(style, 'source', drag.kind === 'from' ? movedSide : fixedSide)
+        style = styleWithSide(style, 'target', drag.kind === 'from' ? fixedSide : movedSide)
+        e.style = style
         break
       }
     })
@@ -3847,7 +3858,13 @@ function CanvasView(props) {
     } else {
       const edge = edgeById(menu.id)
       const hasLabel = edge !== null && typeof edge.label === 'string' && edge.label.length > 0
-      const hasWaypoints = edge !== null && Array.isArray(edge.points) && edge.points.length > 0
+      // 「自动路由」的显示条件：有折点**或**两端被钉住了侧（两者都属于"人工干预过"）。
+      const edgeStyleText = edge !== null && typeof edge.style === 'string' ? edge.style : ''
+      const hasWaypoints =
+        edge !== null &&
+        ((Array.isArray(edge.points) && edge.points.length > 0) ||
+          sideFromStyle(edgeStyleText, 'source') !== null ||
+          sideFromStyle(edgeStyleText, 'target') !== null)
       rows.push(menuTitle('连线' + (hasLabel ? '：' + edge.label : '')))
       const actions = [React.createElement('button', { key: 'edit', className: 'drawai-btn', onClick: () => openEdgeEditor(menu.id) }, '改标签')]
       if (hasWaypoints) {
@@ -4695,8 +4712,9 @@ exports.__routeInternals = {
   pickSides: pickSides,
   stubPointFor: stubPointFor,
   borderPointToward: borderPointToward,
-  edgeSideOf: edgeSideOf,
-  waypointsForRetarget: waypointsForRetarget,
+  sidesFromStyle: sidesFromStyle,
+  pinnedSideOf: pinnedSideOf,
+  chainForRoute: chainForRoute,
   routeThroughWaypoints: routeThroughWaypoints,
   routeEdge: routeEdge,
   ensurePinned: ensurePinned,

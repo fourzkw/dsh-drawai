@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "revision": 23,
   "meta": {
     "engine": "drawio-svg",
@@ -8,43 +8,39 @@
   "nodes": [
     {
       "id": "doc",
-      "shape": "document",
-      "style": "yellow",
+      "label": "demo.dshd.json（真相源）",
+      "style": "shape=document;fillColor=#fff2cc;strokeColor=#d6b656;",
       "x": 60,
       "y": 60,
       "w": 186,
-      "h": 86,
-      "label": "demo.dshd.json（真相源）"
+      "h": 86
     },
     {
       "id": "canvas",
-      "shape": "rect",
-      "style": "purple",
+      "label": "右栏画布自动重绘",
+      "style": "fillColor=#e1d5e7;strokeColor=#9673a6;",
       "x": 60,
       "y": 290,
       "w": 186,
-      "h": 56,
-      "label": "右栏画布自动重绘"
+      "h": 56
     },
     {
       "id": "human",
-      "shape": "stadium",
-      "style": "green",
+      "label": "人拖拽 / AI 改文件",
+      "style": "rounded=1;arcSize=50;fillColor=#d5e8d4;strokeColor=#82b366;",
       "x": 340,
       "y": 60,
       "w": 160,
-      "h": 56,
-      "label": "人拖拽 / AI 改文件"
+      "h": 56
     },
     {
       "id": "n1",
-      "shape": "rect",
-      "style": "blue",
+      "label": "新节点",
+      "style": "fillColor=#dae8fc;strokeColor=#6c8ebf;",
       "x": 350,
       "y": 150,
       "w": 130,
-      "h": 56,
-      "label": "新节点"
+      "h": 56
     }
   ],
   "edges": [
@@ -52,7 +48,8 @@
       "id": "e2",
       "from": "doc",
       "to": "canvas",
-      "label": "变更流 + 兜底轮询"
+      "label": "变更流 + 兜底轮询",
+      "style": "edgeStyle=orthogonalEdgeStyle;rounded=0;jettySize=auto;orthogonalLoop=1;html=1;endArrow=classic;exitX=0.5;exitY=1;entryX=0.5;entryY=0;"
     }
   ]
 }

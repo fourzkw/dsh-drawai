@@ -19,6 +19,8 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { composeClientBody } from './build.mjs'
+// 端点约束的写法与产物完全同源：用内核拼 style，而不是在测试里手抄键名。
+import { DEFAULT_EDGE_STYLE, styleWithSide } from '../src/style-kernel.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 // 客户端半边依赖"构建时内联的样式内核"，所以这里 eval 的是**与产物同款的组合 body**。
@@ -136,26 +138,32 @@ console.log('\n吸附：落在容差内 / 容差外')
 
 console.log('\n预览 == 落盘（逐点一致 / 同一条 routeEdge 通路）')
 {
-  // 落盘路径就是 onNodePointerUp 的那一套：引出侧不自然时先钉 stub，再 routeEdge。
+  // 落盘路径就是 onNodePointerUp 的那一套：两端选中的端点写进 style 的 exitX/exitY 与 entryX/entryY。
   // 预览用的是 routePreviewFor(..., seed)。两者必须逐点一致，否则松手会跳变。
   const bBox = geometry.byId.b
   const cursor = { x: bBox.geo.x + 20, y: bBox.geo.y + 20 }
   const route = internals.routePreviewFor(doc, geometry, cursor, 'a', aBox.geo, { from: 'a', side: 'e' }, hotPad, 'a')
-  const docWithEdge = {
-    nodes: doc.nodes,
-    edges: [{ id: 'e1', from: 'a', to: 'b', points: route.points.slice(0, 1) }],
+  const committed = {
+    id: 'e1',
+    from: 'a',
+    to: 'b',
+    style: styleWithSide(styleWithSide(DEFAULT_EDGE_STYLE, 'source', route.sides.from), 'target', route.sides.to),
   }
+  const docWithEdge = { nodes: doc.nodes, edges: [committed] }
   const landed = internals.buildGeometry(docWithEdge)
-  const stored = internals.routePreviewFor(docWithEdge, landed, cursor, 'a', landed.byId.a.geo, { from: 'a', side: 'e' }, hotPad, 'a')
+  const drawn = internals.edgeRoutePoints(docWithEdge, committed)
   const same =
-    stored.points.length === route.points.length &&
-    stored.points.every((p, i) => Math.abs(p.x - route.points[i].x) < 0.51 && Math.abs(p.y - route.points[i].y) < 0.51)
-  ok(same, '预览折线与同参数落盘折线逐点一致（' + route.points.length + ' 个点）')
-  ok(orthogonal(stored.points), '落盘折线正交')
+    drawn.length === route.points.length &&
+    drawn.every((p, i) => Math.abs(p.x - route.points[i].x) < 0.51 && Math.abs(p.y - route.points[i].y) < 0.51)
+  ok(same, '预览折线与落盘（端点约束写进 style）折线逐点一致（' + route.points.length + ' 个点）')
+  ok(committed.points === undefined, '落盘不再把端点约束伪装成折点：edge.points 仍然是空的')
+  const storedSides = internals.sidesFromStyle(committed.style)
+  ok(storedSides.source === 'e' && storedSides.target === route.sides.to, '两端约束确实落在 style 的 exit*/entry* 上')
+  ok(orthogonal(drawn), '落盘折线正交')
   // 更强的一条：预览的候选集与落盘完全同构时，代价也必须相等。
   // （预览把目标节点换成 __preview、并额外把目标本身当障碍 —— 这里用预览自己的代价做对照。）
   const previewCost = internals.pathCost(route.points, geometry.boxes, { a: true, b: true })
-  const storedCost = internals.pathCost(stored.points, landed.boxes, { a: true, b: true })
+  const storedCost = internals.pathCost(drawn, landed.boxes, { a: true, b: true })
   ok(previewCost.hits === storedCost.hits && Math.abs(previewCost.length - storedCost.length) < 0.51, '预览与落盘代价一致（hits ' + previewCost.hits + '）')
 }
 
@@ -280,13 +288,15 @@ console.log('\n端点选择：指针靠近哪一边就接哪一边，且预览 =
     const end = route.points[route.points.length - 1]
     ok(Math.abs(end.x - a.x) < 0.51 && Math.abs(end.y - a.y) < 0.51, '预览线末端正好落在 ' + side + ' 这个端点上（' + end.x + ',' + end.y + '）')
 
-    // 松手落盘：把**同一对 side** 转成桩点写进积分，再重新路由 —— 必须和预览逐点相同。
+    // 松手落盘：把**同一对端点**写进 style 的 exit*/entry*，再重新路由 —— 必须和预览逐点相同。
     // 这条是"端点提示不是仅供参考"的核心保证：看到接哪边，存下来就接哪边。
-    const landed = {
-      nodes: d.nodes,
-      edges: [{ id: 'e1', from: 'a', to: 'b', points: [internals.stubPointFor(aGeo, 'e'), internals.stubPointFor(bGeo, side)] }],
+    const committed = {
+      id: 'e1',
+      from: 'a',
+      to: 'b',
+      style: styleWithSide(styleWithSide(DEFAULT_EDGE_STYLE, 'source', route.sides.from), 'target', route.sides.to),
     }
-    const after = internals.edgeRoutePoints(landed, landed.edges[0])
+    const after = internals.edgeRoutePoints({ nodes: d.nodes, edges: [committed] }, committed)
     const same =
       after.length === route.points.length &&
       after.every((p, i) => Math.abs(p.x - route.points[i].x) < 0.51 && Math.abs(p.y - route.points[i].y) < 0.51)
@@ -334,18 +344,15 @@ console.log('\n改接端点：预览必须 == 落盘（两个方向、含带折�
   const geoOf = (id) => geo.byId[id].geo
   const boxOf = (id) => ({ id: id, geo: geoOf(id) })
 
-  /** 复刻 finishEdgeDrag 的落盘判定 —— 与预览共用 waypointsForRetarget。 */
+  /** 复刻 finishEdgeDrag 的落盘判定：把两端约束写进 style，用户折点原样保留。 */
   const drop = (edge, kind, targetId, movedSide) => {
-    const movedBox = boxOf(targetId)
-    const fixedBox = boxOf(kind === 'from' ? edge.to : edge.from)
-    const towardMoved = { x: movedBox.geo.x + movedBox.geo.w / 2, y: movedBox.geo.y + movedBox.geo.h / 2 }
-    const fixedSide = internals.edgeSideOf(fixedBox, edge.points, towardMoved)
-    const wps =
-      kind === 'from'
-        ? internals.waypointsForRetarget(movedBox, fixedBox, edge.points, 'from', movedSide, fixedSide)
-        : internals.waypointsForRetarget(fixedBox, movedBox, edge.points, 'to', movedSide, fixedSide)
-    const next = { id: edge.id, from: kind === 'from' ? targetId : edge.from, to: kind === 'to' ? targetId : edge.to }
-    if (wps.length > 0) next.points = wps
+    const fixedEnd = kind === 'from' ? 'target' : 'source'
+    const fixedSide = internals.pinnedSideOf(edge, fixedEnd)
+    let style = typeof edge.style === 'string' ? edge.style : DEFAULT_EDGE_STYLE
+    style = styleWithSide(style, kind === 'from' ? 'source' : 'target', movedSide)
+    style = styleWithSide(style, kind === 'from' ? 'target' : 'source', fixedSide)
+    const next = { id: edge.id, from: kind === 'from' ? targetId : edge.from, to: kind === 'to' ? targetId : edge.to, style: style }
+    if (Array.isArray(edge.points)) next.points = edge.points.map((p) => ({ x: p.x, y: p.y }))
     return next
   }
 
@@ -566,6 +573,31 @@ console.log('\n中心对齐：差几个像素的节点不该连出斜台阶')
   ok(kept.from.x === near.x && kept.to.x === off.x, '中心差得远 → 原样返回')
 }
 
+console.log('\n悬空端：自由点只在该端没有真实顶点时生效（drawio 语义）')
+{
+  const d = { nodes: [{ id: 'a', x: 0, y: 0, w: 160, h: 60 }], edges: [] }
+  // 目标端悬空：路由器把自由点当零尺寸目标盒 —— 和预览给"空白处光标"用的是同一个技巧。
+  const dangling = { id: 'e1', from: 'a', targetPoint: { x: 600, y: 400 } }
+  const pts = internals.edgeRoutePoints(d, dangling)
+  ok(pts !== null && pts.length >= 2, '悬空端也能算出路径（不会被整条丢掉）')
+  const last = pts === null ? null : pts[pts.length - 1]
+  ok(last !== null && Math.abs(last.x - 600) < 0.51 && Math.abs(last.y - 400) < 0.51, '路径终点就是那个自由点')
+  ok(pts !== null && orthogonal(pts) && finite(pts), '悬空端路径正交且有限')
+
+  // 同一端既有顶点又有自由点 → 自由点被忽略，仍然接在那个节点上。
+  const d2 = { nodes: [{ id: 'a', x: 0, y: 0, w: 160, h: 60 }, { id: 'b', x: 600, y: 400, w: 160, h: 60 }], edges: [] }
+  const both = { id: 'e2', from: 'a', to: 'b', targetPoint: { x: 20, y: 20 } }
+  const pts2 = internals.edgeRoutePoints(d2, both)
+  const end2 = pts2 === null ? null : pts2[pts2.length - 1]
+  const onB = end2 !== null && end2.x >= 599.49 && end2.x <= 760.51 && end2.y >= 399.49 && end2.y <= 460.51
+  ok(pts2 !== null && onB, '端点连着真实顶点时 targetPoint 被忽略（仍然接在节点边框上）')
+
+  // 两端都悬空：drawio 里这种边也合法，照样要画得出来。
+  const free = { id: 'e3', sourcePoint: { x: 0, y: 0 }, targetPoint: { x: 300, y: 200 } }
+  const pts3 = internals.edgeRoutePoints(d, free)
+  ok(pts3 !== null && pts3.length >= 2 && orthogonal(pts3) && finite(pts3), '两端都悬空也能画')
+}
+
 console.log('\n画布真图的连线不变量（直接读 demo.dshd.json）')
 {
   // 直接拿工作区里那份真文档跑 —— 它就是用户看的那张图。
@@ -582,11 +614,19 @@ console.log('\n画布真图的连线不变量（直接读 demo.dshd.json）')
     console.log('  · demo.dshd.json 不存在，跳过真图不变量（这不代表失败）')
   }
   if (real !== null) {
+    // 真文档也先过一遍画布的解析器（读时升级）—— 否则 demo 换成 v2 之后，
+    // 这一节测的还是旧字段，等于自己骗自己。
+    const parsed = internals.parseDocument(JSON.stringify(real))
+    ok(parsed.error === undefined, 'demo.dshd.json 能被画布的解析器读入' + (parsed.error === undefined ? '' : '：' + parsed.error))
+    const docReal = parsed.error === undefined ? parsed.doc : { nodes: [], edges: [] }
+    ok(docReal.version === 2, 'demo 读入后是 v2（v1 文档会在读时升级）')
     const segLen = (a, b) => Math.abs(b.x - a.x) + Math.abs(b.y - a.y)
     let broken = 0
-    for (const edge of real.edges) {
-      const pts = internals.edgeRoutePoints(real, edge)
+    let routed = 0
+    for (const edge of docReal.edges) {
+      const pts = internals.edgeRoutePoints(docReal, edge)
       if (pts === null) continue
+      routed += 1
       let minSeg = Infinity
       let tiny = 0
       for (let s = 0; s < pts.length - 1; s += 1) {
@@ -604,7 +644,10 @@ console.log('\n画布真图的连线不变量（直接读 demo.dshd.json）')
       if (bad) broken += 1
       ok(!bad, edge.id + ' ' + edge.from + '→' + edge.to + '：最短段 ' + minSeg + 'px，把手最近 ' + (minGap === Infinity ? '-' : minGap) + 'px')
     }
-    ok(broken === 0, 'demo 里 ' + real.edges.length + ' 条连线全部通过')
+    // 这条是**防假绿**的关键：上面 `if (pts === null) continue` 会让"算不出路径"静默通过，
+    // 于是整节报"全部通过"却什么都没测 —— 必须显式数一遍非 null 的路径数。
+    ok(routed === docReal.edges.length, '每条边都算出了路径（' + routed + '/' + docReal.edges.length + '）')
+    ok(broken === 0, 'demo 里 ' + docReal.edges.length + ' 条连线全部通过')
   }
 }
 
