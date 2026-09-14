@@ -598,6 +598,44 @@ console.log('\n悬空端：自由点只在该端没有真实顶点时生效（dr
   ok(pts3 !== null && pts3.length >= 2 && orthogonal(pts3) && finite(pts3), '两端都悬空也能画')
 }
 
+console.log('\n真机报过的组合：新节点上方 → 目标的下方/右方，以及同向平行边')
+{
+  // 用 demo 的真实几何：canvas 与 n1 在同一行、中间隔一段空隙。
+  const nodes = [
+    { id: 'canvas', x: 10, y: 150, w: 186, h: 56, label: '右栏画布自动重绘' },
+    { id: 'n1', x: 350, y: 150, w: 130, h: 56, label: '新节点' },
+  ]
+  const commit = (from, to, exit, entry) => {
+    const edge = { id: 'eX', from: from, to: to, style: styleWithSide(styleWithSide(DEFAULT_EDGE_STYLE, 'source', exit), 'target', entry) }
+    return internals.edgeRoutePoints({ nodes: nodes, edges: [edge] }, edge)
+  }
+  for (const entry of internals.SIDES) {
+    const pts = commit('n1', 'canvas', 'n', entry)
+    ok(
+      pts !== null && pts.length >= 2 && orthogonal(pts) && finite(pts),
+      'n1 上方 → canvas 的 ' + entry + ' 侧：路径算得出来（' + (pts === null ? 'null' : pts.length + ' 点') + '）',
+    )
+  }
+
+  // 同向平行边：两条都要能算出来 —— 这正是旧版被"同向边已存在就静默 return"吞掉的场景。
+  const two = [
+    { id: 'e1', from: 'n1', to: 'canvas', style: styleWithSide(styleWithSide(DEFAULT_EDGE_STYLE, 'source', 'w'), 'target', 'e') },
+    { id: 'e2', from: 'n1', to: 'canvas', style: styleWithSide(styleWithSide(DEFAULT_EDGE_STYLE, 'source', 'n'), 'target', 's') },
+  ]
+  let routed = 0
+  for (const e of two) {
+    const p = internals.edgeRoutePoints({ nodes: nodes, edges: two }, e)
+    if (p !== null && p.length >= 2) routed += 1
+  }
+  ok(routed === 2, '同向的两条平行边各自都算得出路径（' + routed + '/2）')
+
+  // 落点回落：DOM 命中优先；没有 DOM 命中就认"预览高亮的那个节点"
+  ok(internals.dropTargetOf('a', { hot: { id: 'b' } }) === 'a', 'DOM 命中优先于预览高亮')
+  ok(internals.dropTargetOf(null, { hot: { id: 'b' } }) === 'b', '没有 DOM 命中时回落到预览高亮的节点（预览说会连上就连上）')
+  ok(internals.dropTargetOf(null, { hot: null }) === null, '既没 DOM 命中也没高亮 → 不连（拖到空白处就是取消）')
+  ok(internals.dropTargetOf(null, null) === null, '预览为空也不炸')
+}
+
 console.log('\n画布真图的连线不变量（直接读 demo.dshd.json）')
 {
   // 直接拿工作区里那份真文档跑 —— 它就是用户看的那张图。

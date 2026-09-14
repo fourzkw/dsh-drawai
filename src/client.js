@@ -1296,6 +1296,23 @@ function routeEdgeStyled(fromBox, toBox, boxes, bounds, edge) {
   return routeEdge(fromBox, toBox, boxes, bounds, edge.points, sidesFromStyle(style), !isOrthogonalEdgeStyle(style))
 }
 
+/**
+ * 松手落点：**DOM 命中优先，没有 DOM 命中就回落到"最后一帧预览高亮的那个节点"**。
+ *
+ * 为什么必须有回落：预览是按**几何容差**（HOT_PAD）判"会连上"的，而节点组的 pointerup
+ * 只有在指针**真的压在节点上**时才触发。于是松手落在容差里时，节点组收不到事件 ——
+ * 表现就是"预览亮着环、松手什么也没有"（实测报过：从节点上方往目标下方/右方拖，连不上）。
+ * 既然预览已经把它高亮成落点，落盘就该认它：预览高亮谁，就连谁。
+ *
+ * 放在模块级（而不是组件里）是为了能被自测直接断言。
+ */
+function dropTargetOf(domId, preview) {
+  if (typeof domId === 'string' && domId.length > 0) return domId
+  if (preview === null || preview === undefined) return null
+  if (preview.hot === null || preview.hot === undefined) return null
+  return typeof preview.hot.id === 'string' && preview.hot.id.length > 0 ? preview.hot.id : null
+}
+
 /** 节点的几何（渲染与路由共用同一套默认值）。 */
 function nodeGeoOf(node) {
   return { x: numberOr(node.x, 0), y: numberOr(node.y, 0), w: numberOr(node.w, 150), h: numberOr(node.h, 56) }
@@ -2637,14 +2654,10 @@ function CanvasView(props) {
     const chosenTo = preview !== null && preview !== undefined && preview.sides !== undefined && typeof preview.sides.to === 'string' ? preview.sides.to : null
     clearConnect()
     if (linking.from === id) return
-    const current = docRef.current
-    if (current !== null) {
-      for (let i = 0; i < current.edges.length; i += 1) {
-        const edge = current.edges[i]
-        if (edge.from === linking.from && edge.to === id) return
-      }
-    }
-
+    // 这里曾经有一条"同向边已存在就直接 return"的守卫 —— 它会**无声**吞掉整个手势：
+    // 实测过（demo 里已有 n1→canvas 时，从 n1 往 canvas 拖永远没反应）。
+    // drawio 允许同一条两端之间有多条边（各自带自己的连接点与画法），所以这里不再拦。
+    // 自环仍然拦住（见上一行）：本画布不支持自环。
     // 用户选中的两个端点写进 style 的 exitX/exitY 与 entryX/entryY（drawio 的固定连接点）。
     // v1 是把桩点塞进 edge.points —— 那等于把"接在哪一侧"伪装成一个折点，
     // 端点一动它就成了过期坐标（宿主重排时只能清掉，约束也就丢了）。
@@ -2961,7 +2974,14 @@ function CanvasView(props) {
     // 手势结束必须清掉合并键：否则下一次拖同一个节点会命中同一个 key，
     // 不再压快照 —— 表现为"第二次拖动撤销不了"。
     lastCoalesceRef.current = null
-    if (linkRef.current !== null) clearConnect()
+    // 拖线松手落在吸附容差里时，节点组收不到 pointerup（事件挂在节点上）——用最后一帧预览
+    // 高亮的那个节点兜底，否则"预览亮着、松手什么都没有"。压在节点上时节点组已经处理过，
+    // 那时 linkRef 已被它清空，这里不会重复建边。
+    if (linkRef.current !== null) {
+      const fallback = dropTargetOf(null, connectPreviewRef.current)
+      if (fallback !== null) onNodePointerUp(fallback)
+      else clearConnect()
+    }
     // 收尾清理：让"一条线段只有一个把手"这个不变量在每次手势后都重新成立。
     if (geometryChanged) pruneAllEdges()
   }
@@ -3385,7 +3405,8 @@ function CanvasView(props) {
       return
     }
     if (event === null || event === undefined) return
-    const targetId = nodeIdAtPoint(event.clientX, event.clientY)
+    // 改接端点同理：落在容差里也算连上（预览已经把目标高亮了）。
+    const targetId = dropTargetOf(nodeIdAtPoint(event.clientX, event.clientY), edgePreviewRef.current)
     if (targetId === null) return
     const current = docRef.current
     if (current === null) return
@@ -4773,6 +4794,7 @@ exports.__routeInternals = {
   sidesFromStyle: sidesFromStyle,
   pinnedSideOf: pinnedSideOf,
   chainForRoute: chainForRoute,
+  dropTargetOf: dropTargetOf,
   routeThroughWaypoints: routeThroughWaypoints,
   routeEdge: routeEdge,
   ensurePinned: ensurePinned,
