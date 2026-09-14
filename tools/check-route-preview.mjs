@@ -636,6 +636,38 @@ console.log('\n真机报过的组合：新节点上方 → 目标的下方/右�
   ok(internals.dropTargetOf(null, null) === null, '预览为空也不炸')
 }
 
+console.log('\n移动单位：节点整格（10px）、连线半格（5px）')
+{
+  ok(internals.GRID === 10 && internals.EDGE_GRID === 5, '单位常量：节点一格 10px、连线半格 5px')
+  ok(internals.snapTo(187, internals.GRID) === 190 && internals.snapTo(183, internals.GRID) === 180, 'snapTo(10)：187 → 190、183 → 180')
+  ok(internals.snapTo(103, internals.GRID) === 100, '节点移动：103 落到 100（整格）')
+  ok(internals.snapTo(187, internals.EDGE_GRID) === 185 && internals.snapTo(188, internals.EDGE_GRID) === 190, 'snapTo(5)：187 → 185、188 → 190')
+
+  // 缩放：尺寸吸附到整格、对边原地不动、下限也取整格
+  const base = { x: 100, y: 50, w: 186, h: 56 }
+  const east = internals.resizeBox(base, 'e', 30, 0)
+  ok(east.w === 220 && east.x === base.x && east.y === base.y, '拖东边：186+30 吸附成整格 ' + east.w + '，西边不动')
+  const west = internals.resizeBox(base, 'w', -30, 0)
+  ok(west.w === 220 && west.x + west.w === base.x + base.w, '拖西边：宽度整格，东边界不动（' + west.x + '+' + west.w + '）')
+  const south = internals.resizeBox(base, 's', 0, 7)
+  ok(south.h === 60 && south.y === base.y, '拖南边：56+7 吸附成整格 ' + south.h + '，北边不动')
+  const north = internals.resizeBox(base, 'n', 0, -7)
+  ok(north.h === 60 && north.y + north.h === base.y + base.h, '拖北边：高度整格，南边界不动（' + north.y + '+' + north.h + '）')
+  const corner = internals.resizeBox(base, 'se', 30, 30)
+  ok(corner.w === 220 && corner.h === 90, '角上缩放：宽高都整格（' + corner.w + '×' + corner.h + '）')
+  const tiny = internals.resizeBox(base, 'e', -1000, 0)
+  ok(tiny.w === internals.MIN_NODE_W && tiny.w % 10 === 0, '缩到下限：下限本身也是整格（' + tiny.w + '）')
+  ok(internals.resizeBox(base, 'e', 30, 0).w - internals.resizeBox(base, 'e', 20, 0).w === 10, '东边每移 10px，宽度正好变一格')
+
+  // 连线：折点按半格吸附，且只动垂直于线段的那一轴（不会把线段拉长）
+  const ref = { x: 244, y: 86 }
+  const flat = internals.segmentMoveOf(ref, true, 0, 7)
+  ok(flat.x === 0 && flat.y === 9 && internals.snapTo(ref.y + flat.y, internals.EDGE_GRID) === 95, '水平段拖 7px：位移 9px，落点 95（半格），另一轴 0')
+  const upright = internals.segmentMoveOf(ref, false, 7, 0)
+  ok(upright.y === 0 && internals.snapTo(ref.x + upright.x, internals.EDGE_GRID) === 250, '竖直段拖 7px：x 落到 250（半格），y 不动（线段不会被拉长）')
+  ok(internals.segmentMoveOf({ x: 100, y: 100 }, false, 2, 0).x === 0, '已经落在半格上的点：2px 的意图被吸收成 0（最小单位就是半格）')
+}
+
 console.log('\n微小差距不该留下台阶（真机报过：竖线上 1px 的横跳）')
 {
   // 用户拖出折点后折点在 x=244，而落点按"侧中点"算出来是 x=245 —— 最后一跳曾凭空多出

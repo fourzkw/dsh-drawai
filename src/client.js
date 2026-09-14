@@ -98,8 +98,10 @@ const POLL_MS = 3000
 const SAVE_ENDPOINT = '/drawai/api/save'
 /** 自定义请求头，宿主用它做 CSRF 围栏。 */
 const SAVE_HEADER = 'x-drawai-save'
-/** 拖拽吸附网格（px）。 */
+/** 节点移动/缩放的吸附网格（px）：**一格 = 10px**。 */
 const GRID = 10
+/** 连线（折点/线段）的最小移动单位：**半格 = 5px**。连线比节点需要更细的手感。 */
+const EDGE_GRID = GRID / 2
 
 /** 连线拖拽：指针离目标节点边框多近就算"落在它身上"（吸附容差，用户坐标单位）。 */
 const HOT_PAD = 18
@@ -1324,6 +1326,60 @@ function dropTargetOf(domId, preview) {
   if (preview === null || preview === undefined) return null
   if (preview.hot === null || preview.hot === undefined) return null
   return typeof preview.hot.id === 'string' && preview.hot.id.length > 0 ? preview.hot.id : null
+}
+
+/** 以 unit 为单位的吸附（节点用 GRID = 整格，连线用 EDGE_GRID = 半格）。 */
+function snapTo(value, unit) {
+  return Math.round(value / unit) * unit
+}
+
+/** 节点尺寸下限：都取**整格**（60 = 6 格、40 = 4 格）。原来的 minH=36 不是整格，
+ *  一旦撞上下限就会把"尺寸是整格"这条不变量破坏掉。 */
+const MIN_NODE_W = GRID * 6
+const MIN_NODE_H = GRID * 4
+
+/**
+ * 缩放的结果盒子：**最小单位是一格**，被拖的那条边按 GRID 吸附，对边原地不动。
+ *
+ * 为什么吸附"尺寸"而不是"增量"：文档里的宽度可能是 186 这种非整格值（估宽 / 导入 / 手写），
+ * 只吸附增量会永远把那个零头带着走（186 → 196 → 206…），中心也就永远落在半像素上 ——
+ * 那正是"两条线段差一像素合不成一条"的上游来源。尺寸吸附之后，只要对边在格线上，
+ * 四条边与长宽就都是整格。
+ *
+ * 抽成模块级纯函数是为了能被命令行自测直接断言：吸附规则很容易被后续改动悄悄破坏。
+ */
+function resizeBox(base, dir, rawDx, rawDy) {
+  const east = base.x + base.w
+  const south = base.y + base.h
+  let x = base.x
+  let y = base.y
+  let w = base.w
+  let h = base.h
+  if (dir.indexOf('e') >= 0) w = Math.max(MIN_NODE_W, snapTo(base.w + rawDx, GRID))
+  if (dir.indexOf('s') >= 0) h = Math.max(MIN_NODE_H, snapTo(base.h + rawDy, GRID))
+  if (dir.indexOf('w') >= 0) {
+    w = Math.max(MIN_NODE_W, snapTo(base.w - rawDx, GRID))
+    x = east - w
+  }
+  if (dir.indexOf('n') >= 0) {
+    h = Math.max(MIN_NODE_H, snapTo(base.h - rawDy, GRID))
+    y = south - h
+  }
+  return { x: x, y: y, w: w, h: h }
+}
+
+/**
+ * 拖折点段时的**统一位移**：只在垂直于线段的那一轴上生效，且让**参考点落在半格上**。
+ *
+ * 为什么是"统一位移"而不是"逐点各自吸附"：几乎水平的段（两端 y 差 0.5px 以内）如果逐点吸附，
+ * 两点可能落到不同的 5px 刻度上 —— 段就凭空多出一个 5px 的倾斜。
+ * 用同一个位移，段的形状原样保留，只是整体按半格挪动。
+ *
+ * 抽成纯函数是为了能被自测直接钉住：单位规则最容易在后续改动里被悄悄破坏。
+ */
+function segmentMoveOf(refPoint, horizontal, rawX, rawY) {
+  if (horizontal) return { x: 0, y: snapTo(refPoint.y + rawY, EDGE_GRID) - refPoint.y }
+  return { x: snapTo(refPoint.x + rawX, EDGE_GRID) - refPoint.x, y: 0 }
 }
 
 /** 节点的几何（渲染与路由共用同一套默认值）。 */
@@ -2603,7 +2659,6 @@ function CanvasView(props) {
   function snap(value) {
     return Math.round(value / GRID) * GRID
   }
-
   /** 屏幕坐标 → SVG 用户坐标。用 CTM 逆矩阵，比自己算缩放平移可靠。 */
   function toUserSpace(event) {
     const svg = svgRef.current
@@ -2881,24 +2936,17 @@ function CanvasView(props) {
     if (resize !== null) {
       const point = toUserSpace(event)
       if (point === null) return
-      const dx = snap(point.x - resize.originX)
-      const dy = snap(point.y - resize.originY)
-      const minW = 60
-      const minH = 36
-      let x = resize.x
-      let y = resize.y
-      let w = resize.w
-      let h = resize.h
-      if (resize.dir.indexOf('e') >= 0) w = Math.max(minW, resize.w + dx)
-      if (resize.dir.indexOf('s') >= 0) h = Math.max(minH, resize.h + dy)
-      if (resize.dir.indexOf('w') >= 0) {
-        w = Math.max(minW, resize.w - dx)
-        x = resize.x + (resize.w - w)
-      }
-      if (resize.dir.indexOf('n') >= 0) {
-        h = Math.max(minH, resize.h - dy)
-        y = resize.y + (resize.h - h)
-      }
+      // 缩放的最小单位是**一格**：交给 resizeBox（尺寸按 GRID 吸附、对边原地不动、下限也取整格）。
+      const box = resizeBox(
+        { x: resize.x, y: resize.y, w: resize.w, h: resize.h },
+        resize.dir,
+        point.x - resize.originX,
+        point.y - resize.originY,
+      )
+      const x = box.x
+      const y = box.y
+      const w = box.w
+      const h = box.h
       applyLocal((next) => {
         for (let i = 0; i < next.nodes.length; i += 1) {
           if (next.nodes[i].id !== resize.id) continue
@@ -2935,8 +2983,14 @@ function CanvasView(props) {
       if (edgeDrag.kind === 'segment') {
         // 整段平移：两个端点折点一起动，位移只在**垂直于该段**的方向上生效。
         // 用按下时存的 base 做绝对定位（而不是累加），避免逐帧误差滚雪球。
-        const moveX = edgeDrag.horizontal ? 0 : snap(point.x - edgeDrag.originX)
-        const moveY = edgeDrag.horizontal ? snap(point.y - edgeDrag.originY) : 0
+        //
+        // 最小移动单位是**半格**（EDGE_GRID = 5px）：连线比节点需要更细的手感。
+        // 做法是把**参考点**（被拖那一段的一个端点）的目标坐标吸附到 5px，再换算成统一位移 ——
+        // 两个端点用同一个位移，段本身的形状不会被吸附弄歪（逐点各自吸附会让"几乎水平"的段产生倾斜）。
+        const refPoint = edgeDrag.a < edgeDrag.base.length ? edgeDrag.base[edgeDrag.a] : edgeDrag.base[0]
+        const move = segmentMoveOf(refPoint, edgeDrag.horizontal, point.x - edgeDrag.originX, point.y - edgeDrag.originY)
+        const moveX = move.x
+        const moveY = move.y
         applyLocal((next) => {
           for (let i = 0; i < next.edges.length; i += 1) {
             const e = next.edges[i]
@@ -4808,6 +4862,14 @@ exports.__routeInternals = {
   pinnedSideOf: pinnedSideOf,
   chainForRoute: chainForRoute,
   dropTargetOf: dropTargetOf,
+  // 移动单位（节点整格 / 连线半格）：自测直接断言这几个纯函数，规则被改坏就会红。
+  snapTo: snapTo,
+  resizeBox: resizeBox,
+  segmentMoveOf: segmentMoveOf,
+  GRID: GRID,
+  EDGE_GRID: EDGE_GRID,
+  MIN_NODE_W: MIN_NODE_W,
+  MIN_NODE_H: MIN_NODE_H,
   routeThroughWaypoints: routeThroughWaypoints,
   routeEdge: routeEdge,
   ensurePinned: ensurePinned,
