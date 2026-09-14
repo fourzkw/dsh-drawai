@@ -14,9 +14,16 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import { composeClientBody } from './build.mjs'
+// 造 style 键夹具时直接用内核（与宿主/客户端同一份），免得把键名再抄一遍。
+import { DEFAULT_EDGE_STYLE, stylePatch } from '../src/style-kernel.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
+/** 源码文本断言用（CSS 串、函数名这些在 src/client.js 里就有）。 */
 const source = resolve(here, '..', 'src', 'client.js')
+// 客户端半边依赖"构建时内联的样式内核"，所以 eval 的是**与产物同款的组合 body**
+// （内核 + src/client.js），而不是裸的 src/client.js —— 测的正是真正会被加载的那份文本。
+const clientBody = composeClientBody()
 
 let failures = 0
 let checks = 0
@@ -46,7 +53,7 @@ const require = (spec) => {
   if (spec === 'react') return reactStub
   throw new Error('check-render: 意外 require(' + spec + ')')
 }
-new Function('module', 'exports', 'require', 'window', 'document', readFileSync(source, 'utf8'))(module, module.exports, require, {}, {})
+new Function('module', 'exports', 'require', 'window', 'document', clientBody)(module, module.exports, require, {}, {})
 
 const internals = module.exports.__routeInternals
 const renderDiagram = internals.renderDiagram
@@ -208,12 +215,18 @@ console.log('\n端点标记：拖到节点附近要画出四个端点，并高�
   ok(marks5.length === 4 && on5.length === 1, '改接端点时也显示四个端点（选中 ' + routed.side + '）')
 }
 
-console.log('\n连线的画法：dash / arrow / color')
+console.log('\n连线的画法：style 键（dashed / dashPattern / endArrow / strokeColor / rounded）')
 {
   /** 取第 n 条边的可见 path（跳过 drawai-edge-hit 命中层）。 */
   const edgePaths = (tree) => walk(tree, (n) => n.type === 'path' && typeof n.props.d === 'string' && n.props.className !== 'drawai-edge-hit', [])
-  const styled = (edgePatch) => {
-    const d2 = { nodes: doc.nodes, edges: [Object.assign({ id: 'e1', from: 'a', to: 'b' }, edgePatch)] }
+  /**
+   * 造一条边并取它的可见 path props。
+   * keys 是**drawio 的 style 键**（与文档里的写法完全一致）—— v1 的 dash/arrow/color 字段已不存在，
+   * 那些只是宿主工具层的糖，落盘前就翻成了这里的键。
+   */
+  const styled = (keys) => {
+    const style = stylePatch(DEFAULT_EDGE_STYLE, keys === undefined ? {} : keys)
+    const d2 = { nodes: doc.nodes, edges: [{ id: 'e1', from: 'a', to: 'b', style: style }] }
     const tree = renderDiagram(d2, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
     const paths = edgePaths(tree)
     return paths.length === 0 ? null : paths[paths.length - 1].props
@@ -222,31 +235,38 @@ console.log('\n连线的画法：dash / arrow / color')
   const solid = styled({})
   ok(solid !== null, '默认边渲染出来了')
   ok(solid.strokeDasharray === undefined, '默认实线不写 strokeDasharray')
-  ok(typeof solid.markerEnd === 'string' && solid.markerEnd.indexOf('arrow') >= 0, '默认末端有箭头')
+  ok(typeof solid.markerEnd === 'string' && solid.markerEnd.indexOf('arrow') >= 0, '默认末端有箭头（缺省样式里显式写着 endArrow=classic）')
   ok(solid.markerStart === undefined, '默认起点没有箭头')
 
-  ok(styled({ dash: 'dashed' }).strokeDasharray === '6 4', 'dashed → 6 4')
-  ok(styled({ dash: 'dotted' }).strokeDasharray === '1 4', 'dotted → 1 4')
+  ok(styled({ dashed: '1' }).strokeDasharray === '3 3', 'dashed=1 → 用 drawio 画布缺省的 3 3')
+  ok(styled({ dashed: '1', dashPattern: '1 2' }).strokeDasharray === '1 2', '点线就是 dashed=1 + dashPattern=1 2')
+  ok(styled({ dashed: '1', dashPattern: '8 8' }).strokeDasharray === '8 8', 'dashPattern 覆盖缺省（虚线间距也是文档的一部分）')
+  ok(styled({ dashed: '0', dashPattern: '8 8' }).strokeDasharray === undefined, 'dashed=0 不算虚线（只有 =1 才是）')
 
-  const both = styled({ arrow: 'both' })
-  ok(both.markerEnd !== undefined && both.markerStart !== undefined && both.markerEnd !== both.markerStart, 'both → 两端都有箭头，且用的是两个不同 marker')
-  const noArrow = styled({ arrow: 'none' })
-  ok(noArrow.markerEnd === undefined && noArrow.markerStart === undefined, 'none → 两端都没箭头')
-  const startOnly = styled({ arrow: 'start' })
-  ok(startOnly.markerEnd === undefined && startOnly.markerStart !== undefined, 'start → 只有起点有箭头')
+  const both = styled({ startArrow: 'classic' })
+  ok(both.markerEnd !== undefined && both.markerStart !== undefined && both.markerEnd !== both.markerStart, 'endArrow + startArrow → 两端都有箭头，且用的是两个不同 marker')
+  const noArrow = styled({ endArrow: 'none' })
+  ok(noArrow.markerEnd === undefined && noArrow.markerStart === undefined, 'endArrow=none → 末端没箭头')
+  const bare = styled({ endArrow: null })
+  ok(bare.markerEnd === undefined && bare.markerStart === undefined, '键缺省 = 不画箭头（drawio 的 mxConnector 语义：缺省就是 NONE）')
+  const startOnly = styled({ endArrow: null, startArrow: 'classic' })
+  ok(startOnly.markerEnd === undefined && startOnly.markerStart !== undefined, '只有 startArrow → 只有起点有箭头')
 
-  ok(styled({ color: '#b85450' }).stroke === '#b85450', 'color 覆盖默认线色')
-  ok(styled({}).stroke !== '#b85450', '未指定 color 时跟随主题')
+  ok(styled({ strokeColor: '#b85450' }).stroke === '#b85450', 'strokeColor 覆盖默认线色')
+  ok(styled({}).stroke !== '#b85450', '未指定 strokeColor 时跟随主题')
+  ok(styled({ rounded: '1' }).d !== styled({ rounded: '0' }).d, 'rounded=1 与 rounded=0 的折角画法不同（drawio 缺省是直角）')
+  // 默认省略的等价性：显式删键、与从未写过这个键，渲染必须一模一样。
+  ok(styled({ dashed: null, dashPattern: null }).d === solid.d && styled({ dashed: null }).stroke === solid.stroke, '显式删键与从未写过键渲染完全一致（默认省略的语义）')
 
   // 选中态压过自定义颜色（选中反馈必须看得见，不能被边的配色盖掉）。
-  const d3 = { nodes: doc.nodes, edges: [{ id: 'e1', from: 'a', to: 'b', color: '#b85450' }] }
+  const d3 = { nodes: doc.nodes, edges: [{ id: 'e1', from: 'a', to: 'b', style: stylePatch(DEFAULT_EDGE_STYLE, { strokeColor: '#b85450' }) }] }
   const tree3 = renderDiagram(d3, 'light', 'u1', { current: null }, { selectedIds: ['e1'] }, null)
   const sel = edgePaths(tree3)
   ok(sel[sel.length - 1].props.stroke === '#1a73e8', '选中时用选中色，而不是边的自定义色')
   ok(sel[sel.length - 1].props.strokeDasharray === undefined, '选中不改线型')
 
   // 起点箭头的 marker 必须在 defs 里真的存在，否则 SVG 会静默不画（最难查的一种"没反应"）。
-  const tree4 = renderDiagram({ nodes: doc.nodes, edges: [{ id: 'e1', from: 'a', to: 'b', arrow: 'both' }] }, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const tree4 = renderDiagram({ nodes: doc.nodes, edges: [{ id: 'e1', from: 'a', to: 'b', style: stylePatch(DEFAULT_EDGE_STYLE, { startArrow: 'classic' }) }] }, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
   const markers = walk(tree4, (n) => n.type === 'marker', [])
   const ids = markers.map((m) => m.props.id)
   const refs = []

@@ -14,6 +14,36 @@
 
 const React = require('react')
 
+/**
+ * 样式内核（drawio 的 style 键语义）—— 构建时从 src/style-kernel.js 内联进本 bundle，
+ * 宿主半边 import 的是同一份源文件，所以两边的格式判据不可能漂移。
+ *
+ * 这里**按需解构**：内核里与本文件同名的符号（例如 SIDES）不取，继续用本地的，
+ * 于是不会出现"重复 const 声明"那种直接炸掉整棵子树的错误。
+ */
+const {
+  DEFAULT_EDGE_STYLE,
+  NODE_SHAPES,
+  PALETTE,
+  arrowFromStyle,
+  colorNameFromStyle,
+  colorsFromStyle,
+  dashFromStyle,
+  dashPatternFromStyle,
+  formatStyle,
+  nodeShapeFromStyle,
+  normalizeDrawioDoc,
+  parseStyle,
+  sideFromStyle,
+  styleGet,
+  stylePatch,
+  styleWithArrow,
+  styleWithColorName,
+  styleWithDash,
+  styleWithNodeShape,
+  styleWithSide,
+} = styleKernel
+
 const ID = 'drawai:diagram'
 const KIND = 'diagram'
 const DEFAULT_PATH = 'demo.dshd.json'
@@ -75,7 +105,10 @@ const FONT = 'Helvetica, Arial, sans-serif'
 const FSIZE = 12
 const LHEIGHT = 14
 
-// draw.io 经典调色板（mxGraph 默认色对）
+// draw.io 经典调色板（mxGraph 默认色对）。
+//
+// 注意这里**只有"缺省"一套色**：v1.1 起颜色是文档的一部分（style 键 fillColor/strokeColor），
+// 主题只在文档没写颜色时补缺省 —— 这与 drawio 一致（换主题不改文档里的颜色，只改画布与网格）。
 const LIGHT = {
   page: '#ffffff',
   text: '#000000',
@@ -83,16 +116,7 @@ const LIGHT = {
   gridMinor: '#f2f2f2',
   gridMajor: '#e2e2e2',
   labelBg: '#ffffff',
-  colors: {
-    plain: { fill: '#ffffff', stroke: '#000000' },
-    blue: { fill: '#dae8fc', stroke: '#6c8ebf' },
-    green: { fill: '#d5e8d4', stroke: '#82b366' },
-    orange: { fill: '#ffe6cc', stroke: '#d79b00' },
-    yellow: { fill: '#fff2cc', stroke: '#d6b656' },
-    red: { fill: '#f8cecc', stroke: '#b85450' },
-    purple: { fill: '#e1d5e7', stroke: '#9673a6' },
-    grey: { fill: '#f5f5f5', stroke: '#666666' },
-  },
+  default: { fill: '#ffffff', stroke: '#000000' },
 }
 
 const DARK = {
@@ -102,20 +126,9 @@ const DARK = {
   gridMinor: 'rgba(255,255,255,0.05)',
   gridMajor: 'rgba(255,255,255,0.10)',
   labelBg: '#1c1c1c',
-  colors: {
-    plain: { fill: '#2a2a2a', stroke: '#c9c9c9' },
-    blue: { fill: '#1f3a5f', stroke: '#7fa8d8' },
-    green: { fill: '#22402b', stroke: '#8fc47a' },
-    orange: { fill: '#4a3520', stroke: '#e0a94a' },
-    yellow: { fill: '#453d1e', stroke: '#dcc464' },
-    red: { fill: '#4a2523', stroke: '#d4736f' },
-    purple: { fill: '#33263f', stroke: '#a98cc0' },
-    grey: { fill: '#333333', stroke: '#a0a0a0' },
-  },
+  default: { fill: '#2a2a2a', stroke: '#c9c9c9' },
 }
 
-const LEGACY = { accent: 'blue', rounded: 'blue', plain: 'plain' }
-const SHAPES = ['rect', 'rounded', 'stadium', 'ellipse', 'diamond', 'parallelogram', 'cylinder', 'document', 'hexagon']
 
 /**
  * 浏览器根 ctx，由 apply 在激活时绑定。
@@ -272,24 +285,28 @@ function wrapLabel(label, maxWidth) {
   return lines.length > 0 ? lines : ['']
 }
 
+/**
+ * 节点的配色：**文档的 style 键说了算**，主题只在"没写"时补缺省。
+ *
+ * 这与 v1 相反 —— v1 把 node.style 当颜色名去查主题表，于是暗色主题会改写文档颜色，
+ * 而颜色名之外的值（真十六进制）根本没法表达。drawio 的语义是：颜色本来就存在文档里。
+ */
 function colorOf(node, mode) {
   const skin = mode === 'dark' ? DARK : LIGHT
-  let key = 'plain'
-  if (typeof node.style === 'string') {
-    if (skin.colors[node.style] !== undefined) key = node.style
-    else if (typeof LEGACY[node.style] === 'string') key = LEGACY[node.style]
-  }
-  const base = skin.colors[key] !== undefined ? skin.colors[key] : skin.colors.plain
+  const style = typeof node.style === 'string' ? node.style : ''
+  const fill = styleGet(style, 'fillColor', null)
+  const stroke = styleGet(style, 'strokeColor', null)
+  const font = styleGet(style, 'fontColor', null)
   return {
-    fill: typeof node.fill === 'string' ? node.fill : base.fill,
-    stroke: typeof node.stroke === 'string' ? node.stroke : base.stroke,
+    fill: fill !== null ? fill : skin.default.fill,
+    stroke: stroke !== null ? stroke : skin.default.stroke,
+    font: font !== null ? font : skin.text,
   }
 }
 
+/** 形状：从 style 键推导 —— drawio 里没有 shape 字段，普通矩形就是"没有形状键"。 */
 function shapeOf(node) {
-  if (typeof node.shape === 'string' && SHAPES.indexOf(node.shape) >= 0) return node.shape
-  if (node.style === 'rounded') return 'rounded'
-  return 'rect'
+  return nodeShapeFromStyle(typeof node.style === 'string' ? node.style : '')
 }
 
 // ---- 正交折线路由：6 个候选 + 包围盒避让 ----
@@ -840,50 +857,63 @@ function shapeElement(node, geo, palette, mode) {
   const y = geo.y
   const w = geo.w
   const h = geo.h
-  const stroke = colorOf(node, mode).stroke
+  const style = typeof node.style === 'string' ? node.style : ''
+  const stroke = palette.stroke
   const shape = shapeOf(node)
   const fill = palette.fill
+  // 顶点也吃 drawio 的描边参数：strokeWidth / dashed / dashPattern 都在文档里。
+  const strokeWidth = numberOr(styleGet(style, 'strokeWidth', null), 1)
+  const pattern = dashPatternFromStyle(style)
+  const common = { fill: fill, stroke: stroke, strokeWidth: strokeWidth }
+  if (pattern !== null) common.strokeDasharray = pattern
   if (shape === 'ellipse') {
-    return React.createElement('ellipse', { cx: x + w / 2, cy: y + h / 2, rx: w / 2, ry: h / 2, fill: fill, stroke: stroke, strokeWidth: 1 })
+    return React.createElement('ellipse', Object.assign({}, common, { cx: x + w / 2, cy: y + h / 2, rx: w / 2, ry: h / 2 }))
   }
   if (shape === 'diamond') {
-    return React.createElement('polygon', { points: [x + w / 2, y, x + w, y + h / 2, x + w / 2, y + h, x, y + h / 2].join(' '), fill: fill, stroke: stroke, strokeWidth: 1 })
+    return React.createElement('polygon', Object.assign({}, common, { points: [x + w / 2, y, x + w, y + h / 2, x + w / 2, y + h, x, y + h / 2].join(' ') }))
   }
   if (shape === 'parallelogram') {
     const s = Math.min(w * 0.2, 24)
-    return React.createElement('polygon', { points: [x + s, y, x + w, y, x + w - s, y + h, x, y + h].join(' '), fill: fill, stroke: stroke, strokeWidth: 1 })
+    return React.createElement('polygon', Object.assign({}, common, { points: [x + s, y, x + w, y, x + w - s, y + h, x, y + h].join(' ') }))
   }
   if (shape === 'hexagon') {
     const s = Math.min(w * 0.15, 20)
-    return React.createElement('polygon', { points: [x + s, y, x + w - s, y, x + w, y + h / 2, x + w - s, y + h, x + s, y + h, x, y + h / 2].join(' '), fill: fill, stroke: stroke, strokeWidth: 1 })
+    return React.createElement(
+      'polygon',
+      Object.assign({}, common, { points: [x + s, y, x + w - s, y, x + w, y + h / 2, x + w - s, y + h, x + s, y + h, x, y + h / 2].join(' ') }),
+    )
   }
   if (shape === 'cylinder') {
     const ry = Math.min(h * 0.18, 14)
     return React.createElement(
       'g',
       null,
-      React.createElement('path', {
-        d: ['M', fmt(x), fmt(y + ry), 'A', fmt(w / 2), fmt(ry), 0, 0, 1, fmt(x + w), fmt(y + ry), 'L', fmt(x + w), fmt(y + h - ry), 'A', fmt(w / 2), fmt(ry), 0, 0, 1, fmt(x), fmt(y + h - ry), 'Z'].join(' '),
-        fill: fill,
-        stroke: stroke,
-        strokeWidth: 1,
-      }),
-      React.createElement('path', {
-        d: ['M', fmt(x), fmt(y + ry), 'A', fmt(w / 2), fmt(ry), 0, 0, 0, fmt(x + w), fmt(y + ry)].join(' '),
-        fill: 'none',
-        stroke: stroke,
-        strokeWidth: 1,
-      }),
+      React.createElement(
+        'path',
+        Object.assign({}, common, {
+          d: ['M', fmt(x), fmt(y + ry), 'A', fmt(w / 2), fmt(ry), 0, 0, 1, fmt(x + w), fmt(y + ry), 'L', fmt(x + w), fmt(y + h - ry), 'A', fmt(w / 2), fmt(ry), 0, 0, 1, fmt(x), fmt(y + h - ry), 'Z'].join(' '),
+        }),
+      ),
+      React.createElement(
+        'path',
+        Object.assign({}, common, {
+          d: ['M', fmt(x), fmt(y + ry), 'A', fmt(w / 2), fmt(ry), 0, 0, 0, fmt(x + w), fmt(y + ry)].join(' '),
+          fill: 'none',
+        }),
+      ),
     )
   }
   if (shape === 'document') {
     const d = ['M', fmt(x), fmt(y), 'L', fmt(x + w), fmt(y), 'L', fmt(x + w), fmt(y + h * 0.82), 'C', fmt(x + w * 0.75), fmt(y + h * 1.06), fmt(x + w * 0.25), fmt(y + h * 0.58), fmt(x), fmt(y + h * 0.86), 'Z'].join(' ')
-    return React.createElement('path', { d: d, fill: fill, stroke: stroke, strokeWidth: 1 })
+    return React.createElement('path', Object.assign({}, common, { d: d }))
   }
+  // 圆角：drawio 是 `rounded=1` + `arcSize`（百分比，缺省 15%）；stadium 就是 arcSize=50。
   let rx = 0
-  if (shape === 'rounded') rx = Math.min(w, h) * 0.15
-  if (shape === 'stadium') rx = h / 2
-  return React.createElement('rect', { x: x, y: y, width: w, height: h, rx: rx, ry: rx, fill: fill, stroke: stroke, strokeWidth: 1 })
+  if (shape === 'rounded' || shape === 'stadium') {
+    const arc = Number(styleGet(style, 'arcSize', null))
+    rx = shape === 'stadium' ? h / 2 : Math.min(w, h) * (Number.isFinite(arc) ? arc / 100 : 0.15)
+  }
+  return React.createElement('rect', Object.assign({}, common, { x: x, y: y, width: w, height: h, rx: rx, ry: rx }))
 }
 
 function clampNumber(value, lo, hi) {
@@ -958,17 +988,8 @@ const SHAPE_LIBRARY = [
   { shape: 'hexagon', label: '六边形' },
 ]
 
-/** draw.io 经典调色板里可选的几个。 */
-const COLOR_LIBRARY = [
-  { style: 'plain', fill: '#ffffff', stroke: '#000000' },
-  { style: 'blue', fill: '#dae8fc', stroke: '#6c8ebf' },
-  { style: 'green', fill: '#d5e8d4', stroke: '#82b366' },
-  { style: 'orange', fill: '#ffe6cc', stroke: '#d79b00' },
-  { style: 'yellow', fill: '#fff2cc', stroke: '#d6b656' },
-  { style: 'red', fill: '#f8cecc', stroke: '#b85450' },
-  { style: 'purple', fill: '#e1d5e7', stroke: '#9673a6' },
-  { style: 'grey', fill: '#f5f5f5', stroke: '#666666' },
-]
+// 调色板（8 个经典色）由样式内核的 PALETTE 提供，见文件顶部从 styleKernel 的解构 ——
+// 这里不再留第二份"颜色名 → 十六进制"的表，否则两边迟早会漂移。
 
 /** 从节点集合算出 box / 索引 / 包围盒。渲染与命中都走它，避免两处算法漂移。 */
 function buildGeometry(doc) {
@@ -1532,22 +1553,26 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
       }
     }
     children.push(React.createElement('path', hitProps))
-    // 连线的画法（dash / arrow / color）存在文档里，渲染参数在这里：
-    // 文档只记"虚线"这个语义，虚线该是 6+4 还是 8+5 属于画布的事 ——
-    // 换主题、调密度都不该改动文档，AI 也不必知道像素值。
-    const lineStroke = selected ? '#1a73e8' : typeof edge.color === 'string' && edge.color.length > 0 ? edge.color : skin.line
+    // 连线的画法全部存在文档的 style 键里：dashed/dashPattern 决定线型、endArrow/startArrow
+    // 决定箭头、strokeColor 决定颜色、rounded 决定拐角是否圆滑 —— 与 drawio 一致，缺省即"不画"。
+    // v1 只存语义（dash:'dashed'）而把像素值留在客户端；v1.1 起渲染参数就是文档的一部分。
+    const edgeStyle = typeof edge.style === 'string' ? edge.style : ''
+    const strokeColor = styleGet(edgeStyle, 'strokeColor', null)
+    const arrow = arrowFromStyle(edgeStyle)
+    const pattern = dashPatternFromStyle(edgeStyle)
+    const cornerRadius = styleGet(edgeStyle, 'rounded', '0') === '1' ? 6 : 0
+    const lineStroke = selected ? '#1a73e8' : strokeColor !== null ? strokeColor : skin.line
     const edgeProps = {
       key: 'edge-' + i,
-      d: pathOf(pts, 6),
+      d: pathOf(pts, cornerRadius),
       fill: 'none',
       stroke: lineStroke,
-      strokeWidth: selected ? 2 : 1,
-      markerEnd: edge.arrow === 'none' || edge.arrow === 'start' ? undefined : 'url(#' + arrowId + ')',
-      markerStart: edge.arrow === 'both' || edge.arrow === 'start' ? 'url(#' + arrowStartId + ')' : undefined,
+      strokeWidth: selected ? 2 : numberOr(styleGet(edgeStyle, 'strokeWidth', null), 1),
+      markerEnd: arrow === 'none' || arrow === 'start' ? undefined : 'url(#' + arrowId + ')',
+      markerStart: arrow === 'both' || arrow === 'start' ? 'url(#' + arrowStartId + ')' : undefined,
       pointerEvents: 'none',
     }
-    if (edge.dash === 'dashed') edgeProps.strokeDasharray = '6 4'
-    else if (edge.dash === 'dotted') edgeProps.strokeDasharray = '1 4'
+    if (pattern !== null) edgeProps.strokeDasharray = pattern
     children.push(React.createElement('path', edgeProps))
     if (typeof edge.label === 'string' && edge.label.length > 0) {
       const a = pts.length >= 3 ? pts[1] : pts[0]
@@ -1960,13 +1985,17 @@ function parseDocument(text) {
     return { error: 'JSON 解析失败：' + (error && error.message ? error.message : String(error)) }
   }
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { error: '文档根节点必须是一个 JSON 对象' }
-  const nodes = Array.isArray(raw.nodes) ? raw.nodes.filter((n) => n !== null && typeof n === 'object' && typeof n.id === 'string') : []
-  const edges = Array.isArray(raw.edges) ? raw.edges.filter((e) => e !== null && typeof e === 'object' && typeof e.from === 'string' && typeof e.to === 'string') : []
+  // 读时升级与宿主共用同一份逻辑（style-kernel 的 normalizeDrawioDoc）：
+  // v1 的 shape/style(颜色名)/dash/arrow 与折点里的桩点，都在这里翻成 v2 的 style 键与进出侧约束。
+  // 两边**必须**用同一个函数 —— 否则同一份文件在画布上和 AI 眼里会是两张不同的图。
+  const doc = normalizeDrawioDoc(raw)
+  const nodes = doc.nodes.filter((n) => n !== null && typeof n === 'object' && typeof n.id === 'string')
+  const edges = doc.edges.filter((e) => e !== null && typeof e === 'object' && typeof e.from === 'string' && typeof e.to === 'string')
   // **0 个节点不是错误** —— 空画布是完全合法的状态（刚「新建」出来就是这样，
   // 用户还要靠右键往里面加节点）。这里曾经返回 error，于是新建出来的画布一进去就是红字，
   // 连右键都点不了 —— 等于「新建」功能废掉。
   // 真正该报错的是"文件不是画布文档"，而不是"画布还是空的"。
-  return { doc: { revision: typeof raw.revision === 'number' ? raw.revision : 0, nodes: nodes, edges: edges } }
+  return { doc: { version: doc.version, revision: doc.revision, meta: doc.meta, nodes: nodes, edges: edges }, migrated: doc.migrated }
 }
 
 function basename(address) {
@@ -2168,14 +2197,24 @@ function CanvasView(props) {
   // ---- 撤销 / 重做（快照栈）------------------------------------------------
   const HISTORY_LIMIT = 60
 
-  /** 深一层拷贝：nodes/edges 是数组，edge.points 也是数组，快照必须互不影响。 */
+  /**
+   * 深一层拷贝：nodes/edges 是数组，edge.points / sourcePoint / targetPoint 是嵌套对象，
+   * 快照必须互不影响（否则撤销会写坏工作副本，而且是静默的）。
+   *
+   * v1.1 顺带修掉一个真实缺口：这里以前只留 {revision, nodes, edges}，
+   * **version 与 meta 被丢掉** —— 于是人一保存，盘上的 version 与 meta 就没了。
+   */
   function cloneDoc(source) {
     return {
+      version: source.version,
       revision: source.revision,
+      meta: source.meta === undefined || source.meta === null ? source.meta : Object.assign({}, source.meta),
       nodes: source.nodes.map((n) => Object.assign({}, n)),
       edges: source.edges.map((e) => {
         const copy = Object.assign({}, e)
         if (Array.isArray(e.points)) copy.points = e.points.map((p) => ({ x: p.x, y: p.y }))
+        if (e.sourcePoint !== undefined) copy.sourcePoint = { x: e.sourcePoint.x, y: e.sourcePoint.y }
+        if (e.targetPoint !== undefined) copy.targetPoint = { x: e.targetPoint.x, y: e.targetPoint.y }
         return copy
       }),
     }
@@ -3096,12 +3135,14 @@ function CanvasView(props) {
     return 'n' + (max + 1)
   }
 
-  function createNodeAt(shape, style, userX, userY) {
+  function createNodeAt(shape, styleName, userX, userY) {
     const current = docRef.current
     if (current === null) return
     const id = nextNodeId(current)
+    // 形状与配色都落成 drawio 的 style 键：rect/plain 落成空串（= drawio 的 defaultVertexStyle）。
+    const style = styleWithColorName(styleWithNodeShape('', shape), styleName)
     applyLocal((next) => {
-      next.nodes.push({ id: id, shape: shape, style: style, x: snap(userX - 65), y: snap(userY - 28), w: 130, h: 56, label: '新节点' })
+      next.nodes.push({ id: id, label: '新节点', style: style, x: snap(userX - 65), y: snap(userY - 28), w: 130, h: 56 })
     })
     setSelectedIds([id])
     setMenu(null)
@@ -3139,33 +3180,40 @@ function CanvasView(props) {
     })
   }
 
-  /** 改连线的画法。dash/arrow 只在非默认值时落字段 —— 与宿主 normalizeDash/normalizeArrow 的约定一致。 */
+  /**
+   * 改连线的画法：全部落成 style 键（dashed/dashPattern/endArrow/startArrow/strokeColor）。
+   * 回到默认 = **删键**，不写 `dashed=0` 之类的冗余 —— 与宿主 edgeStyleFromOp 同一套语义。
+   */
   function updateEdge(id, patch) {
     applyLocal((next) => {
       for (let i = 0; i < next.edges.length; i += 1) {
         const e = next.edges[i]
         if (e.id !== id) continue
-        if (has(patch, 'dash')) {
-          if (patch.dash === 'solid') delete e.dash
-          else e.dash = patch.dash
-        }
-        if (has(patch, 'arrow')) {
-          if (patch.arrow === 'end') delete e.arrow
-          else e.arrow = patch.arrow
-        }
+        let style = typeof e.style === 'string' ? e.style : DEFAULT_EDGE_STYLE
+        if (has(patch, 'dash')) style = styleWithDash(style, patch.dash)
+        if (has(patch, 'arrow')) style = styleWithArrow(style, patch.arrow)
         if (has(patch, 'color')) {
-          if (typeof patch.color !== 'string' || patch.color.length === 0) delete e.color
-          else e.color = patch.color
+          style = stylePatch(style, { strokeColor: typeof patch.color === 'string' && patch.color.length > 0 ? patch.color : null })
         }
+        e.style = style
         break
       }
     })
-  }  /** 清掉一条连线的全部折点，回到自动路由。 */
+  }
+
+  /** 清掉一条连线的全部折点**与进出侧约束**，回到自动路由（= drawio 的「自动路由」）。 */
   function clearEdgeWaypoints(id) {
     applyLocal((next) => {
       for (let i = 0; i < next.edges.length; i += 1) {
-        if (next.edges[i].id !== id) continue
-        delete next.edges[i].points
+        const e = next.edges[i]
+        if (e.id !== id) continue
+        delete e.points
+        delete e.sourcePoint
+        delete e.targetPoint
+        let style = typeof e.style === 'string' ? e.style : DEFAULT_EDGE_STYLE
+        style = styleWithSide(style, 'source', null)
+        style = styleWithSide(style, 'target', null)
+        e.style = style
         break
       }
     })
@@ -3537,7 +3585,8 @@ function CanvasView(props) {
     // 这里曾经兜底成 demo.dshd.json：地址认不出时画布会悄悄去读写它、屏幕上毫无提示 ——
     // 用户以为在编辑 A，实际在改 B。现在落成显式状态，由 UI 提示"还没有绑定文件"。
     if (!hasPath) {
-      const blank = { revision: 0, nodes: [], edges: [] }
+      // 未命名的空画布也是 v2：它由人手创建，保存时该带上 pinned（不被 AI 自动布局重排）。
+      const blank = { version: 2, revision: 0, meta: { engine: 'drawio-svg', pinned: true }, nodes: [], edges: [] }
       docRef.current = blank
       revisionRef.current = 0
       dirtyRef.current = false
@@ -3696,17 +3745,18 @@ function CanvasView(props) {
     return React.createElement('div', { className: 'drawai-menu-title' }, text)
   }
 
-  function swatchRow(onPick, activeStyle) {
+  function swatchRow(onPick, activeColor) {
     const buttons = []
-    for (let i = 0; i < COLOR_LIBRARY.length; i += 1) {
-      const entry = COLOR_LIBRARY[i]
+    // 调色板来自样式内核（PALETTE）：这里的"名字"只是 UI 的叫法，点下去生成 fillColor/strokeColor 键。
+    for (let i = 0; i < PALETTE.length; i += 1) {
+      const entry = PALETTE[i]
       buttons.push(
         React.createElement('button', {
-          key: 'swatch-' + entry.style,
-          className: activeStyle === entry.style ? 'drawai-swatch on' : 'drawai-swatch',
-          title: entry.style,
+          key: 'swatch-' + entry.name,
+          className: activeColor === entry.name ? 'drawai-swatch on' : 'drawai-swatch',
+          title: entry.name,
           style: { background: entry.fill, borderColor: entry.stroke },
-          onClick: () => onPick(entry.style),
+          onClick: () => onPick(entry.name),
         }),
       )
     }
@@ -3718,9 +3768,9 @@ function CanvasView(props) {
     const buttons = []
     for (let i = 0; i < SHAPE_LIBRARY.length; i += 1) {
       const entry = SHAPE_LIBRARY[i]
-      // node 与 palette 必须来自同一个 colorOf —— shapeElement 的描边取自 node，填充取自 palette，
-      // 只传 palette 不传 style 的话，缩略图会变成"蓝填充 + 黑描边"。
-      const chipNode = { shape: entry.shape, style: menuStyle }
+      // node 与 palette 必须来自同一个 colorOf —— shapeElement 的描边取自 style，填充取自 palette，
+      // 只传 palette 不传 style 的话，缩略图会变成"默认填充 + 主题描边"。
+      const chipNode = { style: styleWithColorName(styleWithNodeShape('', entry.shape), menuStyle) }
       const palette = colorOf(chipNode, 'light')
       buttons.push(
         React.createElement(
@@ -3781,9 +3831,11 @@ function CanvasView(props) {
     } else if (menu.kind === 'node') {
       const node = nodeById(menu.id)
       const label = node !== null && typeof node.label === 'string' ? node.label : menu.id
+      const nodeStyle = node === null || typeof node.style !== 'string' ? '' : node.style
       rows.push(menuTitle('节点：' + label))
-      rows.push(shapeGrid((shape) => updateNode(menu.id, { shape: shape })))
-      rows.push(swatchRow((style) => updateNode(menu.id, { style: style }), node === null ? '' : node.style))
+      // 形状与配色都改成**键级改写**：不再往文档里写 shape 字段，也不再用颜色名当 style。
+      rows.push(shapeGrid((shape) => updateNode(menu.id, { style: styleWithNodeShape(nodeStyle, shape) })))
+      rows.push(swatchRow((color) => updateNode(menu.id, { style: styleWithColorName(nodeStyle, color) }), colorNameFromStyle(nodeStyle)))
       rows.push(
         React.createElement(
           'div',
@@ -3804,8 +3856,11 @@ function CanvasView(props) {
       actions.push(React.createElement('button', { key: 'del', className: 'drawai-btn', onClick: () => deleteById(menu.id) }, '删除'))
       rows.push(React.createElement('div', { className: 'drawai-menu-row' }, actions))
 
-      // 连线的画法。dash/arrow 存在文档里，这里只是它的手工入口 ——
-      // AI 侧走的是同一个 setStyle（dash/arrow/color），两边写的是同一批字段。
+      // 连线的画法。落盘是 style 键（dashed/dashPattern/endArrow/startArrow/strokeColor），
+      // 这里只是它的手工入口 —— AI 侧走同一个 setStyle（dash/arrow/color 是糖），两边改的是同一批键。
+      const edgeBaseStyle = edge === null || typeof edge.style !== 'string' ? DEFAULT_EDGE_STYLE : edge.style
+      const edgeDashNow = edge === null ? 'solid' : dashFromStyle(edgeBaseStyle)
+      const edgeArrowNow = edge === null ? 'end' : arrowFromStyle(edgeBaseStyle)
       const dashRow = (items) =>
         React.createElement(
           'div',
@@ -3813,7 +3868,7 @@ function CanvasView(props) {
           items.map((it) =>
             React.createElement(
               'button',
-              { key: it[0], className: 'drawai-btn' + ((edge === null ? '' : edge.dash === it[0] || (it[0] === 'solid' && edge.dash === undefined)) ? ' on' : ''), onClick: () => updateEdge(menu.id, { dash: it[0] }) },
+              { key: it[0], className: 'drawai-btn' + (edgeDashNow === it[0] ? ' on' : ''), onClick: () => updateEdge(menu.id, { dash: it[0] }) },
               it[1],
             ),
           ),
@@ -3826,7 +3881,7 @@ function CanvasView(props) {
           items.map((it) =>
             React.createElement(
               'button',
-              { key: it[0], className: 'drawai-btn' + ((edge === null ? '' : edge.arrow === it[0] || (it[0] === 'end' && edge.arrow === undefined)) ? ' on' : ''), onClick: () => updateEdge(menu.id, { arrow: it[0] }) },
+              { key: it[0], className: 'drawai-btn' + (edgeArrowNow === it[0] ? ' on' : ''), onClick: () => updateEdge(menu.id, { arrow: it[0] }) },
               it[1],
             ),
           ),

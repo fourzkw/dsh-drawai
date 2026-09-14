@@ -19,10 +19,12 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import { composeClientBody } from './build.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const source = resolve(here, '..', 'src', 'client.js')
-const src = readFileSync(source, 'utf8')
+// 与产物同款的组合 body（内联的样式内核 + src/client.js）：组件里会用到内核函数，
+// 裸的 src/client.js 在这里会 ReferenceError。
+const src = composeClientBody()
 
 let failures = 0
 let checks = 0

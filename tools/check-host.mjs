@@ -17,6 +17,8 @@ import { mkdirSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+// 自测直接引用样式内核：文档格式的"真相"只有一份，测试跟着它走，而不是把键名再抄一遍。
+import { DEFAULT_EDGE_STYLE, formatStyle, parseStyle, styleGet, styleWithSide } from '../src/style-kernel.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -136,17 +138,60 @@ function current() {
   return JSON.parse(store.get(WORKSPACE + '\\doc.dshd.json'))
 }
 
+/** 调色板名的落盘形态（等价于 UI 里点了蓝/绿之后写进文档的东西）。 */
+const BLUE = 'fillColor=#dae8fc;strokeColor=#6c8ebf;'
+const GREEN = 'fillColor=#d5e8d4;strokeColor=#82b366;'
+
+/** v2 的规范夹具：形状/配色/画法全部只在 style 键里，没有 shape/dash/arrow/color 字段。 */
 function baseDoc(meta) {
+  return {
+    version: 2,
+    revision: 7,
+    meta: meta === undefined ? { engine: 'drawio-svg' } : meta,
+    nodes: [
+      { id: 'n1', label: '一', style: BLUE, x: 37, y: 211, w: 130, h: 56 },
+      { id: 'n2', label: '二', style: GREEN, x: 411, y: 88, w: 130, h: 56 },
+    ],
+    edges: [{ id: 'e1', from: 'n1', to: 'n2', label: '手工连的', style: DEFAULT_EDGE_STYLE }],
+  }
+}
+
+/**
+ * v1（语义枚举那一代）文档：只用于验证"读时升级"。
+ *
+ * 注意 e1 的 points 第一个点 (167,239) 正好贴在 n1（37,211,130×56）的东边框上 ——
+ * 这就是 v1 把"从哪一侧进出"的桩点混进折点的历史包袱，迁移应当把它摘成 exitX/exitY。
+ */
+function legacyDoc(meta) {
   return {
     version: 1,
     revision: 7,
     meta: meta === undefined ? { engine: 'drawio-svg' } : meta,
     nodes: [
       { id: 'n1', shape: 'rect', style: 'blue', x: 37, y: 211, w: 130, h: 56, label: '一' },
-      { id: 'n2', shape: 'rect', style: 'green', x: 411, y: 88, w: 130, h: 56, label: '二' },
+      { id: 'n2', shape: 'diamond', style: 'yellow', x: 411, y: 88, w: 130, h: 56, label: '二' },
     ],
-    edges: [{ id: 'e1', from: 'n1', to: 'n2', label: '手工连的' }],
+    edges: [
+      { id: 'e1', from: 'n1', to: 'n2', label: '手工连的', dash: 'dashed', arrow: 'both', color: '#b85450', points: [{ x: 167, y: 239 }, { x: 300, y: 239 }] },
+    ],
   }
+}
+
+/** 只有两个节点、没有连线的 v2 文档（几何相关断言用）。 */
+function pairDoc(extra) {
+  return Object.assign(
+    {
+      version: 2,
+      revision: 1,
+      meta: { engine: 'drawio-svg', pinned: true },
+      nodes: [
+        { id: 'a', label: 'A', style: '', x: 0, y: 0, w: 120, h: 60 },
+        { id: 'b', label: 'B', style: '', x: 300, y: 200, w: 120, h: 60 },
+      ],
+      edges: [],
+    },
+    extra === undefined ? {} : extra,
+  )
 }
 
 console.log('meta.pinned：人手工摆过的版面不能被 AI 改图冲掉')
@@ -191,7 +236,7 @@ console.log('\ndiagram_read 的输出 schema 必须声明返回体里所有字�
   ok(readSchema !== null, 'diagram_read 声明了 output schema')
   if (readSchema !== null) {
     const edgeProps = readSchema.properties.edges.items.properties
-    for (const field of ['id', 'from', 'to', 'label', 'dash', 'arrow', 'color']) {
+    for (const field of ['id', 'from', 'to', 'label', 'style', 'dash', 'arrow', 'color', 'exit', 'entry', 'points', 'sourcePoint', 'targetPoint']) {
       ok(edgeProps[field] !== undefined, 'edges schema 声明了 ' + field)
     }
     const nodeProps = readSchema.properties.nodes.items.properties
@@ -212,7 +257,10 @@ console.log('\ndiagram_read 的输出 schema 必须声明返回体里所有字�
   for (const e of out.edges) for (const k of Object.keys(e)) if (declaredEdge[k] === undefined) undeclared.push('edges[].' + k)
   for (const n of out.nodes) for (const k of Object.keys(n)) if (declaredNode[k] === undefined) undeclared.push('nodes[].' + k)
   ok(undeclared.length === 0, '真实返回值的字段全部在 schema 里（未声明的会被判非法输出：' + (undeclared.join(', ') || '无') + '）')
-  ok(out.edges[0].dash === 'dashed' && out.edges[0].arrow === 'both' && out.edges[0].color === '#b85450', '带回的边样式确实是设过的值')
+  ok(out.migrated === false, 'v2 文档不会被误判成需要迁移')
+  ok(out.edges[0].dash === 'dashed' && out.edges[0].arrow === 'both' && out.edges[0].color === '#b85450', '带回的边画法确实是设过的值')
+  // 派生字段只是给人/模型看的名字，文档的真相在 style 串里 —— 两者必须同时给得出来。
+  ok(styleGet(out.edges[0].style, 'dashed', null) === '1' && styleGet(out.edges[0].style, 'startArrow', null) === 'classic', 'read 的 style 串里能直接看到 drawio 键')
 }
 
 
@@ -224,35 +272,46 @@ console.log('\ndiagram_read 的输出 schema 必须声明返回体里所有字�
   ok(doc.meta.pinned === undefined, '未 pinned 的文档不会被凭空打上 pinned')
 }
 
-console.log('\n连线的画法：dash / arrow / color')
+console.log('\n连线的画法：dash / arrow / color 落成 drawio 的 style 键')
 {
   seed(baseDoc())
   await apply([{ op: 'addEdge', from: 'n2', to: 'n1', label: '异步', dash: 'dashed', arrow: 'both' }])
-  const e2 = current().edges[1]
-  ok(e2.dash === 'dashed', 'addEdge 直接带上 dash')
-  ok(e2.arrow === 'both', 'addEdge 直接带上 arrow')
-  ok(current().edges[0].dash === undefined, '未指定的边不会凭空多出 dash（默认不写冗余字段）')
+  const e2s = parseStyle(current().edges[1].style)
+  ok(e2s.dashed === '1', 'addEdge 直接带上 dashed=1')
+  ok(e2s.endArrow === 'classic' && e2s.startArrow === 'classic', 'addEdge 直接带上双向箭头（endArrow + startArrow）')
+  ok(parseStyle(current().edges[0].style).dashed === undefined, '未指定的边不会凭空多出 dashed（默认省略）')
 
   await apply([{ op: 'setStyle', id: 'e1', dash: 'dotted', color: '#b85450' }])
-  const e1 = current().edges[0]
-  ok(e1.dash === 'dotted', 'setStyle 能改连线的 dash')
-  ok(e1.color === '#b85450', 'setStyle 能改连线的 color')
+  const e1 = parseStyle(current().edges[0].style)
+  ok(e1.dashed === '1' && e1.dashPattern === '1 2', 'setStyle 能改连线线型（dashed=1 + dashPattern=1 2）')
+  ok(e1.strokeColor === '#b85450', 'setStyle 能改连线颜色（strokeColor）')
 
-  // 归一化：口语说法要能接受，但落盘必须是规范值。
+  // 归一化：口语说法要能接受，但落盘必须是 drawio 的键值。
   await apply([{ op: 'setStyle', id: 'e1', dash: '虚线', arrow: '双向' }])
-  const e1b = current().edges[0]
-  ok(e1b.dash === 'dashed', '"虚线" 归一成 dashed')
-  ok(e1b.arrow === 'both', '"双向" 归一成 both')
+  const e1b = parseStyle(current().edges[0].style)
+  ok(e1b.dashed === '1', '"虚线" 归一成 dashed=1')
+  ok(e1b.endArrow === 'classic' && e1b.startArrow === 'classic', '"双向" 归一成 endArrow + startArrow')
 
-  // 回到默认 = 删字段，而不是写 'solid'/'end'（文档里不留冗余）。
+  // 回到默认 = 删键，而不是写 dashed=0 / 空值（文档里不留冗余）。
   await apply([{ op: 'setStyle', id: 'e1', dash: 'solid', arrow: 'end', color: '' }])
-  const e1c = current().edges[0]
-  ok(e1c.dash === undefined && e1c.arrow === undefined && e1c.color === undefined, '设回默认会删掉这些字段，不留 "solid"/"end" 垃圾')
+  const e1c = parseStyle(current().edges[0].style)
+  ok(e1c.dashed === undefined && e1c.dashPattern === undefined && e1c.startArrow === undefined, '设回默认会删掉虚线相关键，不留 "dashed=0" 垃圾')
+  ok(e1c.strokeColor === undefined, 'color:"" 会删掉 strokeColor（回到 drawio 缺省颜色）')
+  ok(e1c.endArrow === 'classic', 'arrow:end 落成 endArrow=classic（与 drawio 新建连线的写法一致）')
 
-  // 节点与连线共用 setStyle：节点该走 shape/style 那条路。
+  // 节点与连线共用 setStyle：节点该走 style 键那条路。
   await apply([{ op: 'setStyle', id: 'n1', shape: 'diamond', style: 'orange' }])
   const n1 = current().nodes[0]
-  ok(n1.shape === 'diamond' && n1.style === 'orange', 'setStyle 对节点仍然管 shape/style')
+  const n1s = parseStyle(n1.style)
+  ok(n1s.rhombus === '1', '节点换形状落成 rhombus=1（diamond 只是工具语言的叫法）')
+  ok(n1s.fillColor === '#ffe6cc' && n1s.strokeColor === '#d79b00', 'style:"orange" 落成 orange 的 fillColor/strokeColor')
+  ok(n1.shape === undefined && n1.style !== undefined, '文档里不再有 shape 字段（形状只存在于 style 键里）')
+
+  // rect = 没有形状键：drawio 的 defaultVertexStyle 就是 {}。
+  await apply([{ op: 'setStyle', id: 'n1', shape: 'rect' }])
+  const n1r = parseStyle(current().nodes[0].style)
+  ok(n1r.rhombus === undefined && n1r.shape === undefined && n1r.rounded === undefined && n1r.ellipse === undefined, 'rect 落成"没有形状键"（默认省略）')
+  ok(n1r.fillColor === '#ffe6cc', '换形状不会顺手动配色的键')
 }
 
 console.log('\n非法输入必须在写盘之前失败')
@@ -332,7 +391,78 @@ console.log('\ndiagram_read 回读')
   ok(read.revision === 8, 'read 报出正确 revision')
   ok(read.nodes.length === 2 && read.edges.length === 1, 'read 报出节点/边数量')
   const e = read.edges[0]
-  ok(e.dash === 'dashed' && e.arrow === 'both' && e.color === '#333', 'read 把边样式一起报出来（AI 改之前看得到现状）')
+  ok(e.dash === 'dashed' && e.arrow === 'both' && e.color === '#333', 'read 把边画法一起报出来（AI 改之前看得到现状）')
+  ok(parseStyle(e.style).strokeColor === '#333', 'read 同时给出 style 串原文（派生字段只是便于阅读的名字）')
+}
+
+console.log('\n格式逻辑：默认省略 / 开放集合 / 折点与端点分离 / v1 读时升级')
+{
+  // ── 默认省略：不给画法，就一个默认键都不写 ──
+  store.clear()
+  await apply([{ op: 'addNode', label: '素节点' }], { path: 'fresh.dshd.json' })
+  const fresh = JSON.parse(store.get(WORKSPACE + '\\fresh.dshd.json'))
+  ok(fresh.version === 2, '新文档落盘就是 version 2')
+  ok(fresh.nodes[0].style === '', '未指定画法的节点 style 是空串（= drawio 的 defaultVertexStyle {}）')
+
+  // ── style 串往返无损 + 未识别键保留（开放集合）──
+  const exotic = 'shape=cylinder3;fillColor=#ffeeee;strokeColor=#aa0000;customKey=7;whiteSpace=wrap;html=1;'
+  seed({
+    version: 2,
+    revision: 3,
+    meta: { engine: 'drawio-svg', pinned: true },
+    nodes: [
+      { id: 'n1', label: '异形', style: exotic, x: 0, y: 0, w: 120, h: 60 },
+      { id: 'n2', label: '普通', style: '', x: 300, y: 0, w: 120, h: 60 },
+    ],
+    edges: [],
+  })
+  await apply([{ op: 'setLabel', id: 'n2', label: '改别人的标签' }])
+  ok(current().nodes[0].style === formatStyle(exotic), '一次无关的编辑之后，节点 style 串逐字未变（含未识别的 customKey）')
+
+  // ── 键级合并：只动点到的键 ──
+  await apply([{ op: 'setStyle', id: 'n1', keys: { fillColor: '#eeeeee' } }])
+  const merged = parseStyle(current().nodes[0].style)
+  ok(merged.fillColor === '#eeeeee' && merged.customKey === '7' && merged.shape === 'cylinder3', 'keys 只改指到的键，其余（含未知键）原样保留')
+
+  // ── 折点归 points、进出侧归 exit*/entry*：两套模型互不牵连 ──
+  seed(
+    pairDoc({
+      edges: [
+        { id: 'e1', from: 'a', to: 'b', style: styleWithSide(DEFAULT_EDGE_STYLE, 'source', 'e'), points: [{ x: 200, y: 30 }, { x: 200, y: 200 }] },
+      ],
+    }),
+  )
+  await apply([{ op: 'setStyle', id: 'e1', exit: 'w' }])
+  let edge = current().edges[0]
+  ok(Array.isArray(edge.points) && edge.points.length === 2, '改进出侧不动折点')
+  ok(parseStyle(edge.style).exitX === '0' && parseStyle(edge.style).exitY === '0.5', 'exit:"w" 落成 exitX=0;exitY=0.5')
+
+  await apply([{ op: 'setStyle', id: 'e1', clearPoints: true }])
+  edge = current().edges[0]
+  ok(edge.points === undefined, 'clearPoints 清掉折点')
+  ok(parseStyle(edge.style).exitX === '0', 'clearPoints 不动进出侧约束（折点与端点是两套模型）')
+
+  // ── 显式重排 → 端点动了 → 过期折点必须被清掉（v1 的真实缺口：宿主当时不知道 points 存在）──
+  seed(pairDoc({ edges: [{ id: 'e1', from: 'a', to: 'b', style: DEFAULT_EDGE_STYLE, points: [{ x: 200, y: 30 }] }] }))
+  await apply([{ op: 'setLabel', id: 'a', label: '重排' }], { layout: 'dagre-tb' })
+  ok(current().edges[0].points === undefined, '显式重排且端点移动 → 过期折点被清掉（否则会飘在旧坐标上）')
+
+  // ── v1 读时升级：枚举 → drawio 键；折点里的桩点 → 进出侧约束 ──
+  seed(legacyDoc())
+  const migrated = await readTool.execute({ path: 'doc.dshd.json' }, exec)
+  ok(migrated.migrated === true, 'v1 文档被标记为需要迁移')
+  ok(migrated.nodes[0].shape === 'rect' && migrated.nodes[1].shape === 'diamond', 'v1 的 shape 枚举升级后仍报得出形状')
+  ok(parseStyle(migrated.nodes[0].style).fillColor === '#dae8fc', 'v1 的 style:"blue" 升级成 blue 的 fillColor')
+  ok(parseStyle(migrated.nodes[1].style).rhombus === '1', 'v1 的 shape:"diamond" 升级成 rhombus=1')
+  ok(migrated.edges[0].dash === 'dashed' && migrated.edges[0].arrow === 'both', 'v1 的 dash/arrow 升级成 dashed / endArrow+startArrow')
+  ok(styleGet(migrated.edges[0].style, 'strokeColor', null) === '#b85450', 'v1 的 color 升级成 strokeColor')
+  ok(migrated.edges[0].exit === 'e', 'v1 折点里贴在源节点边框上的桩点升级成 exitX/exitY')
+  ok(Array.isArray(migrated.edges[0].points) && migrated.edges[0].points.length === 1, '桩点被从折点里摘掉，只剩真正的折点')
+  ok(current().version === 1, '只是读一眼不会改盘上的文档（读时升级是非破坏的）')
+
+  await apply([{ op: 'setLabel', id: 'n1', label: '迁移后' }])
+  ok(current().version === 2, '迁移过的文档一旦被修改，落盘就是 v2')
+  ok(current().edges[0].dash === undefined && current().edges[0].arrow === undefined && current().nodes[0].shape === undefined, 'v2 文档里不再有 dash/arrow/shape 这些旧字段')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')

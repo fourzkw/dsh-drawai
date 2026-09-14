@@ -16,6 +16,39 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { readdir } from 'node:fs/promises'
 import { isAbsolute, resolve as resolvePath, join as joinPath } from 'node:path'
+import {
+  ARROW_KINDS,
+  DASH_KINDS,
+  DEFAULT_EDGE_STYLE,
+  DEFAULT_NODE_STYLE,
+  DEFAULT_STROKE,
+  NODE_SHAPES,
+  NODE_SHAPE_STYLE,
+  PALETTE,
+  SIDES,
+  arrowFromStyle,
+  avoidFromStyle,
+  colorNameFromStyle,
+  colorsFromStyle,
+  dashFromStyle,
+  edgeStyleValueFromStyle,
+  formatStyle,
+  jettyFromStyle,
+  nodeShapeFromStyle,
+  normalizeDrawioDoc,
+  normalizePoints,
+  parseStyle,
+  sideFromStyle,
+  styleWithArrow,
+  styleWithAvoid,
+  styleWithColorName,
+  styleWithDash,
+  styleWithJetty,
+  styleWithNodeShape,
+  styleWithSide,
+  stylePatch,
+  styleGet,
+} from './style-kernel.js'
 
 /**
  * 列目录走 Node 标准库。
@@ -44,16 +77,24 @@ const GAP_CROSS = 40
 const LAYOUTS = ['dagre-lr', 'dagre-tb', 'grid', 'none']
 
 /**
- * 连线的线型与箭头。
+ * 工具语言 vs 文档语言 —— 这是本次改造最容易被误读的一条界线。
  *
- * 存在文档里的是**语义**（dashed / both），不是 SVG 属性（stroke-dasharray="6 4"）。
- * 渲染参数属于客户端：换个主题、调个间距不该改动文档，而且 AI 说"这条改成虚线"
- * 也不该需要知道虚线是 6 还是 8 个像素。
+ * **文档里存的是 drawio 的 style 键**（`dashed=1`、`dashPattern=8 8`、`edgeStyle=orthogonalEdgeStyle`、
+ * `jettySize=auto`、`libavoidRouting=1`、`exitX/exitY/entryX/entryY`、`endArrow/startArrow`、
+ * `fillColor/strokeColor`、`shape=`/`rounded=`/`arcSize=`…），默认值一律省略，
+ * 认不出的键原样保留（开放集合）。这一切由 ../src/style-kernel.js 负责，宿主与客户端共用。
+ *
+ * **下面这几个枚举只是工具语言**（给模型用的糖）：AI 说"改成虚线""双向箭头""黄色"
+ * 不该被迫拼 style 串。它们**绝不落盘**——由本文件翻译成上面的键。
+ * drawio 自己也是这个分工：面板上给的是名字，文档里只有 fillColor/strokeColor。
+ *
+ * 旧的立场（"存语义、渲染参数属于客户端"）已按需求废弃：现在渲染参数就是文档的一部分，
+ * 换主题/调间距会改文档 —— 与 drawio 一致。
  */
-const DASHES = ['solid', 'dashed', 'dotted']
-const ARROWS = ['end', 'both', 'none', 'start']
+const DASHES = DASH_KINDS
+const ARROWS = ARROW_KINDS
 
-/** 容忍模型的口语说法：只为降低"op 被拒"的概率，落盘一律归一成上面那几个值。 */
+/** 容忍模型的口语说法：只为降低"op 被拒"的概率，落盘前一律归一成上面那几个枚举值。 */
 function normalizeDash(value) {
   const v = String(value).toLowerCase().trim()
   if (v === 'solid' || v === 'line' || v === 'normal' || v === '实线') return 'solid'
@@ -126,17 +167,192 @@ function nextId(list, prefix) {
 }
 
 function emptyDoc() {
-  return { version: 1, revision: 0, meta: { engine: 'drawio-svg', layout: 'dagre-tb' }, nodes: [], edges: [] }
+  return { version: 2, revision: 0, meta: { engine: 'drawio-svg', layout: 'dagre-tb' }, nodes: [], edges: [] }
 }
 
+/** 盘上的文档是不是 v1（语义枚举那一代）—— 只用于给用户/模型提示"已迁移"。 */
+function docNeedsMigration(raw) {
+  return !(raw !== null && typeof raw === 'object' && Number(raw.version) >= 2)
+}
+
+/**
+ * 读入归一化。
+ *
+ * v1 文档（`shape:'rect'`、`style:'blue'`、`dash:'dashed'`、桩点混在 `points` 里）
+ * 在这里**读时升级**成 v2（drawio 键）：升级逻辑在 style-kernel 的 `normalizeDrawioDoc`，
+ * 两侧半边共用同一份，所以"盘上写什么、两边读到什么"不会分叉。
+ * 之后整个宿主半边只认 v2 —— 写盘一律是 v2。
+ */
 function normalizeDoc(raw) {
-  return {
-    version: typeof raw.version === 'number' ? raw.version : 1,
-    revision: typeof raw.revision === 'number' ? raw.revision : 0,
-    meta: raw.meta !== null && typeof raw.meta === 'object' && !Array.isArray(raw.meta) ? raw.meta : { engine: 'drawio-svg' },
-    nodes: Array.isArray(raw.nodes) ? raw.nodes : [],
-    edges: Array.isArray(raw.edges) ? raw.edges : [],
+  const doc = normalizeDrawioDoc(raw)
+  return { version: doc.version, revision: doc.revision, meta: doc.meta, nodes: doc.nodes, edges: doc.edges }
+}
+
+/** 节点位置快照，用于判断一次布局到底动没动端点。 */
+function nodePositions(doc) {
+  const map = Object.create(null)
+  for (let i = 0; i < doc.nodes.length; i += 1) {
+    const n = doc.nodes[i]
+    map[n.id] = { x: numberOr(n.x, 0), y: numberOr(n.y, 0), w: numberOr(n.w, 0), h: numberOr(n.h, 0) }
   }
+  return map
+}
+
+/**
+ * 重新布局会让"人摆过的折点"变成过期坐标。
+ *
+ * 这是 v1 的一个真实缺口：宿主半边当时**完全不知道 `points` 存在**（零读写），
+ * 于是 AI 一重排，盘上就留下一堆飘在旧位置上的折点，而没有任何清理或标记。
+ * v2 起折点归宿主管：布局真的动了某条边的端点，就清掉它的折点与悬空端自由点 ——
+ * 与 drawio 的自动路由在几何变化后重算路径同理。
+ *
+ * @returns 被清理的边数
+ */
+function invalidateStalePoints(doc, before) {
+  const now = nodePositions(doc)
+  let dropped = 0
+  for (let i = 0; i < doc.edges.length; i += 1) {
+    const edge = doc.edges[i]
+    if (edge.points === undefined && edge.sourcePoint === undefined && edge.targetPoint === undefined) continue
+    const moved = function (id) {
+      const prev = before[id]
+      const cur = now[id]
+      if (prev === undefined || cur === undefined) return prev !== cur
+      return prev.x !== cur.x || prev.y !== cur.y || prev.w !== cur.w || prev.h !== cur.h
+    }
+    if (!moved(edge.from) && !moved(edge.to)) continue
+    delete edge.points
+    delete edge.sourcePoint
+    delete edge.targetPoint
+    dropped += 1
+  }
+  return dropped
+}
+
+/** 调色板名清单（错误文案用）。 */
+function paletteNames() {
+  const names = []
+  for (let i = 0; i < PALETTE.length; i += 1) names.push(PALETTE[i].name)
+  return names
+}
+
+/** 工具语言的 `keys`：值给 null 表示**删键**（回到 drawio 缺省）。 */
+function styleKeysFromOp(keys, where) {
+  if (keys === null || typeof keys !== 'object' || Array.isArray(keys)) {
+    throw new Error(where + ': "keys" must be an object like { fillColor: "#fff2cc", dashed: null }')
+  }
+  return keys
+}
+
+/**
+ * 节点/边的 `style` 这个糖：既收调色板名（'yellow'），也收**一段 drawio style 串**
+ * （`fillColor=#fff2cc;strokeColor=#d6b656`）。判据是"有没有 '=' 或 ';'"，
+ * 两者都不像就报错 —— 绝不把垃圾写进文档。
+ */
+function styleValueFromOp(style, value, where) {
+  if (value.indexOf('=') >= 0 || value.indexOf(';') >= 0) {
+    return formatStyle(Object.assign(parseStyle(style), parseStyle(value)))
+  }
+  const named = styleWithColorName(style, value)
+  if (named === style && colorNameFromStyle(style) !== value) {
+    throw new Error(
+      where + ': unknown style "' + value + '"; use a palette name (' + paletteNames().join(', ') +
+        ') or a drawio style string like "fillColor=#fff2cc;strokeColor=#d6b656"',
+    )
+  }
+  return named
+}
+
+/** 边上的 `style` 糖：调色板名 → `strokeColor`（drawio 里连线的颜色就是 strokeColor）。 */
+function edgeStyleValueFromOp(style, value, where) {
+  if (value.indexOf('=') >= 0 || value.indexOf(';') >= 0) {
+    return formatStyle(Object.assign(parseStyle(style), parseStyle(value)))
+  }
+  for (let i = 0; i < PALETTE.length; i += 1) {
+    if (PALETTE[i].name !== value) continue
+    return stylePatch(style, { strokeColor: value === 'plain' ? null : PALETTE[i].stroke })
+  }
+  throw new Error(
+    where + ': unknown style "' + value + '"; use a palette name (' + paletteNames().join(', ') +
+      ') or a drawio style string like "dashed=1;dashPattern=8 8"',
+  )
+}
+
+/** 进出侧：'n'/'e'/'s'/'w'（也容忍 north/east/… 与中文），空值 = 清掉约束。 */
+function normalizeSide(value, where) {
+  if (value === null || value === undefined || value === '') return null
+  const v = String(value).toLowerCase().trim()
+  if (v === 'n' || v === 'north' || v === 'top' || v === '上') return 'n'
+  if (v === 'e' || v === 'east' || v === 'right' || v === '右') return 'e'
+  if (v === 's' || v === 'south' || v === 'bottom' || v === '下') return 's'
+  if (v === 'w' || v === 'west' || v === 'left' || v === '左') return 'w'
+  throw new Error(where + ': unknown side "' + value + '"; use ' + SIDES.join(', '))
+}
+
+/**
+ * 节点样式：`shape` / `style` / `keys` 三种糖统一落成 drawio style 键。
+ * rect 落成**空串** —— drawio 的 `defaultVertexStyle = {}`，普通矩形就是"没有 shape 键"。
+ */
+function nodeStyleFromOp(style, op, where) {
+  let out = style === undefined || style === null ? DEFAULT_NODE_STYLE : String(style)
+  if (typeof op.shape === 'string') {
+    if (!Object.prototype.hasOwnProperty.call(NODE_SHAPE_STYLE, op.shape)) {
+      throw new Error(where + ': unknown shape "' + op.shape + '"; use ' + NODE_SHAPES.join(', '))
+    }
+    out = styleWithNodeShape(out, op.shape)
+  }
+  if (typeof op.style === 'string' && op.style.length > 0) out = styleValueFromOp(out, op.style, where)
+  if (has(op, 'keys')) out = stylePatch(out, styleKeysFromOp(op.keys, where))
+  return out
+}
+
+/**
+ * 边的画法糖：线型 / 箭头 / 颜色 / 进出侧 / 桩点长度 / 路由方式 / 避让，
+ * 全部翻成 drawio 的 style 键（`dashed`、`dashPattern`、`endArrow`、`strokeColor`、
+ * `exitX/exitY/entryX/entryY`、`jettySize`、`edgeStyle`、`libavoidRouting`）。
+ */
+function edgeStyleFromOp(style, op, where) {
+  let out = style === undefined || style === null ? DEFAULT_EDGE_STYLE : String(style)
+  if (typeof op.dash === 'string') {
+    const dash = normalizeDash(op.dash)
+    if (dash === null) throw new Error(where + ': unknown dash "' + op.dash + '"; use ' + DASHES.join(', '))
+    out = styleWithDash(out, dash)
+  }
+  if (typeof op.arrow === 'string') {
+    const arrow = normalizeArrow(op.arrow)
+    if (arrow === null) throw new Error(where + ': unknown arrow "' + op.arrow + '"; use ' + ARROWS.join(', '))
+    out = styleWithArrow(out, arrow)
+  }
+  if (typeof op.color === 'string') out = stylePatch(out, { strokeColor: op.color.length === 0 ? null : op.color })
+  if (has(op, 'exit')) out = styleWithSide(out, 'source', normalizeSide(op.exit, where + ' exit'))
+  if (has(op, 'entry')) out = styleWithSide(out, 'target', normalizeSide(op.entry, where + ' entry'))
+  if (has(op, 'jettySize')) out = styleWithJetty(out, op.jettySize === null ? null : String(op.jettySize))
+  if (typeof op.edgeStyle === 'string') out = stylePatch(out, { edgeStyle: op.edgeStyle })
+  if (has(op, 'avoid')) out = styleWithAvoid(out, op.avoid === true)
+  if (typeof op.style === 'string' && op.style.length > 0) out = edgeStyleValueFromOp(out, op.style, where)
+  if (has(op, 'keys')) out = stylePatch(out, styleKeysFromOp(op.keys, where))
+  return out
+}
+
+/** 一行摘要：把 style 串翻成人话，给 notes / render 用（只报与缺省不同的部分）。 */
+function styleNote(style) {
+  const bits = []
+  const dash = dashFromStyle(style)
+  if (dash !== 'solid') bits.push(dash)
+  const arrow = arrowFromStyle(style)
+  if (arrow === 'both') bits.push('both arrows')
+  else if (arrow === 'none') bits.push('no arrow')
+  else if (arrow === 'start') bits.push('reverse arrow')
+  const name = colorNameFromStyle(style)
+  if (name !== null && name !== 'plain') bits.push(name)
+  const exit = sideFromStyle(style, 'source')
+  const entry = sideFromStyle(style, 'target')
+  if (exit !== null || entry !== null) bits.push((exit === null ? '?' : exit) + '->' + (entry === null ? '?' : entry))
+  const jetty = jettyFromStyle(style)
+  if (jetty !== null) bits.push('jetty ' + jetty)
+  if (edgeStyleValueFromStyle(style) === 'none') bits.push('straight')
+  if (avoidFromStyle(style)) bits.push('avoid')
+  return bits.length === 0 ? '' : ' [' + bits.join(', ') + ']'
 }
 
 /**
@@ -176,11 +392,11 @@ function applyOps(doc, ops) {
       if (id === undefined) id = nextId(doc.nodes, 'n')
       const node = {
         id: id,
-        shape: typeof op.shape === 'string' ? op.shape : 'rect',
-        style: typeof op.style === 'string' ? op.style : 'blue',
+        label: label,
+        // 形状/配色是糖，落盘只有 style 键；不给就是 drawio 缺省（空串 = 普通矩形 + 缺省配色）。
+        style: nodeStyleFromOp(DEFAULT_NODE_STYLE, op, 'ops[' + i + '] addNode'),
         w: numberOr(op.w, estimateWidth(label)),
         h: numberOr(op.h, DEFAULT_H),
-        label: label,
       }
       // 关键：只有显式给了坐标才写入。缺省写 (0,0) 会让 placeMissing 以为"坐标齐全"而不补位，
       // 新节点就会堆在原点压住别人。
@@ -204,19 +420,9 @@ function applyOps(doc, ops) {
       if (typeof op.label === 'string' && op.label.length > 0) edge.label = op.label
       // 建边时就能带上画法：AI 想表达"这是一条异步/可选依赖"时，
       // 不该被迫先 addEdge 再补一次 setStyle（两次写盘、两次往返）。
-      if (typeof op.dash === 'string') {
-        const dash = normalizeDash(op.dash)
-        if (dash === null) throw new Error('ops[' + i + '] addEdge: unknown dash "' + op.dash + '"; use ' + DASHES.join(', '))
-        if (dash !== 'solid') edge.dash = dash
-      }
-      if (typeof op.arrow === 'string') {
-        const arrow = normalizeArrow(op.arrow)
-        if (arrow === null) throw new Error('ops[' + i + '] addEdge: unknown arrow "' + op.arrow + '"; use ' + ARROWS.join(', '))
-        if (arrow !== 'end') edge.arrow = arrow
-      }
-      if (typeof op.color === 'string' && op.color.length > 0) edge.color = op.color
+      edge.style = edgeStyleFromOp(DEFAULT_EDGE_STYLE, op, 'ops[' + i + '] addEdge')
       doc.edges.push(edge)
-      notes.push('+ edge ' + id + ' ' + from + ' -> ' + to + (edge.dash !== undefined ? ' [' + edge.dash + ']' : '') + (edge.arrow !== undefined ? ' [' + edge.arrow + ']' : ''))
+      notes.push('+ edge ' + id + ' ' + from + ' -> ' + to + styleNote(edge.style))
       continue
     }
 
@@ -249,31 +455,27 @@ function applyOps(doc, ops) {
         const ei = findEdge(id)
         if (ei < 0) throw new Error('ops[' + i + '] setStyle: unknown node or edge "' + id + '". Known nodes: ' + known())
         const edge = doc.edges[ei]
-        if (typeof op.dash === 'string') {
-          const dash = normalizeDash(op.dash)
-          if (dash === null) throw new Error('ops[' + i + '] setStyle: unknown dash "' + op.dash + '"; use ' + DASHES.join(', '))
-          if (dash === 'solid') delete edge.dash
-          else edge.dash = dash
+        const where = 'ops[' + i + '] setStyle'
+        // 键级合并：只改点到的键，其余（含认不出的键）原样留着 —— 开放集合的代价与好处都在这。
+        const base = edge.style === undefined ? DEFAULT_EDGE_STYLE : edge.style
+        const next = edgeStyleFromOp(base, op, where)
+        if (next !== base) edge.style = next
+        // 显式清折点/悬空端的自由点（右键"自动路由"与 AI 都能用同一件事）。
+        if (op.clearPoints === true) {
+          delete edge.points
+          delete edge.sourcePoint
+          delete edge.targetPoint
         }
-        if (typeof op.arrow === 'string') {
-          const arrow = normalizeArrow(op.arrow)
-          if (arrow === null) throw new Error('ops[' + i + '] setStyle: unknown arrow "' + op.arrow + '"; use ' + ARROWS.join(', '))
-          if (arrow === 'end') delete edge.arrow
-          else edge.arrow = arrow
-        }
-        if (typeof op.color === 'string') {
-          if (op.color.length === 0) delete edge.color
-          else edge.color = op.color
-        }
-        notes.push('~ edge ' + id + ' style')
+        notes.push('~ edge ' + id + ' style' + styleNote(edge.style === undefined ? base : edge.style))
         continue
       }
       const node = doc.nodes[ni]
-      if (typeof op.shape === 'string') node.shape = op.shape
-      if (typeof op.style === 'string') node.style = op.style
+      const nodeBase = node.style === undefined ? DEFAULT_NODE_STYLE : node.style
+      const nextStyle = nodeStyleFromOp(nodeBase, op, 'ops[' + i + '] setStyle')
+      if (nextStyle !== nodeBase) node.style = nextStyle
       if (has(op, 'w')) node.w = numberOr(op.w, node.w)
       if (has(op, 'h')) node.h = numberOr(op.h, node.h)
-      notes.push('~ node ' + id + ' style')
+      notes.push('~ node ' + id + ' [' + nodeShapeFromStyle(nextStyle) + ']' + (nextStyle.length === 0 ? ' (默认样式)' : ''))
       continue
     }
 
@@ -690,7 +892,7 @@ export function apply(ctx) {
     const target = await resolveTarget(path, sessionId)
     const absolute = absoluteHint(target, path)
     const info = await ctx.fs.stat(target)
-    if (info === undefined) return { target: target, absolute: absolute, doc: emptyDoc() }
+    if (info === undefined) return { target: target, absolute: absolute, doc: emptyDoc(), migrated: false }
     const text = await ctx.fs.readText(target)
     let raw
     try {
@@ -699,13 +901,15 @@ export function apply(ctx) {
       throw new Error(absolute + ' is not valid JSON: ' + messageOf(error))
     }
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(absolute + ' must contain a JSON object')
-    return { target: target, absolute: absolute, doc: normalizeDoc(raw) }
+    return { target: target, absolute: absolute, doc: normalizeDoc(raw), migrated: docNeedsMigration(raw) }
   }
 
   const readTool = defineTool({
     name: 'diagram_read',
     description:
-      '读回工作区里的 DrawAI 画布文档（.dshd.json）：节点 id/标签/形状/配色，边 id/起点/终点/标签。做任何修改前先用它确认当前图。',
+      '读回工作区里的 DrawAI 画布文档（.dshd.json）：节点 id/标签/形状/style 键，边 id/起点/终点/标签/画法/折点。做任何修改前先用它确认当前图。' +
+      '文档存的是 drawio 的 style 键（dashed/dashPattern/edgeStyle/jettySize/libavoidRouting/exitX…/endArrow/strokeColor/shape=…），默认值省略；' +
+      '返回体的 shape/dash/arrow/color/exit/entry 是**从 style 串推导出来的便于阅读的名字**，改图请改 style 或对应 op 参数。',
     parameters: {
       path: { type: 'string', description: '工作区相对路径或绝对路径，默认 ' + DEFAULT_PATH },
     },
@@ -716,6 +920,7 @@ export function apply(ctx) {
         properties: {
           path: { type: 'string', required: true },
           revision: { type: 'number', required: true },
+          migrated: { type: 'boolean', required: true },
           nodes: {
             type: 'array',
             required: true,
@@ -725,8 +930,8 @@ export function apply(ctx) {
               properties: {
                 id: { type: 'string', required: true },
                 label: { type: 'string', required: true },
-                shape: { type: 'string' },
-                style: { type: 'string' },
+                shape: { type: 'string', required: true },
+                style: { type: 'string', required: true },
               },
             },
           },
@@ -741,29 +946,66 @@ export function apply(ctx) {
                 from: { type: 'string', required: true },
                 to: { type: 'string', required: true },
                 label: { type: 'string' },
-                // 这三个是返回体里**确实会带**的字段（execute 里按需填）。
-                // 漏声明的后果实测过：schema 是 additionalProperties:false，
-                // 于是只要某条边带 dash/arrow，diagram_read 整个调用被判为非法输出、
-                // 直接报错 —— 连读都读不出来。新增返回字段时必须同步这里。
-                dash: { type: 'string' },
-                arrow: { type: 'string' },
+                style: { type: 'string', required: true },
+                dash: { type: 'string', required: true },
+                arrow: { type: 'string', required: true },
                 color: { type: 'string' },
+                exit: { type: 'string' },
+                entry: { type: 'string' },
+                // 这几个是返回体里**确实会带**的字段（execute 里按需填）。
+                // 漏声明的后果实测过：schema 是 additionalProperties:false，
+                // 于是只要某条边带折点，diagram_read 整个调用被判为非法输出、
+                // 直接报错 —— 连读都读不出来。新增返回字段时必须同步这里。
+                points: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      x: { type: 'number', required: true },
+                      y: { type: 'number', required: true },
+                    },
+                  },
+                },
+                sourcePoint: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    x: { type: 'number', required: true },
+                    y: { type: 'number', required: true },
+                  },
+                },
+                targetPoint: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    x: { type: 'number', required: true },
+                    y: { type: 'number', required: true },
+                  },
+                },
               },
             },
           },
         },
       },
       render: function (args, value) {
-        const lines = ['画布文档 ' + value.path + '（revision ' + value.revision + '，' + value.nodes.length + ' 节点 / ' + value.edges.length + ' 边）']
+        const lines = [
+          '画布文档 ' + value.path + '（revision ' + value.revision + '，' + value.nodes.length + ' 节点 / ' + value.edges.length + ' 边' +
+            (value.migrated ? '，已从 v1 语义格式迁移' : '') + '）',
+        ]
         for (let i = 0; i < value.nodes.length; i += 1) {
           const n = value.nodes[i]
-          lines.push('  节点 ' + n.id + ' [' + String(n.shape) + '/' + String(n.style) + '] ' + n.label)
+          lines.push('  节点 ' + n.id + ' [' + n.shape + '] ' + n.label + (n.style.length === 0 ? '（默认样式）' : '  style: ' + n.style))
         }
         for (let i = 0; i < value.edges.length; i += 1) {
           const e = value.edges[i]
-          const style = (e.dash !== undefined ? ' ' + e.dash : '') + (e.arrow !== undefined ? ' ' + e.arrow : '') + (e.color !== undefined ? ' ' + e.color : '')
+          const bits = [e.dash, e.arrow + ' arrow']
+          if (e.color !== undefined) bits.push(e.color)
+          if (e.exit !== undefined || e.entry !== undefined) bits.push((e.exit === undefined ? '?' : e.exit) + '->' + (e.entry === undefined ? '?' : e.entry))
+          if (Array.isArray(e.points)) bits.push(e.points.length + ' waypoint(s)')
           lines.push(
-            '  边 ' + e.id + ' ' + e.from + ' -> ' + e.to + (typeof e.label === 'string' && e.label.length > 0 ? ' "' + e.label + '"' : '') + style,
+            '  边 ' + e.id + ' ' + e.from + ' -> ' + e.to + (typeof e.label === 'string' && e.label.length > 0 ? ' "' + e.label + '"' : '') +
+              ' [' + bits.join(', ') + ']',
           )
         }
         return [{ type: 'text', text: lines.join('\n') }]
@@ -780,33 +1022,63 @@ export function apply(ctx) {
       const nodes = []
       for (let i = 0; i < doc.nodes.length; i += 1) {
         const n = doc.nodes[i]
+        const style = typeof n.style === 'string' ? n.style : ''
         nodes.push({
           id: String(n.id),
           label: typeof n.label === 'string' ? n.label : String(n.id),
-          shape: typeof n.shape === 'string' ? n.shape : 'rect',
-          style: typeof n.style === 'string' ? n.style : 'blue',
+          shape: nodeShapeFromStyle(style),
+          style: style,
         })
       }
       const edges = []
       for (let i = 0; i < doc.edges.length; i += 1) {
         const e = doc.edges[i]
-        const item = { id: String(e.id), from: String(e.from), to: String(e.to) }
+        const style = typeof e.style === 'string' ? e.style : DEFAULT_EDGE_STYLE
+        const item = {
+          id: String(e.id),
+          from: String(e.from),
+          to: String(e.to),
+          style: style,
+          dash: dashFromStyle(style),
+          arrow: arrowFromStyle(style),
+        }
         if (typeof e.label === 'string' && e.label.length > 0) item.label = e.label
-        if (typeof e.dash === 'string' && e.dash.length > 0) item.dash = e.dash
-        if (typeof e.arrow === 'string' && e.arrow.length > 0) item.arrow = e.arrow
-        if (typeof e.color === 'string' && e.color.length > 0) item.color = e.color
+        // 派生 color：正好命中调色板就给名字（AI 好读），否则给原始 strokeColor ——
+        // 不能因为"名字认不出"就让 AI 看不见颜色（drawio 的文档里本来就只有十六进制）。
+        const name = colorNameFromStyle(style)
+        if (name !== null && name !== 'plain') item.color = name
+        else {
+          const stroke = styleGet(style, 'strokeColor', null)
+          if (stroke !== null && stroke !== DEFAULT_STROKE) item.color = stroke
+        }
+        const exit = sideFromStyle(style, 'source')
+        const entry = sideFromStyle(style, 'target')
+        if (exit !== null) item.exit = exit
+        if (entry !== null) item.entry = entry
+        const points = normalizePoints(e.points)
+        if (points !== null) item.points = points
+        if (e.sourcePoint !== undefined) item.sourcePoint = e.sourcePoint
+        if (e.targetPoint !== undefined) item.targetPoint = e.targetPoint
         edges.push(item)
       }
-      return { path: loaded.absolute, revision: doc.revision, nodes: nodes, edges: edges }
+      return { path: loaded.absolute, revision: doc.revision, migrated: loaded.migrated, nodes: nodes, edges: edges }
     },
   })
 
   const applyTool = defineTool({
     name: 'diagram_apply',
     description:
-      '对工作区里的 DrawAI 画布文档施加一组结构化编辑（加节点/连边/改标签/改样式/删除），然后自动布局并写回文件。你不需要也不应该自己计算坐标——布局由这里算。ops 的每一项形如 {op:"addNode", label:"...", shape?, style?} / {op:"addEdge", from, to, label?, dash?, arrow?, color?} / {op:"setLabel", id, label} / {op:"setStyle", id, shape?, style?, w?, h?, dash?, arrow?, color?} / {op:"remove", id}；节点 id 省略时自动分配。' +
-      'setStyle 的 id 可以是节点也可以是连线：节点用 shape/style/w/h，连线用 dash（solid|dashed|dotted）、arrow（end 单向|both 双向|none 无箭头|start 反向）、color（CSS 颜色，省略=跟随主题）。' +
-      '文档若带 meta.pinned（人手工摆过位置），不加 layout 就不会重排。边引用了不存在的节点会直接报错，且失败发生在写盘之前。',
+      '对工作区里的 DrawAI 画布文档施加一组结构化编辑（加节点/连边/改标签/改样式/删除），然后自动布局并写回文件。你不需要也不应该自己计算坐标——布局由这里算。' +
+      'ops 的每一项形如 {op:"addNode", label:"...", shape?, style?, keys?, w?, h?, x?, y?} / ' +
+      '{op:"addEdge", from, to, label?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, keys?} / ' +
+      '{op:"setLabel", id, label} / {op:"setStyle", id, shape?, style?, keys?, w?, h?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, clearPoints?} / ' +
+      '{op:"remove", id}；节点 id 省略时自动分配。' +
+      '文档里存的是 **drawio 的 style 键**（dashed/dashPattern/edgeStyle/jettySize/libavoidRouting/exitX·exitY·entryX·entryY/endArrow·startArrow/strokeColor/fillColor/shape=/rounded=/arcSize=…），默认值一律省略、认不出的键原样保留；' +
+      '上面这些 shape/style/dash/arrow/color/exit/entry 是给模型用的**糖**，由宿主翻译成 style 键，绝不落盘。' +
+      'style 既可以是调色板名（plain/blue/green/orange/yellow/red/purple/grey），也可以直接是一段 style 串；keys 用来写任意 drawio 键（值给 null = 删键回默认）。' +
+      'setStyle 的 id 可以是节点也可以是连线：节点用 shape/style/keys/w/h，连线用 dash（solid|dashed|dotted）、arrow（end 单向|both 双向|none 无箭头|start 反向）、color、exit/entry（n|e|s|w 进出侧）、jettySize（引出段长度，数字或 auto）、edgeStyle（orthogonalEdgeStyle|none）、avoid（是否参与避让路由）、clearPoints（清掉折点）。' +
+      '文档若带 meta.pinned（人手工摆过位置），不加 layout 就不会重排；显式重排会清掉端点已移动的那些边上的过期折点。' +
+      '边引用了不存在的节点会直接报错，且失败发生在写盘之前。',
     parameters: {
       path: { type: 'string', description: '工作区相对路径或绝对路径，默认 ' + DEFAULT_PATH },
       ops: {
@@ -867,7 +1139,12 @@ export function apply(ctx) {
 
       const notes = applyOps(doc, ops)
       if (mode === 'none') placeMissing(doc)
-      else autoLayout(doc, mode)
+      else {
+        const before = nodePositions(doc)
+        autoLayout(doc, mode)
+        const dropped = invalidateStalePoints(doc, before)
+        if (dropped > 0) notes.push('~ 重排后端点位置变了，已清掉 ' + dropped + ' 条边上的过期折点')
+      }
       doc.revision = (typeof doc.revision === 'number' ? doc.revision : 0) + 1
       // pinned 必须原样带回去！
       //
@@ -875,7 +1152,8 @@ export function apply(ctx) {
       // 那一次没事（mode 已经是 'none'，人不人的位置都保住了），但从第二次起 pinned 读不到，
       // mode 回落到 'dagre-tb'，人手工摆好的版面被整张重排 —— 正是上面那个判断要防的事。
       // 教训：用整体赋值覆盖 meta 时，"没被显式处理"的字段会静默消失；新增 meta 字段时先看这里。
-      doc.meta = pinned ? { engine: 'drawio-svg', layout: mode, pinned: true } : { engine: 'drawio-svg', layout: mode }
+      // v1.1：改成 Object.assign 合并，不再"整体赋值" —— 以后新增 meta 字段默认就能活下来。
+      doc.meta = Object.assign({}, doc.meta, { engine: 'drawio-svg', layout: mode }, pinned ? { pinned: true } : {})
       const text = JSON.stringify(doc, null, 2) + '\n'
       const policy = policyFor(sessionId)
       try {
@@ -1188,7 +1466,7 @@ function sanitizeNewName(raw) {
         return
       }
       // 空画布也打 meta.pinned：它是人手工建的，不该被 AI 的自动布局重排。
-      const blank = { version: 1, revision: 1, meta: { engine: 'drawio-svg', pinned: true }, nodes: [], edges: [] }
+      const blank = { version: 2, revision: 1, meta: { engine: 'drawio-svg', pinned: true }, nodes: [], edges: [] }
       const createPolicy = policyFor(sessionId)
       const blankText = JSON.stringify(blank, null, 2) + '\n'
       try {
@@ -1263,7 +1541,7 @@ function sanitizeNewName(raw) {
 
     const next = normalizeDoc(doc)
     next.revision = current.revision + 1
-    next.meta = { engine: 'drawio-svg', pinned: true }
+    next.meta = Object.assign({}, current.meta, { engine: 'drawio-svg', pinned: true })
     const out = JSON.stringify(next, null, 2) + '\n'
     const policy = policyFor(sessionId)
     try {

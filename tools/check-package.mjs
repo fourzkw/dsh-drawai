@@ -14,7 +14,7 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { CLIENT_SOURCE_START, dedentBody, extractBody } from './build.mjs'
+import { composeClientBody, dedentBody, extractBody } from './build.mjs'
 
 const EXPECTED_INJECT = ['tools', 'fs', 'sessions', 'sandboxPolicy', 'webServer']
 const EXPECTED_TOOLS = ['diagram_read', 'diagram_apply']
@@ -33,11 +33,12 @@ console.log('dsh-drawai 安装前烟测\n')
 console.log('[0] lib/ 是否与 src/ 同步（防止改了源文件忘了构建）')
 try {
   const bundle = readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8')
-  const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8').replace(/\s+$/, '')
-  const cut = source.indexOf(CLIENT_SOURCE_START)
-  check('src/client.js 里有 body 起点', cut >= 0)
-  const sourceBody = cut < 0 ? source : source.slice(cut)
-  check('lib/client.js 的 body 与 src/client.js 一致', dedentBody(extractBody(bundle)) === sourceBody)
+  check('客户端 bundle 的 body 与 src（样式内核 + client.js）一致', dedentBody(extractBody(bundle)) === composeClientBody())
+  // 内核单源两用：客户端那份必须是内联进去的，不是另抄了一份。
+  check('样式内核确实内联进了客户端 bundle', bundle.includes('function parseStyle') && bundle.includes('function normalizeDrawioDoc'))
+  const kernelLib = readFileSync(new URL('../lib/style-kernel.js', import.meta.url), 'utf8')
+  const kernelSrc = readFileSync(new URL('../src/style-kernel.js', import.meta.url), 'utf8')
+  check('lib/style-kernel.js 含 src/style-kernel.js', kernelLib.includes(kernelSrc))
   const host = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8')
   const hostSource = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8')
   check('lib/index.js 含 src/index.js', host.includes(hostSource))

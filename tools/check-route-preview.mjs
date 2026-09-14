@@ -18,9 +18,11 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import { composeClientBody } from './build.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const source = resolve(here, '..', 'src', 'client.js')
+// 客户端半边依赖"构建时内联的样式内核"，所以这里 eval 的是**与产物同款的组合 body**。
+const clientBody = composeClientBody()
 
 let failures = 0
 let checks = 0
@@ -52,7 +54,7 @@ function loadInternals() {
     if (spec === 'react') return reactStub
     throw new Error('check-route-preview: 意外 require(' + spec + ')')
   }
-  const fn = new Function('module', 'exports', 'require', 'window', 'document', readFileSync(source, 'utf8'))
+  const fn = new Function('module', 'exports', 'require', 'window', 'document', clientBody)
   // window/document 只是占位：路由内核是纯函数，不会碰它们（真碰了就会在这里炸出来，也是有用的信号）。
   fn(module, module.exports, require, {}, {})
   const internals = module.exports.__routeInternals
