@@ -364,38 +364,19 @@ console.log('\n空画布必须可渲染（"新建"出来的第一屏就是它）
   ok(tree !== null && tree.type === 'svg', '空画布渲染出 svg（网格纸还在，可以右键加节点）')
 }
 
-console.log('\n路径三态：不许静默兜底到 demo.dshd.json')
+console.log('\n空舞台：不造"幽灵空文档"；而空画布文件本身仍能渲染')
 {
-  // 曾经的行为：tab 地址解析不出路径时，画布**悄悄**绑到 demo.dshd.json ——
-  // 用户以为在编辑 A，实际在改 B，屏幕上毫无提示。
-  // 现在是三态：字符串=用户选的文件 / UNTITLED=未命名画布 / null=回到 tab，tab 也给不出就"未绑定"。
-  const UNTITLED = '\u0000untitled'
-  const stateOf = (pathOverride, path) => {
-    const untitled = pathOverride === UNTITLED
-    const overridePath = typeof pathOverride === 'string' && pathOverride.length > 0 ? pathOverride : null
-    const tabPath = typeof path === 'string' && path.length > 0 ? path : null
-    const unbound = !untitled && overridePath === null && tabPath === null
-    const target = untitled ? '' : overridePath !== null ? overridePath : tabPath !== null ? tabPath : ''
-    return { untitled: untitled, unbound: unbound, target: target, hasPath: !untitled && target.length > 0 }
-  }
-  const cases = [
-    ['tab 有路径', null, 'demo.dshd.json', true, 'demo.dshd.json'],
-    ['新建（未命名）', UNTITLED, 'demo.dshd.json', false, ''],
-    ['另存为之后', 'my-flow.dshd.json', 'demo.dshd.json', true, 'my-flow.dshd.json'],
-    ['tab 认不出路径', null, undefined, false, ''],
-  ]
-  for (const [label, ov, p, wantPath, wantTarget] of cases) {
-    const s = stateOf(ov, p)
-    ok(s.hasPath === wantPath && s.target === wantTarget, label + ' → ' + (s.hasPath ? '绑定 ' + s.target : s.untitled ? '未命名画布' : '未绑定（显式提示）'))
-  }
-  // 最关键的一条：认不出路径时**绝不能**落到 demo 上。
-  ok(stateOf(null, undefined).target !== 'demo.dshd.json', '认不出路径时不会兜底到 demo.dshd.json')
-
-  // 未命名画布必须可渲染（第一屏就是空网格）。
+  // 需求：打开 drawai 画布后应该为空（零标签），而不是直接冒出一张未绑定画布。
+  // 于是"没有文件"时不再就地造一份本地空文档 —— 屏幕上不该出现一张没有对应文件的图。
+  const src = readFileSync(source, 'utf8')
+  ok(!/const blank = \{ version: 2/.test(src), '空舞台不再就地造本地空文档')
+  ok(/kind: 'empty'/.test(src), '空舞台是一个显式状态')
+  ok(/还没有打开画布/.test(src), '空舞台给出"还没有打开画布"的提示')
+  // 但一个**合法的空画布文件**（nodes/edges 都是空数组）仍然要能渲染出来。
   const blank = internals.parseDocument('{}')
-  ok(blank.error === undefined, '未命名画布的空文档解析通过')
+  ok(blank.error === undefined, '空文档解析通过')
   const tree = internals.renderDiagram(blank.doc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
-  ok(tree !== null && tree.type === 'svg', '未命名画布渲染出可交互的空画布')
+  ok(tree !== null && tree.type === 'svg', '空画布渲染出可交互的网格纸（右键加节点）')
 }
 
 console.log('\n空画布的视口要合理（曾经是 185% 这种荒唐值）')
@@ -414,30 +395,24 @@ console.log('\n空画布的视口要合理（曾经是 185% 这种荒唐值）')
   ok(v.x < 0 && v.y < 0, '有内容时视口覆盖内容外接框')
 }
 
-console.log('\n多画布标签页：同一文件不重复开、未命名各自独立')
+console.log('\n多画布标签页：同一文件不重复开')
 {
-  const U = internals.UNTITLED
-  let list = [{ key: 'tab:a.dshd.json', path: 'a.dshd.json', untitled: false, unbound: false }]
-  let counter = 1
+  let list = [{ key: 'tab:a.dshd.json', path: 'a.dshd.json' }]
   const open = (path) => {
-    const r = internals.openTabIn(list, path, counter)
+    const r = internals.openTabIn(list, path)
     list = r.tabs
-    counter = r.counter
     return r.active
   }
   ok(open('b.dshd.json') === 'tab:b.dshd.json' && list.length === 2, '打开新文件 → 新开一个标签')
   ok(open('a.dshd.json') === 'tab:a.dshd.json' && list.length === 2, '重复打开已开的文件 → 只切过去，不新开')
-  const u1 = open(U)
-  const u2 = open(U)
-  ok(u1 !== u2 && list.filter((t) => t.untitled).length === 2, '两次「新建」得到两个独立的未命名标签')
+  ok(open('A.DSHD.JSON') === 'tab:a.dshd.json' && list.length === 2, '大小写不同视为同一个文件（Windows 路径）')
   const before = list.length
   ok(open(undefined) === null && list.length === before, '非法路径（undefined）不会造出垃圾标签')
   ok(open('') === null && list.length === before, '空字符串同样被挡掉')
 
-  // 标签名：未命名带序号，其余取文件名
-  ok(internals.tabLabelOf(U, 3) === '未命名 3', '未命名标签名带序号')
-  ok(internals.tabLabelOf('sub/b.dshd.json', 1) === 'b.dshd.json', '文件标签取文件名（含子目录路径）')
-  ok(internals.tabLabelOf('', 1) === '(未绑定)', '未绑定标签有明确名字')
+  // 标签名：取文件名。空路径给一个中性名字 —— 已经没有"未绑定"这种状态了。
+  ok(internals.tabLabelOf('sub/b.dshd.json') === 'b.dshd.json', '文件标签取文件名（含子目录路径）')
+  ok(internals.tabLabelOf('') === '画布', '空路径给中性名字（不再有"(未绑定)"）')
 }
 
 console.log('\n布局：不许依赖 height:100% 这条脆链子')
@@ -457,26 +432,33 @@ console.log('\n布局：不许依赖 height:100% 这条脆链子')
   ok(panes !== null && /position:relative/.test(panes[1]), '.drawai-panes 是定位上下文（绝对定位子元素要有参照）')
 }
 
-console.log('\n标签条只能有一份（出现过"渲染两次"）')
+console.log('\n标签条只能有一份，且只由活动窗格渲染')
 {
   // 曾经同时有两条渲染路径：CanvasTabs 里渲染一份，又通过 tabBar prop 让 CanvasView 渲染第二份，
-  // 于是界面上出现两条一模一样的标签栏。现在标签条只由 CanvasTabs 渲染。
-  const css = readFileSync(source, 'utf8')
-  const marks = [...css.matchAll(/className: 'drawai-tabs'/g)]
+  // 于是界面上出现两条一模一样的标签栏。现在：**只在一处构造**（源码里一处），
+  // 并且只交给活动窗格渲染（DOM 里也只有一份）。
+  const src = readFileSync(source, 'utf8')
+  const marks = [...src.matchAll(/className: 'drawai-tabs'/g)]
   ok(marks.length === 1, "源码里只有一处构建标签条（className: 'drawai-tabs' 出现 " + marks.length + " 次）")
-  ok(!/props\.tabBar/.test(css), 'CanvasView 不再接收 tabBar（那条重复渲染路径已删除）')
-  ok(!/tabBar: isActive/.test(css), '不再往子组件传递 tabBar')
+  ok(/tabStrip: isActive \? tabBar : null/.test(src), '标签条只交给活动窗格')
+  ok(!/props\.tabBar/.test(src), '没有第二套 tabBar 传递路径')
 }
 
-console.log('\n未绑定画布必须说清"AI 改不到它"')
+console.log('\n层级：工作栏在标签页之上，菜单挂在 root 上')
 {
-  // diagram_apply 只按**文件路径**工作：不传 path 会落到工作区里的 demo.dshd.json（实测），
-  // 而未命名/未绑定的画布在屏幕上根本没有文件。不把这件事说出来，
-  // 用户对着未命名画布说"画一张流程图"，图就出现在别的文件里，屏幕毫无反应。
-  const css = readFileSync(source, 'utf8')
-  ok(/AI 对话暂时改不到它/.test(css), '未命名画布的状态栏提示了"AI 改不到它"')
-  ok(/AI 对话改不到它/.test(css), '未绑定文件的画布也提示了')
-  ok(/先「另存为」给它一个文件名/.test(css), '提示里给出可执行的下一步')
+  // 右栏窄：'对当前画布做什么'（工作栏）要一直在最上面，'现在看哪张'（标签条）在它下面。
+  const src = readFileSync(source, 'utf8')
+  const rootStart = src.indexOf("className: 'drawai-root'")
+  const rootEnd = src.indexOf("className: 'drawai-note'", rootStart)
+  const block = rootStart >= 0 && rootEnd > rootStart ? src.slice(rootStart, rootEnd) : ''
+  const iHead = block.indexOf('head,')
+  const iStrip = block.indexOf('props.tabStrip')
+  const iBody = block.indexOf('body,')
+  ok(iHead >= 0 && iStrip > iHead && iBody > iStrip, '渲染顺序是 工作栏 → 标签条 → 画布（' + iHead + ' / ' + iStrip + ' / ' + iBody + '）')
+  // 菜单/面板挂在 root 上（不在画布里）：插进标签条之后，按画布算的坐标会变成负数而被裁掉。
+  const posFn = /function menuPosFor\(key\) \{[\s\S]*?\n  \}/.exec(src)
+  ok(posFn !== null && /rootRef\.current/.test(posFn[0]), 'menuPosFor 量的是 root（定位上下文）')
+  ok(/renderDocMenu\(\),/.test(block), '工具条下拉与文件面板挂在 root 的子树里')
 }
 
 console.log('\n地址解析：要认得出绝对路径（否则 tab 永久停在"未绑定"）')
@@ -503,22 +485,18 @@ console.log('\n地址解析：要认得出绝对路径（否则 tab 永久停在
 
 console.log('\n「打开」不能关掉或覆盖其他画布')
 {
-  const U = internals.UNTITLED
   const openTabIn = internals.openTabIn
-  const names = (l) => l.map((t) => (t.untitled ? '未命名' : t.path.split(/[\\/]/).pop()))
+  const names = (l) => l.map((t) => t.path.split(/[\\/]/).pop())
   let list = [
-    { key: 'tab:D:/ws/demo.dshd.json', path: 'D:/ws/demo.dshd.json', untitled: false, unbound: false },
-    { key: 'untitled:1', path: U, untitled: true, unbound: false },
-    { key: 'tab:D:/ws/bfs.dshd.json', path: 'D:/ws/bfs.dshd.json', untitled: false, unbound: false },
+    { key: 'tab:D:/ws/demo.dshd.json', path: 'D:/ws/demo.dshd.json' },
+    { key: 'tab:D:/ws/bfs.dshd.json', path: 'D:/ws/bfs.dshd.json' },
   ]
-  let counter = 2
   const baseline = names(list)
   let vanished = 0
   const open = (p) => {
     const before = names(list)
-    const r = openTabIn(list, p, counter)
+    const r = openTabIn(list, p)
     list = r.tabs
-    counter = r.counter
     // 打开操作**绝不允许**让任何已开着的画布消失
     for (const n of before) if (names(list).indexOf(n) < 0) vanished += 1
   }
@@ -528,16 +506,15 @@ console.log('\n「打开」不能关掉或覆盖其他画布')
   open('D:/WS/NEW.dshd.json') // 大小写不同 → 仍是同一个
   open('D:\\ws\\new.dshd.json') // 分隔符不同 → 仍是同一个
   open('D:/ws/third.dshd.json') // 另一个新文件
-  open(U) // 新建
 
-  ok(vanished === 0, '7 次打开都没有让已开画布消失')
+  ok(vanished === 0, '6 次打开都没有让已开画布消失')
   for (const n of baseline) ok(names(list).indexOf(n) >= 0, '原有画布仍在：' + n)
   const seg = names(list).filter((n) => n.toLowerCase() === 'new.dshd.json')
   ok(seg.length === 1, '大小写/分隔符不同的同一路径只占一个标签（实际 ' + seg.length + ' 个）')
-  ok(names(list).length === 6, '标签总数 = 3 原有 + new + third + 未命名 = 6（实际 ' + names(list).length + '）')
+  ok(names(list).length === 4, '标签总数 = 2 原有 + new + third = 4（实际 ' + names(list).length + '）')
   // 移除标签只有一条路径：closeTab（标签上的 × 按钮）
-  const cssText = readFileSync(source, 'utf8')
-  ok(/const next = list\.filter\(\(t\) => t\.key !== key\)/.test(cssText), '移除标签只发生在 closeTab（× 按钮）里')
+  const srcText = readFileSync(source, 'utf8')
+  ok(/const next = tabs\.filter\(\(t\) => t\.key !== key\)/.test(srcText), '移除标签只发生在 closeTab（× 按钮）里')
 }
 console.log('\n适应内容：居中、覆盖，且缩放锚点不漂移')
 {

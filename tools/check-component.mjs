@@ -290,6 +290,8 @@ console.log('\n工具条：按类型合并为下拉菜单')
       canUndo: true,
       canRedo: true,
       modeTag: 'draw.io 外观',
+      // 空舞台（一张画布都没打开）时菜单项要禁用 —— 它也是 toolbarMenus 的自由变量。
+      empty: false,
     }
     const names = Object.keys(sandbox)
     let menus = null
@@ -319,7 +321,7 @@ console.log('\n工具条：按类型合并为下拉菜单')
     ok(/onClick: \(\) => toggleToolbarMenu\(m\.key\)/.test(headSrc), '每个入口把自己的 key 交给 toggleToolbarMenu')
     ok(/toolBtnRefs\.current\[m\.key\] = el/.test(headSrc), '每个入口把 DOM 交给 toolBtnRefs（要量位置）')
     const posFn = bodyOf('menuPosFor') || ''
-    ok(/canvasRef\.current/.test(posFn), 'menuPosFor 以**画布**为参照系（菜单的定位上下文）')
+    ok(/rootRef\.current/.test(posFn), 'menuPosFor 以**本视图根元素**为参照系（菜单挂在 root 上）')
     ok(!/toolsRef/.test(src), '不再用 .drawai-tools 当参照（它没有 position:relative，会横着跑偏）')
     const toggle = bodyOf('toggleToolbarMenu') || ''
     ok(/setDocMenuPos\(menuPosFor\(m?key\)\)/.test(toggle) || /setDocMenuPos\(menuPosFor\(/.test(toggle), '开菜单时记下按钮位置')
@@ -331,25 +333,49 @@ console.log('\n工具条：按类型合并为下拉菜单')
   }
   }
 
-console.log('\n初始不加载"未绑定"空画布')
+console.log('\n启动行为：空舞台（没有"未绑定画布"那一套）')
 {
-  // 走过两版：
-  //   第一版 初始无条件开一个 (未绑定) 标签 → 一进来就是空画布；
-  //   第二版 改成 provisional 占位再"认领" → 用户仍会先看到空画布闪一下。
-  // 现在是：**初始零标签**。地址到了才开真文件的标签；只有"地址给不出且确实出错"才给空画布。
+  // 需求：打开 drawai 画布后**应该为空**，而不是直接冒出一张未绑定画布；
+  // 要画布就自己「新建画布…」或「打开…」—— 两个入口都在工作栏里，而工作栏在标签页之上。
   ok(/const \[tabs, setTabs\] = React\.useState\(\[\]\)/.test(src), '初始 tabs 是空数组（零标签）')
   ok(!/provisional/.test(src), '不再有"占位标签"这一套（那是上一版的补丁）')
   ok(/const bootstrappedRef = React\.useRef\(false\)/.test(src), '只做一次"开哪个标签"的决定')
-  const boot = src.slice(src.indexOf('if (bootstrappedRef.current) return'), src.indexOf('}, [tabPath, tabError]'))
+  const boot = src.slice(src.indexOf('if (bootstrappedRef.current) return'), src.indexOf('}, [tabPath])'))
   ok(boot.length > 0, 'CanvasTabs 里有 bootstrap effect')
-  ok(/setTabs\(\[\{ key: key, path: tabPath, untitled: false, unbound: false \}\]\)/.test(boot), '地址到了 → 开真文件的标签')
-  ok(/tabError\.length > 0[\s\S]{0,300}unbound: true/.test(boot), '地址给不出且出错 → 才给空画布（让用户能自救）')
-  const afterError = boot.slice(boot.indexOf("if (tabError.length > 0)"))
-  const noBranch = afterError.slice(afterError.indexOf("// 两者都没有"))
-  ok(!/setTabs\(/.test(noBranch), '地址还在路上时不开任何标签（不凭空冒空画布）')
-  ok(/正在打开画布…/.test(src), '零标签时显示"正在打开画布…"')
-  const emptyView = src.slice(src.indexOf('if (tabs.length === 0)'), src.indexOf('const tabBar = React.createElement'))
-  ok(!/CanvasView/.test(emptyView) && !/drawai-head/.test(emptyView), '零标签时不渲染画布与工具条')
+  ok(/setTabs\(\[\{ key: key, path: tabPath \}\]\)/.test(boot), '地址到了 → 开真文件的标签')
+  ok(/if \(tabPath === null\) return/.test(boot), '地址给不出 → 什么都不开（保持空舞台）')
+  const setTabsCalls = boot.match(/setTabs\(/g) || []
+  ok(setTabsCalls.length === 1 && /setTabs\(\[\{ key: key, path: tabPath \}\]\)/.test(boot), 'bootstrap 里只有一次 setTabs，且只开真文件的标签（没有任何空画布兜底）')
+
+  // "未绑定画布"那一整套代码必须消失（注释里提历史可以，用户可见的字符串与标识符不行）
+  ok(!/unbound/.test(src), '源码里不再有 unbound（未绑定画布）')
+  ok(!/UNTITLED/.test(src), '源码里不再有 UNTITLED 哨兵')
+  ok(!/'(\(未绑定\)|未绑定文件|未绑定画布)'/.test(src) && !/AI 对话改不到它/.test(src), '不再有"未绑定"的用户可见文案')
+  ok(!/const blank = \{ version: 2/.test(src), '空舞台不再就地造一份"幽灵空文档"')
+
+  // 空舞台仍然要有工作栏（否则一张画布都没有时连新建/打开都点不到）
+  const emptyStart = src.indexOf('if (tabs.length === 0) {')
+  const emptyBranch = emptyStart >= 0 ? src.slice(emptyStart, src.indexOf('} else {', emptyStart)) : ''
+  ok(/CanvasView/.test(emptyBranch) && /empty: true/.test(emptyBranch), '零标签时渲染 empty 模式的 CanvasView（它带来工作栏）')
+  ok(/tabStrip: null/.test(emptyBranch), '空舞台没有标签条')
+  ok(/还没有打开画布/.test(src), '空舞台给出"还没有打开画布"的提示')
+  ok(/next\.length === 0 \? '' : /.test(bodyOf('closeTab') || ''), '关掉最后一个标签会回到空舞台（不再强制"至少留一个"）')
+}
+
+console.log('\n层级：工作栏在标签页之上')
+{
+  // 工作栏（文件/编辑/视图/导出）要排在标签条**前面**渲染 —— 右栏窄，
+  // "对当前画布做什么"应该一直在最上面，而"现在看哪张"在它下面。
+  const rootStart = src.indexOf("className: 'drawai-root'")
+  const rootEnd = src.indexOf("className: 'drawai-note'", rootStart)
+  const block = rootStart >= 0 && rootEnd > rootStart ? src.slice(rootStart, rootEnd) : ''
+  const iHead = block.indexOf('head,')
+  const iStrip = block.indexOf('props.tabStrip')
+  const iBody = block.indexOf('body,')
+  ok(iHead >= 0 && iStrip > iHead && iBody > iStrip, 'root 的渲染顺序是 工作栏 → 标签条 → 画布（实际 ' + iHead + ' / ' + iStrip + ' / ' + iBody + '）')
+  ok(/tabStrip: isActive \? tabBar : null/.test(src), '标签条只交给活动窗格（DOM 里只有一份）')
+  ok((src.match(/className: 'drawai-tabs'/g) || []).length === 1, '标签条只在一处构造')
+  ok(/const rootRef = React\.useRef\(null\)/.test(src), 'root 上有 ref，供菜单定位')
 }
 
 
