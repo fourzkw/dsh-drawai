@@ -16,7 +16,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { readdir } from 'node:fs/promises'
 import { isAbsolute, resolve as resolvePath, join as joinPath } from 'node:path'
-import { buildMxfile, parseMxfile } from './mxfile.js'
+import { applyDocToMxfile, buildMxfile, contentHash, parseMxfile } from './mxfile.js'
 import {
   ARROW_KINDS,
   DASH_KINDS,
@@ -70,7 +70,7 @@ function toAbsolute(p, cwd) {
   return joinPath(cwd === undefined || cwd === null || cwd.length === 0 ? process.cwd() : cwd, s)
 }
 
-const DEFAULT_PATH = 'demo.dshd.json'
+const DEFAULT_PATH = 'demo.drawio'
 const DEFAULT_W = 170
 /** 缺省高度取**整格**（10px 的倍数）：否则节点中心会落在半像素上，连线容易出现"差一像素"的台阶。 */
 const DEFAULT_H = 60
@@ -174,21 +174,16 @@ function nextId(list, prefix) {
 }
 
 function emptyDoc() {
-  return { version: 2, revision: 0, meta: { engine: 'drawio-svg', layout: 'dagre-tb' }, nodes: [], edges: [] }
-}
-
-/** 盘上的文档是不是 v1（语义枚举那一代）—— 只用于给用户/模型提示"已迁移"。 */
-function docNeedsMigration(raw) {
-  return !(raw !== null && typeof raw === 'object' && Number(raw.version) >= 2)
+  // revision 是**文件内容指纹**（载体即真相，没有第二个地方存版本号）：
+  // 空文档的指纹就是空串，第一次落盘后由写入器算出来。
+  return { version: 2, revision: '', meta: { layout: 'dagre-tb' }, nodes: [], edges: [] }
 }
 
 /**
  * 读入归一化。
  *
- * v1 文档（`shape:'rect'`、`style:'blue'`、`dash:'dashed'`、桩点混在 `points` 里）
- * 在这里**读时升级**成 v2（drawio 键）：升级逻辑在 style-kernel 的 `normalizeDrawioDoc`，
+ * 文档层只认 v2（drawio style 键）；归一化逻辑在 style-kernel 的 `normalizeDrawioDoc`，
  * 两侧半边共用同一份，所以"盘上写什么、两边读到什么"不会分叉。
- * 之后整个宿主半边只认 v2 —— 写盘一律是 v2。
  */
 function normalizeDoc(raw) {
   const doc = normalizeDrawioDoc(raw)
@@ -773,7 +768,6 @@ export const inject = ['tools', 'fs', 'sessions', 'sandboxPolicy', 'webServer']
  */
 async function listCanvases(root, cwd, dir) {
   const found = []
-  const foundDrawio = []
   const seen = {}
   const dirs = []
   const notes = []
@@ -800,19 +794,11 @@ async function listCanvases(root, cwd, dir) {
             : entry.kind === 'directory' || entry.type === 'directory' || entry.isDirectory === true
           : false
       const rel = prefix.length === 0 ? name : prefix + '/' + name
-      if (!isDir && name.toLowerCase().endsWith('.dshd.json')) {
-        if (seen[rel] !== true) {
-          seen[rel] = true
-          found.push(rel)
-        }
-        continue
-      }
-      // drawio 文件单独归一类：它们**不是**可直接打开的画布，点了要先导入成 .dshd.json。
-      // 混进 files 里会让"打开"菜单把 .drawio 当画布去读 JSON，得到一句莫名其妙的解析错误。
+      // 载体就是 .drawio —— 列出来的每一个都能直接打开（不再有「先导入成别的东西」这一步）。
       if (!isDir && name.toLowerCase().endsWith('.drawio')) {
         if (seen[rel] !== true) {
           seen[rel] = true
-          foundDrawio.push(rel)
+          found.push(rel)
         }
         continue
       }
@@ -835,8 +821,7 @@ async function listCanvases(root, cwd, dir) {
     collect(sub.entries, dirs[d])
   }
   found.sort()
-  foundDrawio.sort()
-  return { files: found, drawio: foundDrawio, notes: notes }
+  return { files: found, notes: notes }
 }
 
 
@@ -906,28 +891,58 @@ export function apply(ctx) {
     return root === undefined ? await ctx.fs.resolve(path) : await ctx.fs.resolve(path, { cwd: root })
   }
 
+  /**
+   * 读一份画布：**文件是真相**，读的就是 `.drawio`（mxfile）本身。
+   *
+   * revision 用文件内容指纹（`contentHash`），不落盘 —— 这样 drawio 或别的编辑器改过文件，
+   * 指纹自然变，乐观锁不会因为"属性被 drawio 丢掉"而假冲突。
+   */
   async function loadDoc(path, sessionId) {
     const target = await resolveTarget(path, sessionId)
     const absolute = absoluteHint(target, path)
     const info = await ctx.fs.stat(target)
-    if (info === undefined) return { target: target, absolute: absolute, doc: emptyDoc(), migrated: false }
+    if (info === undefined) return { target: target, absolute: absolute, doc: emptyDoc(), notes: [], exists: false }
     const text = await ctx.fs.readText(target)
-    let raw
-    try {
-      raw = JSON.parse(text)
-    } catch (error) {
-      throw new Error(absolute + ' is not valid JSON: ' + messageOf(error))
+    const parsed = parseMxfile(text)
+    return { target: target, absolute: absolute, doc: normalizeDoc(parsed.doc), notes: parsed.notes, exists: true, text: text }
+  }
+
+  /**
+   * 写一份画布：**在原文件上做无损写回**（只改我们拥有的单元，其余原文逐字节保留）。
+   *
+   * 文件不存在（或为空）时才从零生成 —— 那是"新建"，没有原稿可保护。
+   *
+   * @returns { text, dropped, revision }
+   */
+  function renderDocText(originalText, doc, options) {
+    const doc2 = normalizeDoc(doc)
+    if (typeof originalText !== 'string' || originalText.trim().length === 0) {
+      const built = buildMxfile(doc2, options)
+      return { text: built.text, dropped: built.dropped, revision: contentHash(built.text) }
     }
-    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(absolute + ' must contain a JSON object')
-    return { target: target, absolute: absolute, doc: normalizeDoc(raw), migrated: docNeedsMigration(raw) }
+    const applied = applyDocToMxfile(originalText, doc2, options)
+    return { text: applied.text, dropped: applied.dropped, revision: contentHash(applied.text) }
+  }
+
+  /**
+   * 工具的路径护栏：只认 `.drawio`。
+   *
+   * 载体只有一种格式 —— 放开后缀就等于允许 AI 在工作区里造出第二种画布文件，
+   * 而那些文件没有画布认领、也不会被「打开」列出来，属于"看起来成功、其实没人能看见"。
+   */
+  function assertCanvasPath(path) {
+    if (typeof path !== 'string' || path.toLowerCase().endsWith('.drawio') === false) {
+      throw new Error('画布路径必须以 .drawio 结尾（drawio 的 mxfile 就是画布文件）：' + String(path))
+    }
   }
 
   const readTool = defineTool({
     name: 'diagram_read',
     description:
-      '读回工作区里的 DrawAI 画布文档（.dshd.json）：节点 id/标签/形状/style 键，边 id/起点/终点/标签/画法/折点。做任何修改前先用它确认当前图。' +
+      '读回工作区里的 DrawAI 画布（.drawio，就是 drawio 自己的 mxfile 格式）：节点 id/标签/形状/style 键，边 id/起点/终点/标签/画法/折点。做任何修改前先用它确认当前图。' +
       '文档存的是 drawio 的 style 键（dashed/dashPattern/edgeStyle/jettySize/libavoidRouting/exitX…/endArrow/strokeColor/shape=…），默认值省略；' +
-      '返回体的 shape/dash/arrow/color/exit/entry 是**从 style 串推导出来的便于阅读的名字**，改图请改 style 或对应 op 参数。',
+      '返回体的 shape/dash/arrow/color/exit/entry 是**从 style 串推导出来的便于阅读的名字**，改图请改 style 或对应 op 参数；' +
+      'notes 是这个文件里画布表示不了、但会原样保留的东西（多页、图层、分组层级、图片…）。',
     parameters: {
       path: { type: 'string', description: '工作区相对路径或绝对路径，默认 ' + DEFAULT_PATH },
     },
@@ -937,8 +952,9 @@ export function apply(ctx) {
         additionalProperties: false,
         properties: {
           path: { type: 'string', required: true },
-          revision: { type: 'number', required: true },
-          migrated: { type: 'boolean', required: true },
+          // revision = 文件内容指纹（改由文件决定，不再是我们自己 +1 的计数器）
+          revision: { type: 'string', required: true },
+          notes: { type: 'array', required: true, items: { type: 'string' } },
           nodes: {
             type: 'array',
             required: true,
@@ -1008,8 +1024,7 @@ export function apply(ctx) {
       },
       render: function (args, value) {
         const lines = [
-          '画布文档 ' + value.path + '（revision ' + value.revision + '，' + value.nodes.length + ' 节点 / ' + value.edges.length + ' 边' +
-            (value.migrated ? '，已从 v1 语义格式迁移' : '') + '）',
+          '画布 ' + value.path + '（revision ' + value.revision + '，' + value.nodes.length + ' 节点 / ' + value.edges.length + ' 边）',
         ]
         for (let i = 0; i < value.nodes.length; i += 1) {
           const n = value.nodes[i]
@@ -1026,6 +1041,7 @@ export function apply(ctx) {
               ' [' + bits.join(', ') + ']',
           )
         }
+        for (let i = 0; i < value.notes.length; i += 1) lines.push('  ⚠ ' + value.notes[i])
         return [{ type: 'text', text: lines.join('\n') }]
       },
     },
@@ -1035,6 +1051,7 @@ export function apply(ctx) {
       const focus = focusedPathFor(sessionIdOf(exec))
       const path =
         typeof args.path === 'string' && args.path.length > 0 ? args.path : focus !== undefined && focus.length > 0 ? focus : DEFAULT_PATH
+      assertCanvasPath(path)
       const loaded = await loadDoc(path, sessionIdOf(exec))
       const doc = loaded.doc
       const nodes = []
@@ -1047,8 +1064,7 @@ export function apply(ctx) {
           shape: nodeShapeFromStyle(style),
           style: style,
         })
-      }
-      const edges = []
+      }      const edges = []
       for (let i = 0; i < doc.edges.length; i += 1) {
         const e = doc.edges[i]
         const style = typeof e.style === 'string' ? e.style : DEFAULT_EDGE_STYLE
@@ -1079,7 +1095,7 @@ export function apply(ctx) {
         if (e.targetPoint !== undefined) item.targetPoint = e.targetPoint
         edges.push(item)
       }
-      return { path: loaded.absolute, revision: doc.revision, migrated: loaded.migrated, nodes: nodes, edges: edges }
+      return { path: loaded.absolute, revision: doc.revision, notes: loaded.notes, nodes: nodes, edges: edges }
     },
   })
 
@@ -1117,7 +1133,7 @@ export function apply(ctx) {
         additionalProperties: false,
         properties: {
           path: { type: 'string', required: true },
-          revision: { type: 'number', required: true },
+          revision: { type: 'string', required: true },
           nodeCount: { type: 'number', required: true },
           edgeCount: { type: 'number', required: true },
           layout: { type: 'string', required: true },
@@ -1138,7 +1154,7 @@ export function apply(ctx) {
     async execute(args, exec) {
       // 没有显式 path 时，优先用"用户当前打开的那张画布"（客户端上报的聚焦路径），
       // 最后才退回 DEFAULT_PATH。这样"帮我在这张画布上画"改的就是屏幕上那张，
-      // 而不是工作区里的 demo.dshd.json（那个坑实测踩过）。
+      // 而不是工作区里的 demo.drawio（那个坑实测踩过）。
       const focused = focusedPathFor(sessionIdOf(exec))
       const path =
         typeof args.path === 'string' && args.path.length > 0 ? args.path : focused !== undefined && focused.length > 0 ? focused : DEFAULT_PATH
@@ -1146,6 +1162,7 @@ export function apply(ctx) {
       if (ops.length === 0) throw new Error('ops must contain at least one operation')
 
       const sessionId = sessionIdOf(exec)
+      assertCanvasPath(path)
       const loaded = await loadDoc(path, sessionId)
       const doc = loaded.doc
 
@@ -1163,20 +1180,22 @@ export function apply(ctx) {
         const dropped = invalidateStalePoints(doc, before)
         if (dropped > 0) notes.push('~ 重排后端点位置变了，已清掉 ' + dropped + ' 条边上的过期折点')
       }
-      doc.revision = (typeof doc.revision === 'number' ? doc.revision : 0) + 1
-      // pinned 必须原样带回去！
+      // 写回：**在原文件上做无损写回**（只改我们拥有的单元，其余原文逐字节保留）。
+      // revision 由文件内容算出来，不再是"我们自己 +1"—— 载体即真相，没有第二个计数器。
+      // meta.pinned 的合并规则见下面那句注释。
       //
       // 这里曾经写的是 doc.meta = { engine, layout }，于是**第一次 AI 改图就把 pinned 擦掉了**：
       // 那一次没事（mode 已经是 'none'，人不人的位置都保住了），但从第二次起 pinned 读不到，
       // mode 回落到 'dagre-tb'，人手工摆好的版面被整张重排 —— 正是上面那个判断要防的事。
       // 教训：用整体赋值覆盖 meta 时，"没被显式处理"的字段会静默消失；新增 meta 字段时先看这里。
-      // v1.1：改成 Object.assign 合并，不再"整体赋值" —— 以后新增 meta 字段默认就能活下来。
-      doc.meta = Object.assign({}, doc.meta, { engine: 'drawio-svg', layout: mode }, pinned ? { pinned: true } : {})
-      const text = JSON.stringify(doc, null, 2) + '\n'
+      doc.meta = Object.assign({}, doc.meta, { layout: mode }, pinned ? { pinned: true } : {})
+      const rendered = renderDocText(loaded.text, doc)
+      doc.revision = rendered.revision
+      if (rendered.dropped.length > 0) notes.push('~ ' + rendered.dropped.length + ' 条边的两端都没有落点，已略过：' + rendered.dropped.join(', '))
       const policy = policyFor(sessionId)
       try {
-        if (policy === undefined) await ctx.fs.writeText(loaded.target, text)
-        else await ctx.fs.writeText(loaded.target, text, undefined, undefined, policy)
+        if (policy === undefined) await ctx.fs.writeText(loaded.target, rendered.text)
+        else await ctx.fs.writeText(loaded.target, rendered.text, undefined, undefined, policy)
       } catch (error) {
         const scope = policy === undefined ? 'unresolved policy' : policy.mode + ' @ ' + String(policy.workspaceRoot)
         throw new Error('write "' + loaded.absolute + '" failed: ' + messageOf(error) + ' [sandbox: ' + scope + ']')
@@ -1195,7 +1214,7 @@ export function apply(ctx) {
 /**
  * 校验"新建画布"的文件名。
  *
- * 只允许**单个文件名**（不含路径分隔符），且必须以 .dshd.json 结尾。
+ * 只允许**单个文件名**（不含路径分隔符），且必须以 .drawio 结尾。
  * 这样即使用户在界面上输入 `..\\..\\x` 也进不来 —— 新建永远落在工作区根目录，
  * 不存在"写到哪里去了"的空间。想放到子目录请自己先建好再打开。
  */
@@ -1206,7 +1225,7 @@ function sanitizeNewName(raw) {
   if (name === '.' || name === '..') return { ok: false, error: '文件名非法' }
   // 禁止 Windows 非法字符，省得写盘才失败
   if (/[<>:"|?*\u0000-\u001f]/.test(name)) return { ok: false, error: '文件名包含非法字符' }
-  const withExt = name.toLowerCase().endsWith('.dshd.json') ? name : name + '.dshd.json'
+  const withExt = name.toLowerCase().endsWith('.drawio') ? name : name + '.drawio'
   if (withExt.length > 120) return { ok: false, error: '文件名过长' }
   return { ok: true, name: withExt }
 }
@@ -1214,7 +1233,7 @@ function sanitizeNewName(raw) {
   /**
    * 「画布聚焦」：记录每个会话当前**打开着**的画布路径。
    *
-   * 为什么需要：AI 改图只认路径。不传 path 时原来会落到 demo.dshd.json ——
+   * 为什么需要：AI 改图只认路径。不传 path 时原来会落到 demo.drawio ——
    * 于是"帮我在这张画布上画"会画到别的文件里，用户屏幕上毫无反应（实测踩过）。
    * 有了聚焦记录，不传 path 就改"用户正看着的那张"。
    *
@@ -1238,7 +1257,7 @@ function sanitizeNewName(raw) {
    * 信任围栏（方案 §6.4 明确警告：开任意路径路由会绕过围栏，所以这里逐条校验）：
    *   1. 只接受 POST，且必须带自定义头 —— 跨站表单设不了它，跨域 fetch 会触发预检被浏览器拦掉
    *   2. 带 Origin 时必须同源
-   *   3. 只写会话工作区根内的 .shd.json（用 fs.contains 做真实路径包含判断，不是字符串前缀）
+   *   3. 只写会话工作区根内的 .drawio（用 fs.contains 做真实路径包含判断，不是字符串前缀）
    *   4. revision 乐观锁：对不上就 409，绝不覆盖别人的改动
    *
    * 顺带把 meta.pinned 打成 true —— 从此这个文档被人手工摆过，
@@ -1289,7 +1308,7 @@ function sanitizeNewName(raw) {
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined
     const rawPath = typeof body.path === 'string' ? body.path : undefined
 
-    // action: 'list' —— 列出工作区里可打开的 .dshd.json，供"打开"菜单用。
+    // action: 'list' —— 列出工作区里可打开的 .drawio，供「打开」菜单用。
     // 复用同一条路由而不是另开一个：信任围栏（POST + 自定义头 + 同源）只写一次，
     // 少一个口子就少一处可能忘记校验的地方。
     if (body.action === 'list') {
@@ -1331,14 +1350,10 @@ function sanitizeNewName(raw) {
           // 让客户端用绝对路径当"身份"，就不会重复开标签。
           const abs = []
           for (let i = 0; i < listed.files.length; i += 1) abs.push(toAbsolute(listed.files[i], root))
-          const drawioAbs = []
-          for (let i = 0; i < listed.drawio.length; i += 1) drawioAbs.push(toAbsolute(listed.drawio[i], root))
           sendJson(res, 200, {
             ok: true,
             files: listed.files,
             absolute: abs,
-            drawio: listed.drawio,
-            drawioAbsolute: drawioAbs,
             notes: listed.notes,
             root: absoluteHint(root, root),
             dir: absoluteHint(dirTarget, dir),
@@ -1352,19 +1367,69 @@ function sanitizeNewName(raw) {
         const listed = await listCanvases(root, root, root)
         const abs = []
         for (let i = 0; i < listed.files.length; i += 1) abs.push(toAbsolute(listed.files[i], root))
-        const drawioAbs = []
-        for (let i = 0; i < listed.drawio.length; i += 1) drawioAbs.push(toAbsolute(listed.drawio[i], root))
         sendJson(res, 200, {
           ok: true,
           files: listed.files,
           absolute: abs,
-          drawio: listed.drawio,
-          drawioAbsolute: drawioAbs,
           notes: listed.notes,
           root: absoluteHint(root, root),
         })
       } catch (error) {
         sendJson(res, 500, { ok: false, error: 'list failed: ' + messageOf(error) })
+      }
+      return
+    }
+
+    // action: 'read' —— 把 .drawio 读成语义文档交给界面。
+    //
+    // **为什么读也走宿主**：drawio 默认把页体压成 base64(raw deflate(xml))，而浏览器没有 zlib
+    // （DecompressionStream 是异步的，塞不进同步渲染路径）。与其把解析器抄一份到客户端，
+    // 不如让唯一的解析器待在它本来就在的地方：宿主。客户端只认文档，不认 mxfile。
+    if (body.action === 'read') {
+      if (sessionId === undefined || rawPath === undefined) {
+        sendJson(res, 400, { ok: false, error: 'sessionId and path are required' })
+        return
+      }
+      const readRoot = workspaceRootOf(sessionId)
+      if (readRoot === undefined) {
+        sendJson(res, 403, { ok: false, error: 'no workspace root resolved for this session' })
+        return
+      }
+      let readTarget
+      try {
+        readTarget = await ctx.fs.resolve(rawPath, { cwd: readRoot })
+      } catch (error) {
+        sendJson(res, 400, { ok: false, error: 'resolve failed: ' + messageOf(error) })
+        return
+      }
+      try {
+        const rootTarget = await ctx.fs.resolve(readRoot)
+        if (!ctx.fs.contains(rootTarget, readTarget)) {
+          sendJson(res, 403, { ok: false, error: 'path escapes the workspace root: ' + absoluteHint(readTarget, rawPath) })
+          return
+        }
+      } catch (error) {
+        sendJson(res, 403, { ok: false, error: 'containment check failed: ' + messageOf(error) })
+        return
+      }
+      try {
+        const info = await ctx.fs.stat(readTarget)
+        if (info === undefined) {
+          sendJson(res, 200, { ok: true, exists: false, path: rawPath, absolute: absoluteHint(readTarget, rawPath), revision: '', doc: emptyDoc(), notes: [] })
+          return
+        }
+        const loaded = await loadDoc(rawPath, sessionId)
+        sendJson(res, 200, {
+          ok: true,
+          exists: true,
+          path: rawPath,
+          absolute: loaded.absolute,
+          revision: loaded.doc.revision,
+          doc: loaded.doc,
+          notes: loaded.notes,
+        })
+      } catch (error) {
+        sendJson(res, 400, { ok: false, error: '这个文件读不出画布：' + messageOf(error) })
       }
       return
     }
@@ -1452,7 +1517,7 @@ function sanitizeNewName(raw) {
     // action: 'create' —— 新建一张**真实存在**的空画布并绑定到它。
     //
     // 为什么不"留着以后再说"：画布一旦没有文件，AI 对话就够不到它
-    // （diagram_apply 只按路径工作，不传 path 会落到 demo.dshd.json —— 实测过）。
+    // （diagram_apply 只按路径工作，不传 path 会落到 demo.drawio —— 实测过）。
     // 与其让用户对着"未命名画布"说"画一张图"却改到别的文件，不如新建时就落一个空文件。
     // 同名文件已存在时**不覆盖**，返回 exists 让界面提示改名。
     if (body.action === 'create') {
@@ -1498,235 +1563,21 @@ function sanitizeNewName(raw) {
         return
       }
       // 空画布也打 meta.pinned：它是人手工建的，不该被 AI 的自动布局重排。
-      const blank = { version: 2, revision: 1, meta: { engine: 'drawio-svg', pinned: true }, nodes: [], edges: [] }
+      const blankBuilt = buildMxfile({ version: 2, revision: '', meta: { pinned: true }, nodes: [], edges: [] }, { name: nameCheck.name.replace(/\.drawio$/i, '') })
       const createPolicy = policyFor(sessionId)
-      const blankText = JSON.stringify(blank, null, 2) + '\n'
       try {
-        if (createPolicy === undefined) await ctx.fs.writeText(createTarget, blankText)
-        else await ctx.fs.writeText(createTarget, blankText, undefined, undefined, createPolicy)
+        if (createPolicy === undefined) await ctx.fs.writeText(createTarget, blankBuilt.text)
+        else await ctx.fs.writeText(createTarget, blankBuilt.text, undefined, undefined, createPolicy)
       } catch (error) {
         const scope = createPolicy === undefined ? 'unresolved policy' : createPolicy.mode + ' @ ' + String(createPolicy.workspaceRoot)
         sendJson(res, 500, { ok: false, error: 'write failed: ' + messageOf(error) + ' [sandbox: ' + scope + ']' })
         return
       }
-      sendJson(res, 200, { ok: true, path: nameCheck.name, absolute: absoluteHint(createTarget, nameCheck.name), revision: 1 })
-      return
-    }
-
-    // action: 'import' —— 把工作区里的一个 `.drawio` 读成画布文档，并落一份 `.dshd.json`。
-    //
-    // 为什么在宿主做而不是浏览器：drawio 默认把 `<diagram>` 的内容压成
-    // base64(raw deflate(xml))，**浏览器没有 zlib**，解不开就是一句"打不开"。
-    // 宿主是 Node，`node:zlib` 现成；而且落盘本来就只有宿主这条通道。
-    //
-    // 命名策略（不覆盖任何人）：`foo.drawio` → `foo.dshd.json`；已被占用就
-    // `foo-2.dshd.json` … 直到 99。用户从 drawio 打开过的文件旁边多出一个同名画布，
-    // 但**原件一个字节都不动** —— 这是导入必须守住的底线。
-    if (body.action === 'import') {
-      if (sessionId === undefined) {
-        sendJson(res, 400, { ok: false, error: 'sessionId is required' })
-        return
-      }
-      const importRoot = workspaceRootOf(sessionId)
-      if (importRoot === undefined) {
-        sendJson(res, 403, { ok: false, error: 'no workspace root resolved for this session' })
-        return
-      }
-      if (rawPath === undefined || !rawPath.toLowerCase().endsWith('.drawio')) {
-        sendJson(res, 400, { ok: false, error: '只有 .drawio 文件可以导入' })
-        return
-      }
-      let importTarget
-      try {
-        importTarget = await ctx.fs.resolve(rawPath, { cwd: importRoot })
-      } catch (error) {
-        sendJson(res, 400, { ok: false, error: 'resolve failed: ' + messageOf(error) })
-        return
-      }
-      const importAbs = absoluteHint(importTarget, rawPath)
-      try {
-        const rootTarget = await ctx.fs.resolve(importRoot)
-        if (!ctx.fs.contains(rootTarget, importTarget)) {
-          sendJson(res, 403, { ok: false, error: 'path escapes the workspace root: ' + importAbs })
-          return
-        }
-      } catch (error) {
-        sendJson(res, 403, { ok: false, error: 'containment check failed: ' + messageOf(error) })
-        return
-      }
-      let sourceText
-      try {
-        sourceText = await ctx.fs.readText(importTarget)
-      } catch (error) {
-        sendJson(res, 500, { ok: false, error: '读取失败：' + messageOf(error) })
-        return
-      }
-      let converted
-      try {
-        converted = parseMxfile(sourceText)
-      } catch (error) {
-        sendJson(res, 400, { ok: false, error: '这个文件读不出 mxfile：' + messageOf(error) })
-        return
-      }
-      // 派生目标名：只换最后一段的文件名，保住子目录。
-      // 分隔符两种都要认：列表里给的是 '/'，而标签上的路径（绝对路径）在 Windows 上是 '\'。
-      const slash = Math.max(rawPath.lastIndexOf('/'), rawPath.lastIndexOf('\\'))
-      const dirPart = slash < 0 ? '' : rawPath.slice(0, slash + 1)
-      const stem = (slash < 0 ? rawPath : rawPath.slice(slash + 1)).replace(/\.drawio$/i, '')
-      let outName = dirPart + stem + '.dshd.json'
-      for (let n = 2; n <= 99; n += 1) {
-        let taken = true
-        try {
-          const probe = await ctx.fs.resolve(outName, { cwd: importRoot })
-          taken = (await ctx.fs.stat(probe)) !== undefined
-        } catch (error) {
-          taken = false
-        }
-        if (!taken) break
-        outName = dirPart + stem + '-' + n + '.dshd.json'
-      }
-      let outTarget
-      try {
-        outTarget = await ctx.fs.resolve(outName, { cwd: importRoot })
-        const rootTarget = await ctx.fs.resolve(importRoot)
-        if (!ctx.fs.contains(rootTarget, outTarget)) {
-          sendJson(res, 403, { ok: false, error: '目标路径越出工作区：' + outName })
-          return
-        }
-      } catch (error) {
-        sendJson(res, 400, { ok: false, error: 'resolve failed: ' + messageOf(error) })
-        return
-      }
-      // 导入出来的画布是"人打开的"，同样打 pinned：别让 AI 的自动布局把它重排。
-      const next = normalizeDoc(converted.doc)
-      next.revision = 1
-      next.meta = Object.assign({}, next.meta, { engine: 'drawio-svg', pinned: true, importedFrom: rawPath })
-      const importPolicy = policyFor(sessionId)
-      const outText = JSON.stringify(next, null, 2) + '\n'
-      try {
-        if (importPolicy === undefined) await ctx.fs.writeText(outTarget, outText)
-        else await ctx.fs.writeText(outTarget, outText, undefined, undefined, importPolicy)
-      } catch (error) {
-        const scope = importPolicy === undefined ? 'unresolved policy' : importPolicy.mode + ' @ ' + String(importPolicy.workspaceRoot)
-        sendJson(res, 500, { ok: false, error: 'write failed: ' + messageOf(error) + ' [sandbox: ' + scope + ']' })
-        return
-      }
       sendJson(res, 200, {
         ok: true,
-        path: outName,
-        absolute: absoluteHint(outTarget, outName),
-        revision: 1,
-        source: rawPath,
-        doc: next,
-        notes: converted.notes,
-        pageCount: converted.pageCount,
-      })
-      return
-    }
-
-    // action: 'export' —— 把画布文档写成 `.drawio`（drawio 能直接打开的那种）。
-    //
-    // `doc` 可带可不带：带了就按"界面上现在这份"导出（含还没落盘的拖动），
-    // 不带就读文件。默认**不压缩**（人可读、diff 友好；drawio 两种都认），
-    // `compressed: true` 时按 drawio 的算法压。
-    //
-    // 已存在同名 `.drawio` 时**不覆盖**，顺延成 `foo-2.drawio`：导出常常发生在
-    // "我把 foo.drawio 导入进来看了看"之后，直接覆盖等于**抹掉用户的原稿**。
-    if (body.action === 'export') {
-      if (sessionId === undefined || rawPath === undefined) {
-        sendJson(res, 400, { ok: false, error: 'sessionId and path are required' })
-        return
-      }
-      const exportRoot = workspaceRootOf(sessionId)
-      if (exportRoot === undefined) {
-        sendJson(res, 403, { ok: false, error: 'no workspace root resolved for this session' })
-        return
-      }
-      if (!rawPath.toLowerCase().endsWith('.dshd.json')) {
-        sendJson(res, 403, { ok: false, error: 'only .dshd.json documents may be exported' })
-        return
-      }
-      let sourceDoc
-      if (body.doc !== undefined && body.doc !== null && typeof body.doc === 'object' && Array.isArray(body.doc) === false) {
-        sourceDoc = normalizeDoc(body.doc)
-      } else {
-        let canvasTarget
-        try {
-          canvasTarget = await ctx.fs.resolve(rawPath, { cwd: exportRoot })
-        } catch (error) {
-          sendJson(res, 400, { ok: false, error: 'resolve failed: ' + messageOf(error) })
-          return
-        }
-        try {
-          const rootTarget = await ctx.fs.resolve(exportRoot)
-          if (!ctx.fs.contains(rootTarget, canvasTarget)) {
-            sendJson(res, 403, { ok: false, error: 'path escapes the workspace root: ' + rawPath })
-            return
-          }
-        } catch (error) {
-          sendJson(res, 403, { ok: false, error: 'containment check failed: ' + messageOf(error) })
-          return
-        }
-        try {
-          sourceDoc = normalizeDoc(JSON.parse(await ctx.fs.readText(canvasTarget)))
-        } catch (error) {
-          sendJson(res, 500, { ok: false, error: '读取画布失败：' + messageOf(error) })
-          return
-        }
-      }
-      const slash = Math.max(rawPath.lastIndexOf('/'), rawPath.lastIndexOf('\\'))
-      const dirPart = slash < 0 ? '' : rawPath.slice(0, slash + 1)
-      const stem = (slash < 0 ? rawPath : rawPath.slice(slash + 1)).replace(/\.dshd\.json$/i, '')
-      let outName = dirPart + stem + '.drawio'
-      let suffixed = false
-      for (let n = 2; n <= 99; n += 1) {
-        let taken = true
-        try {
-          const probe = await ctx.fs.resolve(outName, { cwd: exportRoot })
-          taken = (await ctx.fs.stat(probe)) !== undefined
-        } catch (error) {
-          taken = false
-        }
-        if (!taken) break
-        outName = dirPart + stem + '-' + n + '.drawio'
-        suffixed = true
-      }
-      let outTarget
-      try {
-        outTarget = await ctx.fs.resolve(outName, { cwd: exportRoot })
-        const rootTarget = await ctx.fs.resolve(exportRoot)
-        if (!ctx.fs.contains(rootTarget, outTarget)) {
-          sendJson(res, 403, { ok: false, error: '目标路径越出工作区：' + outName })
-          return
-        }
-      } catch (error) {
-        sendJson(res, 400, { ok: false, error: 'resolve failed: ' + messageOf(error) })
-        return
-      }
-      let xml
-      try {
-        xml = buildMxfile(sourceDoc, { compressed: body.compressed === true, name: stem })
-      } catch (error) {
-        sendJson(res, 500, { ok: false, error: '生成 mxfile 失败：' + messageOf(error) })
-        return
-      }
-      const exportPolicy = policyFor(sessionId)
-      try {
-        if (exportPolicy === undefined) await ctx.fs.writeText(outTarget, xml)
-        else await ctx.fs.writeText(outTarget, xml, undefined, undefined, exportPolicy)
-      } catch (error) {
-        const scope = exportPolicy === undefined ? 'unresolved policy' : exportPolicy.mode + ' @ ' + String(exportPolicy.workspaceRoot)
-        sendJson(res, 500, { ok: false, error: 'write failed: ' + messageOf(error) + ' [sandbox: ' + scope + ']' })
-        return
-      }
-      sendJson(res, 200, {
-        ok: true,
-        path: outName,
-        absolute: absoluteHint(outTarget, outName),
-        nodes: Array.isArray(sourceDoc.nodes) ? sourceDoc.nodes.length : 0,
-        edges: Array.isArray(sourceDoc.edges) ? sourceDoc.edges.length : 0,
-        compressed: body.compressed === true,
-        suffixed: suffixed,
+        path: nameCheck.name,
+        absolute: absoluteHint(createTarget, nameCheck.name),
+        revision: contentHash(blankBuilt.text),
       })
       return
     }
@@ -1735,8 +1586,8 @@ function sanitizeNewName(raw) {
       sendJson(res, 400, { ok: false, error: 'sessionId and path are required' })
       return
     }
-    if (!rawPath.toLowerCase().endsWith('.dshd.json')) {
-      sendJson(res, 403, { ok: false, error: 'only .dshd.json documents may be written' })
+    if (!rawPath.toLowerCase().endsWith('.drawio')) {
+      sendJson(res, 403, { ok: false, error: 'only .drawio documents may be written' })
       return
     }
     const doc = body.doc
@@ -1771,38 +1622,53 @@ function sanitizeNewName(raw) {
       return
     }
 
-    let current = emptyDoc()
+    // 乐观锁：基线是**文件内容指纹**（客户端打开时拿到的那个 revision）。
+    // 不用"我们自己的计数器 +1"：载体是唯一真相，drawio 或别的编辑器改过文件之后，
+    // 计数器无从得知；而指纹天然会变，冲突判定才是真的。
+    let originalText
     let exists = false
     try {
       const info = await ctx.fs.stat(target)
       if (info !== undefined) {
         exists = true
-        current = normalizeDoc(JSON.parse(await ctx.fs.readText(target)))
+        originalText = await ctx.fs.readText(target)
       }
     } catch (error) {
       sendJson(res, 500, { ok: false, error: 'read current failed: ' + messageOf(error) })
       return
     }
-    const baseRevision = Number.isFinite(Number(body.revision)) ? Number(body.revision) : undefined
-    if (baseRevision !== undefined && exists && current.revision !== baseRevision) {
-      sendJson(res, 409, { ok: false, error: 'revision conflict', currentRevision: current.revision })
+    const baseRevision = typeof body.revision === 'string' && body.revision.length > 0 ? body.revision : undefined
+    // createOnly（「另存为」）：目标**不该已存在**。已存在就直接拒绝，绝不静默覆盖。
+    if (body.createOnly === true && exists) {
+      sendJson(res, 409, { ok: false, error: 'already exists', path: absolute })
+      return
+    }
+    if (baseRevision !== undefined && exists && contentHash(originalText) !== baseRevision) {
+      sendJson(res, 409, { ok: false, error: 'revision conflict', currentRevision: contentHash(originalText) })
       return
     }
 
+    // 人工编辑一律打 pinned：从此这张画布是人摆过版面的，AI 的自动布局不该再冲掉它。
+    // （空文件 → 从零生成；已有文件 → 无损写回，见 renderDocText。）
     const next = normalizeDoc(doc)
-    next.revision = current.revision + 1
-    next.meta = Object.assign({}, current.meta, { engine: 'drawio-svg', pinned: true })
-    const out = JSON.stringify(next, null, 2) + '\n'
+    next.meta = Object.assign({}, next.meta, { pinned: true })
+    let rendered
+    try {
+      rendered = renderDocText(exists ? originalText : undefined, next)
+    } catch (error) {
+      sendJson(res, 400, { ok: false, error: '写入前解析原文件失败：' + messageOf(error) })
+      return
+    }
     const policy = policyFor(sessionId)
     try {
-      if (policy === undefined) await ctx.fs.writeText(target, out)
-      else await ctx.fs.writeText(target, out, undefined, undefined, policy)
+      if (policy === undefined) await ctx.fs.writeText(target, rendered.text)
+      else await ctx.fs.writeText(target, rendered.text, undefined, undefined, policy)
     } catch (error) {
       const scope = policy === undefined ? 'unresolved policy' : policy.mode + ' @ ' + String(policy.workspaceRoot)
       sendJson(res, 500, { ok: false, error: 'write failed: ' + messageOf(error) + ' [sandbox: ' + scope + ']' })
       return
     }
-    sendJson(res, 200, { ok: true, revision: next.revision, path: absolute })
+    sendJson(res, 200, { ok: true, revision: rendered.revision, path: absolute, dropped: rendered.dropped })
   }
 
   ctx.effect(() => ctx.webServer.register({ kind: 'exact', path: SAVE_PATH, handler: handleSave }), 'drawai: ' + SAVE_PATH)

@@ -21,6 +21,8 @@ import { dirname, resolve } from 'node:path'
 import { composeClientBody } from './build.mjs'
 // 端点约束的写法与产物完全同源：用内核拼 style，而不是在测试里手抄键名。
 import { DEFAULT_EDGE_STYLE, styleWithSide } from '../src/style-kernel.js'
+// 真图不变量要读工作区里的 demo.drawio：用宿主那套解析器（客户端现在拿到的就是它的产物）。
+import { parseMxfile } from '../src/mxfile.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 // 客户端半边依赖"构建时内联的样式内核"，所以这里 eval 的是**与产物同款的组合 body**。
@@ -759,7 +761,7 @@ console.log('\n自动路由：每条线段都落在整格/半格线上')
   ok(onBorderA && onBorderB, '起点/终点仍然精确落在两侧节点的边框上（不被吸附挪开）')
 }
 
-console.log('\n画布真图的连线不变量（直接读 demo.dshd.json）')
+console.log('\n画布真图的连线不变量（直接读工作区里的 demo.drawio）')
 {
   // 直接拿工作区里那份真文档跑 —— 它就是用户看的那张图。
   // 断言的是"用户一眼能看出来的毛病"，而不是实现细节：
@@ -768,19 +770,18 @@ console.log('\n画布真图的连线不变量（直接读 demo.dshd.json）')
   //   · 两个段把手不该挨在 30px 以内 —— 那就是「一条线段上有两个点」。
   let real = null
   try {
-    real = JSON.parse(readFileSync(resolve(here, '..', 'demo.dshd.json'), 'utf8'))
+    // 载体是 .drawio：用**宿主那套解析器**（src/mxfile.js）读，客户端拿到的就是它的产物。
+    real = parseMxfile(readFileSync(resolve(here, '..', 'demo.drawio'), 'utf8')).doc
   } catch (error) {
     // demo 是用户的示例文件，删掉是合法操作 —— 没它就跳过这一节，不要判失败
     // （之前判失败过一次，把"用户清理了工作区"误报成代码回归）。
-    console.log('  · demo.dshd.json 不存在，跳过真图不变量（这不代表失败）')
+    console.log('  · demo.drawio 不存在，跳过真图不变量（这不代表失败）')
   }
   if (real !== null) {
-    // 真文档也先过一遍画布的解析器（读时升级）—— 否则 demo 换成 v2 之后，
-    // 这一节测的还是旧字段，等于自己骗自己。
-    const parsed = internals.parseDocument(JSON.stringify(real))
-    ok(parsed.error === undefined, 'demo.dshd.json 能被画布的解析器读入' + (parsed.error === undefined ? '' : '：' + parsed.error))
+    const parsed = internals.docFromPayload({ ok: true, exists: true, doc: real, revision: real.revision, notes: [] })
+    ok(parsed.error === undefined, 'demo.drawio 能被画布的解析器读入' + (parsed.error === undefined ? '' : '：' + parsed.error))
     const docReal = parsed.error === undefined ? parsed.doc : { nodes: [], edges: [] }
-    ok(docReal.version === 2, 'demo 读入后是 v2（v1 文档会在读时升级）')
+    ok(docReal.version === 2, 'demo 读入后是 v2')
     const segLen = (a, b) => Math.abs(b.x - a.x) + Math.abs(b.y - a.y)
     let broken = 0
     let routed = 0

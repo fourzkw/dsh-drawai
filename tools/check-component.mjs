@@ -171,8 +171,8 @@ console.log('整组件渲染：状态形状不对时也不能整块降级\n')
     ['fileList = null（未拉取）', { 2: 'open', 4: null }],
     ['{ files: null, error: "" }（读取中）', { 2: 'open', 4: { files: null, error: '' } }],
     ['{ files: [], error: "" }（空列表）', { 2: 'open', 4: { files: [], error: '' } }],
-    ['{ files: ["a.dshd.json"], error: "" }', { 2: 'open', 4: { files: ['a.dshd.json'], error: '' } }],
-    ['缺 error 字段 ← 真实事故就是这种', { 2: 'open', 4: { files: ['a.dshd.json'] } }],
+    ['{ files: ["a.drawio"], error: "" }', { 2: 'open', 4: { files: ['a.drawio'], error: '' } }],
+    ['缺 error 字段 ← 真实事故就是这种', { 2: 'open', 4: { files: ['a.drawio'] } }],
     ['缺 files 字段', { 2: 'open', 4: { error: 'boom' } }],
     ['fileList = 字符串（形状完全错）', { 2: 'open', 4: 'oops' }],
     ['{ files: [1,2], error: 5 }（字段类型也不对）', { 2: 'open', 4: { files: [1, 2], error: 5 } }],
@@ -275,8 +275,6 @@ console.log('\n工具条：按类型合并为下拉菜单')
       // 名字对不上会立刻炸出来（比"跑起来才发现菜单点不动"早得多）。
       openNewCanvasPanel: () => {},
       openFilePicker: () => {},
-      importDrawio: () => {},
-      exportDrawio: () => {},
       saveNow: () => {},
       openSaveAsPanel: () => {},
       pickDirectoryAndList: () => {},
@@ -305,12 +303,12 @@ console.log('\n工具条：按类型合并为下拉菜单')
     if (menus !== null) {
     ok(menus.map((m) => m.key).join(',') === 'file,edit,view,export', '恰好 4 类：文件 / 编辑 / 视图 / 导出')
     const total = menus.reduce((n, m) => n + m.items.length, 0)
-    ok(total === 13, '所有操作都有归处（实际 ' + total + ' 项）')
+    ok(total === 12, '所有操作都有归处（实际 ' + total + ' 项）')
     ok(menus.every((m) => typeof m.title === 'string' && m.title.length > 0), '每个菜单都有悬停说明（title）')
     ok(menus.every((m) => m.items.every((i) => typeof i.label === 'string' && i.label.length > 0)), '每一项都有 label')
     ok(menus.every((m) => m.items.every((i) => typeof i.onClick === 'function')), '每一项都有 onClick')
     const labels = menus.reduce((a, m) => a.concat(m.items.map((i) => i.label)), [])
-    for (const gone of ['新建画布…', '打开 / 导入…', '撤销', '重做', '适应内容', '导出 SVG', '导出 PNG（2×）', '导出 drawio（.drawio）']) {
+    for (const gone of ['新建画布…', '打开…', '撤销', '重做', '适应内容', '导出 SVG', '导出 PNG（2×）']) {
       ok(labels.indexOf(gone) >= 0, '旧按钮「' + gone + '」已收进菜单')
     }
     // 工具条本身只应渲染菜单入口

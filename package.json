@@ -9,6 +9,7 @@
     "build": "node tools/build.mjs",
     "watch": "node tools/watch.mjs",
     "check": "node tools/check-package.mjs",
+    "migrate": "node tools/migrate-dshd.mjs",
     "test": "node tools/check-mxfile.mjs && node tools/check-route-preview.mjs && node tools/check-host.mjs && node tools/check-render.mjs && node tools/check-component.mjs"
   },
   "exports": {

@@ -505,147 +505,39 @@ function edgeFreePoint(edge, end) {
   return normalizePoint(end === 'source' ? edge.sourcePoint : edge.targetPoint)
 }
 
-// ── 从 v1（语义枚举）迁移到 v2（drawio 键）────────────────────────────────────
-
-function dashKindFromV1(value) {
-  var v = String(value === undefined || value === null ? '' : value).toLowerCase().trim()
-  if (v === 'dashed' || v === 'dash' || v === '虚线') return 'dashed'
-  if (v === 'dotted' || v === 'dot' || v === '点线' || v === '点状') return 'dotted'
-  return 'solid'
-}
-
-function arrowKindFromV1(value) {
-  var v = String(value === undefined || value === null ? '' : value).toLowerCase().trim()
-  if (v === 'both' || v === 'double' || v === '双向' || v === 'bidirectional') return 'both'
-  if (v === 'none' || v === 'false' || v === '无') return 'none'
-  if (v === 'start' || v === 'source' || v === 'backward' || v === '反向') return 'start'
-  return 'end'
-}
-
-/** v1 节点的 shape/style（颜色名）→ v2 style 串。v2 节点原样返回（幂等）。 */
-function migrateNodeV1(node) {
-  var style = ''
-  if (typeof node.shape === 'string' && NODE_SHAPE_STYLE[node.shape] !== undefined) style = styleFromNodeShape(node.shape)
-  if (typeof node.style === 'string' && node.style.length > 0) {
-    // v1 的 style 是颜色名；v2 的 style 是键值串 —— 用有没有 '=' / ';' 区分。
-    if (node.style.indexOf('=') >= 0 || node.style.indexOf(';') >= 0) style = formatStyle(stylePatch(style, parseStyle(node.style)))
-    else style = styleWithColorName(style, node.style)
-  }
-  var out = { id: node.id, label: node.label }
-  if (style.length > 0) out.style = style
-  out.x = node.x
-  out.y = node.y
-  out.w = node.w
-  out.h = node.h
-  return out
-}
-
-/** 点是否贴在某个盒子的边框上（容差内），返回该盒子或 null。 */
-function boxContainingBorderPoint(boxes, point, eps) {
-  var tolerance = eps === undefined ? 1.5 : eps
-  for (var i = 0; i < boxes.length; i += 1) {
-    var box = boxes[i]
-    var insideX = point.x >= box.x - tolerance && point.x <= box.x + box.w + tolerance
-    var insideY = point.y >= box.y - tolerance && point.y <= box.y + box.h + tolerance
-    if (!insideX || !insideY) continue
-    var onEdgeX = Math.abs(point.x - box.x) <= tolerance || Math.abs(point.x - (box.x + box.w)) <= tolerance
-    var onEdgeY = Math.abs(point.y - box.y) <= tolerance || Math.abs(point.y - (box.y + box.h)) <= tolerance
-    if (onEdgeX || onEdgeY) return box
-  }
-  return null
-}
-
-/** 盒子边框上的点 → 最近的侧（n/e/s/w）。 */
-function sideOfPointOnBox(box, point) {
-  var distances = [
-    { side: 'n', d: Math.abs(point.y - box.y) },
-    { side: 's', d: Math.abs(point.y - (box.y + box.h)) },
-    { side: 'w', d: Math.abs(point.x - box.x) },
-    { side: 'e', d: Math.abs(point.x - (box.x + box.w)) },
-  ]
-  var best = distances[0]
-  for (var i = 1; i < distances.length; i += 1) if (distances[i].d < best.d) best = distances[i]
-  return best.side
-}
-
 /**
- * v1 边 → v2 边。
+ * 文档归一化（字段清洗）。两侧半边都用它，保证读写同一套判据。
  *
- * v1 把"从哪一侧进出"的**桩点**混在 edge.points 里（首/尾那个贴在节点边框上的点）。
- * v2 按 drawio 拆开：贴在源/目标盒子边框上的首/尾点升级成 exitX/exitY 与 entryX/entryY，
- * 其余点才是**折点**。
+ * 载体是 `.drawio`（drawio 的 mxfile）之后，这里**不再有 v1 迁移**：
+ * 盘上只有一种格式，`shape:'rect'` / `style:'blue'` / `dash:'dashed'` 那套语义枚举
+ * 随 `.dshd.json` 一起退场了。留着的迁移代码只会让人以为还有第二种格式。
  *
- * @param edge v1 边对象
- * @param boxes 「节点 id → {x,y,w,h}」的查找表
- * @returns v2 边对象
- */
-function migrateEdgeV1(edge, boxes) {
-  var style = DEFAULT_EDGE_STYLE
-  if (typeof edge.dash === 'string') style = styleWithDash(style, dashKindFromV1(edge.dash))
-  if (typeof edge.arrow === 'string') style = styleWithArrow(style, arrowKindFromV1(edge.arrow))
-  if (typeof edge.color === 'string' && edge.color.length > 0) style = stylePatch(style, { strokeColor: edge.color })
-
-  var points = normalizePoints(edge.points)
-  var fromBox = boxes !== undefined && typeof edge.from === 'string' ? boxes[edge.from] : undefined
-  var toBox = boxes !== undefined && typeof edge.to === 'string' ? boxes[edge.to] : undefined
-
-  if (points !== null && fromBox !== undefined && fromBox !== null) {
-    var head = boxContainingBorderPoint([fromBox], points[0])
-    if (head !== null) {
-      style = styleWithSide(style, 'source', sideOfPointOnBox(fromBox, points[0]))
-      points = points.slice(1)
-    }
-  }
-  if (points !== null && points.length > 0 && toBox !== undefined && toBox !== null) {
-    var tail = boxContainingBorderPoint([toBox], points[points.length - 1])
-    if (tail !== null) {
-      style = styleWithSide(style, 'target', sideOfPointOnBox(toBox, points[points.length - 1]))
-      points = points.slice(0, points.length - 1)
-    }
-  }
-
-  var out = { id: edge.id, from: edge.from, to: edge.to }
-  if (typeof edge.label === 'string' && edge.label.length > 0) out.label = edge.label
-  out.style = style
-  if (points !== null && points.length > 0) out.points = points
-  if (edge.sourcePoint !== undefined) out.sourcePoint = edge.sourcePoint
-  if (edge.targetPoint !== undefined) out.targetPoint = edge.targetPoint
-  return out
-}
-
-/**
- * 文档归一化（v1 → v2 迁移 + 字段清洗）。两侧半边都用它，保证读写同一套判据。
- * 返回值一定带 `migrated` 标记：true 表示原文档是 v1（宿主据此提示"已迁移"）。
+ * `revision` 是**文件内容指纹**（字符串），原样透传 —— 这里曾经把它 `Number()` 一下，
+ * 于是十六进制指纹里只要有一个字母就变成 0，客户端的乐观锁直接失效。
  */
 function normalizeDrawioDoc(raw) {
   var source = isObject(raw) ? raw : {}
-  var version = Number(source.version)
-  var fromV1 = !Number.isFinite(version) || version < 2
 
   var nodesIn = Array.isArray(source.nodes) ? source.nodes : []
   var edgesIn = Array.isArray(source.edges) ? source.edges : []
   var nodes = []
-  var boxes = {}
   var i
 
   for (i = 0; i < nodesIn.length; i += 1) {
     var rawNode = isObject(nodesIn[i]) ? nodesIn[i] : {}
-    var node = fromV1 ? migrateNodeV1(rawNode) : rawNode
-    var out = { id: node.id }
-    if (typeof node.label === 'string') out.label = node.label
-    out.style = formatStyle(node.style)
-    out.x = Number.isFinite(Number(node.x)) ? Number(node.x) : 0
-    out.y = Number.isFinite(Number(node.y)) ? Number(node.y) : 0
-    out.w = Number.isFinite(Number(node.w)) ? Number(node.w) : 0
-    out.h = Number.isFinite(Number(node.h)) ? Number(node.h) : 0
+    var out = { id: rawNode.id }
+    if (typeof rawNode.label === 'string') out.label = rawNode.label
+    out.style = formatStyle(rawNode.style)
+    out.x = Number.isFinite(Number(rawNode.x)) ? Number(rawNode.x) : 0
+    out.y = Number.isFinite(Number(rawNode.y)) ? Number(rawNode.y) : 0
+    out.w = Number.isFinite(Number(rawNode.w)) ? Number(rawNode.w) : 0
+    out.h = Number.isFinite(Number(rawNode.h)) ? Number(rawNode.h) : 0
     nodes.push(out)
-    boxes[out.id] = { x: out.x, y: out.y, w: out.w, h: out.h }
   }
 
   var edges = []
   for (i = 0; i < edgesIn.length; i += 1) {
-    var rawEdge = isObject(edgesIn[i]) ? edgesIn[i] : {}
-    var edge = fromV1 ? migrateEdgeV1(rawEdge, boxes) : rawEdge
+    var edge = isObject(edgesIn[i]) ? edgesIn[i] : {}
     var item = { id: edge.id, from: edge.from, to: edge.to }
     if (typeof edge.label === 'string' && edge.label.length > 0) item.label = edge.label
     item.style = formatStyle(edge.style === undefined ? DEFAULT_EDGE_STYLE : edge.style)
@@ -658,14 +550,13 @@ function normalizeDrawioDoc(raw) {
     edges.push(item)
   }
 
-  var meta = isObject(source.meta) ? source.meta : { engine: 'drawio-svg' }
+  var meta = isObject(source.meta) ? source.meta : {}
   return {
     version: 2,
-    revision: Number.isFinite(Number(source.revision)) ? Number(source.revision) : 0,
+    revision: typeof source.revision === 'string' ? source.revision : Number.isFinite(Number(source.revision)) && source.revision !== undefined && source.revision !== null ? String(source.revision) : '',
     meta: meta,
     nodes: nodes,
     edges: edges,
-    migrated: fromV1,
   }
 }
 
@@ -682,5 +573,5 @@ export {
   avoidFromStyle, styleWithAvoid,
   normalizePoint, normalizePoints, pointsEqual,
   edgeTerminalId, edgeFreePoint,
-  normalizeDrawioDoc, migrateNodeV1, migrateEdgeV1,
+  normalizeDrawioDoc,
 }

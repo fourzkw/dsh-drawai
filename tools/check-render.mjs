@@ -349,15 +349,20 @@ console.log('\n对齐 / 分布：computeAlignMoves 的坐标')
 
 console.log('\n空画布必须可渲染（"新建"出来的第一屏就是它）')
 {
-  // 这里曾经有个真 bug：parseDocument 把"0 个节点"判成错误，于是新建出来的空画布
+  // 这里曾经有个真 bug：把"0 个节点"判成错误，于是新建出来的空画布
   // 一进去就是红字「文档里没有可渲染的 nodes」，右键也点不了 —— 等于新建功能废掉。
-  const empty = internals.parseDocument('{}')
-  ok(empty.error === undefined && empty.doc.nodes.length === 0, '{} 解析成空画布而不是错误')
-  const emptyArr = internals.parseDocument('{"nodes":[],"edges":[]}')
-  ok(emptyArr.error === undefined && emptyArr.doc.nodes.length === 0, '空 nodes 数组同样可渲染')
-  // 该报错的还得报错：文件根本不是画布文档时不能静默当空画布（否则会把别人的文件当成白纸盖掉）。
-  ok(internals.parseDocument('{不是 json').error !== undefined, '坏 JSON 仍然报错')
-  ok(internals.parseDocument('[]').error !== undefined, '根是数组仍然报错')
+  //
+  // 载体换成 .drawio 之后，客户端不再自己解析文件（mxfile 可能被 drawio 压过，
+  // 浏览器没有 zlib），改由宿主读、客户端只校验**宿主的响应载荷**。
+  const payloadOf = (doc) => ({ ok: true, exists: true, revision: '', doc: doc, notes: [] })
+  const empty = internals.docFromPayload(payloadOf({ nodes: [], edges: [] }))
+  ok(empty.error === undefined && empty.doc.nodes.length === 0, '空文档读回空画布而不是错误')
+  ok(internals.docFromPayload({ ok: true, exists: false, doc: null, notes: [] }).created === true, '文件还不存在 → 当作待创建的空画布')
+  // 该报错的还得报错：载荷不是画布文档时不能静默当空画布（否则会把别的东西当成白纸盖掉）。
+  ok(internals.docFromPayload({ ok: false, error: '读不出来' }).error !== undefined, '宿主报错 → 客户端报错')
+  ok(internals.docFromPayload({ ok: true, exists: true, doc: [] }).error !== undefined, 'doc 是数组 → 报错')
+  ok(internals.docFromPayload(payloadOf({ nodes: 'nope', edges: [] })).error !== undefined, 'nodes 不是数组 → 报错')
+  ok(internals.docFromPayload(null).error !== undefined, '响应不是对象 → 报错')
 
   // 空画布要能真的画出来（不抛错、也不是空字符串）。
   const tree = internals.renderDiagram({ nodes: [], edges: [] }, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
@@ -373,7 +378,7 @@ console.log('\n空舞台：不造"幽灵空文档"；而空画布文件本身仍
   ok(/kind: 'empty'/.test(src), '空舞台是一个显式状态')
   ok(/还没有打开画布/.test(src), '空舞台给出"还没有打开画布"的提示')
   // 但一个**合法的空画布文件**（nodes/edges 都是空数组）仍然要能渲染出来。
-  const blank = internals.parseDocument('{}')
+  const blank = internals.docFromPayload({ ok: true, exists: true, doc: { nodes: [], edges: [] }, revision: '', notes: [] })
   ok(blank.error === undefined, '空文档解析通过')
   const tree = internals.renderDiagram(blank.doc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
   ok(tree !== null && tree.type === 'svg', '空画布渲染出可交互的网格纸（右键加节点）')
@@ -397,21 +402,21 @@ console.log('\n空画布的视口要合理（曾经是 185% 这种荒唐值）')
 
 console.log('\n多画布标签页：同一文件不重复开')
 {
-  let list = [{ key: 'tab:a.dshd.json', path: 'a.dshd.json' }]
+  let list = [{ key: 'tab:a.drawio', path: 'a.drawio' }]
   const open = (path) => {
     const r = internals.openTabIn(list, path)
     list = r.tabs
     return r.active
   }
-  ok(open('b.dshd.json') === 'tab:b.dshd.json' && list.length === 2, '打开新文件 → 新开一个标签')
-  ok(open('a.dshd.json') === 'tab:a.dshd.json' && list.length === 2, '重复打开已开的文件 → 只切过去，不新开')
-  ok(open('A.DSHD.JSON') === 'tab:a.dshd.json' && list.length === 2, '大小写不同视为同一个文件（Windows 路径）')
+  ok(open('b.drawio') === 'tab:b.drawio' && list.length === 2, '打开新文件 → 新开一个标签')
+  ok(open('a.drawio') === 'tab:a.drawio' && list.length === 2, '重复打开已开的文件 → 只切过去，不新开')
+  ok(open('A.DRAWIO') === 'tab:a.drawio' && list.length === 2, '大小写不同视为同一个文件（Windows 路径）')
   const before = list.length
   ok(open(undefined) === null && list.length === before, '非法路径（undefined）不会造出垃圾标签')
   ok(open('') === null && list.length === before, '空字符串同样被挡掉')
 
   // 标签名：取文件名。空路径给一个中性名字 —— 已经没有"未绑定"这种状态了。
-  ok(internals.tabLabelOf('sub/b.dshd.json') === 'b.dshd.json', '文件标签取文件名（含子目录路径）')
+  ok(internals.tabLabelOf('sub/b.drawio') === 'b.drawio', '文件标签取文件名（含子目录路径）')
   ok(internals.tabLabelOf('') === '画布', '空路径给中性名字（不再有"(未绑定)"）')
 }
 
@@ -465,14 +470,14 @@ console.log('\n地址解析：要认得出绝对路径（否则 tab 永久停在
 {
   // 原来只认 dsh-resource://file/session/<id>/<rel>，其余一律 undefined。
   // 而地址实际还可能是别的形式（用户那个 tab 就解析不出来 → 永久"(未绑定)"，
-  // 屏幕空白、AI 却会去改 demo.dshd.json）。现在按形式逐个处理。
+  // 屏幕空白、AI 却会去改 demo.drawio）。现在按形式逐个处理。
   const cases = [
-    ['dsh-resource://file/session/abc/demo.dshd.json', 'demo.dshd.json'],
-    ['dsh-resource://file/demo.dshd.json', 'demo.dshd.json'],
-    ['file:///D:/ws/a.dshd.json', 'D:/ws/a.dshd.json'],
-    ['/D:/ws/a.dshd.json', 'D:/ws/a.dshd.json'],
-    ['D:\\ws\\a.dshd.json', 'D:/ws/a.dshd.json'],
-    ['D:/ws/sub/a.dshd.json', 'D:/ws/sub/a.dshd.json'],
+    ['dsh-resource://file/session/abc/demo.drawio', 'demo.drawio'],
+    ['dsh-resource://file/demo.drawio', 'demo.drawio'],
+    ['file:///D:/ws/a.drawio', 'D:/ws/a.drawio'],
+    ['/D:/ws/a.drawio', 'D:/ws/a.drawio'],
+    ['D:\\ws\\a.drawio', 'D:/ws/a.drawio'],
+    ['D:/ws/sub/a.drawio', 'D:/ws/sub/a.drawio'],
     ['dsh-resource://file/session/abc/', undefined],
     ['', undefined],
   ]
@@ -488,8 +493,8 @@ console.log('\n「打开」不能关掉或覆盖其他画布')
   const openTabIn = internals.openTabIn
   const names = (l) => l.map((t) => t.path.split(/[\\/]/).pop())
   let list = [
-    { key: 'tab:D:/ws/demo.dshd.json', path: 'D:/ws/demo.dshd.json' },
-    { key: 'tab:D:/ws/bfs.dshd.json', path: 'D:/ws/bfs.dshd.json' },
+    { key: 'tab:D:/ws/demo.drawio', path: 'D:/ws/demo.drawio' },
+    { key: 'tab:D:/ws/bfs.drawio', path: 'D:/ws/bfs.drawio' },
   ]
   const baseline = names(list)
   let vanished = 0
@@ -500,16 +505,16 @@ console.log('\n「打开」不能关掉或覆盖其他画布')
     // 打开操作**绝不允许**让任何已开着的画布消失
     for (const n of before) if (names(list).indexOf(n) < 0) vanished += 1
   }
-  open('D:/ws/demo.dshd.json') // 已开着 → 切过去
-  open('D:/ws/new.dshd.json') // 没开过 → 新增
-  open('D:/ws/new.dshd.json') // 重复 → 不重复开
-  open('D:/WS/NEW.dshd.json') // 大小写不同 → 仍是同一个
-  open('D:\\ws\\new.dshd.json') // 分隔符不同 → 仍是同一个
-  open('D:/ws/third.dshd.json') // 另一个新文件
+  open('D:/ws/demo.drawio') // 已开着 → 切过去
+  open('D:/ws/new.drawio') // 没开过 → 新增
+  open('D:/ws/new.drawio') // 重复 → 不重复开
+  open('D:/WS/NEW.drawio') // 大小写不同 → 仍是同一个
+  open('D:\\ws\\new.drawio') // 分隔符不同 → 仍是同一个
+  open('D:/ws/third.drawio') // 另一个新文件
 
   ok(vanished === 0, '6 次打开都没有让已开画布消失')
   for (const n of baseline) ok(names(list).indexOf(n) >= 0, '原有画布仍在：' + n)
-  const seg = names(list).filter((n) => n.toLowerCase() === 'new.dshd.json')
+  const seg = names(list).filter((n) => n.toLowerCase() === 'new.drawio')
   ok(seg.length === 1, '大小写/分隔符不同的同一路径只占一个标签（实际 ' + seg.length + ' 个）')
   ok(names(list).length === 4, '标签总数 = 2 原有 + new + third = 4（实际 ' + names(list).length + '）')
   // 移除标签只有一条路径：closeTab（标签上的 × 按钮）
@@ -695,8 +700,8 @@ console.log('\n悬空端：解析不丢边，渲染画得出来')
     nodes: [{ id: 'a', x: 0, y: 0, w: 160, h: 60 }],
     edges: [{ id: 'e1', from: 'a', targetPoint: { x: 500, y: 300 }, style: DEFAULT_EDGE_STYLE }],
   }
-  const parsed = internals.parseDocument(JSON.stringify(dangling))
-  ok(parsed.error === undefined && parsed.doc.edges.length === 1, '带悬空端的边不会被解析器丢掉（v1 会整条消失）')
+  const parsed = internals.docFromPayload({ ok: true, exists: true, revision: '', notes: [], doc: dangling })
+  ok(parsed.error === undefined && parsed.doc.edges.length === 1, '带悬空端的边不会被丢掉（只有画布不认的边才会消失）')
   const tree = renderDiagram(parsed.error === undefined ? parsed.doc : { nodes: [], edges: [] }, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
   // 只认**可见的连线 path**：命中层有 className，网格线没有 pointerEvents:none。
   const paths = walk(tree, (n) => n.type === 'path' && n.props.pointerEvents === 'none' && typeof n.props.d === 'string', [])

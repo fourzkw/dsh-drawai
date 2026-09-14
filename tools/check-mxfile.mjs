@@ -11,8 +11,8 @@
  *
  * 用法：node tools/check-mxfile.mjs
  */
-import { deflateRawSync } from 'node:zlib'
-import { buildMxfile, parseMxfile } from '../src/mxfile.js'
+import { deflateRawSync, inflateRawSync } from 'node:zlib'
+import { __plan, applyDocToMxfile, buildMxfile, contentHash, parseMxfile } from '../src/mxfile.js'
 
 let failures = 0
 let checks = 0
@@ -108,12 +108,12 @@ const plain = parseMxfile(PLAIN)
 
   ok(plain.pageCount === 2, '认出这是 2 页的文件')
   const notes = plain.notes.join(' | ')
-  ok(/2 页/.test(notes), 'notes 说明"只导入了第 1 页"：' + notes)
-  ok(/1 个分组\/容器被摊平/.test(notes), 'notes 说明分组被摊平')
-  ok(/1 个图片\/自定义形状按矩形导入/.test(notes), 'notes 说明图片按矩形导入')
+  ok(/2 页/.test(notes), 'notes 说明只显示/编辑第 1 页：' + notes)
+  ok(/1 个分组\/容器/.test(notes), 'notes 说明分组/容器按绝对位置显示（层级仍保留）')
+  ok(/1 个图片\/自定义形状按矩形显示/.test(notes), 'notes 说明图片按矩形显示（单元原样保留）')
   ok(/HTML 标签按纯文本/.test(notes), 'notes 说明 HTML 标签折成纯文本')
   ok(/1 条边是悬空端/.test(notes), 'notes 说明有悬空端')
-  ok(/1 条边的两端都找不到落点/.test(notes), 'notes 说明有边被跳过')
+  ok(/1 条边的两端都找不到落点/.test(notes), 'notes 说明有边不显示但原样保留')
 }
 
 console.log('\n[2] 读压缩的 .drawio（drawio 默认形态）')
@@ -129,12 +129,12 @@ console.log('\n[2] 读压缩的 .drawio（drawio 默认形态）')
   ok(strip(parseMxfile(lying).doc) === strip(plain.doc), 'compressed 属性标错也不影响（按内容判形态）')
 }
 
-console.log('\n[3] 导出成 .drawio：语义文档 → mxfile → 再读回来')
+console.log('\n[3] 新建一份 .drawio：语义文档 → mxfile → 再读回来')
 {
   const doc = {
     version: 2,
     revision: 3,
-    meta: { engine: 'drawio-svg' },
+    meta: { pinned: false },
     nodes: [
       { id: 'n1', label: '起点 & 终点', style: 'rounded=1;arcSize=50;fillColor=#dae8fc;strokeColor=#6c8ebf;', x: 10, y: 20, w: 130, h: 60 },
       { id: 'n2', label: '', style: '', x: 300, y: 200, w: 186, h: 86 },
@@ -144,8 +144,8 @@ console.log('\n[3] 导出成 .drawio：语义文档 → mxfile → 再读回来'
       { id: 'e2', from: 'n1', sourcePoint: undefined, targetPoint: { x: 700, y: 700 }, style: 'edgeStyle=none;endArrow=none;' },
     ],
   }
-  const xml = buildMxfile(doc)
-  ok(xml.indexOf('<mxfile') === 0 && xml.indexOf('</mxfile>') > 0, '导出的是一份完整 mxfile')
+  const xml = buildMxfile(doc).text
+  ok(xml.indexOf('<mxfile') === 0 && xml.indexOf('</mxfile>') > 0, '生成的是一份完整 mxfile')
   ok(xml.indexOf('<mxCell id="0" />') > 0 && xml.indexOf('<mxCell id="1" parent="0" />') > 0, '带上 drawio 的 root 与默认图层单元')
   ok(xml.indexOf('style="rounded=1;arcSize=50;fillColor=#dae8fc;strokeColor=#6c8ebf;"') > 0, 'style 串原样写出（未做任何键名翻译）')
   ok(xml.indexOf('&amp;') > 0, '标签里的 &amp; 转义正确')
@@ -161,15 +161,16 @@ console.log('\n[3] 导出成 .drawio：语义文档 → mxfile → 再读回来'
   ok(JSON.stringify(e1.points) === JSON.stringify(doc.edges[0].points), '折点往返无损：' + JSON.stringify(e1.points))
   const e2 = back.edges.filter((e) => e.id === 'e2')[0]
   ok(e2.sourcePoint === undefined && e2.targetPoint !== undefined && e2.targetPoint.x === 700, '悬空端往返无损（sourcePoint 缺省、targetPoint 保留）')
+  ok(back.revision === contentHash(xml), '文档的 revision 就是文件内容指纹')
 
-  // 再导一次应当与第一次**逐字节相同**（导出是确定性的）
-  ok(buildMxfile(back) === xml, '导出是确定性的（同一份文档导出两次结果一致）')
+  // 再写一次应当与第一次**逐字节相同**（写回是确定性的）
+  ok(buildMxfile(back).text === xml, '生成是确定性的（同一份文档生成两次结果一致）')
 
-  // 压缩导出同样能被自己读回
-  const packedXml = buildMxfile(doc, { compressed: true })
-  ok(packedXml.indexOf('<mxGraphModel') < 0, '压缩导出确实压掉了 XML')
+  // 压缩形态同样能被自己读回
+  const packedXml = buildMxfile(doc, { compressed: true }).text
+  ok(packedXml.indexOf('<mxGraphModel') < 0, '压缩生成确实压掉了 XML')
   const backPacked = parseMxfile(packedXml).doc
-  ok(JSON.stringify({ nodes: backPacked.nodes, edges: backPacked.edges }) === JSON.stringify({ nodes: back.nodes, edges: back.edges }), '压缩导出读回来与未压缩导出一致')
+  ok(JSON.stringify({ nodes: backPacked.nodes, edges: backPacked.edges }) === JSON.stringify({ nodes: back.nodes, edges: back.edges }), '压缩生成读回来与未压缩一致')
 }
 
 console.log('\n[4] 坏输入要报错，而不是给出半张图')
@@ -200,6 +201,118 @@ console.log('\n[4] 坏输入要报错，而不是给出半张图')
     utf16Message = error && error.message ? error.message : String(error)
   }
   ok(/UTF-16/.test(utf16Message), 'UTF-16 文件给出明确的编码诊断：' + utf16Message)
+}
+
+console.log('\n[5] 无损写回：在原文件上做定点手术')
+{
+  // 一份"drawio 真实产物形状"的文件：<object> 包装、容器 + 子单元、第二页、
+  // 我们不认识的边（两端都没落点）、alternateBounds、自定义属性，且**页 1 是压缩的**。
+  const page1 =
+    '<mxGraphModel dx="0" dy="0">' +
+    '<root><mxCell id="X-0" /><mxCell id="1" parent="X-0" />' +
+    '<object label="容器" placeholders="1" subnet="10.0.0" id="cont">' +
+    '<mxCell style="container=1;" parent="1" vertex="1">' +
+    '<mxGeometry x="100" y="50" width="400" height="300" as="geometry">' +
+    '<mxRectangle x="100" y="50" width="250" height="60" as="alternateBounds" />' +
+    '</mxGeometry></mxCell></object>' +
+    '<mxCell id="child" value="子" style="rounded=1;" parent="cont" vertex="1">' +
+    '<mxGeometry x="20" y="30" width="120" height="60" as="geometry" /></mxCell>' +
+    '<mxCell id="ghost" style="edgeStyle=none;" edge="1" parent="1" source="nope" target="nada">' +
+    '<mxGeometry relative="1" as="geometry" /></mxCell>' +
+    '<mxCell id="img" style="image;image=x.png;" parent="1" vertex="1">' +
+    '<mxGeometry x="500" y="500" width="40" height="40" as="geometry" /></mxCell>' +
+    '</root></mxGraphModel>'
+  const page2 = '<diagram id="p2" name="Page-2"><mxGraphModel><root><mxCell id="0" /><mxCell id="1" parent="0" /></root></mxGraphModel></diagram>'
+  const real =
+    '<mxfile host="app.diagrams.net" compressed="true">\n  <diagram id="p1" name="Page-1">\n    ' +
+    deflateRawSync(Buffer.from(encodeURIComponent(page1), 'utf8')).toString('base64') +
+    '\n  </diagram>\n  ' +
+    page2 +
+    '\n</mxfile>\n'
+  const bodyOf = (text) => {
+    const payload = /<diagram id="p1"[^>]*>\s*([^<\s][^<]*?)\s*<\/diagram>/.exec(text)
+    return payload === null ? text : decodeURIComponent(inflateRawSync(Buffer.from(payload[1], 'base64')).toString('utf8'))
+  }
+
+  const read = parseMxfile(real)
+  const doc = read.doc
+  ok(doc.nodes.length === 3 && doc.edges.length === 0, '容器 + 子单元 + 图片导入成 3 个顶点（实际 ' + doc.nodes.length + '）')
+  ok(doc.nodes.filter((n) => n.id === 'child')[0].x === 120, '容器子单元读成绝对坐标（100+20）')
+
+  // ── 第一条不变量：打开后原样保存，文件逐字节不变 ──
+  ok(applyDocToMxfile(real, doc).text === real, '**原样写回 ⇒ 文件逐字节不变**')
+  ok(__plan(real, doc).edits.length === 0, '原样写回时编辑计划为空（0 条编辑）')
+
+  // ── 改内容：节点/边/标签/坐标 ──
+  const moved = JSON.parse(JSON.stringify(doc))
+  moved.nodes.filter((n) => n.id === 'child')[0].x = 220 // 绝对 220 → 相对父级 120
+  moved.nodes.filter((n) => n.id === 'cont')[0].label = '改名了'
+  moved.meta.pinned = true
+  const written = applyDocToMxfile(real, moved).text
+  const backDoc = parseMxfile(written).doc
+  ok(backDoc.nodes.filter((n) => n.id === 'child')[0].x === 220, '子单元移动后读回来还在 220（相对坐标写对了）')
+  ok(backDoc.nodes.filter((n) => n.id === 'cont')[0].label === '改名了', '<object> 包装的标签改在**外层** label 上')
+  ok(backDoc.meta.pinned === true, 'meta.pinned 落进文件（元数据单元）')
+  // 页 1 是压缩的，所以要在**解压后**的页体里数字面量（base64 里当然找不到）。
+  const firstBody = bodyOf(written)
+  ok((firstBody.match(/drawai-meta/g) || []).length === 1, '元数据单元只有一个（不会每次保存追加一个）')
+  const secondWrite = applyDocToMxfile(written, backDoc).text
+  ok((bodyOf(secondWrite).match(/drawai-meta/g) || []).length === 1, '再保存一次也仍然只有一个元数据单元')
+  ok(applyDocToMxfile(written, backDoc).text === written, '写回幂等：同一份文档写两次结果一致')
+  ok(parseMxfile(written).pageCount === 2 && written.indexOf(page2) > 0, '第 2 页**逐字节保留**')
+  ok(/<diagram id="p1"[^>]*>\s*[^<\s]/.test(written), '页 1 写回后仍是压缩形态（形态不被我们改掉）')
+
+  const body = bodyOf(written)
+  ok(body.indexOf('alternateBounds') > 0, '几何里的 <mxRectangle as="alternateBounds"> 原样保留')
+  ok(body.indexOf('placeholders="1"') > 0 && body.indexOf('subnet="10.0.0"') > 0, '<object> 上的自定义属性原样保留')
+  ok(/<mxCell id="child"[^>]*>\s*<mxGeometry x="120"/.test(body), '子单元写出的是**相对父级**的 x="120"')
+  ok(body.indexOf('id="ghost"') > 0, '我们不认识的边（两端没落点）原样留在文件里')
+  ok(body.indexOf('image;image=x.png;') > 0, '图片单元的 style 没被动过')
+
+  // ── 删除：只删我们拥有、且模型里已经没有的单元 ──
+  const killCont = JSON.parse(JSON.stringify(doc))
+  killCont.nodes = killCont.nodes.filter((n) => n.id !== 'cont')
+  const killed = applyDocToMxfile(real, killCont).text
+  const killedBody = bodyOf(killed)
+  ok(killedBody.indexOf('id="cont"') < 0, '删掉容器后它的单元被移除')
+  const parentOfChild = /<mxCell id="child"[^>]*parent="([^"]+)"/.exec(killedBody)
+  ok(parentOfChild !== null && parentOfChild[1] !== 'cont', '子单元被接到还活着的祖先上：parent=' + (parentOfChild === null ? '(无)' : parentOfChild[1]))
+  ok(/<mxCell id="child"[^>]*>\s*<mxGeometry x="120" y="80"/.test(killedBody), '接走时坐标补成新父级下的绝对坐标（120,80）')
+  ok(parseMxfile(killed).doc.nodes.filter((n) => n.id === 'child')[0].x === 120, '画布上的位置没因删容器而变')
+  ok(killedBody.indexOf('id="ghost"') > 0, '删容器不影响我们不认识的单元')
+  ok(applyDocToMxfile(killed, parseMxfile(killed).doc).text === killed, '删完再写一次仍幂等')
+
+  // ── 容器被移动：子单元保持**画布上**的绝对位置 ──
+  const moveCont = JSON.parse(JSON.stringify(doc))
+  moveCont.nodes.filter((n) => n.id === 'cont')[0].x = 700
+  const movedText = applyDocToMxfile(real, moveCont).text
+  const afterMove = parseMxfile(movedText).doc
+  ok(afterMove.nodes.filter((n) => n.id === 'cont')[0].x === 700, '容器移动写回')
+  ok(afterMove.nodes.filter((n) => n.id === 'child')[0].x === 120, '子单元**没有**跟着容器漂移（与画布所见一致）')
+  ok(applyDocToMxfile(movedText, afterMove).text === movedText, '移动容器后仍幂等')
+
+  // ── 新增：插到第一个图层下 ──
+  const added = JSON.parse(JSON.stringify(doc))
+  added.nodes.push({ id: 'new1', label: '新', style: 'rounded=1;', x: 700, y: 700, w: 130, h: 60 })
+  added.edges.push({ id: 'newedge', from: 'new1', to: 'cont', style: 'endArrow=classic;' })
+  const addedText = applyDocToMxfile(real, added).text
+  const addedDoc = parseMxfile(addedText).doc
+  ok(addedDoc.nodes.filter((n) => n.id === 'new1').length === 1 && addedDoc.nodes.filter((n) => n.id === 'new1')[0].x === 700, '新节点写进文件且坐标正确')
+  ok(addedDoc.edges.filter((e) => e.id === 'newedge')[0].from === 'new1', '新边写进文件')
+  ok(applyDocToMxfile(addedText, addedDoc).text === addedText, '新增后仍幂等')
+  ok(addedText.indexOf(page2) > 0, '新增后第 2 页仍逐字节保留')
+  ok(bodyOf(addedText).indexOf('container=1;') > 0, '新增后原有单元的 style 仍在')
+
+  // ── 边上没有一个落点：宁可丢掉并如实上报，也不写出画不出的边 ──
+  const orphan = JSON.parse(JSON.stringify(doc))
+  orphan.edges.push({ id: 'orphan', from: 'nope', to: 'nada', style: '' })
+  const orphanPlan = __plan(real, orphan)
+  ok(orphanPlan.dropped.indexOf('orphan') >= 0, '两端都没落点的边被丢掉并记进 dropped')
+
+  // ── 压缩与非压缩都走同一条写回路径 ──
+  const plainFile = buildMxfile(doc).text
+  const plainWritten = applyDocToMxfile(plainFile, doc).text
+  ok(plainWritten === plainFile, '非压缩文件同样"原样写回逐字节不变"')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')

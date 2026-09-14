@@ -19,6 +19,8 @@ import { dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 // 自测直接引用样式内核：文档格式的"真相"只有一份，测试跟着它走，而不是把键名再抄一遍。
 import { DEFAULT_EDGE_STYLE, edgeFreePoint, formatStyle, parseStyle, styleGet, styleWithSide } from '../src/style-kernel.js'
+// 夹具与断言都用**源文件**的编解码：check-host 打的是 lib/index.js（产物），两边必须同源。
+import { buildMxfile, contentHash, parseMxfile } from '../src/mxfile.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -140,17 +142,18 @@ const exec = { agent: { id: 's1' } }
 
 /** 调一次 diagram_apply。 */
 async function apply(ops, extra) {
-  const args = Object.assign({ path: 'doc.dshd.json', ops: ops }, extra === undefined ? {} : extra)
+  const args = Object.assign({ path: 'doc.drawio', ops: ops }, extra === undefined ? {} : extra)
   return await applyTool.execute(args, exec)
 }
 
-/** 直接放一份文档进内存文件系统。 */
+/** 直接放一份文档进内存文件系统（**写成真正的 mxfile** —— 载体就是 .drawio）。 */
 function seed(doc) {
-  store.set(WORKSPACE + '\\doc.dshd.json', JSON.stringify(doc, null, 2) + '\n')
+  store.set(WORKSPACE + '\\doc.drawio', buildMxfile(doc).text)
 }
 
+/** 读回盘上那份 = 解析 mxfile（测试看到的必须与工具、界面看到的是同一套解析）。 */
 function current() {
-  return JSON.parse(store.get(WORKSPACE + '\\doc.dshd.json'))
+  return parseMxfile(store.get(WORKSPACE + '\\doc.drawio')).doc
 }
 
 // ---- 打写回路由的小工具（导入 / 导出 / 列表都挂在它上面）----------------------
@@ -215,7 +218,7 @@ const GREEN = 'fillColor=#d5e8d4;strokeColor=#82b366;'
 function baseDoc(meta) {
   return {
     version: 2,
-    revision: 7,
+    revision: '',
     meta: meta === undefined ? { engine: 'drawio-svg' } : meta,
     nodes: [
       { id: 'n1', label: '一', style: BLUE, x: 37, y: 211, w: 130, h: 56 },
@@ -234,7 +237,7 @@ function baseDoc(meta) {
 function legacyDoc(meta) {
   return {
     version: 1,
-    revision: 7,
+    revision: '',
     meta: meta === undefined ? { engine: 'drawio-svg' } : meta,
     nodes: [
       { id: 'n1', shape: 'rect', style: 'blue', x: 37, y: 211, w: 130, h: 56, label: '一' },
@@ -273,7 +276,6 @@ console.log('meta.pinned：人手工摆过的版面不能被 AI 改图冲掉')
   await apply([{ op: 'addNode', label: '第三个' }])
   const after1 = current()
   ok(after1.meta.pinned === true, '第一次 AI 改图后 meta.pinned 仍然是 true（回归点）')
-  ok(after1.meta.layout === 'none', '第一次改图按 pinned 走了 layout=none')
   ok(after1.nodes[0].x === n1Before.x && after1.nodes[0].y === n1Before.y, '第一次改图手坐标未被移动')
   ok(after1.nodes.length === 3, '新节点加上了')
 
@@ -281,16 +283,14 @@ console.log('meta.pinned：人手工摆过的版面不能被 AI 改图冲掉')
   await apply([{ op: 'setLabel', id: 'n1', label: '只改个标签' }])
   const after2 = current()
   ok(after2.meta.pinned === true, '第二次 AI 改图后 meta.pinned 仍在')
-  ok(after2.meta.layout === 'none', '第二次改图仍然 layout=none（没被重排）')
   ok(after2.nodes[0].x === n1Before.x && after2.nodes[0].y === n1Before.y, '第二次改图手坐标仍然未被移动（回归点）')
   ok(after2.nodes[0].label === '只改个标签', '标签确实改掉了')
 
   // 显式要求重排时，pinned 不该拦着。
   await apply([{ op: 'setLabel', id: 'n1', label: 'x' }], { layout: 'dagre-tb' })
   const after3 = current()
-  ok(after3.meta.layout === 'dagre-tb', '显式指定 layout 时 pinned 不拦（人想要重排就得重排）')
   ok(after3.meta.pinned === true, '重排之后 pinned 依然保留')
-  ok(after3.nodes[0].x !== n1Before.x || after3.nodes[0].y !== n1Before.y, '显式重排确实移动了坐标')
+  ok(after3.nodes[0].x !== n1Before.x || after3.nodes[0].y !== n1Before.y, '显式指定 layout 时 pinned 不拦（显式重排确实移动了坐标）')
 }
 
 console.log('\n没有 pinned 的文档：默认自动布局')
@@ -318,7 +318,7 @@ console.log('\ndiagram_read 的输出 schema 必须声明返回体里所有字�
   //   而"执行一次、检查字段是否都在 schema 里"能直接复现那个崩溃。）
   seed(baseDoc())
   await apply([{ op: 'setStyle', id: 'e1', dash: 'dashed', arrow: 'both', color: '#b85450' }])
-  const out = await readTool.execute({ path: 'doc.dshd.json' }, exec)
+  const out = await readTool.execute({ path: 'doc.drawio' }, exec)
   const schemaProps = readSchema.properties
   const declaredEdge = schemaProps.edges.items.properties
   const declaredNode = schemaProps.nodes.items.properties
@@ -326,7 +326,8 @@ console.log('\ndiagram_read 的输出 schema 必须声明返回体里所有字�
   for (const e of out.edges) for (const k of Object.keys(e)) if (declaredEdge[k] === undefined) undeclared.push('edges[].' + k)
   for (const n of out.nodes) for (const k of Object.keys(n)) if (declaredNode[k] === undefined) undeclared.push('nodes[].' + k)
   ok(undeclared.length === 0, '真实返回值的字段全部在 schema 里（未声明的会被判非法输出：' + (undeclared.join(', ') || '无') + '）')
-  ok(out.migrated === false, 'v2 文档不会被误判成需要迁移')
+  ok(typeof out.revision === 'string' && out.revision.length === 12, 'revision 是 12 位内容指纹（不再是自增计数）')
+  ok(Array.isArray(out.notes), 'notes 也在 schema 里（多页/图层/图片这类"画布表示不了但原样保留"的说明）')
   ok(out.edges[0].dash === 'dashed' && out.edges[0].arrow === 'both' && out.edges[0].color === '#b85450', '带回的边画法确实是设过的值')
   // 派生字段只是给人/模型看的名字，文档的真相在 style 串里 —— 两者必须同时给得出来。
   ok(styleGet(out.edges[0].style, 'dashed', null) === '1' && styleGet(out.edges[0].style, 'startArrow', null) === 'classic', 'read 的 style 串里能直接看到 drawio 键')
@@ -335,10 +336,11 @@ console.log('\ndiagram_read 的输出 schema 必须声明返回体里所有字�
 
 {
   seed(baseDoc())
+  const beforeLayout = current().nodes.map((n) => n.x)
   await apply([{ op: 'addNode', label: '新' }])
   const doc = current()
-  ok(doc.meta.layout === 'dagre-tb', '未 pinned 的文档默认 dagre-tb')
-  ok(doc.meta.pinned === undefined, '未 pinned 的文档不会被凭空打上 pinned')
+  ok(doc.nodes.map((n) => n.x).join(',') !== beforeLayout.join(','), '未 pinned 的文档：默认自动布局（坐标被重排）')
+  ok(doc.meta.pinned === false, '未 pinned 的文档不会被凭空打上 pinned')
 }
 
 console.log('\n连线的画法：dash / arrow / color 落成 drawio 的 style 键')
@@ -386,7 +388,7 @@ console.log('\n连线的画法：dash / arrow / color 落成 drawio 的 style �
 console.log('\n非法输入必须在写盘之前失败')
 {
   seed(baseDoc())
-  const before = store.get(WORKSPACE + '\\doc.dshd.json')
+  const before = store.get(WORKSPACE + '\\doc.drawio')
 
   const cases = [
     [{ op: 'addEdge', from: 'n1', to: 'n99' }, 'unknown "to" node'],
@@ -411,8 +413,8 @@ console.log('\n非法输入必须在写盘之前失败')
     const stated = message.indexOf(label) >= 0
     ok(threw && stated, '拒绝 ' + JSON.stringify(op.op) + '（' + label + '）' + (threw ? '' : ' —— 竟然没抛错'))
   }
-  ok(store.get(WORKSPACE + '\\doc.dshd.json') === before, '以上全部失败之后，文件一个字节都没变')
-  ok(current().revision === 7, 'revision 未被失败的操作推高')
+  ok(store.get(WORKSPACE + '\\doc.drawio') === before, '以上全部失败之后，文件一个字节都没变')
+  ok(contentHash(store.get(WORKSPACE + '\\doc.drawio')) === contentHash(before), '指纹也没变（失败不留痕）')
 
   let emptyThrew = false
   try {
@@ -423,32 +425,37 @@ console.log('\n非法输入必须在写盘之前失败')
   ok(emptyThrew, '空 ops 被拒')
 }
 
-console.log('\nrevision 与原子性')
+console.log('\nrevision：文件内容指纹 + 原子性')
 {
   seed(baseDoc())
-  ok(current().revision === 7, '起始 revision = 7')
+  const fingerprint0 = contentHash(store.get(WORKSPACE + '\\doc.drawio'))
+  ok(current().revision === fingerprint0, '起始 revision 就是文件内容指纹')
   await apply([{ op: 'setLabel', id: 'n1', label: 'a' }])
-  ok(current().revision === 8, '一次成功改图 revision = 8')
+  const fingerprint1 = contentHash(store.get(WORKSPACE + '\\doc.drawio'))
+  ok(current().revision === fingerprint1 && fingerprint1 !== fingerprint0, '改一次之后指纹变了')
   await apply([{ op: 'setLabel', id: 'n1', label: 'b' }, { op: 'setLabel', id: 'n2', label: 'c' }])
-  ok(current().revision === 9, '一次调用里多个 ops 只 +1（客户端乐观锁语义）')
+  const fingerprint2 = contentHash(store.get(WORKSPACE + '\\doc.drawio'))
+  ok(current().revision === fingerprint2 && fingerprint2 !== fingerprint1, '一次调用里改多个单元 → 一次写回，指纹与文件内容一致')
   // 一批 ops 里前几条合法、后面一条非法：整批都不该落盘。
-  const snapshot = store.get(WORKSPACE + '\\doc.dshd.json')
+  const snapshot = store.get(WORKSPACE + '\\doc.drawio')
   let threw = false
   try {
     await apply([{ op: 'setLabel', id: 'n1', label: 'zzz' }, { op: 'remove', id: 'ghost' }])
   } catch (error) {
     threw = true
   }
-  ok(threw && store.get(WORKSPACE + '\\doc.dshd.json') === snapshot, '同一批里后面的 op 失败 → 前面已改的也不落盘（全或无）')
+  ok(threw && store.get(WORKSPACE + '\\doc.drawio') === snapshot, '同一批里后面的 op 失败 → 前面已改的也不落盘（全或无）')
   ok(current().nodes[0].label !== 'zzz', '内存里也没有留下半成品')
 }
 
 console.log('\n文件不存在时：当作空文档，不报错')
 {
   store.clear()
-  const result = await apply([{ op: 'addNode', label: '从零开始' }], { path: 'brand-new.dshd.json' })
-  ok(result.nodeCount === 1 && result.revision === 1, '空文档上第一个节点 → revision 1')
-  const doc = JSON.parse(store.get(WORKSPACE + '\\brand-new.dshd.json'))
+  const result = await apply([{ op: 'addNode', label: '从零开始' }], { path: 'brand-new.drawio' })
+  ok(result.nodeCount === 1 && typeof result.revision === 'string' && result.revision.length === 12, '文件不存在时从零生成并给出指纹')
+  const text = store.get(WORKSPACE + '\\brand-new.drawio')
+  ok(typeof text === 'string' && text.indexOf('<mxfile') === 0, '新建的是一份 mxfile（不是 JSON）')
+  const doc = parseMxfile(text).doc
   ok(doc.nodes.length === 1 && doc.nodes[0].id === 'n1', 'id 从 n1 开始')
 }
 
@@ -456,20 +463,21 @@ console.log('\ndiagram_read 回读')
 {
   seed(baseDoc())
   await apply([{ op: 'setStyle', id: 'e1', dash: 'dashed', arrow: 'both', color: '#333' }])
-  const read = await readTool.execute({ path: 'doc.dshd.json' }, exec)
-  ok(read.revision === 8, 'read 报出正确 revision')
+  const read = await readTool.execute({ path: 'doc.drawio' }, exec)
+  ok(read.revision === contentHash(store.get(WORKSPACE + '\\doc.drawio')), 'read 报出的 revision 与文件指纹一致')
   ok(read.nodes.length === 2 && read.edges.length === 1, 'read 报出节点/边数量')
   const e = read.edges[0]
   ok(e.dash === 'dashed' && e.arrow === 'both' && e.color === '#333', 'read 把边画法一起报出来（AI 改之前看得到现状）')
   ok(parseStyle(e.style).strokeColor === '#333', 'read 同时给出 style 串原文（派生字段只是便于阅读的名字）')
+  ok(Array.isArray(read.notes), 'read 也带回 notes（画布表示不了但会原样保留的东西）')
 }
 
-console.log('\n格式逻辑：默认省略 / 开放集合 / 折点与端点分离 / v1 读时升级')
+console.log('\n格式逻辑：默认省略 / 开放集合 / 折点与端点分离')
 {
   // ── 默认省略：不给画法，就一个默认键都不写 ──
   store.clear()
-  await apply([{ op: 'addNode', label: '素节点' }], { path: 'fresh.dshd.json' })
-  const fresh = JSON.parse(store.get(WORKSPACE + '\\fresh.dshd.json'))
+  await apply([{ op: 'addNode', label: '素节点' }], { path: 'fresh.drawio' })
+  const fresh = parseMxfile(store.get(WORKSPACE + '\\fresh.drawio')).doc
   ok(fresh.version === 2, '新文档落盘就是 version 2')
   ok(fresh.nodes[0].style === '', '未指定画法的节点 style 是空串（= drawio 的 defaultVertexStyle {}）')
 
@@ -486,7 +494,7 @@ console.log('\n格式逻辑：默认省略 / 开放集合 / 折点与端点分�
     edges: [],
   })
   await apply([{ op: 'setLabel', id: 'n2', label: '改别人的标签' }])
-  ok(current().nodes[0].style === formatStyle(exotic), '一次无关的编辑之后，节点 style 串逐字未变（含未识别的 customKey）')
+  ok(current().nodes[0].style === exotic, '一次无关的编辑之后，节点 style 串逐字未变（含未识别的 customKey，连键序都没被规范化）')
 
   // ── 键级合并：只动点到的键 ──
   await apply([{ op: 'setStyle', id: 'n1', keys: { fillColor: '#eeeeee' } }])
@@ -516,23 +524,6 @@ console.log('\n格式逻辑：默认省略 / 开放集合 / 折点与端点分�
   await apply([{ op: 'setLabel', id: 'a', label: '重排' }], { layout: 'dagre-tb' })
   ok(current().edges[0].points === undefined, '显式重排且端点移动 → 过期折点被清掉（否则会飘在旧坐标上）')
 
-  // ── v1 读时升级：枚举 → drawio 键；折点里的桩点 → 进出侧约束 ──
-  seed(legacyDoc())
-  const migrated = await readTool.execute({ path: 'doc.dshd.json' }, exec)
-  ok(migrated.migrated === true, 'v1 文档被标记为需要迁移')
-  ok(migrated.nodes[0].shape === 'rect' && migrated.nodes[1].shape === 'diamond', 'v1 的 shape 枚举升级后仍报得出形状')
-  ok(parseStyle(migrated.nodes[0].style).fillColor === '#dae8fc', 'v1 的 style:"blue" 升级成 blue 的 fillColor')
-  ok(parseStyle(migrated.nodes[1].style).rhombus === '1', 'v1 的 shape:"diamond" 升级成 rhombus=1')
-  ok(migrated.edges[0].dash === 'dashed' && migrated.edges[0].arrow === 'both', 'v1 的 dash/arrow 升级成 dashed / endArrow+startArrow')
-  ok(styleGet(migrated.edges[0].style, 'strokeColor', null) === '#b85450', 'v1 的 color 升级成 strokeColor')
-  ok(migrated.edges[0].exit === 'e', 'v1 折点里贴在源节点边框上的桩点升级成 exitX/exitY')
-  ok(Array.isArray(migrated.edges[0].points) && migrated.edges[0].points.length === 1, '桩点被从折点里摘掉，只剩真正的折点')
-  ok(current().version === 1, '只是读一眼不会改盘上的文档（读时升级是非破坏的）')
-
-  await apply([{ op: 'setLabel', id: 'n1', label: '迁移后' }])
-  ok(current().version === 2, '迁移过的文档一旦被修改，落盘就是 v2')
-  ok(current().edges[0].dash === undefined && current().edges[0].arrow === undefined && current().nodes[0].shape === undefined, 'v2 文档里不再有 dash/arrow/shape 这些旧字段')
-
   // ── sourcePoint / targetPoint：drawio 语义是"该端**没有**真实顶点时的自由点" ──
   // 有这个规则，才谈得上"端点与折点是两套模型"：连着顶点时端点由 exit*/entry* 约束，
   // 悬空时才用绝对坐标点。宿主与客户端共用内核，所以这里直接对内核断言。
@@ -548,22 +539,22 @@ console.log('\n新建节点的尺寸也是整格（与画布 10px 的移动单�
   // 宿主这边有两个来源：估宽（estimateWidth）与缺省高度（DEFAULT_H）。
   store.clear()
   const longLabel = '很长很长很长很长很长很长很长很长很长的标签'
-  const created = await apply([{ op: 'addNode', label: longLabel }], { path: 'size.dshd.json' })
-  const sizeDoc = JSON.parse(store.get(WORKSPACE + '\\size.dshd.json'))
+  const created = await apply([{ op: 'addNode', label: longLabel }], { path: 'size.drawio' })
+  const sizeDoc = parseMxfile(store.get(WORKSPACE + '\\size.drawio')).doc
   ok(created.nodeCount === 1 && sizeDoc.nodes.length === 1, '新建了一个节点')
   ok(sizeDoc.nodes[0].w % 10 === 0, '估宽向上取整到整格（' + sizeDoc.nodes[0].w + '）')
   ok(sizeDoc.nodes[0].h === 60, '缺省高度是整格 60（原来 56）')
 
   // 估宽不随标签长度失控，也不越界
-  await apply([{ op: 'addNode', label: '短' }], { path: 'size.dshd.json' })
-  const two = JSON.parse(store.get(WORKSPACE + '\\size.dshd.json'))
+  await apply([{ op: 'addNode', label: '短' }], { path: 'size.drawio' })
+  const two = parseMxfile(store.get(WORKSPACE + '\\size.drawio')).doc
   const widths = two.nodes.map((n) => n.w)
   ok(widths.every((w) => w % 10 === 0 && w >= 130 && w <= 300), '每个宽度都是整格且在 [130, 300] 内：' + widths.join(', '))
 }
 
-console.log('\n导入 / 导出 .drawio（走写回路由，和界面点的是同一条）')
+console.log('\n写回路由：list / read / save / create 都只认 .drawio')
 {
-  // 夹具：一份两页的 drawio 文件（第 2 页会被如实报成"只导入了第 1 页"）。
+  // 夹具：一份**两页**的 drawio 文件（第 2 页会被如实报成"只显示第 1 页"，但保存时原样保留）。
   const drawio = [
     '<mxfile host="test" compressed="false" type="device">',
     '  <diagram id="p1" name="Page-1">',
@@ -587,9 +578,8 @@ console.log('\n导入 / 导出 .drawio（走写回路由，和界面点的是同
 
   store.clear()
   store.set(WORKSPACE + '\\flow.drawio', drawio)
-  store.set(WORKSPACE + '\\doc.dshd.json', JSON.stringify({ version: 2, revision: 4, meta: { pinned: true }, nodes: [{ id: 'n1', label: '一个节点', style: '', x: 0, y: 0, w: 130, h: 60 }], edges: [] }, null, 2) + '\n')
 
-  // ── list：.drawio 单列一区（混进画布列表会让"打开"去按 JSON 读一个 XML 文件）──
+  // ── list：列出来的每一个都能直接打开（不再有"先导入成别的格式"这一步）──
   //
   // list 走的是**真实目录**（宿主用 node:readdir 列目录，不是 ctx.fs），
   // 所以这里真的在工作区里建一个小目录当"会话工作区"，用完删掉。
@@ -598,77 +588,104 @@ console.log('\n导入 / 导出 .drawio（走写回路由，和界面点的是同
   mkdirSync(listDir, { recursive: true })
   SESSION2.header.cwd = listDir
   try {
-    writeFileSync(resolve(listDir, 'real.dshd.json'), JSON.stringify({ version: 2, revision: 1, nodes: [], edges: [] }))
-    writeFileSync(resolve(listDir, 'real.drawio'), drawio)
+    writeFileSync(resolve(listDir, 'one.drawio'), drawio)
+    writeFileSync(resolve(listDir, 'notes.txt'), '无关文件')
     const listed = await api({ action: 'list', sessionId: 's2' })
     ok(listed.status === 200 && listed.payload.ok === true, 'list 正常返回')
-    ok(listed.payload.files.indexOf('real.dshd.json') >= 0, 'list 里画布照旧出现在 files：' + JSON.stringify(listed.payload.files))
-    ok(listed.payload.files.indexOf('real.drawio') < 0, '.drawio **不在** files 里（它不是画布）')
-    ok(Array.isArray(listed.payload.drawio) && listed.payload.drawio.indexOf('real.drawio') >= 0, '.drawio 出现在 drawio 一列：' + JSON.stringify(listed.payload.drawio))
-    ok(listed.payload.drawioAbsolute.length === listed.payload.drawio.length, '同时给出绝对路径（客户端拿它当身份）')
+    ok(listed.payload.files.indexOf('one.drawio') >= 0, 'list 列出 .drawio：' + JSON.stringify(listed.payload.files))
+    ok(listed.payload.files.indexOf('notes.txt') < 0, '其它文件不会被当成画布')
+    ok(Array.isArray(listed.payload.absolute) && listed.payload.absolute.length === listed.payload.files.length, '同时给出绝对路径（客户端拿它当身份）')
   } finally {
     rmSync(listDir, { recursive: true, force: true })
   }
 
-  // ── import：读成文档 + 落一份 .dshd.json ──
-  const imported = await api({ action: 'import', sessionId: 's1', path: 'flow.drawio' })
-  ok(imported.status === 200 && imported.payload.ok === true, 'import 成功（' + imported.status + ' ' + String(imported.payload && imported.payload.error) + '）')
-  ok(imported.payload.path === 'flow.dshd.json', '落到同目录的同名画布：' + imported.payload.path)
-  ok(store.get(WORKSPACE + '\\flow.drawio') === drawio, '**原件一个字节都没动**')
-  const importedDoc = JSON.parse(store.get(WORKSPACE + '\\flow.dshd.json'))
-  ok(importedDoc.version === 2 && importedDoc.revision === 1, '导入结果是 v2、revision 1')
-  ok(importedDoc.nodes.length === 2 && importedDoc.edges.length === 1, '导入出 2 个节点 / 1 条边')
-  ok(importedDoc.nodes[0].style === 'rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;', 'style 串原样带过来了')
-  ok(importedDoc.edges[0].from === 'a' && importedDoc.edges[0].to === 'b' && importedDoc.edges[0].label === '走这里', '端点与标签都对')
-  ok(importedDoc.edges[0].points.length === 1 && importedDoc.edges[0].points[0].x === 240, '折点也带过来了')
-  ok(importedDoc.meta.pinned === true && importedDoc.meta.importedFrom === 'flow.drawio', '导入的画布打 pinned，并记住来源文件')
-  ok(imported.payload.notes.join(' | ').indexOf('2 页') >= 0, '损失说明回传给界面：' + imported.payload.notes.join(' | '))
-  ok(imported.payload.doc.nodes.length === 2, '响应里直接带上文档（界面不用再读一次盘）')
+  // ── read：宿主解析 mxfile，交给界面 ──
+  const read = await api({ action: 'read', sessionId: 's1', path: 'flow.drawio' })
+  ok(read.status === 200 && read.payload.ok === true, 'read 成功（' + read.status + ' ' + String(read.payload && read.payload.error) + '）')
+  ok(read.payload.exists === true && read.payload.doc.nodes.length === 2 && read.payload.doc.edges.length === 1, 'read 回出 2 个节点 / 1 条边')
+  ok(read.payload.doc.nodes[0].style === 'rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;', 'style 串原样带过来')
+  ok(read.payload.doc.edges[0].from === 'a' && read.payload.doc.edges[0].to === 'b' && read.payload.doc.edges[0].label === '走这里', '端点与标签都对')
+  ok(read.payload.doc.edges[0].points.length === 1 && read.payload.doc.edges[0].points[0].x === 240, '折点也带过来')
+  ok(read.payload.notes.join(' | ').indexOf('2 页') >= 0, 'notes 回传给界面：' + read.payload.notes.join(' | '))
+  ok(read.payload.revision === contentHash(drawio), 'read 给出的 revision 就是文件内容指纹')
+  ok(typeof read.payload.doc.revision === 'string' && read.payload.doc.revision.length === 12, '文档里的 revision 也是那个指纹')
 
-  // 再导一次：目标被占用就顺延，绝不覆盖（覆盖等于抹掉用户刚从 drawio 导出的那份画布）
-  const again = await api({ action: 'import', sessionId: 's1', path: 'flow.drawio' })
-  ok(again.payload.path === 'flow-2.dshd.json', '同名目标被占用时顺延成 -2：' + again.payload.path)
-  ok(store.get(WORKSPACE + '\\flow.dshd.json') === store.get(WORKSPACE + '\\flow-2.dshd.json'), '两次导入内容一致，且第一份没被改写')
+  // ── 第一次人工保存：只添上 pinned 元数据单元 ──
+  //
+  // "人手工摆过版面"这件事画布表示不了，只能存进文件（drawio 的 <object> 自定义属性）。
+  // 所以第一次保存**必然**多一个元数据单元 —— 除此之外一个字节都不该动。
+  const noop = await api({ sessionId: 's1', path: 'flow.drawio', revision: read.payload.revision, doc: read.payload.doc })
+  ok(noop.status === 200 && noop.payload.ok === true, 'save 成功（' + noop.status + ' ' + String(noop.payload && noop.payload.error) + '）')
+  const pinnedText = store.get(WORKSPACE + '\\flow.drawio')
+  const withoutMeta = pinnedText.replace(/\n\s*<object label="" drawaiMeta="1" drawaiPinned="1" id="drawai-meta">[\s\S]*?<\/object>/, '')
+  if (withoutMeta !== drawio) {
+    let at = 0
+    while (at < Math.max(withoutMeta.length, drawio.length) && withoutMeta.charAt(at) === drawio.charAt(at)) at += 1
+    console.log('    首个差异 @' + at + '\n    原文: ' + JSON.stringify(drawio.slice(Math.max(0, at - 70), at + 70)) + '\n    写回: ' + JSON.stringify(withoutMeta.slice(Math.max(0, at - 70), at + 70)))
+  }
+  ok(withoutMeta === drawio, '除追加的 pinned 元数据单元外，文件**逐字节不变**')
+  ok(noop.payload.revision !== read.payload.revision, '文件变了，指纹也跟着变')
 
-  // 坏输入
-  const notDrawio = await api({ action: 'import', sessionId: 's1', path: 'doc.dshd.json' })
-  ok(notDrawio.status === 400 && notDrawio.payload.ok !== true, '拒绝导入非 .drawio：' + notDrawio.payload.error)
+  // ── 第二次保存：真的没有改动 → 文件逐字节不变（载体的硬要求）──
+  const read2 = await api({ action: 'read', sessionId: 's1', path: 'flow.drawio' })
+  ok(read2.payload.doc.meta.pinned === true, 'pinned 读得回来')
+  const noop2 = await api({ sessionId: 's1', path: 'flow.drawio', revision: read2.payload.revision, doc: read2.payload.doc })
+  ok(noop2.payload.ok === true && store.get(WORKSPACE + '\\flow.drawio') === pinnedText, '**打开后原样保存 ⇒ 文件逐字节不变**')
+  ok(noop2.payload.revision === read2.payload.revision, '没改动时指纹不变')
+
+  // ── save：改一个坐标 → 只改那一处，其余（第 2 页等）逐字节保留 ──
+  const moved = JSON.parse(JSON.stringify(read2.payload.doc))
+  moved.nodes[0].x = 140
+  const saved = await api({ sessionId: 's1', path: 'flow.drawio', revision: read2.payload.revision, doc: moved })
+  ok(saved.status === 200 && saved.payload.ok === true, 'save 变更成功（' + saved.status + ' ' + String(saved.payload && saved.payload.error) + '）')
+  ok(saved.payload.revision !== read2.payload.revision, '改过之后指纹变了')
+  const afterText = store.get(WORKSPACE + '\\flow.drawio')
+  ok(afterText.indexOf('<diagram id="p2" name="Page-2">') > 0, '第 2 页原样保留')
+  const after = parseMxfile(afterText).doc
+  ok(after.nodes.filter((n) => n.id === 'a')[0].x === 140, '坐标改到了')
+  ok(after.nodes.filter((n) => n.id === 'b')[0].style === 'rhombus;fillColor=#d5e8d4;', '没动过的单元连 style 都逐字未变')
+  ok(after.edges[0].points.length === 1, '没动过的边折点仍在')
+  ok(after.meta.pinned === true, '人工保存过的画布带 pinned（AI 不该再自动重排）')
+
+  // ── 指纹乐观锁：基线对不上就 409，绝不覆盖别处的改动 ──
+  const stale = await api({ sessionId: 's1', path: 'flow.drawio', revision: read2.payload.revision, doc: moved })
+  ok(stale.status === 409 && stale.payload.error === 'revision conflict', '基线指纹过时 → 409：' + stale.status + ' ' + String(stale.payload && stale.payload.error))
+  ok(store.get(WORKSPACE + '\\flow.drawio') === afterText, '409 之后文件没被碰过')
+
+  // ── createOnly（「另存为」）：目标已存在就拒绝，绝不覆盖 ──
+  const saveAs = await api({ sessionId: 's1', path: 'flow.drawio', createOnly: true, doc: moved })
+  ok(saveAs.status === 409 && saveAs.payload.error === 'already exists', '另存为到已存在的文件 → 409 already exists：' + saveAs.status + ' ' + String(saveAs.payload && saveAs.payload.error))
+  const saveAsNew = await api({ sessionId: 's1', path: 'copy.drawio', createOnly: true, doc: moved })
+  ok(saveAsNew.status === 200 && saveAsNew.payload.ok === true, '另存为到新名字 → 成功')
+  ok(parseMxfile(store.get(WORKSPACE + '\\copy.drawio')).doc.nodes.length === 2, '新文件里是当前这份文档（2 个节点）')
+  ok(store.get(WORKSPACE + '\\flow.drawio') === afterText, '另存为不会顺手改原文件')
+
+  // ── 拒绝非 .drawio ──
+  const notDrawio = await api({ sessionId: 's1', path: 'doc.json', revision: '', doc: moved })
+  ok(notDrawio.status === 403 && notDrawio.payload.ok !== true, '拒绝写非 .drawio：' + notDrawio.payload.error)
+
+  // ── 坏文件：读要报错，而不是给半张图 ──
   store.set(WORKSPACE + '\\broken.drawio', '<mxfile><diagram></diagram></mxfile>')
-  const broken = await api({ action: 'import', sessionId: 's1', path: 'broken.drawio' })
+  const broken = await api({ action: 'read', sessionId: 's1', path: 'broken.drawio' })
   ok(broken.status === 400 && /mxGraphModel|mxfile/.test(String(broken.payload.error)), '读不出 mxfile 的文件报错而不是给半张图：' + broken.payload.error)
-  ok(store.get(WORKSPACE + '\\broken.dshd.json') === undefined, '失败时**不落盘**（不留空文件）')
 
-  // ── export：文档 → mxfile ──
-  const exported = await api({ action: 'export', sessionId: 's1', path: 'doc.dshd.json' })
-  ok(exported.status === 200 && exported.payload.ok === true, 'export 成功（' + exported.status + ' ' + String(exported.payload && exported.payload.error) + '）')
-  ok(exported.payload.path === 'doc.drawio', '写在同目录的同名 .drawio：' + exported.payload.path)
-  const exportedText = store.get(WORKSPACE + '\\doc.drawio')
-  ok(typeof exportedText === 'string' && exportedText.indexOf('<mxfile') === 0, '产物是一份 mxfile')
-  const { parseMxfile } = await import('../src/mxfile.js')
-  const back = parseMxfile(exportedText).doc
-  ok(back.nodes.length === 1 && back.nodes[0].label === '一个节点', '导出的文件能被读回来（1 个节点、标签在）')
-  ok(exported.payload.suffixed === false, '第一次导出没有改名')
+  // ── create：新建就落一份真正的 .drawio ──
+  const created = await api({ action: 'create', sessionId: 's1', name: 'brand-new' })
+  ok(created.status === 200 && created.payload.ok === true && created.payload.path === 'brand-new.drawio', 'create 落的是 .drawio：' + String(created.payload && created.payload.path))
+  const createdText = store.get(WORKSPACE + '\\brand-new.drawio')
+  ok(typeof createdText === 'string' && createdText.indexOf('<mxfile') === 0, '新建出来的是一份 mxfile')
+  ok(parseMxfile(createdText).doc.meta.pinned === true, '新建的画布带 pinned（人手工建的，AI 别重排）')
+  ok(created.payload.revision === contentHash(createdText), 'create 返回的 revision 也是内容指纹')
+  const created2 = await api({ action: 'create', sessionId: 's1', name: 'brand-new.drawio' })
+  ok(created2.payload.ok !== true && created2.payload.exists === true, '同名文件已存在时不覆盖')
 
-  // 再导一次：不覆盖已有 .drawio（可能是用户的原稿）
-  const exported2 = await api({ action: 'export', sessionId: 's1', path: 'doc.dshd.json' })
-  ok(exported2.payload.path === 'doc-2.drawio' && exported2.payload.suffixed === true, '同名 .drawio 已存在 → 写成 doc-2.drawio')
-  ok(store.get(WORKSPACE + '\\doc.drawio') === exportedText, '第一份导出没被覆盖')
+  // ── suggest：默认名也补 .drawio ──
+  const suggested = await api({ action: 'suggest', sessionId: 's1', base: 'untitled' })
+  ok(suggested.payload.ok === true && suggested.payload.name === 'untitled.drawio', 'suggest 预填的名字带 .drawio：' + String(suggested.payload && suggested.payload.name))
 
-  // 带 doc：导的是"屏幕上这张"（含还没落盘的改动），而不是盘上的旧版本
-  const unsaved = { version: 2, revision: 4, meta: {}, nodes: [{ id: 'n1', label: '改过的', style: '', x: 0, y: 0, w: 130, h: 60 }, { id: 'n2', label: '新的', style: '', x: 200, y: 0, w: 130, h: 60 }], edges: [] }
-  const exported3 = await api({ action: 'export', sessionId: 's1', path: 'doc.dshd.json', doc: unsaved })
-  ok(exported3.payload.nodes === 2, '带 doc 导出时按界面上的版本（2 个节点）')
-  ok(parseMxfile(store.get(WORKSPACE + '\\doc-3.drawio')).doc.nodes.length === 2, '落盘的确实是 2 个节点那版')
-  ok(JSON.parse(store.get(WORKSPACE + '\\doc.dshd.json')).nodes[0].label === '一个节点', '导出**不会**顺手改画布文档')
-
-  // 压缩形态：drawio 的默认形态，产物必须仍能被自己读回
-  const exported4 = await api({ action: 'export', sessionId: 's1', path: 'doc.dshd.json', compressed: true })
-  const packed = store.get(WORKSPACE + '\\' + exported4.payload.path)
-  ok(packed.indexOf('<mxGraphModel') < 0, 'compressed:true 时正文是压缩的')
-  ok(parseMxfile(packed).doc.nodes.length === 1, '压缩产物仍能读回（1 个节点）')
-
-  const badExport = await api({ action: 'export', sessionId: 's1', path: 'flow.drawio' })
-  ok(badExport.status === 403 && badExport.payload.ok !== true, '拒绝把非 .dshd.json 当画布导出')
+  // ── focus：记录"用户在看哪张"，AI 不传 path 时改它 ──
+  const focus = await api({ action: 'focus', sessionId: 's1', path: 'flow.drawio' })
+  ok(focus.payload.ok === true && focus.payload.focused === 'flow.drawio', 'focus 记下当前画布')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
