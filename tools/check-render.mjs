@@ -546,6 +546,36 @@ console.log('\n适应内容：居中、覆盖，且缩放锚点不漂移')
   const empty = internals.computeFitView(internals.contentBounds({ nodes: [], edges: [] }), 1)
   ok(empty.w >= 400 && empty.h >= 400, '空画布给的是合理视口（不是退化值）')
 
+  // 容器尺寸变化（拖右栏）：**缩放比例不变、宽高比跟着容器走** ——
+  // 这两条一起修掉"拖侧边栏时画布跟着缩放 + 内容畸形"。
+  const before = { x: 100, y: 50, w: 800, h: 600 }
+  const sizes = [
+    [{ w: 800, h: 600 }, { w: 500, h: 600 }], // 右栏被拖窄
+    [{ w: 800, h: 600 }, { w: 1200, h: 600 }], // 拖宽
+    [{ w: 500, h: 900 }, { w: 500, h: 400 }], // 只改高度
+  ]
+  let rescaled = 0
+  let distorted = 0
+  let moved = 0
+  for (const [prevSize, nextSize] of sizes) {
+    const next = internals.resizeViewFor(before, prevSize, nextSize)
+    if (next === null) {
+      distorted += 1
+      continue
+    }
+    const scaleBefore = prevSize.w / before.w
+    const scaleAfter = nextSize.w / next.w
+    if (Math.abs(scaleBefore - scaleAfter) > 1e-9) rescaled += 1
+    if (Math.abs(next.h / next.w - nextSize.h / nextSize.w) > 1e-9) distorted += 1
+    if (next.x !== before.x || next.y !== before.y) moved += 1
+  }
+  ok(rescaled === 0, '容器尺寸变化后缩放比例不变（内容不会跟着放大缩小）')
+  ok(distorted === 0, '视口宽高比始终等于容器宽高比（preserveAspectRatio=none 不会拉伸变形）')
+  ok(moved === 0, '视野左上角不动（拖动过程中画面不会漂移）')
+  ok(internals.resizeViewFor(null, { w: 800, h: 600 }, { w: 500, h: 600 }) === null, '还没有视口时不折算（交给自适应）')
+  ok(internals.resizeViewFor(before, { w: 0, h: 0 }, { w: 500, h: 600 }) === null, '尺寸还没量到时（0）不折算')
+  ok(internals.resizeViewFor(before, { w: 800, h: 600 }, { w: 0, h: 0 }) === null, '新尺寸是 0 时不折算（隐藏的标签页）')
+
   // 锚点缩放：滚轮手感的关键 —— 锚点前后必须停在同一位置
   const current = { x: 0, y: 0, w: 800, h: 600 }
   let drifted = 0
