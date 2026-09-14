@@ -83,6 +83,24 @@ function finite(points) {
   return true
 }
 
+/** 一条路径里每条线段"所在的那条线"的坐标（竖线取 x，横线取 y）。 */
+function lineCoords(pts) {
+  const out = []
+  for (let i = 1; pts !== null && i < pts.length; i += 1) {
+    const p = pts[i - 1]
+    const q = pts[i]
+    if (Math.abs(p.x - q.x) < 0.51) out.push({ axis: 'x', v: p.x })
+    else if (Math.abs(p.y - q.y) < 0.51) out.push({ axis: 'y', v: p.y })
+  }
+  return out
+}
+
+/** 坐标是否落在半格线上。 */
+function onHalfGrid(v) {
+  const step = internals.EDGE_GRID
+  return Math.abs(v / step - Math.round(v / step)) < 0.001
+}
+
 const internals = loadInternals()
 const hotPad = internals.HOT_PAD
 
@@ -532,9 +550,17 @@ console.log('\n折线不该在空地上来回折返（"不是最简洁路径"就
     ok(len <= bound, label + '：在给定折点下已接近最短（' + len + ' ≤ 下界+' + 3 * (wps.length + 1) + ' = ' + bound + '）')
   }
 
-  // 具体防回归：旧算法在这两条上远超下界（截图那条 1341 vs 下界 ~950）。
-  ok(lengthOf(internals.routeThroughWaypoints(db, hb, cases[0][1])) < 1150, '截图那条已收敛（旧算法 1341）')
-  ok(lengthOf(internals.routeThroughWaypoints(db, hb, cases[2][1])) <= 450, '两折点那条已收敛（旧算法 741）')
+  // 每个折点都必须**出现在路径里**：这是 points[] 与路径顶点一一对应的前提，
+  // 也是段把手能拖得动的前提（ensurePinned/pathIndexOf 找不到折点就返回 -1）。
+  //
+  // 这里曾经用"长度 ≤ 1150 / ≤ 450"当防回归 —— 那两条数字其实是在**奖励偷偷丢掉折点**：
+  // 折出去再折回来的那条路径，消掉中间那个折点会短一大截，但它没经过用户摆的点。
+  // 现在改成守住真正的不变量；上面的"接近最短"上界仍然在，那才是长度的判据。
+  for (const [label, wps] of cases) {
+    const pts = internals.routeThroughWaypoints(db, hb, wps)
+    const missing = wps.filter((w) => pts.every((p) => Math.abs(p.x - w.x) >= 0.5 || Math.abs(p.y - w.y) >= 0.5))
+    ok(missing.length === 0, label + '：每个折点都在路径里（没经过的：' + JSON.stringify(missing) + '）')
+  }
 }
 
 console.log('\n共线化简：必须保首尾（这里翻过两次车）')
@@ -717,19 +743,6 @@ console.log('\n自动路由：每条线段都落在整格/半格线上')
     ],
     edges: [],
   }
-  /** 一条路径里每条线段"所在的那条线"的坐标（竖线取 x，横线取 y）。 */
-  const lineCoords = (pts) => {
-    const out = []
-    for (let i = 1; pts !== null && i < pts.length; i += 1) {
-      const p = pts[i - 1]
-      const q = pts[i]
-      if (Math.abs(p.x - q.x) < 0.51) out.push({ axis: 'x', v: p.x })
-      else if (Math.abs(p.y - q.y) < 0.51) out.push({ axis: 'y', v: p.y })
-    }
-    return out
-  }
-  const onHalfGrid = (v) => Math.abs(v / internals.EDGE_GRID - Math.round(v / internals.EDGE_GRID)) < 0.001
-
   const pairs = [
     ['a', 'b'],
     ['b', 'a'],
@@ -759,6 +772,75 @@ console.log('\n自动路由：每条线段都落在整格/半格线上')
   const onBorderA = Math.abs(first.x - (10 + 130)) < 0.01 || Math.abs(first.x - 10) < 0.01 || Math.abs(first.y - 20) < 0.01 || Math.abs(first.y - (20 + 56)) < 0.01
   const onBorderB = Math.abs(last.x - 300) < 0.01 || Math.abs(last.x - (300 + 186)) < 0.01 || Math.abs(last.y - 210) < 0.01 || Math.abs(last.y - (210 + 86)) < 0.01
   ok(onBorderA && onBorderB, '起点/终点仍然精确落在两侧节点的边框上（不被吸附挪开）')
+}
+
+console.log('\n自环：出边与回边在不同侧，整条环在盒子外面')
+{
+  const d = { nodes: [{ id: 'a', x: 100, y: 100, w: 130, h: 60 }], edges: [] }
+  const geo = { x: 100, y: 100, w: 130, h: 60 }
+
+  /** 一条自环的路径。style 里给进出口约束（不写就用缺省的东出南下）。 */
+  function loopPath(style, points) {
+    const edge = { id: 'loop', from: 'a', to: 'a', style: style, points: points }
+    return internals.edgeRoutePoints({ nodes: d.nodes, edges: [edge] }, edge)
+  }
+
+  const plain = loopPath('edgeStyle=orthogonalEdgeStyle;endArrow=classic;')
+  ok(plain !== null && orthogonal(plain) && finite(plain), '自环算得出正交折线（' + (plain === null ? 'null' : plain.length + ' 点') + '）')
+  ok(plain !== null && plain.length >= 4, '自环不是退化的两点线（至少 4 个点：出边—拐弯—回边）')
+  // 缺省：东出 → 南下（nextSideOf('e') = 's'）。
+  const first = plain[0]
+  const last = plain[plain.length - 1]
+  ok(Math.abs(first.x - (geo.x + geo.w)) < 0.01 && Math.abs(first.y - 130) < 0.01, '缺省从东侧中点出去：' + JSON.stringify(first))
+  ok(Math.abs(last.y - (geo.y + geo.h)) < 0.01 && Math.abs(last.x - 165) < 0.01, '缺省从南侧中点回来：' + JSON.stringify(last))
+  // 环必须真的绕到盒子外面去：路径里至少有一个点在盒子右/下边界以外。
+  const outside = plain.filter((p) => p.x > geo.x + geo.w + 0.01 || p.y > geo.y + geo.h + 0.01 || p.x < geo.x - 0.01 || p.y < geo.y - 0.01)
+  ok(outside.length >= 2, '环确实绕到了盒子外面（' + outside.length + ' 个点在外面）')
+  // 没有任何点落进盒子里（贴边不算）。
+  const inside = plain.filter(
+    (p) => p.x > geo.x + 0.01 && p.x < geo.x + geo.w - 0.01 && p.y > geo.y + 0.01 && p.y < geo.y + geo.h - 0.01,
+  )
+  ok(inside.length === 0, '路径没有穿进节点内部（穿进去的点：' + JSON.stringify(inside) + '）')
+  // 贴着边框的那一轴要精确，其余落在半格上。
+  let offGrid = []
+  for (const line of lineCoords(plain)) {
+    if (!onHalfGrid(line.v)) offGrid.push(line.axis + '=' + line.v)
+  }
+  ok(offGrid.length === 0, '自环的每条线段都在半格上（不在的：' + (offGrid.join(', ') || '无') + '）')
+
+  // 约束：西出北回 —— 与落盘写进 style 的 exitX/exitY、entryX/entryY 一致。
+  const wn = loopPath('edgeStyle=orthogonalEdgeStyle;exitX=0;exitY=0.5;entryX=0.5;entryY=0;')
+  const wFirst = wn[0]
+  const nLast = wn[wn.length - 1]
+  ok(Math.abs(wFirst.x - geo.x) < 0.01 && Math.abs(nLast.y - geo.y) < 0.01, '按 style 的约束西出北回：' + JSON.stringify(wFirst) + ' → ' + JSON.stringify(nLast))
+
+  // 同侧约束（西出西回）必须被纠正成不同侧，否则线会原路折回、屏幕上什么都看不见。
+  const ww = loopPath('edgeStyle=orthogonalEdgeStyle;exitX=0;exitY=0.5;entryX=0;entryY=0.5;')
+  const wwLast = ww[ww.length - 1]
+  ok(Math.abs(wwLast.x - geo.x) > 0.01 || Math.abs(wwLast.y - (geo.y + geo.h / 2)) > 0.01 + 1e-9, '同侧约束会被换成另一个侧（回边落在：' + JSON.stringify(wwLast) + '）')
+  ok(ww.length >= 4 && orthogonal(ww), '纠正之后仍是一条像样的环')
+
+  // 用户摆过折点 → 必须穿过去（人摆的优先，和普通边同一套规则）。
+  const withPoints = loopPath('edgeStyle=orthogonalEdgeStyle;', [{ x: 400, y: 400 }])
+  ok(withPoints !== null && orthogonal(withPoints), '带折点的自环也算得出正交折线')
+  ok(withPoints.some((p) => p.x === 400 && p.y === 400), '折点原样成为路径顶点（' + JSON.stringify(withPoints) + '）')
+
+  // 确定性：同一条边算两次必须逐点一致（渲染与命中都靠它）。
+  ok(JSON.stringify(loopPath('edgeStyle=orthogonalEdgeStyle;')) === JSON.stringify(plain), '自环路由是确定性的')
+
+  // 预览：指针停在起点节点自己身上时，应当给出**自环预览**而不是 null。
+  const g = internals.buildGeometry(d)
+  const seed = { from: 'a', side: 'e', x: 0, y: 0 }
+  const preview = internals.routePreviewFor(d, g, { x: 165, y: 170 }, 'a', geo, seed, internals.HOT_PAD, null)
+  ok(preview !== null && preview.hot !== null && preview.hot.id === 'a', '指针回到起点节点上 → 命中它（自环预览的前提）')
+  ok(preview !== null && orthogonal(preview.points) && preview.points.length >= 4, '预览给的就是自环折线（不是空、也不是直线）')
+  ok(preview !== null && preview.sides.to !== preview.sides.from, '预览选中的进出口不是同一个侧（' + JSON.stringify(preview === null ? null : preview.sides) + '）')
+  if (preview !== null) {
+    // 预览即结果：预览的侧 = 落盘写进 style 的侧，路由也必须一致。
+    const style = 'edgeStyle=orthogonalEdgeStyle;'
+    const committed = internals.pinnedSideOf ? { id: 'loop', from: 'a', to: 'a', style: style } : null
+    void committed
+  }
 }
 
 console.log('\n画布真图的连线不变量（直接读工作区里的 demo.drawio）')

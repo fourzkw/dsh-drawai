@@ -552,6 +552,33 @@ console.log('\n新建节点的尺寸也是整格（与画布 10px 的移动单�
   ok(widths.every((w) => w % 10 === 0 && w >= 130 && w <= 300), '每个宽度都是整格且在 [130, 300] 内：' + widths.join(', '))
 }
 
+console.log('\n自环：允许（与 drawio 一致），自动布局忽略它')
+{
+  seed(baseDoc())
+  await apply([{ op: 'addEdge', from: 'n1', to: 'n1', label: '自己连自己' }])
+  const loop = current().edges.filter((e) => e.from === 'n1' && e.to === 'n1')[0]
+  ok(loop !== undefined && loop.label === '自己连自己', 'from === to 的边能写进文件')
+  const fileText = store.get(WORKSPACE + '\\doc.drawio')
+  ok(/source="n1"/.test(fileText) && /target="n1"/.test(fileText), '两端都写成同一个节点（mxfile 里就是 source === target）')
+
+  // 自动布局：自环必须被忽略而不是把分层搞崩（含环图的分层本来就麻烦，自环更敏感）。
+  await apply([{ op: 'addNode', label: 'x' }], { layout: 'dagre-tb' })
+  const after = current()
+  ok(
+    after.edges.some((e) => e.from === e.to),
+    '重排之后自环还在',
+  )
+  ok(
+    after.nodes.every((n) => Number.isFinite(n.x) && Number.isFinite(n.y)),
+    '重排后坐标都是有限数（自环没把布局搞崩）',
+  )
+  const read = await readTool.execute({ path: 'doc.drawio' }, exec)
+  ok(
+    read.edges.some((e) => e.from === e.to),
+    'diagram_read 也能把这条件自环读回来',
+  )
+}
+
 console.log('\n写回路由：list / read / save / create 都只认 .drawio')
 {
   // 夹具：一份**两页**的 drawio 文件（第 2 页会被如实报成"只显示第 1 页"，但保存时原样保留）。

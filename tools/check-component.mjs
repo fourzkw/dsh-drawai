@@ -275,6 +275,9 @@ console.log('\n工具条：按类型合并为下拉菜单')
       // 名字对不上会立刻炸出来（比"跑起来才发现菜单点不动"早得多）。
       openNewCanvasPanel: () => {},
       openFilePicker: () => {},
+      copySelection: () => {},
+      cutSelection: () => {},
+      pasteClipboard: () => {},
       saveNow: () => {},
       openSaveAsPanel: () => {},
       pickDirectoryAndList: () => {},
@@ -289,6 +292,8 @@ console.log('\n工具条：按类型合并为下拉菜单')
       canSave: true,
       canUndo: true,
       canRedo: true,
+      // 复制/剪切要在有选区时可用 —— 它也是 toolbarMenus 的自由变量。
+      selectedIds: ['n1'],
       modeTag: 'draw.io 外观',
       // 空舞台（一张画布都没打开）时菜单项要禁用 —— 它也是 toolbarMenus 的自由变量。
       empty: false,
@@ -303,7 +308,7 @@ console.log('\n工具条：按类型合并为下拉菜单')
     if (menus !== null) {
     ok(menus.map((m) => m.key).join(',') === 'file,edit,view,export', '恰好 4 类：文件 / 编辑 / 视图 / 导出')
     const total = menus.reduce((n, m) => n + m.items.length, 0)
-    ok(total === 12, '所有操作都有归处（实际 ' + total + ' 项）')
+    ok(total === 15, '所有操作都有归处（实际 ' + total + ' 项）')
     ok(menus.every((m) => typeof m.title === 'string' && m.title.length > 0), '每个菜单都有悬停说明（title）')
     ok(menus.every((m) => m.items.every((i) => typeof i.label === 'string' && i.label.length > 0)), '每一项都有 label')
     ok(menus.every((m) => m.items.every((i) => typeof i.onClick === 'function')), '每一项都有 onClick')
@@ -378,6 +383,25 @@ console.log('\n层级：工作栏在标签页之上')
   ok(/const rootRef = React\.useRef\(null\)/.test(src), 'root 上有 ref，供菜单定位')
 }
 
+
+console.log('\n自环与复制粘贴的接线（手势与快捷键必须真的连上）')
+{
+  // 用与产物同款的组合 body 当"源码"：这里断言的是文本接线，不是运行行为。
+  const source = src
+  // 自环：手势不能再被挡住，且预览与落盘共用"进出口不同侧"的纠正。
+  ok(!/if \(linking\.from === id\) return/.test(source), '连线拖回起点不再被直接 return 掉（自环手势通了）')
+  ok(/selfLoopPath/.test(source) && /nextSideOf/.test(source), '自环路由与"换一个侧"的纠正都在')
+  ok(/toSide === seedSide\) toSide = nextSideOf/.test(source), '预览里也做同侧纠正（预览即结果）')
+  // 剪贴板：快捷键与菜单项都接上了。
+  ok(/event\.key === 'c'/.test(source) && /copySelection\(\)/.test(source), 'Ctrl+C → copySelection')
+  ok(/event\.key === 'x'/.test(source) && /cutSelection\(\)/.test(source), 'Ctrl+X → cutSelection')
+  ok(/event\.key === 'v'/.test(source) && /pasteClipboard\(\)/.test(source), 'Ctrl+V → pasteClipboard')
+  ok(
+    /item\('复制', copySelection/.test(source) && /item\('剪切', cutSelection/.test(source) && /item\('粘贴', pasteClipboard/.test(source),
+    '编辑菜单里有复制 / 剪切 / 粘贴',
+  )
+  ok(/let clipboard = null/.test(source), '剪贴板是模块级的（跨标签页也能贴）')
+}
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

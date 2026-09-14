@@ -708,5 +708,81 @@ console.log('\n悬空端：解析不丢边，渲染画得出来')
   ok(paths.length === 1 && paths[0].props.d.indexOf('NaN') < 0, '悬空端的边真的画出了一条合法路径（paths=' + paths.length + '，d=' + (paths.length > 0 ? String(paths[0].props.d).slice(0, 70) : '-') + '）')
 }
 
+console.log('\n自环：画得出一个真的环（不是一个点、也不是 NaN）')
+{
+  const loopDoc = {
+    version: 2,
+    nodes: [{ id: 'a', x: 40, y: 40, w: 160, h: 60 }],
+    edges: [{ id: 'e1', from: 'a', to: 'a', label: '自己', style: 'edgeStyle=orthogonalEdgeStyle;exitX=1;exitY=0.5;entryX=0.5;entryY=0;' }],
+  }
+  const parsed = internals.docFromPayload({ ok: true, exists: true, revision: '', notes: [], doc: loopDoc })
+  ok(parsed.error === undefined && parsed.doc.edges.length === 1, '自环不会被解析器丢掉（from === to 是合法的）')
+  const tree = renderDiagram(parsed.doc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const paths = walk(tree, (n) => n.type === 'path' && n.props.pointerEvents === 'none' && typeof n.props.d === 'string', [])
+  const d = paths.length > 0 ? String(paths[0].props.d) : ''
+  ok(paths.length === 1 && d.indexOf('NaN') < 0, '自环画出了一条合法路径（paths=' + paths.length + '，d=' + d.slice(0, 70) + '）')
+  // 环必须真的绕出去：路径里至少有一个点在节点右/上边界之外。
+  const pts = internals.edgeRoutePoints(parsed.doc, parsed.doc.edges[0])
+  ok(
+    Array.isArray(pts) && pts.some((p) => p.x > 40 + 160 + 0.01 || p.y < 40 - 0.01),
+    '环绕到了节点外面（' + JSON.stringify(pts) + '）',
+  )
+  ok(Array.isArray(pts) && pts.length >= 4, '环有至少 4 个顶点（出边—折—回边）')
+}
+
+console.log('\n剪贴板：复制/粘贴的语义（id 不撞、折点不共享、只搬内部连线）')
+{
+  const doc = {
+    version: 2,
+    revision: '',
+    nodes: [
+      { id: 'n1', label: '一', style: 'fillColor=#dae8fc;', x: 0, y: 0, w: 130, h: 60 },
+      { id: 'n2', label: '二', style: '', x: 200, y: 0, w: 130, h: 60 },
+      { id: 'n3', label: '三', style: '', x: 400, y: 0, w: 130, h: 60 },
+    ],
+    edges: [
+      { id: 'e1', from: 'n1', to: 'n2', label: '内部', style: DEFAULT_EDGE_STYLE, points: [{ x: 165, y: 90 }] },
+      { id: 'e2', from: 'n2', to: 'n3', label: '跨出去', style: DEFAULT_EDGE_STYLE },
+      { id: 'e3', from: 'n1', to: 'n1', style: DEFAULT_EDGE_STYLE },
+    ],
+  }
+
+  // 只选中 n1 / n2：e1（两端都在选区）该进来，e2（跨出去）不该。
+  const clip = internals.collectClipboard(doc, ['n1', 'n2'])
+  ok(clip !== null && clip.nodes.length === 2, '复制收了选中的两个节点')
+  ok(
+    clip !== null && clip.edges.length === 2 && clip.edges.map((e) => e.id).join(',') === 'e1,e3',
+    '只收两端都在选区内的边（跨出去的 e2 不收；自环 e3 两端都在，收）',
+  )
+  // 深拷贝：改剪贴板里的折点不能动到原文档。
+  clip.edges[0].points[0].x = 999
+  ok(doc.edges[0].points[0].x === 165, '剪贴板里的折点是拷贝（改它不动原文档）')
+
+  const clip2 = internals.collectClipboard(doc, ['n1', 'n2'])
+  const pasted = internals.pasteInto(doc, clip2, 20, 20)
+  ok(pasted !== null && pasted.doc.nodes.length === 5, '粘贴后节点数 +2（实际 ' + (pasted === null ? '-' : pasted.doc.nodes.length) + '）')
+  const ids = pasted.doc.nodes.map((n) => n.id)
+  ok(new Set(ids).size === ids.length, '节点 id 不撞车：' + ids.join(','))
+  ok(pasted.doc.nodes.filter((n) => n.id === 'n4')[0].x === 20 && pasted.doc.nodes.filter((n) => n.id === 'n4')[0].y === 20, '粘贴的节点整体平移（+20,+20）')
+  ok(pasted.doc.nodes.filter((n) => n.id === 'n4')[0].label === '一' && pasted.doc.nodes.filter((n) => n.id === 'n4')[0].style === 'fillColor=#dae8fc;', '标签与样式跟着走')
+  const newEdge = pasted.doc.edges.filter((e) => e.id === 'e4')[0]
+  ok(newEdge !== undefined && newEdge.from === 'n4' && newEdge.to === 'n5', '内部连线的两端被改写成新节点：' + (newEdge === undefined ? '-' : newEdge.from + '→' + newEdge.to))
+  ok(newEdge !== undefined && newEdge.points[0].x === 185, '折点也跟着平移（165+20）')
+  ok(doc.nodes.length === 3 && doc.edges.length === 3, '粘贴不改原文档（纯函数）')
+  ok(pasted.ids.indexOf('n4') >= 0 && pasted.ids.indexOf('e4') >= 0, '返回新选中集（贴完接着能拖）')
+
+  // 再贴一次：id 继续往后排，不会覆盖上一次贴出来的。
+  const twice = internals.pasteInto(pasted.doc, clip2, 20, 20)
+  ok(
+    twice.doc.nodes.filter((n) => n.id === 'n6').length === 1 && twice.doc.edges.filter((e) => e.id === 'e6').length === 1,
+    '连贴两次各自拿到新 id：' + twice.doc.nodes.map((n) => n.id).join(','),
+  )
+
+  // 没选中任何节点 → 没有可复制的（调用方据此提示，而不是静默无反应）。
+  ok(internals.collectClipboard(doc, []) === null, '空选区复制不出东西')
+  ok(internals.collectClipboard(doc, ['nope']) === null, '选了个不存在的 id 也复制不出东西')
+  ok(internals.pasteInto(doc, null, 0, 0) === null, '空剪贴板粘不出东西')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1
