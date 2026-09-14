@@ -843,6 +843,89 @@ console.log('\n自环：出边与回边在不同侧，整条环在盒子外面')
   }
 }
 
+console.log('\n拖动节点时端点不许来回跳（路由迟滞）')
+{
+  // 实测的病：直连路线的合法性在避让边界（8px 余量）上反复翻转 ——
+  // 穿过 c → 干净 → 又穿过 d → 又干净，于是路由在"绕上面"和"直连"之间来回切，
+  // 端点侧跟着 n→n ↔ e→w 跳。用户看到的就是"连线自己换端点"。
+  const a = { id: 'a', x: 0, y: 0, w: 160, h: 60 }
+  const obstacles = [
+    { id: 'c', x: 300, y: 120, w: 160, h: 60 },
+    { id: 'd', x: 120, y: 260, w: 160, h: 60 },
+  ]
+  const snapFree = (v) => Math.round(v / internals.EDGE_GRID) * internals.EDGE_GRID
+  const sideOf = (geo, p) => {
+    const cx = snapFree(geo.x + geo.w / 2)
+    const cy = snapFree(geo.y + geo.h / 2)
+    if (Math.abs(p.x - geo.x) < 0.6 && Math.abs(p.y - cy) < 0.6) return 'w'
+    if (Math.abs(p.x - (geo.x + geo.w)) < 0.6 && Math.abs(p.y - cy) < 0.6) return 'e'
+    if (Math.abs(p.y - geo.y) < 0.6 && Math.abs(p.x - cx) < 0.6) return 'n'
+    if (Math.abs(p.y - (geo.y + geo.h)) < 0.6 && Math.abs(p.x - cx) < 0.6) return 's'
+    return '?'
+  }
+
+  /** 模拟一次拖动：返回每一帧的"端点侧"序列。 */
+  function dragSequence(memory) {
+    const tags = []
+    for (let i = 0; i <= 120; i += 1) {
+      const b = { id: 'b', x: 700 - i * 5, y: 400 - i * 3, w: 160, h: 60 }
+      const nodes = [a, b].concat(obstacles)
+      const edge = { id: 'e1', from: 'a', to: 'b', style: 'edgeStyle=orthogonalEdgeStyle;' }
+      const pts = internals.edgeRoutePoints({ nodes: nodes, edges: [edge] }, edge, memory)
+      if (pts === null) continue
+      tags.push(sideOf(a, pts[0]) + '→' + sideOf(b, pts[pts.length - 1]))
+    }
+    return tags
+  }
+  const countFlips = (tags) => {
+    let n = 0
+    for (let i = 1; i < tags.length; i += 1) if (tags[i] !== tags[i - 1]) n += 1
+    return n
+  }
+  /** 有没有"跳过去又跳回来"（A→B→A）：这才是用户看得见的抖动。
+   *  先按连续相同压成段，再看段序列里有没有 A→B→A —— 直接按帧看会漏掉持续两帧的抖动。 */
+  const countBounceBacks = (tags) => {
+    const runs = []
+    for (let i = 0; i < tags.length; i += 1) {
+      if (runs.length === 0 || runs[runs.length - 1] !== tags[i]) runs.push(tags[i])
+    }
+    let n = 0
+    for (let i = 2; i < runs.length; i += 1) if (runs[i] === runs[i - 2] && runs[i] !== runs[i - 1]) n += 1
+    return n
+  }
+
+  const without = dragSequence(undefined)
+  const with_ = dragSequence(new Map())
+  ok(without.length > 100, '扫过 121 帧（实际 ' + without.length + '）')
+  ok(countFlips(with_) < countFlips(without), '迟滞让端点侧切换变少（' + countFlips(without) + ' → ' + countFlips(with_) + '）')
+  ok(countBounceBacks(without) > 0, '无迟滞时确实存在"跳过去又跳回来"（' + countBounceBacks(without) + ' 次）—— 这就是报的 bug')
+  ok(countBounceBacks(with_) === 0, '有迟滞时不出现来回跳（' + countBounceBacks(with_) + ' 次）')
+
+  // 迟滞规则本身：新选择要连续稳定若干帧才采纳；旧的只要还合法就留着。
+  const cands = internals.routeCandidates({ id: 'a', geo: a }, { id: 'b', geo: { x: 400, y: 220, w: 160, h: 60 } })
+  const costs = cands.map(() => ({ hits: 0, bends: 2, length: 500 }))
+  costs[0] = { hits: 0, bends: 2, length: 480 } // 0 号更短 → 期望选它
+  const fakeMemory = new Map()
+  fakeMemory.set('e9', { pick: cands[2].name, pending: null, pendingCount: 0 })
+  let adopted = 0
+  for (let frame = 0; frame < internals.ROUTE_SETTLE_FRAMES + 2; frame += 1) {
+    const picked = { index: 0, bestIndex: 0, costs: costs }
+    const idx = internals.applyRouteHysteresis(cands, picked, { memory: fakeMemory, key: 'e9' })
+    if (cands[idx].name === cands[0].name) adopted = frame + 1
+  }
+  ok(adopted >= internals.ROUTE_SETTLE_FRAMES, '新选择要连续稳定 ' + internals.ROUTE_SETTLE_FRAMES + ' 帧才被采纳（实际第 ' + adopted + ' 帧）')
+  // 旧的那条一旦开始穿模（hits 变差），立刻换掉 —— 安全优先。
+  const blockedCosts = costs.map((c) => Object.assign({}, c))
+  blockedCosts[2] = { hits: 1, bends: 2, length: 500 }
+  const idxBlocked = internals.applyRouteHysteresis(
+    cands,
+    { index: 0, bestIndex: 0, costs: blockedCosts },
+    { memory: new Map([['e9', { pick: cands[2].name, pending: null, pendingCount: 0 }]]), key: 'e9' },
+  )
+  ok(cands[idxBlocked].name === cands[0].name, '记着的那条开始穿模 → 立刻换成干净的（不等迟滞）')
+  ok(internals.applyRouteHysteresis(cands, { index: 0, bestIndex: 0, costs: costs }, undefined) === 0, '没有 memory 时行为不变（直接用挑选结果）')
+}
+
 console.log('\n画布真图的连线不变量（直接读工作区里的 demo.drawio）')
 {
   // 直接拿工作区里那份真文档跑 —— 它就是用户看的那张图。

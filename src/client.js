@@ -421,6 +421,26 @@ function pathCostBetter(cost, best) {
 }
 
 /**
+ * 近似平手时允许的长度差（用户单位）。
+ *
+ * 为什么需要它：代价是 `{hits, bends, length}` 的字典序，而"走上面"和"走下面"两条绕行
+ * 候选常常 **hits 与 bends 完全相同、长度只差几像素**。拖动节点时这两条长度每挪一步就
+ * 互相反超一次 —— 于是端点每帧都在 n↔s 之间跳（实测：斜向拖 120 步，端点切换 49 次，
+ * 用户看到的就是"连线自己在换端点"）。
+ *
+ * 有了这个容差，落在这个范围内的候选一律按**固定优先级**取（正交 → 上 → 下 → 左 → 右），
+ * 于是近似平手的结果是稳定的；只有另一条**明显**更优时才会换。
+ */
+const ROUTE_LENGTH_SLACK = 24
+
+/** 这条候选是否"不比最优差多少"（同一档 hits / bends，长度差在容差内）。 */
+function withinSlack(cost, bestCost) {
+  if (cost.hits > bestCost.hits) return false
+  if (cost.bends > bestCost.bends) return false
+  return cost.length <= bestCost.length + ROUTE_LENGTH_SLACK
+}
+
+/**
  * 去掉连续重复点。
  *
  * 刻意**不做共线点消除** —— 折点必须原样留在路径顶点上。
@@ -955,7 +975,139 @@ function selfLoopPath(geo, sourceSide, targetSide, jetty, waypoints) {
   return finalizePath(pts, chain)
 }
 
-function routeEdge(fromBox, toBox, boxes, bounds, waypoints, sides, straight) {
+/** 某个点是否正好落在盒子某一侧的**中点**上（容差 0.6）。 */
+function isSideMidpoint(geo, point) {
+  for (let i = 0; i < SIDES.length; i += 1) {
+    const mid = sideBorderPoint(geo, SIDES[i])
+    if (Math.abs(mid.x - point.x) < 0.6 && Math.abs(mid.y - point.y) < 0.6) return true
+  }
+  return false
+}
+
+/** 一条路径的两端是否都落在**侧的中点**上。 */
+function hasMidpointEnds(points, fromGeo, toGeo) {
+  if (points.length < 2) return false
+  return isSideMidpoint(fromGeo, points[0]) && isSideMidpoint(toGeo, points[points.length - 1])
+}
+
+/**
+ * 自动路由的候选集合（手动路径与自环不走这里）。
+ *
+ * 抽出来是为了**能被断言与调试**：端点抖动到底是哪两条候选在抢，看候选表最直接
+ * （之前只能靠猜，猜错过两次）。
+ */
+function routeCandidates(fromBox, toBox) {
+  const axis = snapNearAxis(fromBox.geo, toBox.geo)
+  const candFrom = axis.from
+  const candTo = axis.to
+  const top = snapFree(Math.min(candFrom.y, candTo.y) - 60)
+  const bottom = snapFree(Math.max(candFrom.y + candFrom.h, candTo.y + candTo.h) + 60)
+  const left = snapFree(Math.min(candFrom.x, candTo.x) - 60)
+  const right = snapFree(Math.max(candFrom.x + candFrom.w, candTo.x + candTo.w) + 60)
+  return [
+    { name: 'orthoH', points: orthoH(candFrom, candTo) },
+    { name: 'orthoV', points: orthoV(candFrom, candTo) },
+    { name: 'above', points: viaY(candFrom, candTo, top) },
+    { name: 'below', points: viaY(candFrom, candTo, bottom) },
+    { name: 'left', points: viaX(candFrom, candTo, left) },
+    { name: 'right', points: viaX(candFrom, candTo, right) },
+  ]
+}
+
+/**
+ * 从候选里挑一条。纯函数 —— 抽出来是为了能断言"这一步为什么换侧"，
+ * 也因为这段判据连续踩过两次坑（近似平手来回抢、落点风格不一致）。
+ *
+ * 顺序：
+ *   1. 先按代价找出最优（hits → bends → length）；
+ *   2. 在"不比最优差多少"（withinSlack）的候选里，优先**两端都落在侧中点**的那条 ——
+ *      我们的四个端点圆点、exitX/exitY 的语义都指中点；滑动的落点与它们不一致时，
+ *      两者代价接近就会来回抢；
+ *   3. 仍没有就退回按优先级取第一条 withinSlack 的（固定优先级 = 稳定）。
+ *
+ * @returns { index, bestIndex, costs }
+ */
+function pickCandidate(candidates, boxes, skip, fromGeo, toGeo) {
+  const costs = candidates.map((pts) => pathCost(pts, boxes, skip))
+  let bestIndex = 0
+  for (let i = 1; i < costs.length; i += 1) if (pathCostBetter(costs[i], costs[bestIndex])) bestIndex = i
+  const bestCost = costs[bestIndex]
+  let pick = -1
+  for (let i = 0; i < candidates.length; i += 1) {
+    if (!withinSlack(costs[i], bestCost)) continue
+    if (!hasMidpointEnds(candidates[i], fromGeo, toGeo)) continue
+    pick = i
+    break
+  }
+  if (pick < 0) {
+    for (let i = 0; i < candidates.length; i += 1) {
+      if (!withinSlack(costs[i], bestCost)) continue
+      pick = i
+      break
+    }
+  }
+  return { index: pick < 0 ? bestIndex : pick, bestIndex: bestIndex, costs: costs }
+}
+
+/**
+ * 新选择要**连续稳定**这么多帧才被采纳（见 applyRouteHysteresis）。
+ *
+ * 取 3：一次拖动每帧挪几个像素，3 帧 ≈ 几十毫秒 —— 用户察觉不到延迟，
+ * 而避让边界上那种"一两帧的合法窗口"会被它滤掉。
+ */
+const ROUTE_SETTLE_FRAMES = 3
+
+/**
+ * 路由迟滞：**端点侧不能一帧一变**。
+ *
+ * 实测的病：拖动节点时，直连路线的合法性会在避让边界（8px 余量）上反复翻转 ——
+ * 穿过一个节点 → 干净 → 又穿过另一个 → 又干净。于是路由在"绕上面"和"直连"之间来回切，
+ * 端点侧跟着 `n→n` ↔ `e→w` 跳，用户看到的就是"连线自己换端点"（120 步里跳 4 次）。
+ *
+ * 这类抖动只有迟滞能治：
+ *   · 记着的那条**只要还合法**（不穿模、拐弯数不比最优多）就先用它；
+ *   · 想换，必须新选择连续 `ROUTE_SETTLE_FRAMES` 帧都是最优 —— 一两帧的窗口换不动它；
+ *   · 记着的那条一旦**不合法**（开始穿模），立刻换，安全优先。
+ *
+ * 没有 memory 时（自测、一次性路由）行为与以前完全一致。
+ *
+ * @param hint { memory, key } —— memory 是 Map，key 是边 id
+ */
+function applyRouteHysteresis(candidates, picked, hint) {
+  const memory = hint === undefined || hint === null ? undefined : hint.memory
+  const key = hint === undefined || hint === null || typeof hint.key !== 'string' ? null : hint.key
+  if (memory === undefined || memory === null || key === null) return picked.index
+  const bestCost = picked.costs[picked.bestIndex]
+  const remembered = memory.get(key)
+  let keepIndex = -1
+  if (remembered !== undefined && remembered !== null && typeof remembered.pick === 'string') {
+    for (let i = 0; i < candidates.length; i += 1) {
+      if (candidates[i].name === remembered.pick) {
+        keepIndex = i
+        break
+      }
+    }
+  }
+  if (keepIndex >= 0) {
+    const cost = picked.costs[keepIndex]
+    const legal = cost.hits <= bestCost.hits && cost.bends <= bestCost.bends
+    if (!legal) keepIndex = -1
+  }
+  const desiredName = candidates[picked.index].name
+  if (keepIndex >= 0 && keepIndex !== picked.index) {
+    const pending = remembered.pending === desiredName ? remembered.pendingCount + 1 : 1
+    if (pending < ROUTE_SETTLE_FRAMES) {
+      memory.set(key, { pick: remembered.pick, pending: desiredName, pendingCount: pending })
+      return keepIndex
+    }
+    memory.set(key, { pick: desiredName, pending: null, pendingCount: 0 })
+    return picked.index
+  }
+  memory.set(key, { pick: desiredName, pending: null, pendingCount: 0 })
+  return picked.index
+}
+
+function routeEdge(fromBox, toBox, boxes, bounds, waypoints, sides, straight, hint) {
   // 入参是 box（{ id, node, geo, label }），几何在 .geo 上。
   // 这里曾经直接读 from.x / from.y —— box 上没有这些字段，于是 NaN 一路传染：
   // 连线 d="M NaN NaN" 被浏览器丢弃（边全部消失），边标签 x="NaN" 被忽略（全部塌到原点重叠）。
@@ -979,38 +1131,19 @@ function routeEdge(fromBox, toBox, boxes, bounds, waypoints, sides, straight) {
     return [{ x: a.x, y: a.y }, { x: b.x, y: b.y }]
   }
   void bounds
-  // 中心几乎对齐时先统一（见 snapNearAxis）：否则 orthoV/viaY 会在两者之间走一个
-  // 一两像素的台阶，视觉上是同一条线、几何上是两条，一段就长出两个段把手。
-  const axis = snapNearAxis(from, to)
-  const candFrom = axis.from
-  const candTo = axis.to
   const skip = {}
   skip[fromBox.id] = true
   skip[toBox.id] = true
-  // 绕行走廊贴着**这两个端点**，不是贴着整张图。
-  // 贴着整张图时，一条需要避让的边会绕到画布最外圈再回来，看上去就是"线乱跑"。
-  const top = snapFree(Math.min(candFrom.y, candTo.y) - 60)
-  const bottom = snapFree(Math.max(candFrom.y + candFrom.h, candTo.y + candTo.h) + 60)
-  const left = snapFree(Math.min(candFrom.x, candTo.x) - 60)
-  const right = snapFree(Math.max(candFrom.x + candFrom.w, candTo.x + candTo.w) + 60)
-  const candidates = [
-    orthoH(candFrom, candTo),
-    orthoV(candFrom, candTo),
-    viaY(candFrom, candTo, top),
-    viaY(candFrom, candTo, bottom),
-    viaX(candFrom, candTo, left),
-    viaX(candFrom, candTo, right),
-  ]
-  let best = candidates[0]
-  let bestCost = pathCost(candidates[0], boxes, skip)
-  for (let i = 1; i < candidates.length; i += 1) {
-    const cost = pathCost(candidates[i], boxes, skip)
-    if (pathCostBetter(cost, bestCost)) {
-      best = candidates[i]
-      bestCost = cost
-    }
-  }
-  return simplifyCollinear(dedupePoints(best))
+  const raw = routeCandidates(fromBox, toBox)
+  const picked = pickCandidate(
+    raw.map((c) => c.points),
+    boxes,
+    skip,
+    fromBox.geo,
+    toBox.geo,
+  )
+  const index = applyRouteHysteresis(raw, picked, hint)
+  return simplifyCollinear(dedupePoints(raw[index].points))
 }
 
 
@@ -1423,13 +1556,26 @@ function endpointBoxOf(byId, edge, end) {
   return { id: '__free-' + end, geo: { x: point.x, y: point.y, w: 0, h: 0 } }
 }
 
-/** 一条边当前的折线路径（命中与定位都要用，和渲染同一套逻辑）。 */
-function edgeRoutePoints(doc, edge) {
+/** 渲染期构造路由迟滞的 hint（memory 挂在 ui 上，同一次渲染里所有边共用一份）。 */
+function edgeRouteHint(ui, edge) {
+  const memory = ui === undefined || ui === null ? undefined : ui.routeMemory
+  if (memory === undefined || memory === null) return undefined
+  return { memory: memory, key: String(edge.id) }
+}
+
+/**
+ * 一条边当前的折线路径（渲染、命中、定位、段把手都用它）。
+ *
+ * `memory`（可选）是路由迟滞用的 Map：同一张画布上，**渲染与命中必须传同一个** ——
+ * 否则迟滞期间"画出来的线"和"点得到的线"会是两条不同的路。
+ */
+function edgeRoutePoints(doc, edge, memory) {
   const geometry = buildGeometry(doc)
   const from = endpointBoxOf(geometry.byId, edge, 'source')
   const to = endpointBoxOf(geometry.byId, edge, 'target')
   if (from === null || to === null) return null
-  return routeEdgeStyled(from, to, geometry.boxes, geometry.bounds, edge)
+  const hint = memory === undefined || memory === null ? undefined : { memory: memory, key: String(edge.id) }
+  return routeEdgeStyled(from, to, geometry.boxes, geometry.bounds, edge, hint)
 }
 
 /**
@@ -1437,9 +1583,9 @@ function edgeRoutePoints(doc, edge) {
  * （`edgeStyle=none`）统统从文档的 style 键读。渲染、命中、标签定位、预览全走它 ——
  * 一条边在哪儿只有一个答案。
  */
-function routeEdgeStyled(fromBox, toBox, boxes, bounds, edge) {
+function routeEdgeStyled(fromBox, toBox, boxes, bounds, edge, hint) {
   const style = typeof edge.style === 'string' ? edge.style : DEFAULT_EDGE_STYLE
-  return routeEdge(fromBox, toBox, boxes, bounds, edge.points, sidesFromStyle(style), !isOrthogonalEdgeStyle(style))
+  return routeEdge(fromBox, toBox, boxes, bounds, edge.points, sidesFromStyle(style), !isOrthogonalEdgeStyle(style), hint)
 }
 
 /**
@@ -1772,7 +1918,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     const from = endpointBoxOf(byId, edge, 'source')
     const to = endpointBoxOf(byId, edge, 'target')
     if (from === null || to === null) continue
-    let pts = routeEdgeStyled(from, to, boxes, bounds, edge)
+    let pts = routeEdgeStyled(from, to, boxes, bounds, edge, edgeRouteHint(ui, edge))
     // 安全网：路由若产出非有限坐标，退化成"中心直线"。
     // 宁可画得难看，也不要让边无声消失 —— 浏览器会静默丢弃 d="M NaN NaN" 的路径，
     // 这正是上面那个 box/geo 混用 bug 能藏这么久的原因。
@@ -2547,6 +2693,14 @@ function CanvasView(props) {
   const panRef = React.useRef(null)
   /** 上一次量到的容器尺寸：容器一变就要把视口按**同一个缩放比例**折算过去（见 measure）。 */
   const measuredRef = React.useRef({ w: 0, h: 0 })
+  /**
+   * 路由迟滞的记忆：边 id → 上一次用的候选。
+   *
+   * 为什么要有它：拖动节点时，直连路线的合法性会在避让边界上反复翻转，
+   * 于是路由在"绕上面"和"直连"之间一帧一变、端点侧跟着跳（详见 applyRouteHysteresis）。
+   * **渲染与命中共用这一份** —— 否则迟滞期间"画出来的线"和"点得到的线"会是两条路。
+   */
+  const routeMemoryRef = React.useRef(new Map())
 
   // ---- 右键菜单 / 连线拖拽 ------------------------------------------------
   const menuState = React.useState(null) // { kind: 'canvas'|'node'|'edge', id, left, top, userX, userY }
@@ -3708,7 +3862,7 @@ function CanvasView(props) {
       //
       // 端点落在起点/终点一侧时同样成立：那个顶点被钉住之后，形状的落点会朝它重新计算，
       // 于是自动多出一小段连接 —— 也就是"相当于新建一条线段"。
-      const pts = edgeRoutePoints(current, edge)
+      const pts = edgeRoutePoints(current, edge, routeMemoryRef.current)
       if (pts === null || index < 0 || index >= pts.length - 1) return
       const a = pts[index]
       const b = pts[index + 1]
@@ -3814,7 +3968,7 @@ function CanvasView(props) {
     if (current === null || svg === null || canvas === null) return
     const edge = edgeById(edgeId)
     if (edge === null) return
-    const pts = edgeRoutePoints(current, edge)
+    const pts = edgeRoutePoints(current, edge, routeMemoryRef.current)
     const label = pts === null ? null : edgeLabelPosition(pts)
     if (label === null) return
     const ctm = svg.getScreenCTM()
@@ -3871,7 +4025,7 @@ function CanvasView(props) {
         setEditing(null)
         return
       }
-      const pts = edgeRoutePoints(current, edge)
+      const pts = edgeRoutePoints(current, edge, routeMemoryRef.current)
       const label = pts === null ? null : edgeLabelPosition(pts)
       if (label === null) return
       next = { left: label.x * scale + ctm.e - rect.left - 60, top: label.y * scale + ctm.f - rect.top - 12, width: 120, height: 24 }
@@ -4262,6 +4416,7 @@ function CanvasView(props) {
 
   const ui = {
     selectedIds: selectedIds,
+    routeMemory: routeMemoryRef.current,
     marquee: marquee,
     singleSelectedNodeId: singleSelectedNodeId,
     connectFrom: connectFrom,
@@ -5295,6 +5450,15 @@ exports.__routeInternals = {
   FALLBACK_NODE_H: FALLBACK_NODE_H,
   routeThroughWaypoints: routeThroughWaypoints,
   routeEdge: routeEdge,
+  routeCandidates: routeCandidates,
+  pickCandidate: pickCandidate,
+  applyRouteHysteresis: applyRouteHysteresis,
+  ROUTE_SETTLE_FRAMES: ROUTE_SETTLE_FRAMES,
+  buildGeometry: buildGeometry,
+  pathCost: pathCost,
+  withinSlack: withinSlack,
+  hasMidpointEnds: hasMidpointEnds,
+  ROUTE_LENGTH_SLACK: ROUTE_LENGTH_SLACK,
   selfLoopPath: selfLoopPath,
   nextSideOf: nextSideOf,
   collectClipboard: collectClipboard,
