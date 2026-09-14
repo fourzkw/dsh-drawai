@@ -103,6 +103,20 @@ const GRID = 10
 /** 连线（折点/线段）的最小移动单位：**半格 = 5px**。连线比节点需要更细的手感。 */
 const EDGE_GRID = GRID / 2
 
+/**
+ * 新建节点的默认尺寸：**都取整格**。
+ *
+ * 为什么：尺寸不整格，节点中心就会落在半像素上（旧的 130×56 默认值，中心 y 偏移 28），
+ * 连线于是动不动多出"差一像素"的台阶。默认 60 与 GRID 对齐后，只要坐标在格线上，
+ * 中心就永远是 5 的倍数。
+ */
+const NEW_NODE_W = 130
+const NEW_NODE_H = 60
+
+/** 文档里没写 w/h 时的兜底尺寸（同样整格）。 */
+const FALLBACK_NODE_W = 150
+const FALLBACK_NODE_H = NEW_NODE_H
+
 /** 连线拖拽：指针离目标节点边框多近就算"落在它身上"（吸附容差，用户坐标单位）。 */
 const HOT_PAD = 18
 /** 落盘防抖窗口（ms）：拖拽过程中不写盘，停手后落一次。 */
@@ -1008,8 +1022,8 @@ function contentBounds(doc) {
     const n = doc.nodes[i]
     const x = numberOr(n.x, 0)
     const y = numberOr(n.y, 0)
-    const w = numberOr(n.w, 150)
-    const h = numberOr(n.h, 56)
+    const w = numberOr(n.w, FALLBACK_NODE_W)
+    const h = numberOr(n.h, FALLBACK_NODE_H)
     if (x < minX) minX = x
     if (y < minY) minY = y
     if (x + w > maxX) maxX = x + w
@@ -1076,7 +1090,7 @@ function buildGeometry(doc) {
   let maxY = -Infinity
   for (let i = 0; i < doc.nodes.length; i += 1) {
     const n = doc.nodes[i]
-    const geo = { x: numberOr(n.x, 0), y: numberOr(n.y, 0), w: numberOr(n.w, 150), h: numberOr(n.h, 56) }
+    const geo = { x: numberOr(n.x, 0), y: numberOr(n.y, 0), w: numberOr(n.w, FALLBACK_NODE_W), h: numberOr(n.h, FALLBACK_NODE_H) }
     const box = { id: n.id, node: n, geo: geo, label: typeof n.label === 'string' ? n.label : n.id }
     boxes.push(box)
     byId[n.id] = box
@@ -1109,7 +1123,7 @@ function computeAlignMoves(doc, ids, kind, grid) {
   for (let i = 0; i < doc.nodes.length; i += 1) {
     const n = doc.nodes[i]
     if (ids.indexOf(n.id) < 0) continue
-    targets.push({ id: n.id, x: numberOr(n.x, 0), y: numberOr(n.y, 0), w: numberOr(n.w, 150), h: numberOr(n.h, 56) })
+    targets.push({ id: n.id, x: numberOr(n.x, 0), y: numberOr(n.y, 0), w: numberOr(n.w, FALLBACK_NODE_W), h: numberOr(n.h, FALLBACK_NODE_H) })
   }
   if (targets.length < 2) return {}
   const snapTo = (v) => Math.round(v / grid) * grid
@@ -1384,7 +1398,7 @@ function segmentMoveOf(refPoint, horizontal, rawX, rawY) {
 
 /** 节点的几何（渲染与路由共用同一套默认值）。 */
 function nodeGeoOf(node) {
-  return { x: numberOr(node.x, 0), y: numberOr(node.y, 0), w: numberOr(node.w, 150), h: numberOr(node.h, 56) }
+  return { x: numberOr(node.x, 0), y: numberOr(node.y, 0), w: numberOr(node.w, FALLBACK_NODE_W), h: numberOr(node.h, FALLBACK_NODE_H) }
 }
 
 /**
@@ -2766,8 +2780,8 @@ function CanvasView(props) {
       text: typeof node.label === 'string' ? node.label : '',
       left: numberOr(node.x, 0) * scale + ctm.e - rect.left,
       top: numberOr(node.y, 0) * scale + ctm.f - rect.top,
-      width: numberOr(node.w, 170) * scale,
-      height: numberOr(node.h, 56) * scale,
+      width: numberOr(node.w, FALLBACK_NODE_W) * scale,
+      height: numberOr(node.h, FALLBACK_NODE_H) * scale,
     })
   }
 
@@ -3069,8 +3083,8 @@ function CanvasView(props) {
       originY: point.y,
       x: numberOr(node.x, 0),
       y: numberOr(node.y, 0),
-      w: numberOr(node.w, 130),
-      h: numberOr(node.h, 56),
+      w: numberOr(node.w, FALLBACK_NODE_W),
+      h: numberOr(node.h, FALLBACK_NODE_H),
     }
     const element = canvasRef.current
     if (element !== null && typeof element.setPointerCapture === 'function') {
@@ -3177,8 +3191,8 @@ function CanvasView(props) {
       const n = current.nodes[i]
       const x = numberOr(n.x, 0)
       const y = numberOr(n.y, 0)
-      const w = numberOr(n.w, 150)
-      const h = numberOr(n.h, 56)
+      const w = numberOr(n.w, FALLBACK_NODE_W)
+      const h = numberOr(n.h, FALLBACK_NODE_H)
       const overlaps = x < maxX && x + w > minX && y < maxY && y + h > minY
       if (overlaps) hits.push(n.id)
     }
@@ -3251,7 +3265,15 @@ function CanvasView(props) {
     // 形状与配色都落成 drawio 的 style 键：rect/plain 落成空串（= drawio 的 defaultVertexStyle）。
     const style = styleWithColorName(styleWithNodeShape('', shape), styleName)
     applyLocal((next) => {
-      next.nodes.push({ id: id, label: '新节点', style: style, x: snap(userX - 65), y: snap(userY - 28), w: 130, h: 56 })
+      next.nodes.push({
+        id: id,
+        label: '新节点',
+        style: style,
+        x: snap(userX - NEW_NODE_W / 2),
+        y: snap(userY - NEW_NODE_H / 2),
+        w: NEW_NODE_W,
+        h: NEW_NODE_H,
+      })
     })
     setSelectedIds([id])
     setMenu(null)
@@ -3562,8 +3584,8 @@ function CanvasView(props) {
       next = {
         left: numberOr(node.x, 0) * scale + ctm.e - rect.left,
         top: numberOr(node.y, 0) * scale + ctm.f - rect.top,
-        width: numberOr(node.w, 170) * scale,
-        height: numberOr(node.h, 56) * scale,
+        width: numberOr(node.w, FALLBACK_NODE_W) * scale,
+        height: numberOr(node.h, FALLBACK_NODE_H) * scale,
       }
     } else {
       const edge = edgeById(editing.id)
@@ -4870,6 +4892,10 @@ exports.__routeInternals = {
   EDGE_GRID: EDGE_GRID,
   MIN_NODE_W: MIN_NODE_W,
   MIN_NODE_H: MIN_NODE_H,
+  NEW_NODE_W: NEW_NODE_W,
+  NEW_NODE_H: NEW_NODE_H,
+  FALLBACK_NODE_W: FALLBACK_NODE_W,
+  FALLBACK_NODE_H: FALLBACK_NODE_H,
   routeThroughWaypoints: routeThroughWaypoints,
   routeEdge: routeEdge,
   ensurePinned: ensurePinned,

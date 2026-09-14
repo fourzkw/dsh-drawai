@@ -666,6 +666,17 @@ console.log('\n移动单位：节点整格（10px）、连线半格（5px）')
   const upright = internals.segmentMoveOf(ref, false, 7, 0)
   ok(upright.y === 0 && internals.snapTo(ref.x + upright.x, internals.EDGE_GRID) === 250, '竖直段拖 7px：x 落到 250（半格），y 不动（线段不会被拉长）')
   ok(internals.segmentMoveOf({ x: 100, y: 100 }, false, 2, 0).x === 0, '已经落在半格上的点：2px 的意图被吸收成 0（最小单位就是半格）')
+
+  // 新建节点与兜底尺寸也都是整格 —— 尺寸不整格，中心就会落在半像素上（台阶的上游来源）
+  ok(
+    internals.NEW_NODE_W % internals.GRID === 0 && internals.NEW_NODE_H % internals.GRID === 0,
+    '新建节点默认尺寸是整格（' + internals.NEW_NODE_W + '×' + internals.NEW_NODE_H + '）',
+  )
+  ok(internals.NEW_NODE_H === 60, '默认高度是 60（原来 56 不是整格，中心会落在 y+28 上）')
+  ok(
+    internals.FALLBACK_NODE_W % internals.GRID === 0 && internals.FALLBACK_NODE_H % internals.GRID === 0,
+    '文档缺 w/h 时的兜底尺寸也是整格（' + internals.FALLBACK_NODE_W + '×' + internals.FALLBACK_NODE_H + '）',
+  )
 }
 
 console.log('\n微小差距不该留下台阶（真机报过：竖线上 1px 的横跳）')

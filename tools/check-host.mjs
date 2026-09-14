@@ -473,5 +473,24 @@ console.log('\n格式逻辑：默认省略 / 开放集合 / 折点与端点分�
   ok(edgeFreePoint({ from: 'a', to: 'b', targetPoint: { x: 3, y: 4 } }, 'target') === null, 'targetPoint 同理（有顶点就忽略）')
 }
 
+console.log('\n新建节点的尺寸也是整格（与画布 10px 的移动单位一致）')
+{
+  // 尺寸不整格 → 节点中心落在半像素上 → 连线动不动多出"差一像素"的台阶。
+  // 宿主这边有两个来源：估宽（estimateWidth）与缺省高度（DEFAULT_H）。
+  store.clear()
+  const longLabel = '很长很长很长很长很长很长很长很长很长的标签'
+  const created = await apply([{ op: 'addNode', label: longLabel }], { path: 'size.dshd.json' })
+  const sizeDoc = JSON.parse(store.get(WORKSPACE + '\\size.dshd.json'))
+  ok(created.nodeCount === 1 && sizeDoc.nodes.length === 1, '新建了一个节点')
+  ok(sizeDoc.nodes[0].w % 10 === 0, '估宽向上取整到整格（' + sizeDoc.nodes[0].w + '）')
+  ok(sizeDoc.nodes[0].h === 60, '缺省高度是整格 60（原来 56）')
+
+  // 估宽不随标签长度失控，也不越界
+  await apply([{ op: 'addNode', label: '短' }], { path: 'size.dshd.json' })
+  const two = JSON.parse(store.get(WORKSPACE + '\\size.dshd.json'))
+  const widths = two.nodes.map((n) => n.w)
+  ok(widths.every((w) => w % 10 === 0 && w >= 130 && w <= 300), '每个宽度都是整格且在 [130, 300] 内：' + widths.join(', '))
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1
