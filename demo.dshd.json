@@ -1,26 +1,17 @@
 {
   "version": 2,
-  "revision": 23,
+  "revision": 46,
   "meta": {
     "engine": "drawio-svg",
     "pinned": true
   },
   "nodes": [
     {
-      "id": "doc",
-      "label": "demo.dshd.json（真相源）",
-      "style": "shape=document;fillColor=#fff2cc;strokeColor=#d6b656;",
-      "x": 60,
-      "y": 60,
-      "w": 186,
-      "h": 86
-    },
-    {
       "id": "canvas",
       "label": "右栏画布自动重绘",
       "style": "fillColor=#e1d5e7;strokeColor=#9673a6;",
-      "x": 60,
-      "y": 290,
+      "x": 10,
+      "y": 150,
       "w": 186,
       "h": 56
     },
@@ -45,11 +36,16 @@
   ],
   "edges": [
     {
+      "id": "e1",
+      "from": "canvas",
+      "to": "n1",
+      "style": "rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;exitX=1;exitY=0.5;entryX=0;entryY=0.5;endArrow=classic;"
+    },
+    {
       "id": "e2",
-      "from": "doc",
+      "from": "n1",
       "to": "canvas",
-      "label": "变更流 + 兜底轮询",
-      "style": "edgeStyle=orthogonalEdgeStyle;rounded=0;jettySize=auto;orthogonalLoop=1;html=1;endArrow=classic;exitX=0.5;exitY=1;entryX=0.5;entryY=0;"
+      "style": "rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;exitX=0;exitY=0.5;entryX=1;entryY=0.5;endArrow=classic;"
     }
   ]
 }

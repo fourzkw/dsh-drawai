@@ -670,6 +670,45 @@ console.log('\n文本与直线：fontSize / fontColor / whiteSpace / edgeStyle=n
   const orthoPath = edgePathOf(ortho)
   ok(straightPath !== undefined && straightPath.props.d.split('L').length === 2, 'edgeStyle=none 画成一条直线（只有两个点）')
   ok(orthoPath !== undefined && orthoPath.props.d.split('L').length > 2, '缺省 edgeStyle 走正交折线（多于两个点）')
+
+  // ── 默认值绝不能被算成 0 ──
+  // 这是**真机上踩过**的 bug：`Number(null) === 0` 且 0 是有限数，于是"取不到就用缺省"
+  // 静默变成 0 —— fontSize=0 / strokeWidth=0，表现是"节点没有文字、连线完全看不见"，
+  // 而且不报任何错。下面几条就是把这类回归钉死。
+  const labelTextOf = (el) => {
+    if (el === undefined || el === null) return ''
+    const spans = Array.isArray(el.children[0]) ? el.children[0] : el.children
+    return spans.map((s) => (s !== null && s !== undefined && Array.isArray(s.children) ? s.children.join('') : '')).join('')
+  }
+  const plainTree = renderDiagram(
+    { nodes: [{ id: 'a', x: 0, y: 0, w: 160, h: 60, label: '默认' }], edges: [] },
+    'light',
+    'u1',
+    { current: null },
+    { selectedIds: [] },
+    null,
+  )
+  const plainText = textOf(plainTree)
+  ok(plainText !== undefined && plainText.props.fontSize === 12, '缺省标签字号是 12px（不是 0）')
+  ok(labelTextOf(plainText) === '默认', '缺省标签的文字确实在元素里（不是空串）')
+  const plainRect = walk(plainTree, (n) => n.type === 'rect' && n.props.width === 160, [])[0]
+  ok(plainRect !== undefined && plainRect.props.strokeWidth === 1, '缺省节点描边是 1px（不是 0）')
+  const plainEdge = edgePathOf(
+    renderDiagram({ nodes: twoNodes, edges: [{ id: 'e1', from: 'a', to: 'b', style: DEFAULT_EDGE_STYLE }] }, 'light', 'u1', { current: null }, { selectedIds: [] }, null),
+  )
+  ok(plainEdge !== undefined && plainEdge.props.strokeWidth === 1, '缺省连线是 1px 的可见线（不是 0）')
+
+  // rounded=1 不带 arcSize → drawio 的 15% 圆角；写成 Number(null) 会得到 0（= 直角）
+  const roundedTree = renderDiagram(
+    { nodes: [{ id: 'a', x: 0, y: 0, w: 160, h: 60, label: '', style: 'rounded=1;' }], edges: [] },
+    'light',
+    'u1',
+    { current: null },
+    { selectedIds: [] },
+    null,
+  )
+  const roundedRect = walk(roundedTree, (n) => n.type === 'rect' && typeof n.props.rx === 'number' && n.props.rx > 0, [])[0]
+  ok(roundedRect !== undefined && Math.abs(roundedRect.props.rx - 9) < 0.01, 'rounded=1 且缺省 arcSize → 15% 圆角（60 高的盒子 rx=9）')
 }
 
 console.log('\n悬空端：解析不丢边，渲染画得出来')

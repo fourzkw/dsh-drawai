@@ -39,6 +39,7 @@ const {
   parseStyle,
   sideFromStyle,
   styleGet,
+  styleNumber,
   stylePatch,
   styleWithArrow,
   styleWithColorName,
@@ -234,6 +235,10 @@ const CSS = [
 ].join('\n')
 
 function numberOr(value, fallback) {
+  // null / undefined / 空串一律回落 **不能靠 Number() 判断**：`Number(null) === 0` 而 0 是有限数，
+  // 于是"没给值就用缺省"会静默变成 0。实测过：节点的 fontSize / strokeWidth 变成 0，
+  // 表现是"节点没有文字、连线完全看不见"，而且不报错。
+  if (value === null || value === undefined || value === '') return fallback
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
 }
@@ -915,7 +920,7 @@ function shapeElement(node, geo, palette, mode) {
   const shape = shapeOf(node)
   const fill = palette.fill
   // 顶点也吃 drawio 的描边参数：strokeWidth / dashed / dashPattern 都在文档里。
-  const strokeWidth = numberOr(styleGet(style, 'strokeWidth', null), 1)
+  const strokeWidth = styleNumber(style, 'strokeWidth', 1)
   const pattern = dashPatternFromStyle(style)
   const common = { fill: fill, stroke: stroke, strokeWidth: strokeWidth }
   if (pattern !== null) common.strokeDasharray = pattern
@@ -963,8 +968,10 @@ function shapeElement(node, geo, palette, mode) {
   // 圆角：drawio 是 `rounded=1` + `arcSize`（百分比，缺省 15%）；stadium 就是 arcSize=50。
   let rx = 0
   if (shape === 'rounded' || shape === 'stadium') {
-    const arc = Number(styleGet(style, 'arcSize', null))
-    rx = shape === 'stadium' ? h / 2 : Math.min(w, h) * (Number.isFinite(arc) ? arc / 100 : 0.15)
+    // arcSize 缺省 = 15%（drawio 的矩形圆角比例）。**不能**写成 Number(styleGet(...)) —— 缺省时
+    // 那会得到 0，于是 rounded=1 被画成直角（同一个 null→0 陷阱）。
+    const arc = styleNumber(style, 'arcSize', null)
+    rx = shape === 'stadium' ? h / 2 : Math.min(w, h) * (arc === null ? 0.15 : arc / 100)
   }
   return React.createElement('rect', Object.assign({}, common, { x: x, y: y, width: w, height: h, rx: rx, ry: rx }))
 }
@@ -1585,7 +1592,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
       d: pathOf(pts, cornerRadius),
       fill: 'none',
       stroke: lineStroke,
-      strokeWidth: selected ? 2 : numberOr(styleGet(edgeStyle, 'strokeWidth', null), 1),
+      strokeWidth: selected ? 2 : styleNumber(edgeStyle, 'strokeWidth', 1),
       markerEnd: arrow === 'none' || arrow === 'start' ? undefined : 'url(#' + arrowId + ')',
       markerStart: arrow === 'both' || arrow === 'start' ? 'url(#' + arrowStartId + ')' : undefined,
       pointerEvents: 'none',
@@ -1598,7 +1605,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
       const mx = (a.x + b.x) / 2
       const my = (a.y + b.y) / 2
       // 边标签的画法同样来自文档：fontSize / fontColor。
-      const edgeFontSize = numberOr(styleGet(edgeStyle, 'fontSize', null), 10)
+      const edgeFontSize = styleNumber(edgeStyle, 'fontSize', 10)
       const edgeFontColor = styleGet(edgeStyle, 'fontColor', null)
       const edgeFontFill = edgeFontColor !== null ? edgeFontColor : skin.text
       const lw = textWidth(edge.label, edgeFontSize) + 6
@@ -1785,7 +1792,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     // 标签的画法也在文档里：fontSize / fontColor / whiteSpace。
     // whiteSpace=nowrap 不换行（drawio 的语义就是这个），其余（含缺省）按宽度换行。
     const labelStyle = typeof node.style === 'string' ? node.style : ''
-    const labelFontSize = numberOr(styleGet(labelStyle, 'fontSize', null), FSIZE)
+    const labelFontSize = styleNumber(labelStyle, 'fontSize', FSIZE)
     const labelFill = colorOf(node, mode).font
     const wrap = styleGet(labelStyle, 'whiteSpace', 'wrap') !== 'nowrap'
     let maxText = geo.w - 12
@@ -3439,6 +3446,56 @@ function CanvasView(props) {
     })
   }
 
+  /**
+   * 就地编辑框跟着视图走。
+   *
+   * 实测过的毛病：双击节点开始改字，然后拖动画布 —— 节点跟着画布走了，输入框**原地不动**，
+   * 看上去就是"文字和节点分家了"。根因是 left/top 只在打开那一刻用当时的 CTM 算了一次。
+   * 这里每次渲染后按当前 CTM 重算（值没变就不 setState，避免自激循环），
+   * 于是平移、缩放、拖节点、AI 改坐标，输入框都跟着走。
+   */
+  React.useEffect(() => {
+    if (editing === null) return
+    const svg = svgRef.current
+    const canvas = canvasRef.current
+    const current = docRef.current
+    if (svg === null || canvas === null || current === null) return
+    const ctm = svg.getScreenCTM()
+    if (ctm === null) return
+    const rect = canvas.getBoundingClientRect()
+    const scale = ctm.a
+    let next = null
+    if (editing.kind === 'node') {
+      const node = nodeById(editing.id)
+      if (node === null) {
+        setEditing(null)
+        return
+      }
+      next = {
+        left: numberOr(node.x, 0) * scale + ctm.e - rect.left,
+        top: numberOr(node.y, 0) * scale + ctm.f - rect.top,
+        width: numberOr(node.w, 170) * scale,
+        height: numberOr(node.h, 56) * scale,
+      }
+    } else {
+      const edge = edgeById(editing.id)
+      if (edge === null) {
+        setEditing(null)
+        return
+      }
+      const pts = edgeRoutePoints(current, edge)
+      const label = pts === null ? null : edgeLabelPosition(pts)
+      if (label === null) return
+      next = { left: label.x * scale + ctm.e - rect.left - 60, top: label.y * scale + ctm.f - rect.top - 12, width: 120, height: 24 }
+    }
+    const moved =
+      Math.abs(next.left - editing.left) > 0.5 ||
+      Math.abs(next.top - editing.top) > 0.5 ||
+      Math.abs(next.width - editing.width) > 0.5 ||
+      Math.abs(next.height - editing.height) > 0.5
+    if (moved) setEditing(Object.assign({}, editing, next))
+  })
+
   function onEdgeDoubleClick(edgeId, event) {
     event.preventDefault()
     event.stopPropagation()
@@ -4344,7 +4401,8 @@ function CanvasView(props) {
             width: Math.max(60, editing.width) + 'px',
             height: Math.max(24, editing.height) + 'px',
           },
-          onChange: (event) => setEditing({ id: editing.id, text: event.target.value, left: editing.left, top: editing.top, width: editing.width, height: editing.height }),
+          // 保留 kind 等全部字段：这里曾经重建对象时漏了 kind，于是"编辑过再平移"会走错分支。
+          onChange: (event) => setEditing(Object.assign({}, editing, { text: event.target.value })),
           onBlur: commitEdit,
           onKeyDown: (event) => {
             if (event.key === 'Enter') {
