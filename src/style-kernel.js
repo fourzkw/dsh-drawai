@@ -39,7 +39,7 @@
 
 // ── 规范键序：落盘顺序稳定、diff 友好；不在表里的键（开放集合）按插入序排在后面 ──
 var STYLE_KEY_ORDER = [
-  'shape', 'ellipse', 'rhombus', 'rounded', 'arcSize', 'direction', 'flipH', 'flipV',
+  'shape', 'ellipse', 'rhombus', 'rounded', 'arcSize', 'curved', 'direction', 'flipH', 'flipV',
   'whiteSpace', 'html', 'fontSize', 'fontFamily', 'fontColor', 'fontStyle',
   'fillColor', 'strokeColor', 'strokeWidth', 'dashed', 'dashPattern',
   'edgeStyle', 'orthogonalLoop', 'jettySize', 'sourceJettySize', 'targetJettySize',
@@ -483,6 +483,32 @@ function isOrthogonalEdgeStyle(style) {
   return edgeStyleValueFromStyle(style) !== 'none'
 }
 
+/**
+ * 连线的**线型**：直线 / 正交折线 / 曲线 —— drawio 的三个键组合（Format.js:6543 的
+ * sharp / rounded / curved 与 6827 的 Curved 预设）。
+ *
+ * `straight` 落成 `edgeStyle=none`：drawio 的 "Straight" 其实是**删掉 edgeStyle 键**
+ * （mxGraph 认不出的值就退回折线），而我们的渲染器把"没有键"当正交 —— 所以直线上必须
+ * 显式写 `none`，两边才看到同一条线（drawio 那边认不出 `none`，同样按直线画）。
+ */
+function lineKindFromStyle(style) {
+  if (styleGet(style, 'curved', null) === '1') return 'curved'
+  return isOrthogonalEdgeStyle(style) ? 'orthogonal' : 'straight'
+}
+
+/** 写线型：'straight' | 'orthogonal' | 'curved'（认不出的值原样返回）。 */
+function styleWithLineKind(style, kind) {
+  if (kind === 'straight') return stylePatch(stylePatch(style, { curved: null }), { edgeStyle: 'none' })
+  if (kind === 'curved') return stylePatch(style, { curved: '1' })
+  if (kind === 'orthogonal') return stylePatch(stylePatch(style, { curved: null }), { edgeStyle: 'orthogonalEdgeStyle' })
+  return style
+}
+
+/** `curved=1`：把折线抹成平滑曲线（drawio 的 STYLE_CURVED，mxPolyline.paintCurvedLine）。 */
+function curvedFromStyle(style) {
+  return styleGet(style, 'curved', null) === '1'
+}
+
 /** 某一端的桩点长度：'auto' 或缺省 → null（由渲染端用缺省值）；数字 → 数值。 */
 function jettyFromStyle(style, end) {
   var key = end === 'source' ? 'sourceJettySize' : end === 'target' ? 'targetJettySize' : 'jettySize'
@@ -772,6 +798,7 @@ export {
   arrowFromStyle, styleWithArrow,
   sideFromStyle, fractionFromStyle, styleWithSide, sideFromFraction,
   edgeStyleValueFromStyle, isOrthogonalEdgeStyle, jettyFromStyle, styleWithJetty,
+  lineKindFromStyle, styleWithLineKind, curvedFromStyle,
   avoidFromStyle, styleWithAvoid,
   normalizePoint, normalizePoints, pointsEqual,
   edgeTerminalId, edgeFreePoint,

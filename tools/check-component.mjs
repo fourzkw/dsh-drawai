@@ -598,6 +598,28 @@ console.log('\n双击改标签：按下时不许抢 pointer capture')
   ok(exactly.captured.length === 0, '正好 3px 还不算拖（判据是 >3）')
 }
 
+console.log('\n线型与字号的手工入口')
+{
+  // 需求："添加直线（无折点），圆弧线等" + "文字的字号均可修改"。
+  // 线型是"语义 + 几何"两件事（直线要清折点、曲线要补弓形中点），所以走 applyLineKind，
+  // 不是普通 updateEdge；字号是三个地方共用同一个控件。
+  ok(/function applyLineKind\(/.test(src), '有 applyLineKind（线型连带几何一起改）')
+  ok(/\['straight', '直线'/.test(src) && /\['curved', '曲线'/.test(src) && /\['orthogonal', '折线'/.test(src), '连线菜单里有 直线 / 折线 / 曲线 三个入口')
+  ok(/applyLineKind\(edgeTargets, it\[0\]\)/.test(src), '点线型对整组连线生效（与改色/箭头一致）')
+  ok(/kind === 'straight'\) \{\s*\n\s*delete e\.points/.test(src) || /if \(kind === 'straight'\) \{\n\s+delete e\.points/.test(src), '选直线会清掉折点')
+  ok(/e\.points = \[\{ x: snap\(/.test(src), '选曲线会给"本来就笔直"的边补一个弓形中点（否则弧看不见）')
+  // 空白处右键：一条**直线**（无折点）
+  ok(/'╱ 直线'/.test(src), '空白处右键有「╱ 直线」入口')
+  ok(/createFreeEdgeAt\(menu\.userX, menu\.userY, 'straight'\)/.test(src), '它建的是直线（createFreeEdgeAt 的第三个参数）')
+  ok(/straight \? styleWithLineKind\(DEFAULT_EDGE_STYLE, 'straight'\) : DEFAULT_EDGE_STYLE/.test(src), '那条线的样式真的是直线')
+  // 字号：节点/文字与连线共用同一个控件
+  ok(/function fontSizeRow\(/.test(src), '有 fontSizeRow（三个地方共用）')
+  ok(/const FONT_SIZE_PRESETS = \[/.test(src), '字号有档位表（不写死在 UI 里）')
+  ok(/rows\.push\(fontSizeRow\(nodeStyle,/.test(src), '节点菜单（含独立文字）有字号行')
+  ok(/rows\.push\(fontSizeRow\(edgeBaseStyle,/.test(src), '连线菜单有字号行（改的是线上的字）')
+  ok(/fontSize: v === null \? null : String\(v\)/.test(src), '「默认」= 删掉 fontSize 键（不留 fontSize=0 之类噪音）')
+}
+
 console.log('\n独立文字：右键空白处能放一段字（不接节点、也不接边）')
 {
   // 需求："添加可独立放置的文字"。实现上它是**一个节点**，只是形状是 drawio 的 text

@@ -35,6 +35,7 @@ import {
   edgeStyleValueFromStyle,
   formatStyle,
   jettyFromStyle,
+  lineKindFromStyle,
   nodeShapeFromStyle,
   normalizeDrawioDoc,
   normalizePoints,
@@ -45,6 +46,7 @@ import {
   styleWithColorName,
   styleWithDash,
   styleWithJetty,
+  styleWithLineKind,
   styleWithNodeShape,
   styleWithSide,
   styleWithTextColorName,
@@ -114,6 +116,18 @@ function normalizeArrow(value) {
   if (v === 'none' || v === 'false' || v === '无') return 'none'
   if (v === 'start' || v === 'backward' || v === 'source' || v === '反向') return 'start'
   return null
+}
+
+/**
+ * 线型：直线 / 折线 / 曲线。模型可能说 "curve"/"arc"/"弧线"，都归一到 drawio 的三个组合上
+ * （见内核的 `styleWithLineKind`）。
+ */
+function normalizeLineKind(value, where) {
+  const v = String(value).toLowerCase().trim()
+  if (v === 'straight' || v === 'line' || v === 'direct' || v === '直线') return 'straight'
+  if (v === 'orthogonal' || v === 'elbow' || v === '折线' || v === '正交') return 'orthogonal'
+  if (v === 'curved' || v === 'curve' || v === 'arc' || v === '曲线' || v === '弧线') return 'curved'
+  throw new Error(where + ': unknown line "' + value + '"; use straight, orthogonal, curved')
 }
 
 function messageOf(error) {
@@ -351,8 +365,50 @@ function nodeStyleFromOp(style, op, where) {
       out = styleValueFromOp(out, op.style, where)
     }
   }
+  // 字号：`fontSize` 是 drawio 的键，节点标签与独立文字都吃它（null = 删键回缺省）。
+  if (has(op, 'fontSize')) out = stylePatch(out, { fontSize: op.fontSize === null ? null : String(op.fontSize) })
   if (has(op, 'keys')) out = stylePatch(out, styleKeysFromOp(op.keys, where))
   return out
+}
+
+/**
+ * 连线的"曲线"要看得见，就得有一个中点。
+ *
+ * drawio 的曲线是把**现有走线**抹圆（mxPolyline.paintCurvedLine）；两点直连时控制点落在起点上，
+ * 于是退化成直线 —— 屏幕上什么都看不出来。所以给这种边补一个**垂直弓形的中点**，
+ * 与人在画布上手动拖一个中点出来是同一件事（文件里就是普通的折点，drawio 打开一样）。
+ *
+ * 取两端落点：连着节点用节点中心，悬空端用自由点。弓高 = 长度的 12%，至少 20px，吸附到半格。
+ */
+function arcWaypointFor(doc, edge) {
+  const endOf = (which) => {
+    const nodeId = which === 'source' ? edge.from : edge.to
+    const free = which === 'source' ? edge.sourcePoint : edge.targetPoint
+    if (typeof nodeId === 'string') {
+      for (let i = 0; i < doc.nodes.length; i += 1) {
+        const n = doc.nodes[i]
+        if (String(n.id) !== nodeId) continue
+        return { x: numberOr(n.x, 0) + numberOr(n.w, DEFAULT_W) / 2, y: numberOr(n.y, 0) + numberOr(n.h, DEFAULT_H) / 2 }
+      }
+    }
+    if (free !== null && free !== undefined && Number.isFinite(Number(free.x)) && Number.isFinite(Number(free.y))) {
+      return { x: Number(free.x), y: Number(free.y) }
+    }
+    return null
+  }
+  const a = endOf('source')
+  const b = endOf('target')
+  if (a === null || b === null) return null
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const len = Math.sqrt(dx * dx + dy * dy)
+  if (!(len > 1)) return null
+  const unit = 5 // 与画布一致：折点的最小单位是半格
+  const bow = Math.max(20, Math.round((len * 0.12) / unit) * unit)
+  return {
+    x: Math.round(((a.x + b.x) / 2 - (dy / len) * bow) / unit) * unit,
+    y: Math.round(((a.y + b.y) / 2 + (dx / len) * bow) / unit) * unit,
+  }
 }
 
 /**
@@ -376,8 +432,13 @@ function edgeStyleFromOp(style, op, where) {
   if (has(op, 'exit')) out = styleWithSide(out, 'source', normalizeSide(op.exit, where + ' exit'))
   if (has(op, 'entry')) out = styleWithSide(out, 'target', normalizeSide(op.entry, where + ' entry'))
   if (has(op, 'jettySize')) out = styleWithJetty(out, op.jettySize === null ? null : String(op.jettySize))
+  // 线型糖：直线 / 折线 / 曲线（drawio 的 Straight / Orthogonal / Curved 三个键组合）。
+  // `edgeStyle`（orthogonalEdgeStyle|none）仍然保留 —— 它是键级的写法，line 是它的语义写法。
+  if (has(op, 'line')) out = styleWithLineKind(out, normalizeLineKind(op.line, where))
   if (typeof op.edgeStyle === 'string') out = stylePatch(out, { edgeStyle: op.edgeStyle })
   if (has(op, 'avoid')) out = styleWithAvoid(out, op.avoid === true)
+  // 字号：连线的文字（边自己的 value 与挂在边上的标签单元）都是 `fontSize`。
+  if (has(op, 'fontSize')) out = stylePatch(out, { fontSize: op.fontSize === null ? null : String(op.fontSize) })
   if (typeof op.style === 'string' && op.style.length > 0) out = edgeStyleValueFromOp(out, op.style, where)
   if (has(op, 'keys')) out = stylePatch(out, styleKeysFromOp(op.keys, where))
   return out
@@ -481,6 +542,12 @@ function applyOps(doc, ops, out) {
       // 建边时就能带上画法：AI 想表达"这是一条异步/可选依赖"时，
       // 不该被迫先 addEdge 再补一次 setStyle（两次写盘、两次往返）。
       edge.style = edgeStyleFromOp(DEFAULT_EDGE_STYLE, op, 'ops[' + i + '] addEdge')
+      // 线型是"语义 + 几何"两件事：直线不带折点（新边本来就没有）；曲线要看得见就得有个中点
+      // （见 arcWaypointFor —— 两点直连的曲线在 drawio 里会退化成一条直线）。
+      if (has(op, 'line') && normalizeLineKind(op.line, 'ops[' + i + '] addEdge') === 'curved') {
+        const bow = arcWaypointFor(doc, edge)
+        if (bow !== null) edge.points = [bow]
+      }
       doc.edges.push(edge)
       const head = from !== undefined ? from : '(free ' + fromPoint.x + ',' + fromPoint.y + ')'
       const tail = to !== undefined ? to : '(free ' + toPoint.x + ',' + toPoint.y + ')'
@@ -580,6 +647,18 @@ function applyOps(doc, ops, out) {
           delete edge.points
           delete edge.sourcePoint
           delete edge.targetPoint
+        }
+        // 线型带来的几何后果（与画布右键菜单同一套语义，见客户端的 applyLineKind）：
+        //   直线 = 无折点：留着折点就不是直线了；
+        //   曲线 = 把现有折线抹圆，而**两点直连的边**在 drawio 里曲线会退化成直线
+        //   （mxPolyline.paintCurvedLine 两点时控制点落在起点上），所以补一个弓形中点。
+        if (has(op, 'line')) {
+          const kind = normalizeLineKind(op.line, where)
+          if (kind === 'straight') delete edge.points
+          else if (kind === 'curved' && (Array.isArray(edge.points) === false || edge.points.length === 0)) {
+            const bow = arcWaypointFor(doc, edge)
+            if (bow !== null) edge.points = [bow]
+          }
         }
         notes.push('~ edge ' + id + ' style' + styleNote(edge.style === undefined ? base : edge.style))
         continue
@@ -969,9 +1048,9 @@ revision 是乐观锁：写回时若文件已被别处改过（比如用户同�
 
 ## ops 速查
     {op:"addNode", label:"必填", shape?, style?, keys?, w?, h?, x?, y?}
-    {op:"addEdge", from?, to?, fromPoint?, toPoint?, label?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, keys?}
+    {op:"addEdge", from?, to?, fromPoint?, toPoint?, label?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, line?, avoid?, fontSize?, keys?}
     {op:"setLabel", id, label}
-    {op:"setStyle", id, shape?, style?, keys?, w?, h?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, clearPoints?}
+    {op:"setStyle", id, shape?, style?, keys?, w?, h?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, line?, avoid?, fontSize?, clearPoints?}
     {op:"move", id, dx?, dy?, x?, y?}
     {op:"remove", id}
     {op:"highlight", ids:["n1","n2"]}
@@ -984,6 +1063,12 @@ revision 是乐观锁：写回时若文件已被别处改过（比如用户同�
 - **move**：改已有元素的位置。节点给 dx/dy（相对）或 x/y（绝对）；连线只能给 dx/dy
   （平移它自己的折点与自由端点；两端接在节点上时端点由节点决定）。
   以前没有 move，想把某个节点挪一下就只好删掉重画 —— 那会丢 id、丢边上的端点约束与折点。
+- **line**（连线线型）：straight（直线，不带折点）| orthogonal（正交折线，缺省）| curved（曲线）。
+  line:"straight" 会**清掉折点**；line:"curved" 在边本来就是两点直连时会补一个弓形中点 ——
+  因为 drawio 的曲线是把**现有折线**抹圆，两点时它退化成直线（屏幕上什么都看不出来）。
+  与它等价的键级写法是 edgeStyle:"none"（直线）与 keys:{curved:1}（曲线），两种都收。
+- **fontSize**（字号）：节点标签、独立文字、连线上的文字都吃它（drawio 的 fontSize 键）；
+  给 null 就是删键回缺省。例：{op:"setStyle", id:"n1", fontSize:18}。
 - **highlight** 只是"让画布选中这几个"给你看，不改文档、也不重排。
 - **没有图层相关的 op**（v1）：你能**看到** layers 与每个单元的 layer，但还不能加层、
   把单元挪到别的层、按层导出。用户在「图层」菜单里做这些。
@@ -1505,8 +1590,8 @@ export function apply(ctx) {
     description:
       '对工作区里的 DrawAI 画布文档施加一组结构化编辑（加节点/连边/改标签/改样式/移动/删除/高亮），然后自动布局并写回文件。布局默认由这里算；ops 里一旦自带几何（addNode 给了 x/y，或有 move）就不再重排，想重排请显式给 layout。' +
       'ops 的每一项形如 {op:"addNode", label:"...", shape?, style?, keys?, w?, h?, x?, y?} / ' +
-      '{op:"addEdge", from?, to?, fromPoint?, toPoint?, label?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, keys?} / ' +
-      '{op:"setLabel", id, label} / {op:"setStyle", id, shape?, style?, keys?, w?, h?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, clearPoints?} / ' +
+      '{op:"addEdge", from?, to?, fromPoint?, toPoint?, label?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, line?, avoid?, fontSize?, keys?} / ' +
+      '{op:"setLabel", id, label} / {op:"setStyle", id, shape?, style?, keys?, w?, h?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, line?, avoid?, fontSize?, clearPoints?} / ' +
       '{op:"move", id, dx?, dy?, x?, y?} / {op:"remove", id} / {op:"highlight", ids:[...]}；节点 id 省略时自动分配。' +
       'addEdge 的两端各自可以给**节点 id** 或**绝对点**（fromPoint/toPoint）—— 两端都给点就是一条**独立线**' +
       '（drawio 里边的两端都可以是自由点，线可以完全不接节点）。' +
@@ -1516,9 +1601,8 @@ export function apply(ctx) {
       '文档里存的是 **drawio 的 style 键**（dashed/dashPattern/edgeStyle/jettySize/libavoidRouting/exitX·exitY·entryX·entryY/endArrow·startArrow/strokeColor/fillColor/shape=/rounded=/arcSize=…），默认值一律省略、认不出的键原样保留；' +
       '上面这些 shape/style/dash/arrow/color/exit/entry 是给模型用的**糖**，由宿主翻译成 style 键，绝不落盘。' +
       'style 既可以是调色板名（plain/blue/green/orange/yellow/red/purple/grey），也可以直接是一段 style 串；keys 用来写任意 drawio 键（值给 null = 删键回默认）。' +
-      'setStyle 的 id 可以是节点也可以是连线：节点用 shape/style/keys/w/h，连线用 dash（solid|dashed|dotted）、arrow（end 单向|both 双向|none 无箭头|start 反向）、color、exit/entry（n|e|s|w 进出侧）、jettySize（引出段长度，数字或 auto）、edgeStyle（orthogonalEdgeStyle|none）、avoid（是否参与避让路由）、clearPoints（清掉折点）。' +
-      '文档若带 meta.pinned（人手工摆过位置），不加 layout 就不会重排；显式重排会清掉端点已移动的那些边上的过期折点。' +
-      '边引用了不存在的节点会直接报错，且失败发生在写盘之前。自环写成 from === to（与 drawio 一致）；自动布局会忽略自环，只摆节点。' +
+      'setStyle 的 id 可以是节点也可以是连线：节点用 shape/style/keys/w/h，连线用 dash（solid|dashed|dotted）、arrow（end 单向|both 双向|none 无箭头|start 反向）、color、exit/entry（n|e|s|w 进出侧）、jettySize（引出段长度，数字或 auto）、edgeStyle（orthogonalEdgeStyle|none）、line（straight 直线|orthogonal 折线|curved 曲线）、avoid（是否参与避让路由）、fontSize（字号）、clearPoints（清掉折点）。' +
+      '文档若带 meta.pinned（人手工摆过位置），不加 layout 就不会重排；显式重排会清掉端点已移动的那些边上的过期折点。' +      '边引用了不存在的节点会直接报错，且失败发生在写盘之前。自环写成 from === to（与 drawio 一致）；自动布局会忽略自环，只摆节点。' +
       '不传 path 时改的是**用户当前打开的那张画布**（没打开才退回 ' + DEFAULT_PATH + '）—— 用户说"这张图"时不用传 path。',
     parameters: {
       path: {

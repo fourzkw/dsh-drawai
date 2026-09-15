@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { composeClientBody } from './build.mjs'
 // 造 style 键夹具时直接用内核（与宿主/客户端同一份），免得把键名再抄一遍。
-import { DEFAULT_EDGE_STYLE, NODE_SHAPES, nodeShapeFromStyle, normalizeDrawioDoc, styleGet, stylePatch, styleWithNodeShape, styleWithTextColorName, textColorNameFromStyle } from '../src/style-kernel.js'
+import { DEFAULT_EDGE_STYLE, NODE_SHAPES, curvedFromStyle, lineKindFromStyle, nodeShapeFromStyle, normalizeDrawioDoc, styleGet, stylePatch, styleWithLineKind, styleWithNodeShape, styleWithTextColorName, textColorNameFromStyle } from '../src/style-kernel.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 /** 源码文本断言用（CSS 串、函数名这些在 src/client.js 里就有）。 */
@@ -1379,6 +1379,66 @@ console.log('\n独立文字：一段没有边框底色的字（drawio 的 text �
   const redGroup = walk(redTree, (n) => n.type === 'g' && n.props['data-node-id'] === 't1', [])[0]
   const redLabel = redGroup === undefined ? [] : walk(redGroup.children, (n) => n.type === 'text', [])
   ok(redLabel.length === 1 && redLabel[0].props.fill === '#b85450', '字色真的驱动渲染：' + (redLabel[0] === undefined ? '没有标签' : redLabel[0].props.fill))
+}
+
+console.log('\n线型（直线 / 折线 / 曲线）与字号')
+{
+  // 线型：drawio 的 Straight / Orthogonal / Curved（Format.js:6543 sharp|rounded|curved）。
+  // 直线在我们这里必须显式写 `edgeStyle=none`：drawio 的 Straight 是**删掉 edgeStyle 键**，
+  // 而我们的渲染器把"没有键"当正交 —— 不写 none 两边就不是同一条线。
+  const base = 'edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=classic;'
+  const straight = styleWithLineKind(base, 'straight')
+  ok(styleGet(straight, 'edgeStyle', null) === 'none', '直线落成 edgeStyle=none：' + straight)
+  ok(lineKindFromStyle(straight) === 'straight', '从样式反推得回直线')
+  const curved = styleWithLineKind(base, 'curved')
+  ok(styleGet(curved, 'curved', null) === '1' && styleGet(curved, 'edgeStyle', null) === 'orthogonalEdgeStyle', '曲线 = curved=1（路由仍留着）：' + curved)
+  ok(lineKindFromStyle(curved) === 'curved', '从样式反推得回曲线')
+  const back = styleWithLineKind(curved, 'orthogonal')
+  ok(styleGet(back, 'curved', null) === null && lineKindFromStyle(back) === 'orthogonal', '换回折线会把 curved 删掉（不留 curved=0 噪音）')
+  ok(styleWithLineKind(base, 'unknown') === base, '认不出的线型原样返回（不猜）')
+  ok(curvedFromStyle(curved) === true && curvedFromStyle(base) === false, 'curvedFromStyle 的判据是 curved=1')
+  ok(styleGet(styleWithLineKind(straight, 'curved'), 'edgeStyle', null) === 'none', '直线转曲线：路由保持"直线"，只加 curved（由现有的折点决定弧度）')
+
+  // 曲线怎么画：drawio 的 mxPolyline.paintCurvedLine（中间点当二次曲线的控制点）
+  const pts3 = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 80 }]
+  const curvedD = internals.pathOf(pts3, 0, true)
+  ok(curvedD.indexOf('Q') > 0 && curvedD.indexOf('L') < 0, '曲线路径只用二次曲线（没有直线段）：' + curvedD)
+  ok(curvedD === 'M 0 0 Q 100 0 100 80', '三点曲线与 drawio 的算法逐字一致：' + curvedD)
+  const pts4 = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 80 }, { x: 200, y: 80 }]
+  ok(
+    internals.pathOf(pts4, 0, true) === 'M 0 0 Q 100 0 100 40 Q 100 80 200 80',
+    '四点曲线：每个中间点收在下一点与它的中点上（drawio 的循环）：' + internals.pathOf(pts4, 0, true),
+  )
+  // 两点 + 曲线：控制点落在起点上 → 退化成直线（与 drawio 一致，不会凭空鼓起来）
+  ok(internals.pathOf([{ x: 0, y: 0 }, { x: 50, y: 0 }], 0, true) === 'M 0 0 Q 0 0 50 0', '两点 + 曲线 = 退化成直线（所以"看得见的弧"要靠一个中点）')
+  ok(internals.pathOf(pts3, 6, false) === 'M 0 0 L 94 0 Q 100 0 100 6 L 100 80', '不带曲线时还是原来的圆角折线：' + internals.pathOf(pts3, 6, false))
+
+  // 画面：curved=1 的边用曲线画，命中带也是同一条曲线（否则"看着是弧、点起来按折线算"）
+  const d = {
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 100, h: 40 },
+      { id: 'b', x: 300, y: 200, w: 100, h: 40 },
+    ],
+    edges: [
+      { id: 'e1', from: 'a', to: 'b', style: DEFAULT_EDGE_STYLE },
+      { id: 'e2', from: 'a', to: 'b', style: styleWithLineKind(DEFAULT_EDGE_STYLE, 'curved') },
+      { id: 'e3', from: 'a', to: 'b', style: styleWithLineKind(DEFAULT_EDGE_STYLE, 'straight') },
+    ],
+  }
+  const tree = renderDiagram(d, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const pathD = (key) => {
+    const el = walk(tree, (n) => n.props !== undefined && n.props.key === key, [])[0]
+    return el === undefined ? '' : String(el.props.d)
+  }
+  ok(pathD('edge-1').indexOf('Q') > 0 && pathD('edge-1').indexOf('L') < 0, '曲线那条边画成了曲线：' + pathD('edge-1'))
+  ok(pathD('edge-hit-1') === pathD('edge-1'), '命中带用的是同一条曲线（点得中弧线本身）')
+  ok(pathD('edge-2').indexOf('Q') < 0 && pathD('edge-2').split('L').length === 2, '直线那条边只有一段（M + 一个 L）：' + pathD('edge-2'))
+  ok(pathD('edge-0').indexOf('Q') > 0, '缺省（正交 + 圆角）还是原来的折线')
+
+  // 字号：drawio 的 fontSize 键，null = 删键
+  const fs = stylePatch(DEFAULT_EDGE_STYLE, { fontSize: '18' })
+  ok(styleGet(fs, 'fontSize', null) === '18', '字号落在 fontSize 键上')
+  ok(styleGet(stylePatch(fs, { fontSize: null }), 'fontSize', null) === null, '删键回缺省')
 }
 
 console.log('\n对齐辅助线 / 批量改样式 / 全选')

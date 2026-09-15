@@ -427,7 +427,63 @@ console.log('\n独立文字：AI 也能放（shape:"text"），换色落到字�
   ok(doc.meta.pinned === false, '未 pinned 的文档不会被凭空打上 pinned')
 }
 
-console.log('\n连线的画法：dash / arrow / color 落成 drawio 的 style 键')
+console.log('\n线型与字号：AI 也能改（直线 / 曲线 / fontSize）')
+{
+  seed(baseDoc())
+  // 直线：edgeStyle=none，且**不许留折点**（留着折点就不是直线了）
+  await apply([{ op: 'addEdge', from: 'n1', to: 'n2', line: 'straight' }])
+  const straight = current().edges.filter((e) => e.id === 'e2')[0]
+  ok(straight !== undefined && styleGet(straight.style, 'edgeStyle', null) === 'none', 'line:"straight" 落成 edgeStyle=none：' + (straight === undefined ? '没有边' : straight.style))
+  ok(straight.points === undefined, '直线不带折点')
+
+  // 曲线：curved=1，并且**补一个弓形中点** —— 两点直连的曲线在 drawio 里退化成直线，
+  // 不补中点的话用户/AI 说"画条弧线"屏幕上什么都不会发生。
+  await apply([{ op: 'addEdge', from: 'n1', to: 'n2', line: 'curved' }])
+  const curved = current().edges.filter((e) => e.id === 'e3')[0]
+  ok(curved !== undefined && styleGet(curved.style, 'curved', null) === '1', 'line:"curved" 落成 curved=1：' + (curved === undefined ? '没有边' : curved.style))
+  ok(Array.isArray(curved.points) && curved.points.length === 1, '弧线补了一个中点（实际 ' + JSON.stringify(curved.points) + '）')
+  // 中点必须**离开**两端中心的连线（否则还是直线）
+  const n1 = current().nodes.filter((n) => n.id === 'n1')[0]
+  const n2 = current().nodes.filter((n) => n.id === 'n2')[0]
+  const mid = { x: (n1.x + n1.w / 2 + n2.x + n2.w / 2) / 2, y: (n1.y + n1.h / 2 + n2.y + n2.h / 2) / 2 }
+  const bowDist = Math.round(Math.sqrt((curved.points[0].x - mid.x) ** 2 + (curved.points[0].y - mid.y) ** 2))
+  ok(bowDist > 10, '中点在连线旁边（弓起来了，离中点 ' + bowDist + 'px）')
+
+  // 别名：arc / 曲线 / curve 都能认
+  await apply([{ op: 'setStyle', id: 'e2', line: 'arc' }])
+  ok(styleGet(current().edges.filter((e) => e.id === 'e2')[0].style, 'curved', null) === '1', 'line:"arc" 当成曲线（口语别名）')
+  // 换回折线：curved 删掉
+  await apply([{ op: 'setStyle', id: 'e2', line: 'orthogonal' }])
+  ok(styleGet(current().edges.filter((e) => e.id === 'e2')[0].style, 'curved', null) === null, '换回折线把 curved 删掉')
+  // 直线：清折点
+  await apply([{ op: 'setStyle', id: 'e3', line: 'straight' }])
+  ok(current().edges.filter((e) => e.id === 'e3')[0].points === undefined, 'setStyle line:"straight" 也会清掉折点')
+
+  // 不认识的线型：写盘前失败
+  const before = store.get(WORKSPACE + '\\doc.drawio')
+  let rejected = false
+  try {
+    await apply([{ op: 'setStyle', id: 'e1', line: 'wavy' }])
+  } catch (error) {
+    rejected = /unknown line/.test(String(error && error.message))
+  }
+  ok(rejected, '认不出的线型被拒（并说明可用值）')
+  ok(store.get(WORKSPACE + '\\doc.drawio') === before, '被拒之后文件一个字节都没变')
+
+  // 字号：节点、独立文字、连线都吃 fontSize（null = 删键）
+  await apply([{ op: 'setStyle', id: 'n1', fontSize: 18 }])
+  ok(styleGet(current().nodes.filter((n) => n.id === 'n1')[0].style, 'fontSize', null) === '18', 'setStyle fontSize:18 落到节点样式上')
+  await apply([{ op: 'setStyle', id: 'n1', fontSize: null }])
+  ok(styleGet(current().nodes.filter((n) => n.id === 'n1')[0].style, 'fontSize', null) === null, 'fontSize:null 删键回缺省')
+  await apply([{ op: 'setStyle', id: 'e1', fontSize: 14 }])
+  ok(styleGet(current().edges.filter((e) => e.id === 'e1')[0].style, 'fontSize', null) === '14', '连线上的文字也能改字号')
+  await apply([{ op: 'addNode', shape: 'text', label: '大字', x: 60, y: 300, fontSize: 24 }])
+  const bigText = current().nodes.filter((n) => n.label === '大字')[0]
+  ok(bigText !== undefined && styleGet(bigText.style, 'fontSize', null) === '24', '独立文字的字号也能给（addNode fontSize）')
+  ok(bigText !== undefined && nodeShapeFromStyle(bigText.style) === 'text', '字号不会把文字元素变成别的形状')
+}
+
+
 {
   seed(baseDoc())
   await apply([{ op: 'addEdge', from: 'n2', to: 'n1', label: '异步', dash: 'dashed', arrow: 'both' }])

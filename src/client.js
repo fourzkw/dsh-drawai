@@ -28,12 +28,14 @@ const {
   arrowFromStyle,
   colorNameFromStyle,
   colorsFromStyle,
+  curvedFromStyle,
   dashFromStyle,
   dashPatternFromStyle,
   edgeFreePoint,
   formatStyle,
   isOrthogonalEdgeStyle,
   jettyFromStyle,
+  lineKindFromStyle,
   nodeShapeFromStyle,
   normalizeDrawioDoc,
   snapDocGeometry,
@@ -47,6 +49,7 @@ const {
   styleWithTextColorName,
   textColorNameFromStyle,
   styleWithDash,
+  styleWithLineKind,
   styleWithNodeShape,
   styleWithSide,
 } = styleKernel
@@ -1300,7 +1303,16 @@ function zoomViewAt(current, anchor, factor) {
   return { x: anchor.x - (anchor.x - current.x) * k, y: anchor.y - (anchor.y - current.y) * k, w: w, h: current.h * k }
 }
 
-function pathOf(rawPoints, radius) {
+/**
+ * 折线 → SVG path。
+ *
+ * `curved` 走 drawio 的 `mxPolyline.paintCurvedLine`（curved=1）：从起点出发，每个中间点
+ * 作为**二次曲线的控制点**、收在下一点与它的中点，最后一段收在终点上 —— 于是整条线是平滑
+ * 的曲线而不是硬拐角。注意 drawio 里 curved 与 rounded 是**互斥**的（painCurvedLine 优先），
+ * 所以这里 curved 时不带圆角半径。
+ * 两点 + curved：控制点落在起点上 → 退化成直线（与 drawio 完全一致，不会凭空鼓起来）。
+ */
+function pathOf(rawPoints, radius, curved) {
   const pts = []
   for (let i = 0; i < rawPoints.length; i += 1) {
     const p = rawPoints[i]
@@ -1309,6 +1321,18 @@ function pathOf(rawPoints, radius) {
     pts.push(p)
   }
   if (pts.length < 2) return ''
+  if (curved === true) {
+    const parts = ['M ' + fmt(pts[0].x) + ' ' + fmt(pts[0].y)]
+    for (let i = 1; i < pts.length - 2; i += 1) {
+      const p0 = pts[i]
+      const p1 = pts[i + 1]
+      parts.push('Q ' + fmt(p0.x) + ' ' + fmt(p0.y) + ' ' + fmt((p0.x + p1.x) / 2) + ' ' + fmt((p0.y + p1.y) / 2))
+    }
+    const p0 = pts[pts.length - 2]
+    const p1 = pts[pts.length - 1]
+    parts.push('Q ' + fmt(p0.x) + ' ' + fmt(p0.y) + ' ' + fmt(p1.x) + ' ' + fmt(p1.y))
+    return parts.join(' ')
+  }
   const parts = ['M ' + fmt(pts[0].x) + ' ' + fmt(pts[0].y)]
   for (let i = 1; i < pts.length - 1; i += 1) {
     const prev = pts[i - 1]
@@ -1460,6 +1484,12 @@ function computeFitView(bounds, aspect) {
 /** 视口宽度范围（用户单位）：太小看不见，太大没意义。 */
 const VIEW_MIN_W = 80
 const VIEW_MAX_W = 40000
+
+/**
+ * 字号档位（菜单里可点的那几个；「默认」不在表里，它等于删掉 fontSize 键）。
+ * 落盘是 drawio 的 `fontSize`，所以档位只是 UI 的便利值，不限制用户/AI 写别的数。
+ */
+const FONT_SIZE_PRESETS = [10, 12, 14, 18, 24]
 
 /** 元素库：draw.io 那套形状词汇的可用子集。 */
 const SHAPE_LIBRARY = [
@@ -2621,6 +2651,12 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
       ]
     }
     const selected = ui !== undefined && ui !== null && Array.isArray(ui.selectedIds) && ui.selectedIds.indexOf(edge.id) >= 0
+    // 连线的画法全部存在文档的 style 键里：dashed/dashPattern 决定线型、endArrow/startArrow
+    // 决定箭头、strokeColor 决定颜色、rounded 决定拐角是否圆滑、curved=1 把折线抹成曲线
+    // —— 与 drawio 一致，缺省即"不画"。命中带与可见线**用同一个 curved 判据**，否则
+    // "看着是曲线、点起来按折线算"，两端拐弯处会点不中。
+    const edgeStyle = typeof edge.style === 'string' ? edge.style : ''
+    const edgeCurved = curvedFromStyle(edgeStyle)
     // 命中层：连线本身只有 1px，直接点很难点中。先铺一条透明的宽带子承接触击。
     /** 连线的交互面：命中带、标签底衬、标签文字**共用同一套**处理。
      *
@@ -2653,12 +2689,11 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
       }
       return props
     }
-    const hitProps = edgeFace({ key: 'edge-hit-' + i, className: 'drawai-edge-hit', d: pathOf(pts, 6) })
+    const hitProps = edgeFace({ key: 'edge-hit-' + i, className: 'drawai-edge-hit', d: pathOf(pts, 6, edgeCurved) })
     children.push(React.createElement('path', hitProps))
     // 连线的画法全部存在文档的 style 键里：dashed/dashPattern 决定线型、endArrow/startArrow
     // 决定箭头、strokeColor 决定颜色、rounded 决定拐角是否圆滑 —— 与 drawio 一致，缺省即"不画"。
     // v1 只存语义（dash:'dashed'）而把像素值留在客户端；v1.1 起渲染参数就是文档的一部分。
-    const edgeStyle = typeof edge.style === 'string' ? edge.style : ''
     const strokeColor = styleGet(edgeStyle, 'strokeColor', null)
     const arrow = arrowFromStyle(edgeStyle)
     const pattern = dashPatternFromStyle(edgeStyle)
@@ -2690,7 +2725,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     const edgeProps = {
       key: 'edge-' + i,
       d: subPaths
-        .map((sub) => pathOf(sub, cornerRadius))
+        .map((sub) => pathOf(sub, cornerRadius, edgeCurved))
         .filter((text) => text.length > 0)
         .join(' '),
       fill: 'none',
@@ -4918,20 +4953,21 @@ function CanvasView(props) {
    * 缺的只是"从零画一条"的入口 —— 原来只能从节点手柄拖出来，于是至少有一端是节点。
    * 画完之后照样能拖端点接到节点上（改接端点那套手势对自由端点同样有效）。
    */
-  function createFreeEdgeAt(userX, userY) {
+  function createFreeEdgeAt(userX, userY, kind) {
     const current = docRef.current
     if (current === null) return
     const id = nextEdgeId(current)
     const from = { x: snap(userX, EDGE_GRID), y: snap(userY, EDGE_GRID) }
     const to = { x: from.x + 200, y: from.y }
+    const straight = kind === 'straight'
     applyLocal((next) => {
-      const edge = { id: id, style: DEFAULT_EDGE_STYLE, sourcePoint: from, targetPoint: to }
+      const edge = { id: id, style: straight ? styleWithLineKind(DEFAULT_EDGE_STYLE, 'straight') : DEFAULT_EDGE_STYLE, sourcePoint: from, targetPoint: to }
       if (activeLayerId !== null) edge.layer = activeLayerId
       next.edges.push(edge)
     })
     setSelectedIds([id])
     setMenu(null)
-    setSaveNote('已放一条独立连线（两端都没接节点）—— 拖它的端点即可接到节点上')
+    setSaveNote(straight ? '已放一条直线（两端都没接节点、没有折点）' : '已放一条独立连线（两端都没接节点）—— 拖它的端点即可接到节点上')
   }
 
   /**
@@ -5035,10 +5071,67 @@ function CanvasView(props) {
         let style = typeof e.style === 'string' ? e.style : DEFAULT_EDGE_STYLE
         if (has(patch, 'dash')) style = styleWithDash(style, patch.dash)
         if (has(patch, 'arrow')) style = styleWithArrow(style, patch.arrow)
+        if (has(patch, 'line')) style = styleWithLineKind(style, patch.line)
+        if (has(patch, 'fontSize')) style = stylePatch(style, { fontSize: patch.fontSize === null ? null : String(patch.fontSize) })
         if (has(patch, 'color')) {
           style = stylePatch(style, { strokeColor: typeof patch.color === 'string' && patch.color.length > 0 ? patch.color : null })
         }
         e.style = style
+      }
+    })
+  }
+
+  /**
+   * 换连线的**线型**（直线 / 折线 / 曲线）—— 比 updateEdge 多做一件几何上的事。
+   *
+   * - 直线（无折点）：必须把折点清掉。留着折点 + `edgeStyle=none` 在 drawio 里会画成
+   *   "穿过折点的折线"，不是用户按「直线」时想要的东西。
+   * - 曲线：`curved=1` 是把**现有走线**抹圆。走线本来就带拐角（自动路由的 L 形、或人摆的折点）时
+   *   直接就能看见弧度；但如果这条边是两点直连（完全共线），drawio 的曲线会退化成直线
+   *   （mxPolyline.paintCurvedLine 在两点时控制点落在起点上）—— 那时补一个**垂直弓形的中点**，
+   *   弧才真的看得见。这跟人在 drawio 里手动拖一个中点出来是同一件事。
+   */
+  function applyLineKind(ids, kind) {
+    const current = docRef.current
+    if (current === null) return
+    const list = Array.isArray(ids) ? ids : [ids]
+    applyLocal((next) => {
+      for (let i = 0; i < next.edges.length; i += 1) {
+        const e = next.edges[i]
+        if (list.indexOf(e.id) < 0) continue
+        const style = typeof e.style === 'string' ? e.style : DEFAULT_EDGE_STYLE
+        e.style = styleWithLineKind(style, kind)
+        if (kind === 'straight') {
+          delete e.points
+          continue
+        }
+        if (kind !== 'curved') continue
+        const hasPoints = Array.isArray(e.points) && e.points.length > 0
+        if (hasPoints) continue
+        const pts = edgeRoutePoints(next, e, routeMemoryRef.current)
+        if (pts === null || pts.length < 2) continue
+        let turns = false
+        for (let k = 1; k < pts.length - 1; k += 1) {
+          const a = pts[k - 1]
+          const b = pts[k]
+          const c = pts[k + 1]
+          if (Math.abs((b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x)) > 0.5) {
+            turns = true
+            break
+          }
+        }
+        if (turns) continue
+        const ax = pts[0].x
+        const ay = pts[0].y
+        const bx = pts[pts.length - 1].x
+        const by = pts[pts.length - 1].y
+        const dx = bx - ax
+        const dy = by - ay
+        const len = Math.sqrt(dx * dx + dy * dy)
+        if (len < 1) continue
+        // 弓高：取长度的 12%，至少 20px、至多半格对齐后的整数（折点单位就是半格）
+        const bow = Math.max(20, Math.round((len * 0.12) / EDGE_GRID) * EDGE_GRID)
+        e.points = [{ x: snap((ax + bx) / 2 - (dy / len) * bow, EDGE_GRID), y: snap((ay + by) / 2 + (dx / len) * bow, EDGE_GRID) }]
       }
     })
   }
@@ -5900,6 +5993,33 @@ function CanvasView(props) {
     return React.createElement('div', { className: 'drawai-grid' }, buttons)
   }
 
+  /**
+   * 字号行：节点标签、边标签、独立文字**共用**这一个控件（"文字的字号均可修改"）。
+   *
+   * 落盘还是 drawio 的 `fontSize` 键（缺省不写键）。「默认」= 删键回到各自缺省
+   * （节点/文字 12、连线 10），其余是常用档位。
+   */
+  function fontSizeRow(style, apply) {
+    const current = styleNumber(style, 'fontSize', null)
+    const items = [[null, '默认']].concat(FONT_SIZE_PRESETS.map((n) => [n, String(n)]))
+    return React.createElement(
+      'div',
+      { className: 'drawai-menu-row' },
+      items.map((it) =>
+        React.createElement(
+          'button',
+          {
+            key: 'fs-' + String(it[0]),
+            className: 'drawai-btn' + (String(current) === String(it[0]) ? ' on' : ''),
+            title: it[0] === null ? '回到缺省字号' : '字号 ' + it[0] + 'px',
+            onClick: () => apply(it[0]),
+          },
+          it[1],
+        ),
+      ),
+    )
+  }
+
   function renderMenu() {
     if (menu === null) return null
     const rows = []
@@ -5964,6 +6084,13 @@ function CanvasView(props) {
             { className: 'drawai-btn', onClick: () => createFreeEdgeAt(menu.userX, menu.userY), title: '画一条两端都没接节点的线，之后拖它的端点可以接到节点上' },
             '／ 独立连线',
           ),
+          // 同一条独立线，但**线型是直线**（`edgeStyle=none`，不带折点）：斜着量一段距离、
+          // 拉一条指示线时用得上。之后在连线的右键菜单里可以随时换成折线/曲线。
+          React.createElement(
+            'button',
+            { className: 'drawai-btn', onClick: () => createFreeEdgeAt(menu.userX, menu.userY, 'straight'), title: '画一条两端都不接节点、也不带折点的直线' },
+            '╱ 直线',
+          ),
         ),
       )
     } else if (menu.kind === 'multi') {
@@ -6018,7 +6145,8 @@ function CanvasView(props) {
           React.createElement('button', { className: 'drawai-btn', onClick: () => openDataEditor('node', menu.id) }, '编辑数据…'),
         ),
       )
-      // 顺序：谁压在谁上面（drawio 的 Bring to Front / Send to Back 那一组）。
+      // 字号：节点标签与独立文字共用这套控件（文字元素没有填充描边，字号是它少数能改的东西）。
+      rows.push(fontSizeRow(nodeStyle, (v) => updateNode(nodeTargets, { style: stylePatch(nodeStyle, { fontSize: v === null ? null : String(v) }) })))
       rows.push(
         React.createElement(
           'div',
@@ -6071,6 +6199,35 @@ function CanvasView(props) {
           ),
         )
       rows.push(dashRow([['solid', '实线'], ['dashed', '虚线'], ['dotted', '点线']]))
+      // 线型（drawio 的 Straight / Orthogonal / Curved）：直线会顺手清掉折点，曲线会给
+      // "本来就笔直"的那种边补一个弓形中点 —— 理由见 applyLineKind 的注释。
+      const edgeLineNow = edge === null ? 'orthogonal' : lineKindFromStyle(edgeBaseStyle)
+      const lineRow = (items) =>
+        React.createElement(
+          'div',
+          { className: 'drawai-menu-row' },
+          items.map((it) =>
+            React.createElement(
+              'button',
+              {
+                key: it[0],
+                className: 'drawai-btn' + (edgeLineNow === it[0] ? ' on' : ''),
+                title: it[2],
+                onClick: () => applyLineKind(edgeTargets, it[0]),
+              },
+              it[1],
+            ),
+          ),
+        )
+      rows.push(
+        lineRow([
+          ['straight', '直线', '两点之间一条直线，不带折点'],
+          ['orthogonal', '折线', '正交折线（自动路由 / 你摆的折点）'],
+          ['curved', '曲线', '把折线抹成平滑曲线；本来笔直的那种会补一个弓形中点，弧才看得见'],
+        ]),
+      )
+      // 字号：线上的文字（边自己的 value）与挂在边上的独立标签都吃 fontSize。
+      rows.push(fontSizeRow(edgeBaseStyle, (v) => updateEdge(edgeTargets, { fontSize: v })))
       const arrowRow = (items) =>
         React.createElement(
           'div',
