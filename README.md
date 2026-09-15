@@ -85,52 +85,114 @@ DSH 右侧栏的 **draw.io 风格画布** + 让 AI 直接绘图的**语义工具
 
 ## 离「可发布」还差什么
 
-按"挡住发布 → 用户第一天会问 → 功能大件 → AI 侧"的顺序。**A/B 两类加起来不到半天**，
-真正的工作量在 C 类（都是 drawio 生态里的大件）。
+### 收录要求（查过原始出处，不是猜的）
 
-### A. 发布阻塞项（都是小活）
+DSH 插件市场（`dshmarket`）的**插件列表并不在自己仓库里**：它读的是精选列表
+[awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
+（站点 <https://awesome-dsh-plugin.com>，注册表 `plugins.json`）。dshmarket 的说明原文：
 
-- [ ] `package.json` 里 **`"private": true`** —— `npm publish` 会直接拒绝。删掉它。
-- [ ] **没有 LICENSE 文件**，`package.json` 也没有 `license` 字段。必须定一个（MIT？Apache-2.0？）
-      —— 没有它，别人法律上不能用/改/分发。
-- [ ] `repository` / `homepage` / `keywords` / `author` 都没有，npm 页面上会是空白。
-- [ ] **`@deepseek-ai/dsh-tools` 是运行时 import（`src/index.js:16`），但 package.json 里
-      没有任何 `dependencies`/`peerDependencies`** —— 走 bundle 通道装到别的机器上时依赖关系不明。
-      至少要声明 peer（或明确"由宿主提供"并写进 README）。
-- [ ] 没有 `CHANGELOG.md`、没有 git tag：版本只有 package.json 里的 `0.1.0`，
-      而分支叫 `v1.1-drawio-format` —— 装完以后"我装的是哪版、升了什么"说不清。
-- [ ] 自测要先手工建一个指向 `@deepseek-ai/dsh-tools` 的 junction（见本文档末尾）。
-      对外发布要让 `npm install && npm test` 直接能跑，否则没人会跑你的断言。
-- [ ] 没有 CI（`.github/workflows`）：现在 1100 多条断言只在这台机器上跑过。
-- [ ] `vendor/drawio-webapp/` 是 199 个**空目录**的残留（未跟踪），清掉或说明用途。
+> **这个仓库是市场应用本身，不是插件目录。** 市场里的插件列表来自精选列表 awesome-dsh-plugin
+> —— 想让你的插件上架，请去**那边**提 PR（在列表里加一条即可，站点和本市场会自动收录，通常一天内生效）。
 
-### B. 装上去第一天就会被问的
+投稿就是**一个文件**：`data/plugins/<owner>__<repo>.yml`：
+
+```yaml
+url: https://github.com/owner/repo    # 必须与仓库完全一致
+name: owner/repo                      # 列表里显示的链接文字
+category: tools                       # 见下方分类
+description:
+  en: One-line description ending with a period.   # 只有这条是必填
+  zh: 一句话描述，以句号结尾。                       # 可选，维护者会补
+tarball: https://github.com/…/releases/latest/download/<name>.tgz   # 可选（没发 npm 时推荐）
+```
+
+可用的 `category`：`agi ui usage theme model identity session memory tools wsl browser vision
+voice docs skill workflow git notify dev security remote market fun`。
+
+CI 会依次检查（**绿了只是前置条件，合并前维护者会真的读你的仓库**）：
+
+1. 一个 PR 最多 3 条；
+2. **从仓库的 `package.json` 里读 `dsh.bundle`** —— 只声明 `dsh.client` 是最常见的被拒原因；
+3. 仓库**创建满 1 天**（自动查）；
+4. `awesome-lint` 与站点构建（双语、分隔符、截图）；
+5. 评审看：代码是否与描述一致（**描述里的数字/命令/API 会被逐个核对**）、分类是否贴切、
+   是不是真代码、是否与已有条目重复、源码有没有可疑行为、有没有动别人的条目、是不是纯聚合包。
+
+其余要求：仓库要加 **`dsh-plugin` topic**；描述只写功能、不带营销词；项目要**活跃维护**；
+**官方 `@deepseek-ai/*` 包声明为 `peerDependencies` 而不是 `dependencies`** —— 并且
+peer 范围**必须带显式预发布分支**，否则会静默排除 harness 的全部预发布构建
+（node-semver 只在该版本 `major.minor.patch` 元组上有带预发布标签的比较符时才放行预发布版）。
+这一点我在这台机器上用真实 semver 验过（harness 是 `0.1.5-rc.2`）：
+
+| peer 范围 | `0.1.0-rc.6` | `0.1.5-rc.2` | `0.1.5` |
+|---|---|---|---|
+| `>=0.0.1-rc.1 <0.2.0`（看着宽） | ✗ | ✗ | ✓ |
+| `>=0.0.0-0 <0.2.0-0`（"匹配一切"） | ✗ | ✗ | ✓ |
+| `>=0.1.0-rc.1 <0.2.0-0` | ✓ | ✗ | ✓ |
+| **`>=0.1.0-rc.1 <0.1.0 \|\| >=0.1.5-rc.1 <0.2.0-0`** | ✓ | ✓ | ✓ |
+
+图片（可选、推荐）：在自己仓库 `package.json` 旁边放 `screenshots.json`，列出 1-8 张图片的
+**相对路径**（或 GitHub 托管的 https 链接）。不声明也行 —— 市场会退回从 README 抽图。
+
+npm 包（可选）：**发不发都不影响收录**；发了的话市场会显示下载量，但包的 `repository`
+必须指回被收录的那个仓库（映射自动采集，条目里手写 `npm:` 会被拒）。
+
+### 对着这份要求，我们这边要改什么
+
+已经改好的：
+
+- [x] **`peerDependencies` 声明 `@deepseek-ai/dsh-tools`**，范围用上面验证过的
+      `>=0.1.0-rc.1 <0.1.0 || >=0.1.5-rc.1 <0.2.0-0`（市场按它显示"宿主是否兼容"，
+      npm/pnpm 也不会因为预发布而 ERESOLVE）；
+- [x] 去掉 **`"private": true`**（`npm publish` 之前它会让发布直接被拒）；
+- [x] `keywords` 补齐（含 `dsh-plugin`，与 hub 的约定一致）。
+
+**还需要人来做的（我做不了：要 GitHub 账号 / 你要拍板）**：
+
+- [ ] **建一个公开 GitHub 仓库并 push** —— 现在 `git remote -v` 是空的，仓库只在本地。
+      没有它就没有 `url` 可填，CI 也读不到 `package.json`。同时给仓库加 **`dsh-plugin` topic**。
+- [ ] 定 **LICENSE**（生态里几乎都是 MIT：dshmarket、dsh-package-manifest 都是），
+      然后在 `package.json` 补 `license` 与 **`repository`**（后者必须指回那个仓库，
+      否则将来发了 npm 也不会与条目关联）。
+- [ ] 可选但推荐：**发到 npm**（`dsh-drawai` 这个名字我查过，**npm 上还没被占用**）——
+      预构建安装可以跳过 `allowBuilds` 构建授权那一步；不发也行，我们的 `lib/` 是提交进仓库的，
+      从 GitHub 源码装也不需要构建。
+- [ ] 提 PR：在 awesome-dsh-plugin 加一个 `data/plugins/<owner>__dsh-drawai.yml`
+      （`category` 建议 `tools` —— 它带来的是两个模型工具 + 一块可编辑画布；
+      若维护者觉得更像界面增强，会直接给改成 `ui`，不会因此打回）。
+- [ ] 可选：放 2-3 张截图 + `screenshots.json`（现在 README 里一张图都没有，
+      市场卡片会没有配图）。
+
+### 其余"完善度"缺口（不影响收录，影响体验）
+
+**B. 装上去第一天就会被问的**
 
 - [ ] **UI 全是中文**，没有 i18n。drawio 的用户不全是中文用户。
 - [ ] **没有设置页**：主题跟随、网格显示/吸附、默认布局、默认字号、默认线型都写死在代码里。
-- [ ] README 是 800 行**架构文档**，缺一段"装完怎么用"的 5 分钟上手（最好带图/GIF）。
-- [ ] **宿主半边没有热重载**：改宿主代码/升级插件都要重启 `dsh web`。
-      发布版至少要把这件事写在显眼处，理想是给一个"重载插件"的入口。
+- [ ] README 是 900 行**架构文档**，缺一段"装完怎么用"的 5 分钟上手。
+- [ ] **宿主半边没有热重载**：改宿主代码/升级插件都要重启 `dsh web`（市场能热挂载的插件不受影响，
+      但换 `lib/index.js` 必须重启）。发布版至少要把这件事写在显眼处。
 - [ ] 出错时只有一块红底错误页（`CanvasBoundary`），没有"复制诊断""打开原始 XML"这类自救入口。
+- [ ] 没有 `CHANGELOG.md`、没有 git tag；分支名（`v1.1-drawio-format`）与版本号（`0.1.0`）也该理顺。
+- [ ] **没有 CI**：1100 多条断言只在这台机器上跑过（`npm test` 需要先建一个指向
+      `@deepseek-ai/dsh-tools` 的 junction，见本文档末尾）。
+- [ ] `vendor/drawio-webapp/` 是 199 个**空目录**的残留（未跟踪），清掉或说明用途。
 
-### C. 功能大件（按用户会碰到的顺序）
+**C. 功能大件（按用户会碰到的顺序）**
 
 - [ ] **分组 / 容器**：文件里层级保留着，但画布按绝对位置拍平显示，不能进组编辑。
-      这是 drawio 用户最常用的组织手段之一。
 - [ ] **多页**：只显示/编辑第 1 页（其余页逐字节保留），没有切页/建页。
-- [ ] **图层 v2/v3**：锁定、把选中单元移到别的层、重命名、删除层（不许删最后一层）；
-      AI 侧的按层 ops（见下面 D）。
+- [ ] **图层 v2/v3**：锁定、把选中单元移到别的层、重命名、删除层（不许删最后一层）；AI 侧按层 ops。
 - [ ] **图片 / HTML 标签**只读：按矩形显示、原样保留，不能插入图片。
 - [ ] **`.drawio.svg` / `.png` / `.html` 载体**不支持（drawio 生态里很常见）。
-- [ ] **所有边都画在所有节点下面**（drawio 是按单元顺序混合层叠）——
-      绕法是把那条边放进更上面的一层。
+- [ ] **所有边都画在所有节点下面**（drawio 是按单元顺序混合层叠）——绕法是把那条边放进更上面的一层。
 - [ ] 导出只有 SVG 与 PNG(2×)：没有 PDF，没有"只导出选中"，没有倍率选择。
 - [ ] 交互细节：方向键微移、查找、单条边复制、辅助线不跟折点/端点比。
 - [ ] 保真度零头：`entityRelation` 等其它 edgeStyle、箭头字形（`endSize/endFill` 只保留不渲染）、
       旋转/翻转/透明、mxgraph stencil 形状、容器的 `direction`。
 - [ ] **大图性能没测过**：几百个单元时的重渲染与路由开销是未知数。
 
-### D. AI 侧（这是本插件的卖点，值得单独排）
+**D. AI 侧（这是本插件的卖点，值得单独排）**
 
 - [ ] AI **看不到用户的选区**：用户说"把这几个挪一下"时只能靠坐标猜。
 - [ ] AI **不能导出图片**（"给我一张 PNG"做不到）。
@@ -139,13 +201,17 @@ DSH 右侧栏的 **draw.io 风格画布** + 让 AI 直接绘图的**语义工具
 - [ ] AI 不能建/改分组、不能切页、不能按层操作（v3）。
 - [ ] `diagram_read` 不告诉你页面尺寸/纸张，布局与导出建议会因此不准。
 
-### 已经验证过是通的（发布时不用返工）
+### 已经验证过是通的（评审时可以直接说）
 
-- `npm pack --dry-run` 出包干净：**7 个文件、230KB**（`lib/` + `cordis.patch.yml` + README + package.json），
-  `files` 白名单与 `dsh.bundle.patch` 通道都成立；
-- 客户端 bundle 只用宿主提供的 `window.__ModuleLoader__` 与 `react`（不需要额外打包工具）；
+- **`dsh.bundle.patch` 已声明**（`cordis.patch.yml` 就在包根）—— 这是收录的硬条件，我们满足；
+- `npm pack --dry-run` 出包干净：**7 个文件、230KB**（`lib/` + `cordis.patch.yml` + README + package.json）；
+- **从 GitHub 源码装也不需要构建**：`lib/` 是提交进仓库的、没有 `prepare` 脚本；
+- 客户端 bundle 只用宿主提供的 `window.__ModuleLoader__` 与 `react`，不需要额外打包工具；
 - 内嵌技能随宿主半边一起发（换台电脑只装插件，AI 也知道怎么操作画布）；
-- 无损写回：打开后原样保存 ⇒ 文件逐字节不变（有断言盯着）。
+- 无损写回：打开后原样保存 ⇒ 文件逐字节不变（有断言盯着）；
+- **与已有条目不重复**：列表里做图形/画布的两个插件是 `guchang/draw2code`（Excalidraw 原型板）
+  与 `lokih1028/dsh-plugin-canvas-pro`（HTML/Markdown/Mermaid/SVG 产出），
+  没有做 **`.drawio`（drawio mxfile）**的 —— 我们的差异点是"载体就是 drawio 的文件本身 + 无损写回"。
 
 ---
 

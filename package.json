@@ -1,7 +1,6 @@
 {
   "name": "dsh-drawai",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "DSH 右侧栏 draw.io 风格画布 + AI 语义绘图工具（diagram_apply / diagram_read）",
   "main": "lib/index.js",
@@ -20,8 +19,21 @@
     "lib",
     "cordis.patch.yml"
   ],
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "diagram",
+    "drawio",
+    "mxfile",
+    "canvas"
+  ],
   "engines": {
     "node": ">=20"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.1 <0.1.0 || >=0.1.5-rc.1 <0.2.0-0"
   },
   "dsh": {
     "bundle": {
