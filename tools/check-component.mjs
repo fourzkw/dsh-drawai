@@ -525,6 +525,61 @@ console.log('\n下拉菜单 / 弹出面板：点到外面就关掉')
   ok(/setDocMenu\(null\)/.test(escBranch), 'Esc 也收掉下拉菜单/面板（"退出这一层"的语义要一致）')
 }
 
+console.log('\n双击改标签：按下时不许抢 pointer capture')
+{
+  // 真实事故：`onNodePointerDown` 里按下就 setPointerCapture(画布) —— pointer capture 会把
+  // 随后的 click / dblclick 目标改成**捕获元素**（click 取按下/松开两个目标的公共祖先，
+  // 而被捕获的 pointerup 目标是画布容器），于是节点那个 <g> 不在事件路径里，
+  // "双击节点改内容"彻底失灵（Chrome 判为 working as intended，见 w3c/pointerevents#356）。
+  // 修法：按下只登记，等真的动了（>3px）才在 pointermove 里抢 —— 一次点击完全不抢捕获。
+  const capBody = bodyOf('takePendingCapture')
+  ok(capBody !== null, '源码里有 takePendingCapture')
+
+  // 结构性守卫：全文件里 setPointerCapture 只允许有**一处**调用，并且它在 takePendingCapture 里。
+  // （以前它在 6 个 pointerdown 路径里各抄了一遍，所以双击改标签是全坏的。）
+  const capCalls = src.match(/setPointerCapture\(event\.pointerId\)/g) || []
+  ok(capCalls.length === 1, 'setPointerCapture 全文件只有一处调用（实际 ' + capCalls.length + ' 处）')
+  ok(capBody !== null && capBody.indexOf('setPointerCapture(event.pointerId)') >= 0, '那一处就在 takePendingCapture 里')
+  ok(/function requestCapture\(event\)/.test(src), '按下时走的是 requestCapture（只登记坐标，不抢捕获）')
+  ok((src.match(/requestCapture\(event\)/g) || []).length >= 6, '每个拖动入口都登记（节点/连线/框选/平移/缩放/改接…）：实际 ' + (src.match(/requestCapture\(event\)/g) || []).length + ' 处')
+  ok(/takePendingCapture\(event\)/.test(bodyOf('onCanvasPointerMove') || ''), 'pointermove 里才真正抢捕获')
+  ok(/pendingCaptureRef\.current = null/.test(bodyOf('onCanvasPointerUp') || ''), '手势结束清掉登记（这一轮没拖 = 就是点击，不能在后面的 move 里突然抢）')
+
+  // 行为：喂假事件真的跑一遍
+  const runTake = (pending, move) => {
+    const captured = []
+    const ref = { current: pending }
+    const canvas = { current: { setPointerCapture: (id) => captured.push(id) } }
+    const fn = new Function(
+      'pendingCaptureRef',
+      'canvasRef',
+      'CAPTURE_MOVE_PX',
+      'return function takePendingCapture(event) ' + capBody,
+    )(ref, canvas, 3)
+    fn(move)
+    return { captured: captured, pending: ref.current }
+  }
+
+  const idle = runTake(null, { pointerId: 1, clientX: 10, clientY: 10 })
+  ok(idle.captured.length === 0, '没有登记时什么都不做')
+
+  // 手抖 1px 的点击：不许抢捕获（抢了 dblclick 就落到画布上）
+  const jitter = runTake({ pointerId: 1, x: 100, y: 100 }, { pointerId: 1, clientX: 101, clientY: 100 })
+  ok(jitter.captured.length === 0, '移动 1px（手抖）不抢捕获')
+  ok(jitter.pending !== null, '不抢时登记还留着（后面动得更远再抢）')
+
+  const moved = runTake({ pointerId: 1, x: 100, y: 100 }, { pointerId: 1, clientX: 104, clientY: 100 })
+  ok(moved.captured.join(',') === '1', '移动 4px（真的在拖）才抢捕获：' + moved.captured.join(','))
+  ok(moved.pending === null, '抢过之后登记清掉（不重复抢）')
+
+  const other = runTake({ pointerId: 1, x: 100, y: 100 }, { pointerId: 7, clientX: 200, clientY: 200 })
+  ok(other.captured.length === 0 && other.pending !== null, '别的 pointer 的移动不会替这一路抢捕获（多指/多设备）')
+
+  // 3px 判据与"越 3px 才算拖"同一套手感
+  const exactly = runTake({ pointerId: 1, x: 100, y: 100 }, { pointerId: 1, clientX: 103, clientY: 100 })
+  ok(exactly.captured.length === 0, '正好 3px 还不算拖（判据是 >3）')
+}
+
 console.log('\n自环与复制粘贴的接线（手势与快捷键必须真的连上）')
 {
   // 用与产物同款的组合 body 当"源码"：这里断言的是文本接线，不是运行行为。

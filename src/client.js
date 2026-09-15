@@ -95,6 +95,14 @@ const GRID = 10
 const EDGE_GRID = GRID / 2
 
 /**
+ * 指针移动多少像素之后才抢 pointer capture（见 `requestCapture`）。
+ *
+ * 取 3 是跟着"越 3px 才算拖"那套手感走的：手抖一两像素的点击不该被当成拖动，
+ * 更不该因此抢掉捕获 —— 抢了 click/dblclick 就落到画布容器上，双击改标签直接失灵。
+ */
+const CAPTURE_MOVE_PX = 3
+
+/**
  * 新建节点的默认尺寸：**都取整格**。
  *
  * 为什么：尺寸不整格，节点中心就会落在半像素上（旧的 130×56 默认值，中心 y 偏移 28），
@@ -3672,6 +3680,9 @@ function CanvasView(props) {
         ? layerList[0].id
         : null
   const marqueeRef = React.useRef(null) // 框选拖拽 { x0, y0, x1, y1, additive, moved }
+  // 待抢的 pointer capture：按下时登记 { pointerId, x, y }，真的动起来（> CAPTURE_MOVE_PX）
+  // 才在 pointermove 里抢下来。按下就抢会让 click/dblclick 落到画布容器上（双击改标签失灵）。
+  const pendingCaptureRef = React.useRef(null)
   const marqueeState = React.useState(null) // 同上，供渲染
   const marquee = marqueeState[0]
   const setMarquee = marqueeState[1]
@@ -4158,8 +4169,30 @@ function CanvasView(props) {
     }
   }
 
-  /** 把 pointer capture 挂在画布上：pointermove / pointerup 的处理本来就在画布上。 */
-  function captureOnCanvas(event) {
+  /**
+   * 指针按下时**只登记**，等真的拖动起来再抢 pointer capture。
+   *
+   * 为什么不能按下就抢（这是一个真实事故）：pointer capture 会把随后的 **click / dblclick
+   * 的目标改成捕获元素**。规范里 click 取"按下与松开两个目标的公共祖先"，而被捕获的
+   * `pointerup` 目标是捕获元素，于是 click 就落到画布容器上 —— 按在节点上双击时，
+   * 节点那个 `<g>` 根本不在事件路径里，`onDoubleClick` 永远不触发
+   * （Chrome 把这种行为判为 working as intended，见 w3c/pointerevents#356）。
+   * 症状就是用户报的"双击节点无法更改节点内容"。
+   *
+   * 我们抢捕获的唯一理由是"拖动过程中指针离开画布也别丢事件"，而那只在**真的动了**之后才有意义：
+   * 所以按下先记一笔，在 pointermove 里移动超过阈值（3px，与"越 3px 才算拖"同一套手感）时才抢。
+   * 一次"按下-松开没动"的点击因此完全不抢捕获，click/dblclick 仍由浏览器按命中测试派发。
+   */
+  function requestCapture(event) {
+    pendingCaptureRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY }
+  }
+
+  /** pointermove 里的第一件事：动得够远了就把登记过的捕获真正抢下来。 */
+  function takePendingCapture(event) {
+    const pending = pendingCaptureRef.current
+    if (pending === null || pending.pointerId !== event.pointerId) return
+    if (Math.abs(event.clientX - pending.x) + Math.abs(event.clientY - pending.y) <= CAPTURE_MOVE_PX) return
+    pendingCaptureRef.current = null
     const element = canvasRef.current
     if (element === null || typeof element.setPointerCapture !== 'function') return
     try {
@@ -4193,7 +4226,7 @@ function CanvasView(props) {
     const node = nodeById(id)
     const reference = node === null ? null : { x: numberOr(node.x, 0), y: numberOr(node.y, 0) }
     startSelectionDrag(ids, point, reference)
-    captureOnCanvas(event)
+    requestCapture(event)
   }
 
   /**
@@ -4227,7 +4260,7 @@ function CanvasView(props) {
       }
     }
     startSelectionDrag(ids, point, reference)
-    captureOnCanvas(event)
+    requestCapture(event)
   }
 
   function onNodePointerUp(id) {
@@ -4414,13 +4447,7 @@ function CanvasView(props) {
       moved: false,
       button: button,
     }
-    if (element !== null && typeof element.setPointerCapture === 'function') {
-      try {
-        element.setPointerCapture(event.pointerId)
-      } catch (error) {
-        // 捕获失败不影响平移：指针仍在画布内时会继续派发 pointermove
-      }
-    }
+    requestCapture(event)
     return true
   }
 
@@ -4435,14 +4462,7 @@ function CanvasView(props) {
     if (point === null) return
     marqueeRef.current = { x0: point.x, y0: point.y, x1: point.x, y1: point.y, additive: event.shiftKey === true, moved: false }
     setMarquee({ x0: point.x, y0: point.y, x1: point.x, y1: point.y })
-    const element = canvasRef.current
-    if (element !== null && typeof element.setPointerCapture === 'function') {
-      try {
-        element.setPointerCapture(event.pointerId)
-      } catch (error) {
-        // 捕获失败不影响框选：指针在画布内时仍会派发 pointermove
-      }
-    }
+    requestCapture(event)
   }
 
   /** 中键按下（在任何位置都生效，包括压在节点上）：拖动画布。 */
@@ -4453,6 +4473,9 @@ function CanvasView(props) {
   }
 
   function onCanvasPointerMove(event) {
+    // 第一件事：真的动起来了才把 pointer capture 抢下来（见 requestCapture 的注释 ——
+    // 按下就抢会让 click/dblclick 的目标变成画布容器，节点双击改标签会失灵）。
+    takePendingCapture(event)
     const pan = panRef.current
     if (pan !== null) {
       const dxPx = event.clientX - pan.startClientX
@@ -4618,6 +4641,9 @@ function CanvasView(props) {
   }
 
   function onCanvasPointerUp(event) {
+    // 手势结束：还没抢下来的捕获登记也一起作废（这一轮没拖动 = 就是一次点击，
+    // 不该在后面的某次 move 里突然抢捕获）。
+    pendingCaptureRef.current = null
     const pan = panRef.current
     if (pan !== null) {
       panRef.current = null
@@ -4672,14 +4698,7 @@ function CanvasView(props) {
       w: numberOr(node.w, FALLBACK_NODE_W),
       h: numberOr(node.h, FALLBACK_NODE_H),
     }
-    const element = canvasRef.current
-    if (element !== null && typeof element.setPointerCapture === 'function') {
-      try {
-        element.setPointerCapture(event.pointerId)
-      } catch (error) {
-        // 捕获失败不影响缩放
-      }
-    }
+    requestCapture(event)
   }
 
   /** 导出前把实时 SVG 克隆一份、摘掉交互件 —— 手柄和选中框不该出现在产物里。 */
@@ -4944,14 +4963,8 @@ function CanvasView(props) {
     const point = toUserSpace(event)
     if (point === null) return
     labelDragRef.current = { edgeId: edgeId, originX: point.x, originY: point.y, moved: false }
-    const element = canvasRef.current
-    if (element !== null && typeof element.setPointerCapture === 'function') {
-      try {
-        element.setPointerCapture(event.pointerId)
-      } catch (error) {
-        // 捕获失败不影响拖动：指针在画布内时仍会派发 pointermove
-      }
-    }
+    // 同上：按下不抢捕获（抢了 dblclick 就落到画布容器上，"双击改线上的字"会失灵）。
+    requestCapture(event)
   }
 
   /** 拖标签的每一帧：指针先**吸附**（半格 + 贴线），再反解成 drawio 的相对位置。 */
@@ -5101,14 +5114,7 @@ function CanvasView(props) {
 
     if (kind === 'from' || kind === 'to') {
       edgeDragRef.current = { edgeId: edgeId, kind: kind, index: -1 }
-      const canvas = canvasRef.current
-      if (canvas !== null && typeof canvas.setPointerCapture === 'function') {
-        try {
-          canvas.setPointerCapture(event.pointerId)
-        } catch (error) {
-          // 捕获失败不影响：指针在画布内时仍会派发 pointermove
-        }
-      }
+      requestCapture(event)
       return
     }
 
@@ -5148,14 +5154,7 @@ function CanvasView(props) {
         originX: origin.x,
         originY: origin.y,
       }
-      const canvas = canvasRef.current
-      if (canvas !== null && typeof canvas.setPointerCapture === 'function') {
-        try {
-          canvas.setPointerCapture(event.pointerId)
-        } catch (error) {
-          // 捕获失败不影响拖动
-        }
-      }
+      requestCapture(event)
       return
     }
     // 只剩下 from/to/segment 三种；走到这里说明参数不对，不启动拖拽。

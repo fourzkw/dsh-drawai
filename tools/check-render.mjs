@@ -1280,6 +1280,37 @@ console.log('\n文档在客户端里转一圈不能把字段吃掉（图层就�
   ok(missingKeys(d1, pasted.doc).length === 0, 'pasteInto 不丢字段（缺：' + JSON.stringify(missingKeys(d1, pasted.doc)) + '）')
 }
 
+console.log('\n双击节点 = 就地改标签（这条接线曾经被 pointer capture 打断）')
+{
+  // 真实事故：`onNodePointerDown` 里按下就 `setPointerCapture(画布)`，于是随后的
+  // **click / dblclick 目标被改成捕获元素**（click 取按下/松开两个目标的公共祖先，而被捕获的
+  // pointerup 目标是画布容器）—— 节点那个 <g> 根本不在事件路径里，双击改标签完全失灵。
+  // 之前这里一条断言都没有：只在别处断言过"边上的文字"双击，节点这边是空白。
+  const d = {
+    nodes: [{ id: 'a', x: 0, y: 0, w: 160, h: 60, label: 'A' }],
+    edges: [],
+  }
+  const hits = []
+  const ui = {
+    selectedIds: [],
+    onNodeDoubleClick: (id, event) => hits.push(id + ':' + (event === undefined ? 'undefined' : 'event')),
+    onNodePointerDown: () => hits.push('down'),
+    onNodeContextMenu: () => hits.push('menu'),
+  }
+  const tree = renderDiagram(d, 'light', 'u1', { current: null }, ui, null)
+  const group = walk(tree, (n) => n.type === 'g' && n.props['data-node-id'] === 'a', [])[0]
+  ok(group !== undefined, '节点 <g> 渲染出来了')
+  if (group !== undefined) {
+    ok(typeof group.props.onDoubleClick === 'function', '节点 <g> 挂着双击 → 能就地改标签')
+    const fake = { type: 'dblclick' }
+    group.props.onDoubleClick(fake)
+    ok(hits.join(',') === 'a:event', '双击报到那条节点上（id 与事件都传对了）：' + hits.join(','))
+    // 双击与按下是两条路：按下只负责选中/拖动，改标签必须靠双击
+    ok(typeof group.props.onPointerDown === 'function' && hits.indexOf('down') < 0, '按下不会顺便开编辑框（改标签只由双击触发）')
+    ok(group.props.onDoubleClick !== group.props.onPointerDown, '两者不是同一个处理器')
+  }
+}
+
 console.log('\n对齐辅助线 / 批量改样式 / 全选')
 {
   // ① 对齐辅助线（drawio 的 guides）：与**没在拖的**节点比 左/中/右、上/中/下，
