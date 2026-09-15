@@ -1518,6 +1518,22 @@ console.log('\n右键菜单的"当前值"（一类一行只显示它）')
     ok(sum('startArrow=classic', 'arrow') === '← 反向', '只有起点有 → 反向')
     ok(sum('', 'nonsense') === '', '认不出的类返回空串（不猜）')
   }
+
+  // 字号可以手动调节：输入的解析/夹取是纯函数，边界情况在这里钉住
+  const clampFs = internals.clampFontSize
+  ok(typeof clampFs === 'function', 'clampFontSize 有导出')
+  if (typeof clampFs === 'function') {
+    ok(clampFs('18') === 18, '正常输入：18 → 18')
+    ok(clampFs(22) === 22, '数字也收：22 → 22')
+    ok(clampFs('14.6') === 15, '小数四舍五入到整数：14.6 → 15')
+    ok(clampFs('0') === 8, '太小夹到下界：0 → 8')
+    ok(clampFs('-5') === 8, '负数也夹到下界：-5 → 8')
+    ok(clampFs('999') === 72, '太大夹到上界：999 → 72')
+    ok(clampFs('abc') === null, '不是数字 → null（调用方忽略，不写文档）')
+    ok(clampFs('') === null && clampFs('   ') === null, '空输入 → null（不把空当成 0）')
+    ok(clampFs(null) === null && clampFs(undefined) === null, 'null/undefined → null')
+    ok(clampFs('8') === 8 && clampFs('72') === 72, '边界值本身可用')
+  }
 }
 
 console.log('\n对齐辅助线 / 批量改样式 / 全选')

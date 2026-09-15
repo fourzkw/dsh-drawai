@@ -658,6 +658,32 @@ console.log('\n右键菜单：一类一行只显示当前值，选项在下拉�
   ok(/\.drawai-menu-select\{/.test(src) && /\.drawai-menu-select-body\{/.test(src), '下拉行与下拉体有对应样式')
 }
 
+console.log('\n下拉里的选项横着排 + 字号可手动调节')
+{
+  // 需求："下拉列表横向排布，字号需要可以手动调节大小"。
+  const body = bodyOf('fontSizeRow') || ''
+  ok(body.length > 0, '有 fontSizeRow')
+  // 横向排布：选项条一律 flex + 允许换行，形状缩略图按原尺寸自动填充（不被挤扁）
+  ok(/\.drawai-menu-select-body>\.drawai-menu-row,\.drawai-menu-select-body>\.drawai-fontrow\{[^}]*display:flex;flex-wrap:wrap/.test(src), '下拉里的选项条是横向 flex（放不下才换行）')
+  ok(/\.drawai-fontrow\{display:flex;flex-wrap:wrap/.test(src), '字号那一行也是横向 flex')
+  ok(/\.drawai-menu-select-body>\.drawai-grid\{grid-template-columns:repeat\(auto-fill,minmax\(42px,1fr\)\)\}/.test(src), '形状缩略图按 42px 自动填充（5 列 1fr 会把 44px 的缩略图挤扁）')
+  ok(/\.drawai-menu-select-body>\.drawai-swatches\{margin-top:0;flex-wrap:wrap\}/.test(src), '色板也横排并允许换行')
+
+  // 字号手动调节：− [输入框] ＋
+  ok(/function clampFontSize\(value\)/.test(src), '有 clampFontSize（纯函数，边界自测在 check-render）')
+  ok(/const FONT_SIZE_MIN = 8/.test(src) && /const FONT_SIZE_MAX = 72/.test(src), '手动输入有范围常量（8–72）')
+  ok(/type: 'number'/.test(body) && /min: FONT_SIZE_MIN/.test(body) && /max: FONT_SIZE_MAX/.test(body), '输入框是 number 且带 min/max')
+  ok(/className: 'drawai-fontsize'/.test(body), '输入框有自己的样式类')
+  ok(/if \(event\.key === 'Enter'\)/.test(body) && /commit\(event\.target\.value, true\)/.test(body), '回车生效并收起')
+  ok(/onBlur: \(event\) => commit\(event\.target\.value, false\)/.test(body), '失焦也生效（且不收起，方便接着点 ＋/−）')
+  ok(!/onChange:/.test(body), '打字过程中不写文档（回车/失焦才落盘 —— 与"双击改标签"同一套节奏）')
+  ok(/key: 'fs-minus'/.test(body) && /key: 'fs-plus'/.test(body), '有 − / ＋ 两个步进按钮')
+  ok(/const next = clampFontSize\(raw\)/.test(body) && /if \(next !== current\) apply\(next\)/.test(body), '输入值先夹取、与当前值相同就不写（不制造无意义的撤销步）')
+  ok(/const next = Math\.min\(FONT_SIZE_MAX, Math\.max\(FONT_SIZE_MIN, base \+ delta\)\)/.test(body), '步进同样受范围限制')
+  ok(/if \(String\(current\) !== String\(it\[0\]\)\) apply\(it\[0\]\)/.test(body), '点档位时值没变也不写文档（以前每次点击都会压一步撤销历史）')
+  ok(/key: 'fs-input-' \+ String\(current\)/.test(body), '输入框非受控但随当前值重挂（步进之后显示的仍是新值）')
+}
+
 console.log('\n独立文字：右键空白处能放一段字（不接节点、也不接边）')
 {
   // 需求："添加可独立放置的文字"。实现上它是**一个节点**，只是形状是 drawio 的 text
