@@ -770,5 +770,52 @@ console.log('\n切换画布 → 主动告诉模型"当前是哪一张"（Agent.i
   ok(stranger.ok === true && injected.length === 4, '切回原来那张会再注入一次（路径确实变了）')
 }
 
+console.log('\n二叉树：父节点居中于两个孩子之间（树/森林专用摆法）')
+{
+  // 用户实测：让 AI"画一个二叉树"，排出来是 B 压在 E 正上方、D 甩在左边 ——
+  // 因为逐层居中只保证"每一层整体居中"，不保证"父节点在两个孩子中间"。
+  // 教科书（也是人的直觉）是后者，所以树/森林再补一遍自下而上的居中。
+  store.clear()
+  const treeOps = []
+  const labels = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+  for (let i = 0; i < labels.length; i += 1) treeOps.push({ op: 'addNode', label: labels[i], shape: 'ellipse', w: 60, h: 60 })
+  const links = [['n1', 'n2'], ['n1', 'n3'], ['n2', 'n4'], ['n2', 'n5'], ['n3', 'n6'], ['n3', 'n7']]
+  for (let i = 0; i < links.length; i += 1) treeOps.push({ op: 'addEdge', from: links[i][0], to: links[i][1] })
+  await apply(treeOps, { path: 'tree.drawio', layout: 'dagre-tb' })
+  const tree = parseMxfile(store.get(WORKSPACE + '\\tree.drawio')).doc
+  const at = (id) => tree.nodes.filter((n) => n.id === id)[0]
+  ok(tree.nodes.length === 7 && tree.edges.length === 6, '七节点六边的完整二叉树')
+  ok(
+    at('n1').x === 150 && at('n2').x === 50 && at('n3').x === 250,
+    '父节点居中于两个孩子之间：A=150 / B=50 / C=250（实际 ' + [at('n1').x, at('n2').x, at('n3').x].join(' / ') + '）',
+  )
+  ok(
+    [at('n4').x, at('n5').x, at('n6').x, at('n7').x].join(',') === '0,100,200,300',
+    '叶子均匀铺开：0 / 100 / 200 / 300（实际 ' + [at('n4').x, at('n5').x, at('n6').x, at('n7').x].join(' / ') + '）',
+  )
+  ok(at('n1').y === 0 && at('n2').y === 150 && at('n4').y === 300, '层间距照旧：0 / 150 / 300')
+  const centerOf = (n) => n.x + 30
+  ok(Math.abs(centerOf(at('n2')) - (centerOf(at('n4')) + centerOf(at('n5'))) / 2) < 0.5, 'B 的中心 = D/E 中心的中点')
+  ok(Math.abs(centerOf(at('n1')) - (centerOf(at('n2')) + centerOf(at('n3'))) / 2) < 0.5, 'A 的中心 = B/C 中心的中点')
+
+  // 多父的 DAG 不做这个居中：那里"居中于父"没有唯一答案，保持原来的逐层居中。
+  // 宽度故意不等（60 + 40 + 200），这样两种摆法的结果不同，断言才有区分度。
+  store.clear()
+  await apply(
+    [
+      { op: 'addNode', label: 'a', w: 60, h: 60 },
+      { op: 'addNode', label: 'b', w: 200, h: 60 },
+      { op: 'addNode', label: 'c', w: 60, h: 60 },
+      { op: 'addEdge', from: 'n1', to: 'n3' },
+      { op: 'addEdge', from: 'n2', to: 'n3' },
+    ],
+    { path: 'dag.drawio', layout: 'dagre-tb' },
+  )
+  const dag = parseMxfile(store.get(WORKSPACE + '\\dag.drawio')).doc
+  const dagAt = (id) => dag.nodes.filter((n) => n.id === id)[0]
+  ok(dagAt('n3').x === 120, '多父节点仍然逐层居中（若误用"居中于父"会是 85）：c.x=' + dagAt('n3').x)
+  ok(dagAt('n1').x === 0 && dagAt('n2').x === 100, '同层按宽度铺开：a=0 / b=100')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1
