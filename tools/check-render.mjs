@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { composeClientBody } from './build.mjs'
 // 造 style 键夹具时直接用内核（与宿主/客户端同一份），免得把键名再抄一遍。
-import { DEFAULT_EDGE_STYLE, normalizeDrawioDoc, stylePatch } from '../src/style-kernel.js'
+import { DEFAULT_EDGE_STYLE, NODE_SHAPES, nodeShapeFromStyle, normalizeDrawioDoc, styleGet, stylePatch, styleWithNodeShape, styleWithTextColorName, textColorNameFromStyle } from '../src/style-kernel.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 /** 源码文本断言用（CSS 串、函数名这些在 src/client.js 里就有）。 */
@@ -1309,6 +1309,76 @@ console.log('\n双击节点 = 就地改标签（这条接线曾经被 pointer ca
     ok(typeof group.props.onPointerDown === 'function' && hits.indexOf('down') < 0, '按下不会顺便开编辑框（改标签只由双击触发）')
     ok(group.props.onDoubleClick !== group.props.onPointerDown, '两者不是同一个处理器')
   }
+}
+
+console.log('\n独立文字：一段没有边框底色的字（drawio 的 text 形状）')
+{
+  // 为什么样式必须与 drawio 一字不差：`text` 是 drawio 的**裸键**（不是 shape=text），
+  // 而且靠 strokeColor=none;fillColor=none 才没有边框与底色 ——
+  // 少一个键，同一个元素在 drawio 里就多出一个白框（两边看到的不是同一张图）。
+  ok(NODE_SHAPES.indexOf('text') >= 0, 'text 在形状枚举里（AI 的 shape:"text" 与右键形状面板都能用）')
+  const textStyle = styleWithNodeShape('', 'text')
+  // drawio 自己写的是裸键 `text;`；我们这边的规范化写法是 `text=1`（parseStyle 里两者等价，
+  // 见内核注释），所以这里断言"text 这个键在"，别去比字节。
+  ok(styleGet(textStyle, 'text', null) !== null, '落成 drawio 的 text 键（裸键；我们规范成 text=1）：' + textStyle)
+  ok(
+    styleGet(textStyle, 'strokeColor', null) === 'none' && styleGet(textStyle, 'fillColor', null) === 'none',
+    '无边框无底色（strokeColor=none;fillColor=none）',
+  )
+  ok(styleGet(textStyle, 'whiteSpace', null) === 'wrap' && styleGet(textStyle, 'rounded', null) === '0', '与 Editor.defaultTextStyle 一致（whiteSpace=wrap;rounded=0）')
+  ok(nodeShapeFromStyle(textStyle) === 'text', '从样式反推得回来')
+  ok(nodeShapeFromStyle('text;html=1') === 'text', '只写 text;html=1 也认得（drawio 里手画的文字可能就这么简）')
+  ok(nodeShapeFromStyle('rounded=1') === 'rounded', '别的形状不受影响（text 判定排在前面但只认这个键）')
+
+  // 换形状：文字 → 矩形 必须把"隐形"设置一起清掉，否则换出来的是一只**看不见的矩形**
+  const asRect = styleWithNodeShape(textStyle, 'rect')
+  ok(styleGet(asRect, 'text', null) === null, '换成矩形后 text 键没了')
+  ok(
+    styleGet(asRect, 'strokeColor', null) === null && styleGet(asRect, 'fillColor', null) === null,
+    '隐形设置也一起清掉（否则矩形看不见 —— 这是最容易漏的一步）',
+  )
+  // 有配色的矩形换成文字：drawio 的形状模板会盖掉 fill/stroke（文字本来就不该有底色）
+  const blueRect = stylePatch('', { fillColor: '#dae8fc', strokeColor: '#6c8ebf' })
+  const blueAsText = styleWithNodeShape(blueRect, 'text')
+  ok(styleGet(blueAsText, 'fillColor', null) === 'none', '矩形（蓝）换成文字 → 底色被文字模板盖掉')
+
+  // 文字元素的"配色"落到 fontColor 上（否则点一圈颜色屏幕上毫无变化）
+  const redText = styleWithTextColorName(textStyle, 'red')
+  ok(styleGet(redText, 'fontColor', null) === '#b85450', '文字换色落到 fontColor：' + styleGet(redText, 'fontColor', null))
+  ok(
+    styleGet(redText, 'fillColor', null) === 'none' && styleGet(redText, 'strokeColor', null) === 'none',
+    '不会顺手给它加填充/描边',
+  )
+  ok(textColorNameFromStyle(redText) === 'red', '从字色反推得回调色板名')
+  ok(textColorNameFromStyle(styleWithTextColorName(redText, 'plain')) === 'plain', '"默认"把 fontColor 删掉、回缺省字色')
+
+  // 画面：只有字 + 一个透明命中框
+  const tdoc = { nodes: [{ id: 't1', label: '一段说明', style: textStyle, x: 0, y: 0, w: 160, h: 60 }], edges: [] }
+  const tree = renderDiagram(tdoc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const group = walk(tree, (n) => n.type === 'g' && n.props['data-node-id'] === 't1', [])[0]
+  ok(group !== undefined, '文字元素照常进渲染（不是被当成不认识的形状丢掉）')
+  if (group !== undefined) {
+    const shapes = walk(group.children, (n) => ['rect', 'ellipse', 'polygon', 'path'].indexOf(n.type) >= 0, [])
+    const painted = shapes.filter((s) => typeof s.props.fill === 'string' && s.props.fill !== 'transparent' && s.props.fill !== 'none')
+    ok(painted.length === 0, '不画边框/底色（没有一个带真实填充的形状）：' + JSON.stringify(painted.map((s) => s.props.fill)))
+    const hit = shapes.filter((s) => s.props.fill === 'transparent')
+    ok(hit.length === 1, '但留了一个透明命中框 —— 否则点不到、拖不动、双击也改不了字')
+    ok(hit.length === 1 && hit[0].props.width === 160 && hit[0].props.height === 60, '命中框就是它的包围盒')
+    const texts = walk(group.children, (n) => n.type === 'text', [])
+    // 标签是 <text><tspan>…</tspan></text>，把字符串叶子摊平了看（别去数嵌套层数）
+    const flatten = (node) => {
+      if (node === null || node === undefined) return ''
+      if (typeof node === 'string' || typeof node === 'number') return String(node)
+      if (Array.isArray(node)) return node.map(flatten).join('')
+      return flatten(node.children)
+    }
+    ok(texts.length === 1 && flatten(texts[0]) === '一段说明', '字照常画出来：' + (texts[0] === undefined ? '没有标签' : flatten(texts[0])))
+  }
+  const redDoc = { nodes: [{ id: 't1', label: '红字', style: redText, x: 0, y: 0, w: 160, h: 60 }], edges: [] }
+  const redTree = renderDiagram(redDoc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const redGroup = walk(redTree, (n) => n.type === 'g' && n.props['data-node-id'] === 't1', [])[0]
+  const redLabel = redGroup === undefined ? [] : walk(redGroup.children, (n) => n.type === 'text', [])
+  ok(redLabel.length === 1 && redLabel[0].props.fill === '#b85450', '字色真的驱动渲染：' + (redLabel[0] === undefined ? '没有标签' : redLabel[0].props.fill))
 }
 
 console.log('\n对齐辅助线 / 批量改样式 / 全选')

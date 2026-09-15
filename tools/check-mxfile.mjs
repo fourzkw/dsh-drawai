@@ -138,6 +138,8 @@ console.log('\n[3] 新建一份 .drawio：语义文档 → mxfile → 再读回�
     nodes: [
       { id: 'n1', label: '起点 & 终点', style: 'rounded=1;arcSize=50;fillColor=#dae8fc;strokeColor=#6c8ebf;', x: 10, y: 20, w: 130, h: 60 },
       { id: 'n2', label: '', style: '', x: 300, y: 200, w: 186, h: 86 },
+      // 独立文字（drawio 的 text 形状）：也当普通顶点走，样式串必须原样往返
+      { id: 'n3', label: '一段说明', style: 'text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0;', x: 40, y: 400, w: 160, h: 40 },
     ],
     edges: [
       { id: 'e1', from: 'n1', to: 'n2', label: '带折点', style: 'edgeStyle=orthogonalEdgeStyle;html=1;endArrow=classic;exitX=1;exitY=0.5;', points: [{ x: 200, y: 50 }, { x: 200, y: 240 }] },
@@ -151,10 +153,14 @@ console.log('\n[3] 新建一份 .drawio：语义文档 → mxfile → 再读回�
   ok(xml.indexOf('&amp;') > 0, '标签里的 &amp; 转义正确')
 
   const back = parseMxfile(xml).doc
-  ok(back.nodes.length === 2 && back.edges.length === 2, '读回来节点/边数量一致（' + back.nodes.length + '/' + back.edges.length + '）')
+  ok(back.nodes.length === 3 && back.edges.length === 2, '读回来节点/边数量一致（' + back.nodes.length + '/' + back.edges.length + '）')
   const n1 = back.nodes.filter((n) => n.id === 'n1')[0]
   ok(n1.label === '起点 & 终点' && n1.x === 10 && n1.y === 20 && n1.w === 130 && n1.h === 60, '节点标签与几何往返无损')
   ok(n1.style === doc.nodes[0].style, '节点 style 往返无损')
+  // 独立文字：它就是 drawio 的 text 形状 —— 样式串（含裸键 text）必须原样过一遍
+  const n3 = back.nodes.filter((n) => n.id === 'n3')[0]
+  ok(n3 !== undefined && n3.style === doc.nodes[2].style, '独立文字的 style 往返无损：' + (n3 === undefined ? '丢了' : n3.style))
+  ok(n3.label === '一段说明' && n3.w === 160 && n3.h === 40, '文字元素的标签与几何也在')
   const e1 = back.edges.filter((e) => e.id === 'e1')[0]
   ok(e1.from === 'n1' && e1.to === 'n2' && e1.label === '带折点', '边的端点与标签往返无损')
   ok(e1.style === doc.edges[0].style, '边 style 往返无损')

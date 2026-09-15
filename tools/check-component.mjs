@@ -472,29 +472,36 @@ console.log('\n层级：工作栏在标签页之上')
 }
 
 
-console.log('\n下拉菜单 / 弹出面板：点到外面就关掉')
+console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入框')
 {
-  // 需求：下拉栏（文件/编辑/图层/视图/导出）与「打开/新建/另存为」面板，
-  // 在**外面**点一下就收掉 —— 不关的话它一直挂在画布上方挡着，而且下次点同一个按钮
-  // 会变成"关掉"而不是"打开"（用户以为按钮坏了）。
+  // ① 需求：下拉栏（文件/编辑/图层/视图/导出）与「打开/新建/另存为」面板，
+  //    在**外面**点一下就收掉 —— 不关的话它一直挂在画布上方挡着，而且下次点同一个按钮
+  //    会变成"关掉"而不是"打开"（用户以为按钮坏了）。
+  // ② 需求：点输入框外面就提交并退出（节点文字与线上的文字共用同一个输入框）。
+  //    不能指望 onBlur —— 画布的按下处理里普遍 preventDefault()（框选/拖动/右键），
+  //    而它会挡掉**焦点变化**，输入框根本不 blur。
   //
   // 这里把 onRootPointerDown 的**真实函数体**抽出来、喂假事件真的调用一遍
   // （不是只 grep 源码：这个函数的分支正是"算不算外面"，只能靠跑）。
   const body = bodyOf('onRootPointerDown')
   ok(body !== null, '源码里有 onRootPointerDown')
 
-  /** 跑一次：docMenuValue 是当时的菜单状态，target 是事件目标。返回调用记录。 */
-  const runPointer = (docMenuValue, target) => {
+  /** 跑一次：editingValue 是当时的编辑框状态，docMenuValue 是菜单状态，target 是事件目标。 */
+  const runPointer = (docMenuValue, target, editingValue) => {
     const calls = []
     const fn = new Function(
       'docMenu',
       'setDocMenu',
       'setDocMenuPos',
+      'editing',
+      'commitEdit',
       'return function onRootPointerDown(event) ' + body,
     )(
       docMenuValue,
       (v) => calls.push('menu:' + String(v)),
       (v) => calls.push('pos:' + String(v)),
+      editingValue === undefined ? null : editingValue,
+      () => calls.push('commit'),
     )
     fn({ target: target })
     return calls
@@ -504,7 +511,7 @@ console.log('\n下拉菜单 / 弹出面板：点到外面就关掉')
   const targetInside = (sel) => ({ closest: (s) => (s === sel ? { className: sel } : null) })
   const targetOutside = { closest: () => null }
 
-  ok(runPointer(null, targetOutside).length === 0, '菜单没开时什么都不做')
+  ok(runPointer(null, targetOutside).length === 0, '菜单没开、也没在编辑时什么都不做')
   ok(runPointer('file', targetOutside).join(',') === 'menu:null,pos:null', '点画布/标签条（外面）→ 关掉菜单与位置：' + runPointer('file', targetOutside).join(','))
   ok(runPointer('file', targetInside('.drawai-menu')).length === 0, '点菜单自己（选项/输入框/按钮）→ 不关')
   ok(runPointer('file', targetInside('.drawai-menu-trigger')).length === 0, '点开菜单的那个按钮 → 不在这里关（交给它自己的 toggle：点同一个是关、点另一个是换）')
@@ -513,12 +520,23 @@ console.log('\n下拉菜单 / 弹出面板：点到外面就关掉')
   // 目标没有 closest（例如事件落在 document 上）时，它一定不在菜单里 → 该关
   ok(runPointer('file', {}).join(',') === 'menu:null,pos:null', '事件目标没有 closest（document 之类）→ 关掉')
 
+  // 文字输入框：外面按一下 → 提交（画布的 preventDefault 挡掉了 blur，只能自己判）
+  const EDIT = { kind: 'node', id: 'n1', text: 'x' }
+  ok(runPointer(null, targetOutside, EDIT).join(',') === 'commit', '编辑中点到画布空白 → 提交并退出：' + runPointer(null, targetOutside, EDIT).join(','))
+  ok(runPointer(null, targetInside('.drawai-edit'), EDIT).length === 0, '点输入框自己（选字/移动光标）→ 不提交')
+  ok(runPointer(null, targetOutside, null).length === 0, '没在编辑时不会平白提交一次')
+  ok(runPointer('file', targetOutside, EDIT).join(',') === 'commit,menu:null,pos:null', '两件事可以同时发生：提交文字 + 收掉菜单')
+  // 输入框的 blur 仍然是兜底（点浏览器外、Tab 走焦都会走它）
+  ok(/onBlur: commitEdit/.test(src), '输入框保留 onBlur 兜底（点击浏览器外/Tab 走焦也要提交）')
+
   // 接线：root 上必须真的挂了这个捕获处理器，否则函数写得再对也没人调
   ok(/onPointerDownCapture: onRootPointerDown/.test(src), 'root 上挂了 onPointerDownCapture（捕获阶段，早于画布自己的按下处理）')
   const rootStart = src.indexOf("{ className: 'drawai-root'")
   ok(rootStart >= 0 && src.slice(rootStart, rootStart + 160).indexOf('onPointerDownCapture') >= 0, '挂的就是 root（画布、标签条、工作栏都在它里面）')
   // 放过的那一类按钮必须真的带这个类名，否则"点同一个按钮关不掉"
   ok(/className: 'drawai-btn drawai-menu-trigger'/.test(src), '开菜单的按钮带 drawai-menu-trigger 类（与处理器里的选择器对得上）')
+  // 编辑框也要真的带那个类名（否则"点输入框自己"会被判成外面）
+  ok(/className: 'drawai-edit'/.test(src), '输入框带 drawai-edit 类（与处理器里的选择器对得上）')
   // Esc 同一套语义：菜单开着按 Esc 也该收掉
   const escStart = src.indexOf("event.key === 'Escape'", src.indexOf('function onKey(event)'))
   const escBranch = escStart >= 0 ? src.slice(escStart, escStart + 400) : ''
@@ -578,6 +596,27 @@ console.log('\n双击改标签：按下时不许抢 pointer capture')
   // 3px 判据与"越 3px 才算拖"同一套手感
   const exactly = runTake({ pointerId: 1, x: 100, y: 100 }, { pointerId: 1, clientX: 103, clientY: 100 })
   ok(exactly.captured.length === 0, '正好 3px 还不算拖（判据是 >3）')
+}
+
+console.log('\n独立文字：右键空白处能放一段字（不接节点、也不接边）')
+{
+  // 需求："添加可独立放置的文字"。实现上它是**一个节点**，只是形状是 drawio 的 text
+  // （没有边框、没有底色），于是拖动/缩放/改字/进图层/复制粘贴全都免费复用节点那一套。
+  ok(/'T 文字'/.test(src), '空白处的右键菜单里有「T 文字」入口')
+  ok(/createNodeAt\('text', menuStyle, menu\.userX, menu\.userY\)/.test(src), "它调用 createNodeAt('text', …) —— 位置就是点的地方")
+  ok(/label: isText \? '文字' : '新节点'/.test(src), '文字元素的默认文字是「文字」')
+  // 文字不吃配色：它的样式就是 drawio 的 defaultTextStyle，盖上 fillColor/strokeColor
+  // 只会让文件与 drawio 不一致，屏幕上还什么都看不出来。
+  ok(
+    /isText \? styleWithNodeShape\('', shape\) : styleWithColorName/.test(src),
+    'createNodeAt 对文字不套配色（保持 drawio 的 defaultTextStyle）',
+  )
+  ok(/if \(isText\) openNodeEditor\(id\)/.test(src), '放下来直接进编辑态（drawio 的 insertText 也是这样）')
+  ok(/\{ shape: 'text', label: '文字' \}/.test(src), '形状面板里有「文字」（普通节点也能换成文字）')
+  ok(
+    /isTextNode \? styleWithTextColorName\(nodeStyle, color\) : styleWithColorName/.test(src),
+    '文字元素的调色板改 fontColor 而不是填充/描边（否则点一圈颜色毫无变化）',
+  )
 }
 
 console.log('\n自环与复制粘贴的接线（手势与快捷键必须真的连上）')

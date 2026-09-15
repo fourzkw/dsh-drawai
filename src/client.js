@@ -44,6 +44,8 @@ const {
   stylePatch,
   styleWithArrow,
   styleWithColorName,
+  styleWithTextColorName,
+  textColorNameFromStyle,
   styleWithDash,
   styleWithNodeShape,
   styleWithSide,
@@ -1340,6 +1342,14 @@ function shapeElement(node, geo, palette, mode) {
   const pattern = dashPatternFromStyle(style)
   const common = { fill: fill, stroke: stroke, strokeWidth: strokeWidth }
   if (pattern !== null) common.strokeDasharray = pattern
+  // 独立文字：**不画任何边框/底色**，只留一个透明命中框。
+  // 为什么还要那个 rect：节点组靠子元素的命中测试接收指针事件（形状 + 标签同组），
+  // 而标签是 pointerEvents:none 的 —— 少了它，文字元素点不到、拖不动、也双击不了。
+  // `fill="transparent"` 在 SVG 里是"有填充但全透明"，照样参与命中测试；
+  // 导出 SVG 时它也是不可见的（不是 `fill="none"` —— 那个不参与命中测试）。
+  if (shape === 'text') {
+    return React.createElement('rect', { x: x, y: y, width: w, height: h, fill: 'transparent', stroke: 'none', pointerEvents: 'all' })
+  }
   if (shape === 'ellipse') {
     return React.createElement('ellipse', Object.assign({}, common, { cx: x + w / 2, cy: y + h / 2, rx: w / 2, ry: h / 2 }))
   }
@@ -1455,6 +1465,7 @@ const VIEW_MAX_W = 40000
 const SHAPE_LIBRARY = [
   { shape: 'rect', label: '矩形' },
   { shape: 'rounded', label: '圆角矩形' },
+  { shape: 'text', label: '文字' },
   { shape: 'stadium', label: '胶囊 / 起止' },
   { shape: 'ellipse', label: '椭圆' },
   { shape: 'diamond', label: '判定' },
@@ -4873,12 +4884,15 @@ function CanvasView(props) {
     const current = docRef.current
     if (current === null) return
     const id = nextNodeId(current)
+    const isText = shape === 'text'
     // 形状与配色都落成 drawio 的 style 键：rect/plain 落成空串（= drawio 的 defaultVertexStyle）。
-    const style = styleWithColorName(styleWithNodeShape('', shape), styleName)
+    // 文字**不吃配色**：它的样式就是 drawio 的 defaultTextStyle（无边框无底色），
+    // 往上盖 fillColor/strokeColor 只会让文件与 drawio 不一致，画面上也什么都看不出来。
+    const style = isText ? styleWithNodeShape('', shape) : styleWithColorName(styleWithNodeShape('', shape), styleName)
     applyLocal((next) => {
       const node = {
         id: id,
-        label: '新节点',
+        label: isText ? '文字' : '新节点',
         style: style,
         x: snap(userX - NEW_NODE_W / 2),
         y: snap(userY - NEW_NODE_H / 2),
@@ -4891,6 +4905,9 @@ function CanvasView(props) {
     })
     setSelectedIds([id])
     setMenu(null)
+    // 文字放下来就直接进编辑态（drawio 的 insertText 也是放完立刻 startEditing）：
+    // 否则用户还得再双击一次，而屏幕上只是一小块淡淡的选择框。
+    if (isText) openNodeEditor(id)
   }
 
   /**
@@ -5338,6 +5355,11 @@ function CanvasView(props) {
     if (current === null) return
     const label = String(current.text)
     setEditing(null)
+    // 文字没改就**不要写**：不然"点开编辑框、又点空白处关掉"会平白多一步撤销历史
+    // （用户按 Ctrl+Z 时屏幕毫无变化，看起来像撤销坏了）。
+    const before = current.kind === 'edge' ? edgeById(current.id) : nodeById(current.id)
+    const beforeLabel = before === null || before === undefined ? null : typeof before.label === 'string' ? before.label : ''
+    if (beforeLabel === label) return
     if (current.kind === 'edge') {
       applyLocal((next) => {
         for (let i = 0; i < next.edges.length; i += 1) {
@@ -5929,6 +5951,13 @@ function CanvasView(props) {
           'div',
           { className: 'drawai-menu-row' },
           React.createElement('button', { className: 'drawai-btn', onClick: () => createNodeAt('rect', menuStyle, menu.userX, menu.userY) }, '＋ 新增节点'),
+          // 独立文字：一个只有文字、没有边框底色的元素（drawio 的 text 形状）。
+          // 放在这里的原因是"要在哪就放哪"：它不接节点、也不接边，位置就是点的地方。
+          React.createElement(
+            'button',
+            { className: 'drawai-btn', onClick: () => createNodeAt('text', menuStyle, menu.userX, menu.userY), title: '放一段独立文字（无边框无底色，可拖动/改字/改字色）' },
+            'T 文字',
+          ),
           // 独立线：两端都不接节点（drawio 里的自由形态），之后拖端点就能接到节点上。
           React.createElement(
             'button',
@@ -5970,7 +5999,14 @@ function CanvasView(props) {
       // 形状与配色都改成**键级改写**：不再往文档里写 shape 字段，也不再用颜色名当 style。
       // 整组改色时以**点中的那个**的当前样式为基准（把它的配色推广给其它成员）。
       rows.push(shapeGrid((shape) => updateNode(nodeTargets, { style: styleWithNodeShape(nodeStyle, shape) })))
-      rows.push(swatchRow((color) => updateNode(nodeTargets, { style: styleWithColorName(nodeStyle, color) }), colorNameFromStyle(nodeStyle)))
+      // 配色：文字元素能换的只有**字色**（它没有填充与描边）—— 否则点了一圈颜色屏幕上毫无变化。
+      const isTextNode = nodeShapeFromStyle(nodeStyle) === 'text'
+      rows.push(
+        swatchRow(
+          (color) => updateNode(nodeTargets, { style: isTextNode ? styleWithTextColorName(nodeStyle, color) : styleWithColorName(nodeStyle, color) }),
+          isTextNode ? textColorNameFromStyle(nodeStyle) : colorNameFromStyle(nodeStyle),
+        ),
+      )
       rows.push(
         React.createElement(
           'div',
@@ -6377,15 +6413,19 @@ function CanvasView(props) {
   }
 
   /**
-   * 点在下拉菜单 / 弹出面板**外面**就把它关掉。
+   * root 上的**捕获阶段**按下处理：管两件"点到外面就收"的事。
    *
-   * 菜单是"看一眼、点一下就完事"的东西：用户点别处就是在说"不要了"。不关的话它一直挂在
-   * 画布上方挡着，而且下次点同一个按钮会变成"关掉"而不是"打开"（用户以为按钮坏了）。
+   * ① **输入框外面按一下 → 提交并退出**（节点文字与线上的文字共用同一个输入框）。
+   *    不能指望 `onBlur`：画布的按下处理里普遍有 `preventDefault()`（框选、拖动、右键），
+   *    而 preventDefault 会挡掉**焦点变化**，于是输入框根本不 blur ——
+   *    用户点空白处，编辑框还杵在那里，而且那一下点击也被输入框"吃掉"了。
+   *    所以在捕获阶段自己判：目标不在输入框里就提交（提交=把改好的文字落盘，与失焦一致）。
+   * ② **下拉菜单/面板外面按一下 → 收掉**（理由见下）。
    *
-   * 挂在 root 的**捕获阶段**：画布、标签条、工作栏都在 root 里，捕获能保证在任何子元素的
+   * 挂在 root 的捕获阶段：画布、标签条、工作栏都在 root 里，捕获能保证在任何子元素的
    * 按下处理（画布框选、右键菜单、拖动）之前先判完，不必给每个区域各挂一遍。
    *
-   * 两种"不算外面"的地方：
+   * 菜单那部分，两种"不算外面"的地方：
    *   · 菜单/面板自己（点选项、点输入框、点按钮 —— 关了就没法用了）；
    *   · 工作栏那些**开菜单的按钮**（`.drawai-menu-trigger`）—— 它们自己有 toggle 语义
    *     （点同一个是关、点另一个是换），交给它们判断；否则捕获阶段先关一次、按钮的 onClick
@@ -6394,9 +6434,10 @@ function CanvasView(props) {
    *     都应该算"外面"（用户眼里那都是画布/别的东西，不是菜单）。
    */
   function onRootPointerDown(event) {
-    if (docMenu === null) return
     const target = event === null || event === undefined ? null : event.target
     const closest = target !== null && target !== undefined && typeof target.closest === 'function' ? target.closest.bind(target) : null
+    if (editing !== null && (closest === null || closest('.drawai-edit') === null)) commitEdit()
+    if (docMenu === null) return
     if (closest !== null && closest('.drawai-menu') !== null) return
     if (closest !== null && closest('.drawai-menu-trigger') !== null) return
     setDocMenu(null)

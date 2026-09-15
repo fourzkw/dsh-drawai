@@ -44,7 +44,8 @@ DSH 右侧栏的 **draw.io 风格画布** + 让 AI 直接绘图的**语义工具
 | 客户端 | **顺序**：节点/边的右键菜单有「置顶 / 上移 / 下移 / 置底」；模型顺序决定覆盖顺序，写回会真的改动文件里单元的先后 |
 | 客户端 | **编辑数据**：右键「编辑数据…」按 `key=value` 一行一项改 drawio 用户对象的自定义属性；裸单元第一次加数据会自动包成 `<object>`（不包的话 drawio 保存时会把属性丢掉） |
 | 客户端 | **线上的文字**（边自己的 `value`）：双击线、线上的文字、或线上的把手都能就地改（右键也有「改标签」；AI 侧是 `addEdge {label}` / `setLabel`）；**按住线上的字就能拖**且**有吸附**（半格 + 贴线），位置按 drawio 的存法写进边几何的 `x/y/offset`（右键「标签居中」放回中点）；落点缺省是 drawio 的**弧长中点**；**线在文字的位置断开**（真的不画那一段，不盖白底，`labelBackgroundColor` 有才画底衬） |
-| 客户端 | **双击节点 = 就地改标签**（右键也有「改标签」；AI 侧是 `setLabel`）：编辑框是绝对定位盖在节点上的 HTML `input`（不用 SVG `foreignObject` —— React 会把 svg 后代建成 SVG 命名空间元素，里面的 input 不按 HTML 渲染），回车提交、Esc 取消、失焦也算提交 |
+| 客户端 | **双击节点 = 就地改标签**（右键也有「改标签」；AI 侧是 `setLabel`）：编辑框是绝对定位盖在节点上的 HTML `input`（不用 SVG `foreignObject` —— React 会把 svg 后代建成 SVG 命名空间元素，里面的 input 不按 HTML 渲染），回车提交、Esc 取消、失焦也算提交；**点编辑框外面（画布/标签条/别的元素）就提交并退出** —— 不能指望 `onBlur`，画布的按下处理普遍 `preventDefault()`，而它会挡掉焦点变化，输入框根本不 blur |
+| 客户端 | **独立文字**（drawio 的 `text` 形状）：空白处右键「T 文字」放一段**没有边框、没有底色**的字，位置就是点的地方；放下即进编辑态（drawio 的 `insertText` 也是这样）。它就是**一个节点**，所以拖动/缩放/改字/改字色/进图层/复制粘贴/顺序/避让全都免费复用节点那一套；形状面板里也有「文字」，普通节点能换成文字、文字也能换成别的形状（换走时会把 `strokeColor=none;fillColor=none` 一起清掉，否则换出来的是**看不见的矩形**）。文字元素的"配色"落到 **`fontColor`** 上（它没有填充与描边，往它身上写 fillColor 屏幕上不会有任何变化）。样式与 drawio 的 `Editor.defaultTextStyle` 对齐（`text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0`） |
 | 客户端 | **pointer capture 只在"真的拖动起来"（>3px）时才抢**：capture 会把随后的 `click`/`dblclick` 目标改成**捕获元素**（[w3c/pointerevents#356](https://github.com/w3c/pointerevents/issues/356)：click 取按下/松开两个目标的公共祖先，而被捕获的 `pointerup` 目标是画布容器），按下就抢的话"双击节点/线上的字改标签"会**整个失灵**。所以按下只登记坐标，指针移动超过 3px（与"越 3px 才算拖"同一套手感）才在 `pointermove` 里抢 —— 一次点击全程不抢捕获。代价：极快地一甩、第一帧就离开面板的那种拖动可能抓不住（那条拖动本来也要靠 capture 才留得住），这是为了不牺牲双击而付的 |
 | 客户端 | 读 drawio 的**独立边标签单元**（`edgeLabel`）：按 `mxGraphView.getPoint` 的规则算位置（沿边比例 + 垂直偏移 + 残余偏移）并只读显示 |
 | 客户端 | 走线里**不会出现折返段**（出去又原路描回来）：选 L 时避开折返，残余的（目标侧桩点与折点分居拐点两侧时）由 `removeRetraces` 消掉 —— 人摆的折点当尖点时不动 |
@@ -207,7 +208,7 @@ drawio 源码核实过（`mxConstants.js`、`Graph.js`、`mxConnector.js`、`doc
 
 | 用途 | 键（drawio 名） |
 |---|---|
-| 形状 | `shape=`、`ellipse`、`rhombus`、`rounded=`、`arcSize=` |
+| 形状 | `shape=`、`ellipse`、`rhombus`、`rounded=`、`arcSize=`、**`text`（独立文字，drawio 的裸键）** |
 | 配色 | `fillColor`、`strokeColor`、`fontColor`、`strokeWidth` |
 | 线型 | `dashed=1`、`dashPattern`（画布缺省 `3 3`） |
 | 箭头 | `endArrow`、`startArrow`（`classic` / `none` / …） |
@@ -225,6 +226,13 @@ drawio 源码核实过（`mxConstants.js`、`Graph.js`、`mxConnector.js`、`doc
 **工具语言 ≠ 文档语言。** AI 侧的 ops 仍然收 `shape:'diamond'`、`dash:'虚线'`、`arrow:'双向'`、
 `style:'yellow'`、`exit:'e'` 这些**糖**，宿主翻成上面的键再落盘；`keys:{…}` 用来写任意 drawio 键
 （值给 `null` = 删键回缺省）。drawio 自己也是这个分工：面板上给名字，文档里只有十六进制。
+两条与"独立文字"有关的细节：`shape:'text'` 写出去的是 drawio 的 `Editor.defaultTextStyle`
+（无边框无底色），而且对文字元素 `style:'red'` 会落到 **`fontColor`** 而不是填充色（见「独立文字」一节）。
+
+> **一处刻意的规范化**：drawio 自己写裸键 `text;html=1;…`，我们的 `parseStyle` 把"单独一个键"
+> 规范化成 `=1`（内核注释里就写着这两者等价，`ellipse;` 同理），所以**由我们新写/改过的**文字元素
+> 落盘是 `text=1;…`。只读不改的单元**一个字节都不动**（无损写回的规矩），drawio 打开两种写法
+> 都是同一段文字。
 
 **只有一种格式。** `.dshd.json` 那套语义枚举（`shape:'rect'`、`style:'blue'`、`dash:'dashed'`、
 把进出侧混在 `points` 里的桩点）随载体切换一起退场了 —— 连同它的读时升级代码。留着一份
@@ -576,7 +584,7 @@ doc 中心 153、fs 中心 151.5 时生成
 这套几何逻辑可以在命令行里自测，不需要浏览器：
 
 ```sh
-npm test        # 153 项 mxfile 编解码/写回（含顺序/数据/标签单元/标签位置/图层）+ 177 项路由/自环/迟滞/折返 + 193 项宿主（聚焦/注入/树布局/坐标/move/独立线/highlight/撤回/图层）+ 352 项渲染/标签/挖空/框选/辅助线/批量样式/全选/图层/字段不丢/双击改标签 + 129 项组件（菜单真实求值/点外面关掉/指针捕获策略/降级边界）（合计 1004）
+npm test        # 155 项 mxfile 编解码/写回（含顺序/数据/标签单元/标签位置/图层/独立文字）+ 177 项路由/自环/迟滞/折返 + 201 项宿主（聚焦/注入/树布局/坐标/move/独立线/highlight/撤回/图层/独立文字）+ 372 项渲染/标签/挖空/框选/辅助线/批量样式/全选/图层/字段不丢/双击改标签/独立文字 + 142 项组件（菜单真实求值/点外面关掉/指针捕获策略/独立文字入口/降级边界）（合计 1047）
                 # 路由那一节的条数跟着工作区里的 demo.drawio 走（每条边一组不变量），改了那张图就会变
 ```
 
@@ -596,16 +604,19 @@ npm test        # 153 项 mxfile 编解码/写回（含顺序/数据/标签单�
   宿主半边没有热重载（改完要重启 `dsh web`），这个自测把反馈压到一秒内；
 - `tools/check-render.mjs` —— 用极简 React 桩驱动 `renderDiagram`：预览折线/收尾线/提示环
   **确实被画进了 SVG**、连线画法（线型/箭头/marker 是否真的在 defs 里）、
-  以及 `computeAlignMoves` 的对齐/分布坐标与幂等性；
+  `computeAlignMoves` 的对齐/分布坐标与幂等性，以及**独立文字**（不画边框底色、但留一个透明
+  命中框，字色由 fontColor 驱动）与"文字→矩形要把隐形设置清掉"；
 - `tools/check-component.mjs` —— 用带 hooks 的 React 桩把整个面板组件跑起来（状态形状不对时不能整块降级）；
   另有**工具条一节**：把 `item/layerMenuItems/toolbarMenus` 这一段**真实源码整体抽出来求值并真的调用**
   （不再把 `layerMenuItems` 桩掉），所以"菜单项定义在看不见它的作用域里"这类自由变量错位会当场炸
   （真实事故见「图层」一节末尾），另有一条断言盯着 `layerList/activeLayerId` 必须定义在最早用到它之前；
-  还有一节**下拉栏点外面就收**：把 `onRootPointerDown` 的真实函数体抽出来、喂假事件真的调用一遍
-  （外面 / 菜单自己 / 开菜单的按钮 / 没有 `closest` 的 document 四种目标），并断言 root 上真的挂了
-  捕获处理器、按钮真的带那个类名 —— 这类"算不算外面"的分支只能靠跑，grep 源码看不出来；
+  还有一节**点到外面**：把 `onRootPointerDown` 的真实函数体抽出来、喂假事件真的调用一遍
+  （菜单外面 / 菜单自己 / 开菜单的按钮 / 没有 `closest` 的 document / **输入框外面** / 输入框自己
+  六种目标），并断言 root 上真的挂了捕获处理器、按钮与输入框真的带那两个类名 ——
+  这类"算不算外面"的分支只能靠跑，grep 源码看不出来；
   再一节**按下时不许抢 pointer capture**（见「图层」一节末尾的盲区 ④）：既做结构性守卫
   （`setPointerCapture` 全文件只允许一处），也把 `takePendingCapture` 抽出来喂假事件真跑；
+  一节**独立文字入口**：右键菜单有「T 文字」、它对文字不套配色、放下即进编辑态、调色板改字色；
   以及一节**键盘归属**：喂假 DOM 节点断言"输入框 / 别的面板里按键时画布一个键都不碰"，
   以及 window 上那个 keydown 确实**先问归属再动手**。
 

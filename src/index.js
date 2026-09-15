@@ -47,6 +47,8 @@ import {
   styleWithJetty,
   styleWithNodeShape,
   styleWithSide,
+  styleWithTextColorName,
+  textColorNameFromStyle,
   stylePatch,
   styleGet,
 } from './style-kernel.js'
@@ -334,7 +336,21 @@ function nodeStyleFromOp(style, op, where) {
     }
     out = styleWithNodeShape(out, op.shape)
   }
-  if (typeof op.style === 'string' && op.style.length > 0) out = styleValueFromOp(out, op.style, where)
+  if (typeof op.style === 'string' && op.style.length > 0) {
+    // 文字元素（独立文字）没有填充与描边：给它调色板名要落到 **fontColor** 上，
+    // 否则 AI 说 style:"red"、屏幕上一个像素都不变（而且文件里还多两个没用的键）。
+    if (nodeShapeFromStyle(out) === 'text' && op.style.indexOf('=') < 0 && op.style.indexOf(';') < 0) {
+      const named = styleWithTextColorName(out, op.style)
+      if (named === out && textColorNameFromStyle(out) !== op.style) {
+        throw new Error(
+          where + ': unknown style "' + op.style + '"; use a palette name (' + paletteNames().join(', ') + ') for the text color',
+        )
+      }
+      out = named
+    } else {
+      out = styleValueFromOp(out, op.style, where)
+    }
+  }
   if (has(op, 'keys')) out = stylePatch(out, styleKeysFromOp(op.keys, where))
   return out
 }
@@ -975,7 +991,11 @@ revision 是乐观锁：写回时若文件已被别处改过（比如用户同�
   用户想让它进别的层，得自己在画布上挪（v3 才会有按层操作的 op）。
 - 糖（shape/style/dash/arrow/color/exit/entry/jettySize/edgeStyle/avoid）由宿主翻译成 drawio 的 style 键，
   **绝不落盘**；keys 用来写任意 drawio 键，值给 null = 删键回默认。
-- shape：rect | rounded | stadium | ellipse | diamond | parallelogram | cylinder | document | hexagon
+- shape：rect | rounded | **text**（独立文字：无边框无底色的一段字）| stadium | ellipse | diamond | parallelogram | cylinder | document | hexagon
+  要"一段不带框的说明/标题文字"就用 addNode {shape:"text", label:"…", x, y} —— 它就是 drawio 的
+  text 形状（样式原样写 text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0）。
+  文字元素想换颜色要写 **fontColor**（setStyle {id, keys:{fontColor:"#b85450"}}）：
+  它没有填充与描边，往它身上写 fillColor/strokeColor 屏幕上不会有任何变化。
 - style：调色板名 plain|blue|green|orange|yellow|red|purple|grey，或直接给一段 style 串
 - dash：solid|dashed|dotted；arrow：end（单向）|both（双向）|none（无）|start（反向）
 - exit/entry：进出侧 n|e|s|w；edgeStyle：orthogonalEdgeStyle|none（none = 直线）

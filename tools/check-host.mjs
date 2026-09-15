@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 // 自测直接引用样式内核：文档格式的"真相"只有一份，测试跟着它走，而不是把键名再抄一遍。
-import { DEFAULT_EDGE_STYLE, edgeFreePoint, formatStyle, parseStyle, styleGet, styleWithSide } from '../src/style-kernel.js'
+import { DEFAULT_EDGE_STYLE, edgeFreePoint, formatStyle, nodeShapeFromStyle, parseStyle, styleGet, styleWithSide } from '../src/style-kernel.js'
 // 夹具与断言都用**源文件**的编解码：check-host 打的是 lib/index.js（产物），两边必须同源。
 import { buildMxfile, contentHash, parseMxfile } from '../src/mxfile.js'
 
@@ -389,6 +389,32 @@ console.log('\n图层：AI 至少要知道"东西在哪几层、哪一层用户�
   const blank = await readTool.execute({ path: 'fresh.drawio' }, exec)
   ok(Array.isArray(blank.layers) && blank.layers.length === 1, '还不存在的画布：read 报一个缺省图层（实际 ' + JSON.stringify(blank.layers) + '）')
   ok(blank.layers[0].id === '1' && blank.layers[0].visible === true && blank.layers[0].locked === false, '缺省图层就是 drawio 那个 `<mxCell id="1" parent="0" />`')
+}
+
+
+console.log('\n独立文字：AI 也能放（shape:"text"），换色落到字色上')
+{
+  seed(baseDoc())
+  await apply([{ op: 'addNode', shape: 'text', label: '标题', x: 40, y: 40 }])
+  const added = current().nodes.filter((n) => n.label === '标题')[0]
+  ok(added !== undefined, '文字元素加上了')
+  ok(nodeShapeFromStyle(added.style) === 'text', 'read 会把它报成 shape text（实际 ' + nodeShapeFromStyle(added.style) + '）')
+  ok(
+    styleGet(added.style, 'strokeColor', null) === 'none' && styleGet(added.style, 'fillColor', null) === 'none',
+    '写进去的就是 drawio 的 text 样式（无边框无底色）：' + added.style,
+  )
+  ok(added.x === 40 && added.y === 40, '给的 x/y 就是最终位置（自带几何 → 不重排）')
+
+  // 文字元素没有填充与描边：style:'red' 必须落到 fontColor，否则屏幕上一点变化都没有
+  await apply([{ op: 'setStyle', id: added.id, style: 'red' }])
+  const recolored = current().nodes.filter((n) => n.id === added.id)[0]
+  ok(styleGet(recolored.style, 'fontColor', null) === '#b85450', 'style:"red" 落到 fontColor：' + styleGet(recolored.style, 'fontColor', null))
+  ok(styleGet(recolored.style, 'fillColor', null) === 'none' && styleGet(recolored.style, 'strokeColor', null) === 'none', '不会顺手给它加填充/描边')
+  ok(styleGet(recolored.style, 'text', null) !== null, '还是文字形状（换色不该把它变回矩形）')
+
+  const out = await readTool.execute({ path: 'doc.drawio' }, exec)
+  const item = out.nodes.filter((n) => n.id === added.id)[0]
+  ok(item !== undefined && item.shape === 'text', 'diagram_read 报 shape:text（AI 下次读得出来这是个文字元素）')
 }
 
 
