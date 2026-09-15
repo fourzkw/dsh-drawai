@@ -251,17 +251,22 @@ console.log('\n「打开」一个文件 = 多出它的标签页（不是改名�
 console.log('\n工具条：按类型合并为下拉菜单')
 {
   // 从源码里抽出**同一段作用域的真实代码**执行它：
-  //   const layerList / activeLayerId  →  item  →  layerMenuItems  →  toolbarMenus
+  //   item  →  layerMenuItems  →  toolbarMenus
   //
   // 为什么不把 layerMenuItems 桩成 `() => []`（曾经就是这么写的）：
   // 真实事故 —— `item`（菜单项构造器）原来定义在 toolbarMenus 肚子里，而 layerMenuItems
   // 是外层函数，于是「图层」菜单一被调用就 `ReferenceError: item is not defined`，
   // 整张画布降级成"画布未渲染"。桩掉之后真实函数体一次都没跑过，全绿到底。
   // 现在把这段作用域整体求值并**真的调用两个函数**：自由变量对不上会立刻炸出来。
-  const regionStart = src.indexOf('  const layerList = doc !== null')
+  const regionStart = src.indexOf('  const item = (label, onClick, opts) => ({')
   const tbStart = src.indexOf('  function toolbarMenus() {')
-  ok(regionStart >= 0, '源码里有 layerList（图层菜单的数据源）')
+  ok(regionStart >= 0, '源码里有菜单项构造器 item')
   ok(tbStart > regionStart, 'layerMenuItems 与 toolbarMenus 在同一段作用域里（能一起抽出来跑）')
+  // layerList / activeLayerId 是**菜单之外**也要用的派生状态（新单元盖章），
+  // 所以它必须定义在组件体靠前的位置 —— 与最早用它的那一行比一比。
+  const layerListDecl = src.indexOf('  const layerList = doc !== null')
+  const firstUse = src.indexOf('if (activeLayerId !== null')
+  ok(layerListDecl >= 0 && firstUse > layerListDecl, 'layerList / activeLayerId 定义在**最早用到它之前**（否则就是 TDZ 地雷）')
 
   let end = -1
   if (tbStart >= 0) {
@@ -289,13 +294,12 @@ console.log('\n工具条：按类型合并为下拉菜单')
     const sandbox = {
       // toolbarMenus / layerMenuItems 引用到的自由变量必须**全部**列在这里，
       // 否则 new Function 求值或调用时直接 ReferenceError —— 这本身就是一种接线检查。
-      doc: {
-        layers: [
-          { id: '1', name: '主流程', visible: true, locked: false },
-          { id: 'L2', name: '草稿', visible: false, locked: false },
-        ],
-      },
-      currentLayerId: null,
+      // layerList / activeLayerId 就是组件体里那两个派生常量（这里喂数据当值）。
+      layerList: [
+        { id: '1', name: '主流程', visible: true, locked: false },
+        { id: 'L2', name: '草稿', visible: false, locked: false },
+      ],
+      activeLayerId: '1',
       layerLabelOf: (layer, i) => (typeof layer.name === 'string' && layer.name.length > 0 ? layer.name : '第 ' + (i + 1) + ' 层'),
       toggleLayerVisible: () => {},
       setCurrentLayerId: () => {},
@@ -373,9 +377,9 @@ console.log('\n工具条：按类型合并为下拉菜单')
       )
     }
 
-    // 空舞台（doc 还没有）= 一句禁用说明，不能炸、也不能给出点了没用的项
-    const blank = evalMenus({ doc: null })
-    ok(blank.error === undefined, 'doc 为 null（空舞台）时图层菜单照样算得出来')
+    // 空舞台（还没有图层）= 一句禁用说明，不能炸、也不能给出点了没用的项
+    const blank = evalMenus({ layerList: [], activeLayerId: null })
+    ok(blank.error === undefined, '没有图层列表（空舞台）时图层菜单照样算得出来')
     if (blank.error === undefined) {
       ok(blank.items.length === 1 && blank.items[0].disabled === true, '没有图层信息时只给一项禁用的说明')
     }
