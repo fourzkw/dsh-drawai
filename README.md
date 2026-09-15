@@ -70,8 +70,10 @@ UserObject 自定义属性、旋转翻转、页面设置…），而本画布只
 > 所以这类单元一律**不导入、不拥有、原样保留** —— 不拥有，才不会在"模型里没有它"时
 > 被当成用户删除而抹掉（见 `ownershipOf` 与 check-mxfile 的「边标签单元」一节）。
 
-**旧文件迁移**：`npm run migrate`（`tools/migrate-dshd.mjs`）把 `.dshd.json` 转成 `.drawio`，
-**不删旧文件、不覆盖已有目标**。
+**旧格式（`.dshd.json`）已经彻底退场。** 仓库里不再有这种文件，也不再有迁移脚本 ——
+需要从旧版本升上来的话，用 git 历史里的那一版：
+`git show 873a835:tools/migrate-dshd.mjs > migrate.mjs && node migrate.mjs`（它不删旧文件、
+不覆盖已有目标）。
 
 ---
 
