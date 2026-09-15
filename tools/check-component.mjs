@@ -472,6 +472,59 @@ console.log('\n层级：工作栏在标签页之上')
 }
 
 
+console.log('\n下拉菜单 / 弹出面板：点到外面就关掉')
+{
+  // 需求：下拉栏（文件/编辑/图层/视图/导出）与「打开/新建/另存为」面板，
+  // 在**外面**点一下就收掉 —— 不关的话它一直挂在画布上方挡着，而且下次点同一个按钮
+  // 会变成"关掉"而不是"打开"（用户以为按钮坏了）。
+  //
+  // 这里把 onRootPointerDown 的**真实函数体**抽出来、喂假事件真的调用一遍
+  // （不是只 grep 源码：这个函数的分支正是"算不算外面"，只能靠跑）。
+  const body = bodyOf('onRootPointerDown')
+  ok(body !== null, '源码里有 onRootPointerDown')
+
+  /** 跑一次：docMenuValue 是当时的菜单状态，target 是事件目标。返回调用记录。 */
+  const runPointer = (docMenuValue, target) => {
+    const calls = []
+    const fn = new Function(
+      'docMenu',
+      'setDocMenu',
+      'setDocMenuPos',
+      'return function onRootPointerDown(event) ' + body,
+    )(
+      docMenuValue,
+      (v) => calls.push('menu:' + String(v)),
+      (v) => calls.push('pos:' + String(v)),
+    )
+    fn({ target: target })
+    return calls
+  }
+
+  // 假事件目标：closest(sel) 命中给定选择器时就返回一个元素，否则 null。
+  const targetInside = (sel) => ({ closest: (s) => (s === sel ? { className: sel } : null) })
+  const targetOutside = { closest: () => null }
+
+  ok(runPointer(null, targetOutside).length === 0, '菜单没开时什么都不做')
+  ok(runPointer('file', targetOutside).join(',') === 'menu:null,pos:null', '点画布/标签条（外面）→ 关掉菜单与位置：' + runPointer('file', targetOutside).join(','))
+  ok(runPointer('file', targetInside('.drawai-menu')).length === 0, '点菜单自己（选项/输入框/按钮）→ 不关')
+  ok(runPointer('file', targetInside('.drawai-menu-trigger')).length === 0, '点开菜单的那个按钮 → 不在这里关（交给它自己的 toggle：点同一个是关、点另一个是换）')
+  ok(runPointer('file', targetInside('.drawai-tools')).join(',') === 'menu:null,pos:null', '只放过"开菜单的按钮"，不是整个工作栏（点按钮之间的缝 = 外面 → 关）')
+  ok(runPointer('open', targetOutside).join(',') === 'menu:null,pos:null', '「打开/新建/另存为」面板同样点外面就关')
+  // 目标没有 closest（例如事件落在 document 上）时，它一定不在菜单里 → 该关
+  ok(runPointer('file', {}).join(',') === 'menu:null,pos:null', '事件目标没有 closest（document 之类）→ 关掉')
+
+  // 接线：root 上必须真的挂了这个捕获处理器，否则函数写得再对也没人调
+  ok(/onPointerDownCapture: onRootPointerDown/.test(src), 'root 上挂了 onPointerDownCapture（捕获阶段，早于画布自己的按下处理）')
+  const rootStart = src.indexOf("{ className: 'drawai-root'")
+  ok(rootStart >= 0 && src.slice(rootStart, rootStart + 160).indexOf('onPointerDownCapture') >= 0, '挂的就是 root（画布、标签条、工作栏都在它里面）')
+  // 放过的那一类按钮必须真的带这个类名，否则"点同一个按钮关不掉"
+  ok(/className: 'drawai-btn drawai-menu-trigger'/.test(src), '开菜单的按钮带 drawai-menu-trigger 类（与处理器里的选择器对得上）')
+  // Esc 同一套语义：菜单开着按 Esc 也该收掉
+  const escStart = src.indexOf("event.key === 'Escape'", src.indexOf('function onKey(event)'))
+  const escBranch = escStart >= 0 ? src.slice(escStart, escStart + 400) : ''
+  ok(/setDocMenu\(null\)/.test(escBranch), 'Esc 也收掉下拉菜单/面板（"退出这一层"的语义要一致）')
+}
+
 console.log('\n自环与复制粘贴的接线（手势与快捷键必须真的连上）')
 {
   // 用与产物同款的组合 body 当"源码"：这里断言的是文本接线，不是运行行为。

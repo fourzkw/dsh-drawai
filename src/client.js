@@ -5551,6 +5551,10 @@ function CanvasView(props) {
         setSelectedIds([])
         setEditing(null)
         setMenu(null)
+        // 下拉菜单与「打开/新建/另存为」面板也一起收掉：Esc 是"退出当前这层"，
+        // 菜单开着却按 Esc 没反应会让人以为键盘坏了（与外面点一下同一个语义）。
+        setDocMenu(null)
+        setDocMenuPos(null)
       }
     }
     window.addEventListener('keydown', onKey)
@@ -6374,6 +6378,33 @@ function CanvasView(props) {
   }
 
   /**
+   * 点在下拉菜单 / 弹出面板**外面**就把它关掉。
+   *
+   * 菜单是"看一眼、点一下就完事"的东西：用户点别处就是在说"不要了"。不关的话它一直挂在
+   * 画布上方挡着，而且下次点同一个按钮会变成"关掉"而不是"打开"（用户以为按钮坏了）。
+   *
+   * 挂在 root 的**捕获阶段**：画布、标签条、工作栏都在 root 里，捕获能保证在任何子元素的
+   * 按下处理（画布框选、右键菜单、拖动）之前先判完，不必给每个区域各挂一遍。
+   *
+   * 两种"不算外面"的地方：
+   *   · 菜单/面板自己（点选项、点输入框、点按钮 —— 关了就没法用了）；
+   *   · 工作栏那些**开菜单的按钮**（`.drawai-menu-trigger`）—— 它们自己有 toggle 语义
+   *     （点同一个是关、点另一个是换），交给它们判断；否则捕获阶段先关一次、按钮的 onClick
+   *     又开一次，点同一个按钮就永远关不掉。
+   *     这里只放过"开菜单的按钮"而不是整个工作栏：点在按钮之间的缝里、或者点标签条，
+   *     都应该算"外面"（用户眼里那都是画布/别的东西，不是菜单）。
+   */
+  function onRootPointerDown(event) {
+    if (docMenu === null) return
+    const target = event === null || event === undefined ? null : event.target
+    const closest = target !== null && target !== undefined && typeof target.closest === 'function' ? target.closest.bind(target) : null
+    if (closest !== null && closest('.drawai-menu') !== null) return
+    if (closest !== null && closest('.drawai-menu-trigger') !== null) return
+    setDocMenu(null)
+    setDocMenuPos(null)
+  }
+
+  /**
    * 面板的定位样式：贴在触发它的按钮下方，并夹在画布范围内。
    *
    * 为什么用 inline style 而不是 CSS 类：位置随按钮宽度和右栏宽度变，属于运行期数据。
@@ -6544,7 +6575,7 @@ function CanvasView(props) {
             ref: (el) => {
               toolBtnRefs.current[m.key] = el
             },
-            className: 'drawai-btn' + (docMenu === m.key ? ' on' : ''),
+            className: 'drawai-btn drawai-menu-trigger' + (docMenu === m.key ? ' on' : ''),
             onClick: () => toggleToolbarMenu(m.key),
             title: m.title,
           },
@@ -6639,7 +6670,7 @@ function CanvasView(props) {
 
   return React.createElement(
     'div',
-    { className: 'drawai-root', ref: rootRef },
+    { className: 'drawai-root', ref: rootRef, onPointerDownCapture: onRootPointerDown },
     // 1) 工作栏（文件/编辑/视图/导出）—— 层级在标签页**之上**
     head,
     // 2) 标签页：由 CanvasTabs 构造、只在活动窗格里渲染（保证 DOM 里只有一份）
