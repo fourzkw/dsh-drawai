@@ -966,16 +966,27 @@ console.log('\n线上的文字（边自己的 value）：落点照 drawio、双�
   const tree = renderDiagram(doc, 'light', 'u1', { current: null }, ui, null)
   const text = walk(tree, (n) => n.type === 'text' && n.props.key === 'edge-text-0', [])[0]
   const bg = walk(tree, (n) => n.type === 'rect' && n.props.key === 'edge-bg-0', [])[0]
-  ok(text !== undefined && bg !== undefined, '有文字的边画出了文字与底衬')
+  ok(text !== undefined, '有文字的边画出了文字')
+  ok(bg === undefined, '默认**不画底衬**（线已经在字的位置断开了，再盖一层白会把网格也盖掉）')
   ok(text !== undefined && Math.abs(text.props.x - arc.x) < 0.6 && Math.abs(text.props.y - arc.y) < 1.6, '边自己的文字落在**弧长中点**上（drawio 的规则）：' + JSON.stringify(text === undefined ? null : [text.props.x, text.props.y]))
   ok(text !== undefined && Math.abs(text.props.x - secondSeg.x) + Math.abs(text.props.y - secondSeg.y) > 1, '不再是"第 2 段的中点"（旧算法的落点不同）')
 
   ok(text !== undefined && typeof text.props.onDoubleClick === 'function', '标签文字挂了双击 → 能就地改字')
-  ok(bg !== undefined && typeof bg.props.onPointerDown === 'function' && typeof bg.props.onContextMenu === 'function', '标签底衬挂了单击 / 右键')
-  if (bg !== undefined) bg.props.onPointerDown({})
+  ok(text !== undefined && typeof text.props.onPointerDown === 'function' && typeof text.props.onContextMenu === 'function', '标签文字挂了单击 / 右键（拖动也挂在它身上）')
+  if (text !== undefined) text.props.onPointerDown({})
   if (text !== undefined) text.props.onDoubleClick({})
   if (text !== undefined) text.props.onContextMenu({})
   ok(calls.join(',') === 'select:e1,edit:e1,menu:e1', '三处都报到这条线上：' + calls.join(','))
+
+  // 样式明确要底衬时才画（drawio 的 labelBackgroundColor；它可能带透明度后缀 #rrggbbaa）
+  const bgDoc = JSON.parse(JSON.stringify(doc))
+  bgDoc.edges[0].style = DEFAULT_EDGE_STYLE + 'labelBackgroundColor=#ffffffe0;'
+  const bgTree = renderDiagram(bgDoc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const painted = walk(bgTree, (n) => n.type === 'rect' && n.props.key === 'edge-bg-0', [])[0]
+  ok(painted !== undefined, '样式给了 labelBackgroundColor 就画底衬')
+  ok(painted !== undefined && painted.props.fill === '#ffffff' && Math.abs(painted.props.fillOpacity - 224 / 255) < 0.01, '8 位十六进制拆成 颜色 + fill-opacity：' + JSON.stringify(painted === undefined ? null : [painted.props.fill, painted.props.fillOpacity]))
+  const box = internals.labelBox(internals.edgeLabelPointAt(internals.edgeRoutePoints(bgDoc, bgDoc.edges[0]), 0, 0, 0, 0), '线上文字', 10)
+  ok(painted !== undefined && Math.abs(painted.props.width - box.w) < 0.01, '底衬的大小 = 挖空用的那个框（同一个来源）')
 
   // 把手：它正压在**段的中点**上 —— 恰恰是"给线加字"最自然的双击位置。
   const handles = byClass(tree, 'drawai-handle')
@@ -1061,12 +1072,88 @@ console.log('\n拖线上的文字：位置存在边自己的几何上（drawio �
     onEdgeDoubleClick: (id) => calls.push('edit:' + id),
   }
   const tree2 = renderDiagram(doc, 'light', 'u1', { current: null }, ui, null)
-  const bg = walk(tree2, (n) => n.type === 'rect' && n.props.key === 'edge-bg-0', [])[0]
+  const labelText = walk(tree2, (n) => n.type === 'text' && n.props.key === 'edge-text-0', [])[0]
   const band = walk(tree2, (n) => n.props.key === 'edge-hit-0', [])[0]
-  if (bg !== undefined) bg.props.onPointerDown({})
+  if (labelText !== undefined) labelText.props.onPointerDown({})
   if (band !== undefined) band.props.onPointerDown({})
   ok(calls.join(',') === 'drag:e1,select:e1', '标签按住 = 拖标签，命中带按住 = 选中（实际 ' + calls.join(',') + '）')
-  ok(bg !== undefined && typeof bg.props.onDoubleClick === 'function', '标签仍然双击改字（拖动没有把它挤掉）')
+  ok(labelText !== undefined && typeof labelText.props.onDoubleClick === 'function', '标签仍然双击改字（拖动没有把它挤掉）')
+}
+
+console.log('\n线在文字的位置断开 + 拖动吸附')
+{
+  // 用户的两条要求：
+  //   1) 不要"白色盖一层"（会把网格也盖掉、深色主题下一块白），要真的**不画那一段线**；
+  //   2) 拖文字要有**吸附**（与画布其余部分同一套单位：连线几何走半格 5px）。
+  const line = [{ x: 0, y: 100 }, { x: 300, y: 100 }]
+  const box = { x: 120, y: 92, w: 60, h: 16 }
+  const gaps = internals.labelGapsOnPath(line, box)
+  ok(gaps.length === 1 && Math.abs(gaps[0].from - 120) < 0.01 && Math.abs(gaps[0].to - 180) < 0.01, '横线上与框相交的一段被挖掉：' + JSON.stringify(gaps))
+  const cut = internals.cutPathByGaps(line, gaps)
+  ok(cut.length === 2, '挖空后断成两段子折线：' + cut.length)
+  ok(
+    cut.length === 2 && Math.abs(cut[0][cut[0].length - 1].x - 120) < 0.01 && Math.abs(cut[1][0].x - 180) < 0.01,
+    '断开的两个端头正好落在框的两侧：' + JSON.stringify([cut[0][cut[0].length - 1], cut[1][0]]),
+  )
+  ok(internals.cutPathByGaps(line, []).length === 1, '没有框要挖时原样返回')
+
+  // 长标签压在短边上：两端各留一小截，别把整条线（含箭头）都挖没了
+  const short = [{ x: 0, y: 0 }, { x: 40, y: 0 }]
+  const wide = internals.cutPathByGaps(short, internals.labelGapsOnPath(short, { x: -60, y: -8, w: 200, h: 16 }))
+  ok(wide.length === 2, '框比线还长时仍然画成两截（不是整条消失）：' + wide.length)
+  ok(
+    wide.length === 2 && wide[0][wide[0].length - 1].x > 0 && wide[1][wide[1].length - 1].x - wide[1][0].x > 0,
+    '两端各留了一小截：' + JSON.stringify([wide[0][wide[0].length - 1], [wide[1][0].x, wide[1][wide[1].length - 1].x]]),
+  )
+
+  const vline = [{ x: 50, y: 0 }, { x: 50, y: 300 }]
+  const vgaps = internals.labelGapsOnPath(vline, { x: 40, y: 120, w: 20, h: 40 })
+  ok(vgaps.length === 1 && Math.abs(vgaps[0].from - 120) < 0.01 && Math.abs(vgaps[0].to - 160) < 0.01, '竖线按 y 挖：' + JSON.stringify(vgaps))
+
+  ok(internals.labelGapsOnPath(line, { x: 120, y: 40, w: 60, h: 16 }).length === 0, '框离得远（不压线）→ 一点都不挖')
+
+  // 折角上：框同时压到两段 → 两段各自挖，且合并成一段连续区间
+  const corner = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }]
+  const cgaps = internals.labelGapsOnPath(corner, { x: 90, y: -6, w: 20, h: 20 })
+  ok(cgaps.length === 1, '压住折角时挖出的是一段连续区间（相邻区间已合并）：' + JSON.stringify(cgaps))
+
+  // 渲染：d 里出现两个 M（线被断开），断开的位置就是框的两侧
+  const doc = {
+    version: 2,
+    revision: '',
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 160, h: 60 },
+      { id: 'b', x: 400, y: 0, w: 160, h: 60 },
+    ],
+    edges: [{ id: 'e1', from: 'a', to: 'b', label: '线上的字', style: DEFAULT_EDGE_STYLE }],
+  }
+  const pts = internals.edgeRoutePoints(doc, doc.edges[0])
+  const tree = renderDiagram(doc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const path = walk(tree, (n) => n.props.key === 'edge-0', [])[0]
+  const d = path === undefined ? '' : path.props.d
+  ok((d.match(/M /g) || []).length === 2, '线上有字时，边被画成两条子路径（那一段不画）：' + d)
+  const pos = internals.edgeLabelPosition(pts, doc.edges[0])
+  const b = internals.labelBox(pos, '线上的字', 10)
+  // 第一段子路径的终点应该停在框的左侧（留 2px 余量）
+  const first = /M ([\d.-]+) ([\d.-]+) L ([\d.-]+) ([\d.-]+)/.exec(d)
+  ok(first !== null && Math.abs(Number(first[3]) - (b.x - 2)) < 1.01, '断口就落在框的左边（含 2px 余量）：' + (first === null ? '-' : first[3]) + ' vs ' + (b.x - 2))
+  const hit = walk(tree, (n) => n.props.key === 'edge-hit-0', [])[0]
+  ok(hit !== undefined && (hit.props.d.match(/M /g) || []).length === 1, '命中带不挖空（线在字下面也要能点中/拖动）')
+
+  // 吸附：半格（5px）+ 贴线
+  const onLine = internals.snapLabelPoint(line, { x: 123, y: 102 })
+  ok(onLine.x % 5 === 0 && onLine.y % 5 === 0, '指针吸到半格：' + JSON.stringify(onLine))
+  const stuck = internals.snapLabelPoint(line, { x: 123, y: 98 })
+  ok(Math.abs(stuck.y - 100) < 1.01, '离线 2px → 贴回线上：' + JSON.stringify(stuck))
+  const off = internals.snapLabelPoint(line, { x: 123, y: 112 })
+  ok(Math.abs(off.y - 110) < 1.01, '离线 12px（有意挪开）→ 只吸半格，不贴线：' + JSON.stringify(off))
+  // 边框那一轴常常不在格上（例如 x=455）：贴线吸附负责这种情形
+  const shifted = [{ x: 455, y: 100 }, { x: 455, y: 200 }]
+  const near = internals.snapLabelPoint(shifted, { x: 457, y: 152 })
+  ok(Math.abs(near.x - 455) < 1.01, '线不在格上时也能贴回线上：' + JSON.stringify(near))
+  // 拖一次之后存下来的数：吸附过 → 垂距是半格的整数倍、零头 0（文件里就是干净的数）
+  const saved = internals.labelPosFor(line, internals.snapLabelPoint(line, { x: 123, y: 128 }))
+  ok(saved !== null && Math.abs(saved.labelY) === 30 && saved.labelOffsetX === 0 && saved.labelOffsetY === 0, '存下来的垂距是半格的整数倍、零头 0：' + JSON.stringify(saved))
 }
 
 console.log('\n悬空端：能拖回来、也能拖出去（预览与落盘同一套）')
