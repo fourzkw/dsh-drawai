@@ -1459,8 +1459,13 @@ const SHAPE_LIBRARY = [
 // 调色板（8 个经典色）由样式内核的 PALETTE 提供，见文件顶部从 styleKernel 的解构 ——
 // 这里不再留第二份"颜色名 → 十六进制"的表，否则两边迟早会漂移。
 
-/** 从节点集合算出 box / 索引 / 包围盒。渲染与命中都走它，避免两处算法漂移。 */
+/** 从节点集合算出 box / 索引 / 包围盒。渲染与命中都走它，避免两处算法漂移。
+ *
+ * **隐藏图层的节点不进来** —— 这里是"什么可见"的唯一咽喉：渲染、命中（`hitNodeAt`）、
+ * 框选、路由障碍全都读它，于是"隐藏一层"在这些地方自动一致（不会出现
+ * "看不见却能点到/线还绕着它走"）。 */
 function buildGeometry(doc) {
+  const hidden = hiddenLayerIds(doc)
   const boxes = []
   const byId = {}
   let minX = Infinity
@@ -1469,6 +1474,7 @@ function buildGeometry(doc) {
   let maxY = -Infinity
   for (let i = 0; i < doc.nodes.length; i += 1) {
     const n = doc.nodes[i]
+    if (isHiddenCell(hidden, n)) continue
     const geo = { x: numberOr(n.x, 0), y: numberOr(n.y, 0), w: numberOr(n.w, FALLBACK_NODE_W), h: numberOr(n.h, FALLBACK_NODE_H) }
     const box = { id: n.id, node: n, geo: geo, label: typeof n.label === 'string' ? n.label : n.id }
     boxes.push(box)
@@ -1480,6 +1486,48 @@ function buildGeometry(doc) {
   }
   if (!Number.isFinite(minX)) return { boxes: boxes, byId: byId, bounds: { minX: 0, minY: 0, maxX: 1, maxY: 1 } }
   return { boxes: boxes, byId: byId, bounds: { minX: minX, minY: minY, maxX: maxX, maxY: maxY } }
+}
+
+/**
+ * 隐藏的图层 id 集合：**渲染、命中、框选、对齐候选**都拿它判断"这一层现在看不见"。
+ *
+ * 隐藏是**文档里的属性**（drawio 就写在图层单元上：`visible="0"`），不是客户端本地开关 ——
+ * 于是它会被保存、能被 drawio 看见、也进撤销历史。这里只把它翻成便于查的集合。
+ */
+function hiddenLayerIds(doc) {
+  const set = new Set()
+  const layers = doc === null || doc === undefined || Array.isArray(doc.layers) === false ? [] : doc.layers
+  for (let i = 0; i < layers.length; i += 1) {
+    const layer = layers[i]
+    if (layer !== null && layer !== undefined && typeof layer.id === 'string' && layer.visible === false) set.add(layer.id)
+  }
+  return set
+}
+
+/** 这个单元属于的层是不是隐藏的（没有层信息 = 可见）。 */
+function isHiddenCell(hidden, cell) {
+  return cell !== null && cell !== undefined && typeof cell.layer === 'string' && hidden.has(cell.layer)
+}
+
+/** 图层名（没名字的用"第 N 层"兜底，与 drawio 的面板一致：它也只显示空名字）。 */
+function layerLabelOf(layer, index) {
+  if (layer === null || layer === undefined) return ''
+  const name = typeof layer.name === 'string' ? layer.name : ''
+  return name.length > 0 ? name : '第 ' + (index + 1) + ' 层'
+}
+
+/** 新的图层 id：`L<n>`，避开文档里已经用掉的 id（节点/连线/图层都算）。 */
+function nextLayerIdOf(doc) {
+  const used = new Set()
+  const layers = doc !== null && doc !== undefined && Array.isArray(doc.layers) ? doc.layers : []
+  const nodes = doc !== null && doc !== undefined && Array.isArray(doc.nodes) ? doc.nodes : []
+  const edges = doc !== null && doc !== undefined && Array.isArray(doc.edges) ? doc.edges : []
+  for (const l of layers) if (l !== null && l !== undefined) used.add(String(l.id))
+  for (const n of nodes) if (n !== null && n !== undefined) used.add(String(n.id))
+  for (const e of edges) if (e !== null && e !== undefined) used.add(String(e.id))
+  let n = layers.length + 1
+  while (used.has('L' + n)) n += 1
+  return 'L' + n
 }
 
 /**
@@ -1636,9 +1684,11 @@ function draggedGeometry(drag, move) {
 function marqueeHits(doc, rect, memory) {
   const hits = []
   if (doc === null || doc === undefined) return hits
+  const hidden = hiddenLayerIds(doc)
   const nodes = Array.isArray(doc.nodes) ? doc.nodes : []
   for (let i = 0; i < nodes.length; i += 1) {
     const n = nodes[i]
+    if (isHiddenCell(hidden, n)) continue
     const x = numberOr(n.x, 0)
     const y = numberOr(n.y, 0)
     const w = numberOr(n.w, FALLBACK_NODE_W)
@@ -1648,6 +1698,7 @@ function marqueeHits(doc, rect, memory) {
   const edges = Array.isArray(doc.edges) ? doc.edges : []
   for (let i = 0; i < edges.length; i += 1) {
     const edge = edges[i]
+    if (isHiddenCell(hidden, edge)) continue
     const pts = edgeRoutePoints(doc, edge, memory)
     if (pts === null || pts.length < 2) continue
     for (let s = 0; s < pts.length - 1; s += 1) {
@@ -2523,9 +2574,12 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
 
   /** 边的路径：独立边标签要按它算落点（与上面渲染用的是同一次路由结果）。 */
   const edgePts = {}
+  // 隐藏图层的连线整条不画（它的边标签也跟着藏 —— 标签的 layer 会沿 parent 找到这条边）。
+  const hiddenCells = hiddenLayerIds(doc)
 
   for (let i = 0; i < doc.edges.length; i += 1) {
     const edge = doc.edges[i]
+    if (isHiddenCell(hiddenCells, edge)) continue
     const from = endpointBoxOf(byId, edge, 'source')
     const to = endpointBoxOf(byId, edge, 'target')
     if (from === null || to === null) continue
@@ -2778,8 +2832,10 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
   // 位置按 mxGraphView.getPoint 那套算法算 —— 挂在边上的用"沿边比例 + 垂直偏移 + 残余偏移"，
   // 没挂在边上的（从别处粘过来的那种）按它自己的坐标画。
   const labels = Array.isArray(doc.labels) ? doc.labels : []
+  const hiddenForLabels = hiddenLayerIds(doc)
   for (let i = 0; i < labels.length; i += 1) {
     const item = labels[i]
+    if (isHiddenCell(hiddenForLabels, item)) continue
     const text = item === null || item === undefined || typeof item.text !== 'string' ? '' : item.text
     if (text.length === 0) continue
     let pos = null
@@ -3230,7 +3286,12 @@ let clipboard = null
 
 /** 节点深拷贝（标签/样式都是字符串，几何是数字 —— 浅拷就够，但要显式列出来）。 */
 function cloneClipNode(node) {
-  return { id: node.id, label: node.label, style: node.style, x: node.x, y: node.y, w: node.w, h: node.h }
+  const copy = { id: node.id, label: node.label, style: node.style, x: node.x, y: node.y, w: node.w, h: node.h }
+  // 图层与自定义数据也要跟着复制 —— 否则"复制到一个新图层"或"复制带数据的节点"会丢东西
+  // （数据是 drawio 用户对象上的属性，丢了 drawio 那边就查不到了）。
+  if (typeof node.layer === 'string' && node.layer.length > 0) copy.layer = node.layer
+  if (node.data !== undefined && node.data !== null) copy.data = copyData(node.data)
+  return copy
 }
 
 /** 边深拷贝：折点与两个自由端点都要**各拷一份**，否则粘贴出来的两条边会共享同一组点。 */
@@ -3241,6 +3302,14 @@ function cloneClipEdge(edge) {
   if (Array.isArray(edge.points)) copy.points = edge.points.map((p) => ({ x: p.x, y: p.y }))
   if (edge.sourcePoint !== undefined && edge.sourcePoint !== null) copy.sourcePoint = { x: edge.sourcePoint.x, y: edge.sourcePoint.y }
   if (edge.targetPoint !== undefined && edge.targetPoint !== null) copy.targetPoint = { x: edge.targetPoint.x, y: edge.targetPoint.y }
+  if (typeof edge.layer === 'string' && edge.layer.length > 0) copy.layer = edge.layer
+  if (edge.data !== undefined && edge.data !== null) copy.data = copyData(edge.data)
+  if (Number.isFinite(Number(edge.labelX)) && Number.isFinite(Number(edge.labelY))) {
+    copy.labelX = Number(edge.labelX)
+    copy.labelY = Number(edge.labelY)
+    if (Number.isFinite(Number(edge.labelOffsetX))) copy.labelOffsetX = Number(edge.labelOffsetX)
+    if (Number.isFinite(Number(edge.labelOffsetY))) copy.labelOffsetY = Number(edge.labelOffsetY)
+  }
   return copy
 }
 
@@ -3290,7 +3359,7 @@ function idCounters(doc) {
  * 纯函数（返回新文档与新选中集）—— 剪贴板最容易错的两处（id 撞车、共享折点数组）
  * 都能在命令行里直接断言，不必靠手点。
  */
-function pasteInto(doc, clip, offsetX, offsetY) {
+function pasteInto(doc, clip, offsetX, offsetY, layer) {
   if (doc === null || doc === undefined || clip === null || clip === undefined) return null
   if (Array.isArray(clip.nodes) === false || clip.nodes.length === 0) return null
   const counters = idCounters(doc)
@@ -3298,21 +3367,18 @@ function pasteInto(doc, clip, offsetX, offsetY) {
   const nodes = doc.nodes.map((n) => Object.assign({}, n))
   const edges = doc.edges.map(cloneClipEdge)
   const ids = []
+  const targetLayer = typeof layer === 'string' && layer.length > 0 ? layer : null
   for (let i = 0; i < clip.nodes.length; i += 1) {
     const src = clip.nodes[i]
     counters.node += 1
     const id = 'n' + counters.node
     remap[String(src.id)] = id
     ids.push(id)
-    nodes.push({
-      id: id,
-      label: src.label,
-      style: src.style,
-      x: numberOr(src.x, 0) + offsetX,
-      y: numberOr(src.y, 0) + offsetY,
-      w: src.w,
-      h: src.h,
-    })
+    // 先整份拷（label/style/w/h/data/layer 都在里面），再改写 id 与新位置。
+    const copy = Object.assign({}, src, { id: id, x: numberOr(src.x, 0) + offsetX, y: numberOr(src.y, 0) + offsetY })
+    // 粘贴进**当前图层**（drawio 也是这个行为）；没设当前层就沿用原件那一层（copy.layer 已经在）。
+    if (targetLayer !== null) copy.layer = targetLayer
+    nodes.push(copy)
   }
   for (let i = 0; i < clip.edges.length; i += 1) {
     const src = clip.edges[i]
@@ -3324,6 +3390,7 @@ function pasteInto(doc, clip, offsetX, offsetY) {
     copy.id = 'e' + counters.edge
     copy.from = from
     copy.to = to
+    if (targetLayer !== null) copy.layer = targetLayer
     if (Array.isArray(copy.points)) copy.points = copy.points.map((p) => ({ x: p.x + offsetX, y: p.y + offsetY }))
     if (copy.sourcePoint !== undefined) copy.sourcePoint = { x: copy.sourcePoint.x + offsetX, y: copy.sourcePoint.y + offsetY }
     if (copy.targetPoint !== undefined) copy.targetPoint = { x: copy.targetPoint.x + offsetX, y: copy.targetPoint.y + offsetY }
@@ -3539,6 +3606,11 @@ function CanvasView(props) {
   const canRevertState = React.useState(false) // 宿主那边有没有可退回的 AI 改动
   const canRevert = canRevertState[0]
   const setCanRevert = canRevertState[1]
+  // 当前图层（新建的节点/连线/粘贴进这一层）：**客户端状态**，不进文件 ——
+  // drawio 也是这样（图层面板里的选中项不落盘）。
+  const currentLayerState = React.useState(null)
+  const currentLayerId = currentLayerState[0]
+  const setCurrentLayerId = currentLayerState[1]
   const marqueeRef = React.useRef(null) // 框选拖拽 { x0, y0, x1, y1, additive, moved }
   const marqueeState = React.useState(null) // 同上，供渲染
   const marquee = marqueeState[0]
@@ -3917,6 +3989,35 @@ function CanvasView(props) {
     }
   }
 
+  /**
+   * 显示/隐藏一个图层 —— 写的是**文档里的属性**（drawio 的 `visible="0"`），不是本地开关：
+   * 于是它会被保存、能被 drawio 看见、也进撤销历史（Ctrl+Z 能撤回一次误点）。
+   */
+  function toggleLayerVisible(id) {
+    applyLocal((next) => {
+      const layers = Array.isArray(next.layers) ? next.layers : null
+      if (layers === null) return
+      for (let i = 0; i < layers.length; i += 1) {
+        if (layers[i].id !== id) continue
+        layers[i].visible = layers[i].visible === false
+      }
+    }, 'layer-visible:' + id)
+  }
+
+  /** 新建图层：自动命名"图层 N"（重命名/锁定/删除留到 v2，所以 v1 不给输入框）。 */
+  function createLayer() {
+    const current = docRef.current
+    if (current === null) return
+    const id = nextLayerIdOf(current)
+    const index = Array.isArray(current.layers) ? current.layers.length : 0
+    applyLocal((next) => {
+      if (Array.isArray(next.layers) === false) next.layers = []
+      next.layers.push({ id: id, name: '图层 ' + (index + 1), visible: true, locked: false })
+    })
+    setCurrentLayerId(id)
+    setSaveNote('已新建图层「图层 ' + (index + 1) + '」并设为当前图层')
+  }
+
   async function saveNow() {
     if (client === null || dirtyRef.current !== true) return
     // 没有绑定文件（空舞台）时不该有脏数据；真出现就说明状态串了 —— 提示而不是猜一个文件名
@@ -4127,7 +4228,9 @@ function CanvasView(props) {
           if (n > max) max = n
         }
       }
-      next.edges.push({ id: 'e' + (max + 1), from: linking.from, to: id, style: style })
+      const fresh = { id: 'e' + (max + 1), from: linking.from, to: id, style: style }
+      if (activeLayerId !== null && activeLayerId !== undefined) fresh.layer = activeLayerId
+      next.edges.push(fresh)
     })
   }
 
@@ -4345,9 +4448,11 @@ function CanvasView(props) {
         const movedIds = drag.starts.map((s) => s.id)
         const box = boxOfBoxes(drag.starts.map((s) => ({ x: s.x + move.x, y: s.y + move.y, w: s.w, h: s.h })))
         const others = []
+        const hiddenForGuides = hiddenLayerIds(live)
         for (let i = 0; i < live.nodes.length; i += 1) {
           const n = live.nodes[i]
           if (movedIds.indexOf(n.id) >= 0) continue
+          if (isHiddenCell(hiddenForGuides, n)) continue
           others.push({ x: numberOr(n.x, 0), y: numberOr(n.y, 0), w: numberOr(n.w, FALLBACK_NODE_W), h: numberOr(n.h, FALLBACK_NODE_H) })
         }
         if (box !== null && others.length > 0) {
@@ -4715,7 +4820,7 @@ function CanvasView(props) {
     // 形状与配色都落成 drawio 的 style 键：rect/plain 落成空串（= drawio 的 defaultVertexStyle）。
     const style = styleWithColorName(styleWithNodeShape('', shape), styleName)
     applyLocal((next) => {
-      next.nodes.push({
+      const node = {
         id: id,
         label: '新节点',
         style: style,
@@ -4723,7 +4828,10 @@ function CanvasView(props) {
         y: snap(userY - NEW_NODE_H / 2),
         w: NEW_NODE_W,
         h: NEW_NODE_H,
-      })
+      }
+      // 新节点进**当前图层**（没设过就是第一层）—— drawio 的"当前图层"就是这个意思。
+      if (activeLayerId !== null) node.layer = activeLayerId
+      next.nodes.push(node)
     })
     setSelectedIds([id])
     setMenu(null)
@@ -4744,7 +4852,9 @@ function CanvasView(props) {
     const from = { x: snap(userX, EDGE_GRID), y: snap(userY, EDGE_GRID) }
     const to = { x: from.x + 200, y: from.y }
     applyLocal((next) => {
-      next.edges.push({ id: id, style: DEFAULT_EDGE_STYLE, sourcePoint: from, targetPoint: to })
+      const edge = { id: id, style: DEFAULT_EDGE_STYLE, sourcePoint: from, targetPoint: to }
+      if (activeLayerId !== null) edge.layer = activeLayerId
+      next.edges.push(edge)
     })
     setSelectedIds([id])
     setMenu(null)
@@ -5343,7 +5453,7 @@ function CanvasView(props) {
     }
     let pasted = null
     applyLocal((next) => {
-      const result = pasteInto(next, clipboard, GRID * 2, GRID * 2)
+      const result = pasteInto(next, clipboard, GRID * 2, GRID * 2, activeLayerId)
       if (result === null) return
       pasted = result
       next.nodes = result.doc.nodes
@@ -5963,8 +6073,11 @@ function CanvasView(props) {
               className: 'drawai-btn drawai-menu-item',
               disabled: entry.disabled === true,
               onClick: () => {
-                setDocMenu(null)
-                setDocMenuPos(null)
+                // keepOpen：图层的显示/隐藏、切换当前层要能连点几下（drawio 的图层面板也不关）。
+                if (entry.keepOpen !== true) {
+                  setDocMenu(null)
+                  setDocMenuPos(null)
+                }
                 entry.onClick()
               },
             },
@@ -6246,12 +6359,59 @@ function CanvasView(props) {
    * 面板沿用 docMenu 那套绝对定位（在画布左上角展开），而不是 CSS hover 弹出 ——
    * 这里是窄栏，hover 弹出很难点，鼠标一移开就收起。
    */
+  const layerList = doc !== null && doc !== undefined && Array.isArray(doc.layers) ? doc.layers : []
+  const activeLayerId =
+    currentLayerId !== null && layerList.some((l) => l !== null && l !== undefined && l.id === currentLayerId)
+      ? currentLayerId
+      : layerList.length > 0 && layerList[0] !== null && layerList[0] !== undefined
+        ? layerList[0].id
+        : null
+
+  /**
+   * 「图层」菜单的内容。
+   *
+   * 菜单原语只有"一项一个动作"，而一层有两个动作（显示/隐藏、设为当前），所以分两段列：
+   * 上半段点一下切换显示，下半段点一下切换"当前图层"。两段都 keepOpen —— 连点几层不用重开菜单。
+   */
+  function layerMenuItems() {
+    const out = []
+    if (layerList.length === 0) {
+      out.push(item('（这张画布没有图层信息）', () => {}, { disabled: true, hint: '打开一张 drawio 文件或新建画布后就有' }))
+      return out
+    }
+    for (let i = 0; i < layerList.length; i += 1) {
+      const layer = layerList[i]
+      const name = layerLabelOf(layer, i)
+      const eye = layer.visible === false ? '🚫' : '👁'
+      out.push(
+        item(eye + ' ' + name, () => toggleLayerVisible(layer.id), {
+          hint: layer.visible === false ? '现在是隐藏的，点一下显示（写进文件）' : '现在是显示的，点一下隐藏（写进文件）',
+          keepOpen: true,
+        }),
+      )
+    }
+    for (let i = 0; i < layerList.length; i += 1) {
+      const layer = layerList[i]
+      const name = layerLabelOf(layer, i)
+      const on = layer.id === activeLayerId
+      out.push(
+        item((on ? '● ' : '○ ') + '当前：' + name, () => setCurrentLayerId(layer.id), {
+          hint: '新建的节点/连线/粘贴会落进「当前图层」',
+          keepOpen: true,
+        }),
+      )
+    }
+    out.push(item('＋ 新建图层', createLayer, { hint: '自动命名「图层 N」；重命名 / 锁定 / 删除见 v2' }))
+    return out
+  }
+
   function toolbarMenus() {
     const item = (label, onClick, opts) => ({
       label: label,
       onClick: onClick,
       hint: opts !== undefined && opts.hint !== undefined ? opts.hint : '',
       disabled: opts !== undefined && opts.disabled === true,
+      keepOpen: opts !== undefined && opts.keepOpen === true,
     })
     return [
       {
@@ -6286,6 +6446,12 @@ function CanvasView(props) {
           }),
           item('整理几何（吸附到格线）', normalizeGeometry, { hint: '节点对齐整格、折点对齐半格；从 drawio 手画来的图常用', disabled: empty }),
         ],
+      },
+      {
+        key: 'layers',
+        label: '图层',
+        title: '显示 / 隐藏，以及新建单元进哪一层',
+        items: layerMenuItems(),
       },
       {
         key: 'view',
@@ -6745,6 +6911,11 @@ exports.__routeInternals = {
   allIdsOf: allIdsOf,
   alignGuidesFor: alignGuidesFor,
   boxOfBoxes: boxOfBoxes,
+  // 图层（v1）
+  hiddenLayerIds: hiddenLayerIds,
+  isHiddenCell: isHiddenCell,
+  layerLabelOf: layerLabelOf,
+  nextLayerIdOf: nextLayerIdOf,
   docFromPayload: docFromPayload,
   pathFromAddress: pathFromAddress,
   computeFitView: computeFitView,

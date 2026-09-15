@@ -393,6 +393,9 @@ function scanCells(source, from, to) {
       data: data,
       style: rawAttr(cellAttrsText, 'style') === undefined ? '' : decodeEntities(rawAttr(cellAttrsText, 'style')),
       parent: attr(cellAttrsText, 'parent'),
+      // 图层的两个状态位（drawio 就写在图层单元上）：`visible="0"` = 隐藏、`locked="1"` = 锁定。
+      visible: attr(cellAttrsText, 'visible'),
+      locked: attr(cellAttrsText, 'locked'),
       source: attr(cellAttrsText, 'source'),
       target: attr(cellAttrsText, 'target'),
       vertex: attr(cellAttrsText, 'vertex') === '1',
@@ -458,8 +461,17 @@ function analyzeMxfile(source) {
   // 元数据单元挂在图层下（parent 是图层而不是 root），所以不会被误判成图层。
   const isLayer = (cell) =>
     cell.id !== META_ID && cell.parent === rootId && cell.vertex !== true && cell.edge !== true && cell.geometry === null
-  const layerIds = new Set(cells.filter(isLayer).map((c) => c.id))
-  const layerOrder = cells.filter(isLayer).map((c) => c.id)
+  const layerCells = cells.filter(isLayer)
+  const layerIds = new Set(layerCells.map((c) => c.id))
+  const layerOrder = layerCells.map((c) => c.id)
+  // 图层的三个属性就是 drawio 的写法：`value` = 名字、`visible="0"` = 隐藏、`locked="1"` = 锁定。
+  // 缺省（不写属性）就是"名字为空 / 可见 / 未锁"。属性在 scanCells 里已经读好了。
+  const layers = layerCells.map((cell) => ({
+    id: String(cell.id),
+    name: typeof cell.label === 'string' ? decodeEntities(cell.label) : '',
+    visible: cell.visible !== '0',
+    locked: cell.locked === '1',
+  }))
 
   return {
     source: source,
@@ -477,6 +489,7 @@ function analyzeMxfile(source) {
     rootId: rootId,
     layerIds: layerIds,
     layerOrder: layerOrder,
+    layers: layers,
     isLayer: isLayer,
   }
 }
@@ -563,6 +576,28 @@ function layerOrRoot(info) {
   return info.layerOrder.length > 0 ? info.layerOrder[0] : info.rootId
 }
 
+/**
+ * 一个单元属于哪个图层：沿 parent 往上找**第一个图层**。
+ *
+ * 挂在边上的边标签单元 parent 是那条边，所以它会拿到边所在的那一层 ——
+ * 于是"隐藏某一层"能把那一层里的标签一起藏掉（否则会剩下一堆孤零零的字）。
+ *
+ * @returns 图层 id，或 null（走到 root 也没找到，理论上不该发生）
+ */
+function layerIdOf(info, cell) {
+  let parentId = cell === null || cell === undefined ? undefined : cell.parent
+  const seen = new Set()
+  while (typeof parentId === 'string' && seen.has(parentId) === false) {
+    seen.add(parentId)
+    if (info.layerIds.has(parentId)) return parentId
+    if (parentId === info.rootId) return null
+    const parent = info.byId.get(parentId)
+    if (parent === undefined) return null
+    parentId = parent.parent
+  }
+  return null
+}
+
 // ---- 解析 → 语义文档 -------------------------------------------------------
 
 /**
@@ -640,7 +675,7 @@ export function parseMxfile(text, options) {
   const pageCount = info.pageCount
 
   if (info.layerIds.size > 1) {
-    notes.push('这个文件有 ' + info.layerIds.size + ' 个图层，画布把它们叠在一起显示；保存时图层结构照旧保留')
+    notes.push('这个文件有 ' + info.layerIds.size + ' 个图层：画布按「图层」菜单里的显示/隐藏来画；保存时图层结构照旧保留')
   }
 
   const nodes = []
@@ -667,6 +702,9 @@ export function parseMxfile(text, options) {
       h: geo !== null && geo.height !== undefined ? geo.height : 60,
     }
     if (cell.data !== undefined && cell.data !== null && Object.keys(cell.data).length > 0) node.data = cell.data
+    // 属于哪个图层（沿 parent 往上找第一个图层）：渲染时隐藏层要整层不画。
+    const layerId = layerIdOf(info, cell)
+    if (layerId !== null) node.layer = layerId
     nodes.push(node)
   }
 
@@ -709,6 +747,8 @@ export function parseMxfile(text, options) {
         edge.labelOffsetY = labelPos.offsetY
       }
     }
+    const edgeLayer = layerIdOf(info, cell)
+    if (edgeLayer !== null) edge.layer = edgeLayer
     edges.push(edge)
   }
 
@@ -730,7 +770,7 @@ export function parseMxfile(text, options) {
     const onEdge = parentCell !== undefined && parentCell.edge === true
     const geo = cell.geometry === null ? {} : cell.geometry
     const offset = geo.offset === undefined || geo.offset === null ? { x: 0, y: 0 } : geo.offset
-    labels.push({
+    const labelItem = {
       id: String(cell.id),
       text: labelFromValue(cell.label),
       edgeId: onEdge ? String(cell.parent) : null,
@@ -740,7 +780,11 @@ export function parseMxfile(text, options) {
       offsetY: offset.y,
       relative: geo.relative === true,
       style: cell.style === undefined ? '' : String(cell.style),
-    })
+    }
+    // 挂在边上的：它的层就是那条边的层（parent 是边，不是图层）。
+    const labelLayer = layerIdOf(info, cell)
+    if (labelLayer !== null) labelItem.layer = labelLayer
+    labels.push(labelItem)
   }
   if (labels.length > 0) {
     const onEdges = labels.filter((l) => l.edgeId !== null).length
@@ -766,6 +810,9 @@ export function parseMxfile(text, options) {
     nodes: nodes,
     edges: edges,
     labels: labels,
+    // 图层（drawio 的写法：挂在 root 下、没有 vertex/edge 的单元）：
+    // id + 名字 + 显示/隐藏 + 锁定，顺序就是覆盖顺序（后面的压前面的）。
+    layers: info.layers,
   }
   if (existing !== null && existing.meta !== undefined && existing.meta !== null && existing.meta.pinned === true) {
     doc.meta.pinned = true
@@ -856,8 +903,20 @@ function edgeCellXml(edge, parentId, indent) {
   return withDataWrapper([head, geoHead + '>' + inner + '</mxGeometry>', indent + '</mxCell>'], edge, indent)
 }
 
-/** 元数据单元：没有 vertex/edge，所以不会显示，也不会被我们当成图形单元。 */
-function metaCellXml(parentId, indent, meta) {
+/**
+ * 图层单元（drawio 的写法）：挂在 root 下、**没有** vertex/edge，所以它既不是形状也不是连线。
+ * `value` = 名字、`visible="0"` = 隐藏、`locked="1"` = 锁定 —— 缺省（可见/未锁）不写属性。
+ */
+function layerCellXml(id, name, visible, locked, indent) {
+  const attrs = ['id="' + escapeAttr(id) + '"']
+  if (name.length > 0) attrs.push('value="' + escapeAttr(name) + '"')
+  if (visible === false) attrs.push('visible="0"')
+  if (locked === true) attrs.push('locked="1"')
+  attrs.push('parent="0"')
+  return indent + '<mxCell ' + attrs.join(' ') + ' />'
+}
+
+/** 元数据单元：没有 vertex/edge，所以不会显示，也不会被我们当成图形单元。 */function metaCellXml(parentId, indent, meta) {
   const pinned = meta !== undefined && meta !== null && meta.pinned === true ? '1' : '0'
   return [
     indent + '<object label="" drawaiMeta="1" drawaiPinned="' + pinned + '" id="' + META_ID + '">',
@@ -1197,18 +1256,26 @@ function planDocEdits(originalText, doc) {
     }
   }
 
-  // 新单元：插到最后一个单元之后（parent 用第一个图层）
+  // 新单元：插到最后一个单元之后（parent 用**它自己那一层**，没写就用第一个图层）
   //
   // 缩进与插入点都**跟着这个文件走**，不硬编码：硬编码会留下多余空白，
   // 于是"只追加了一个单元"变成"顺带改了别处的字节"，逐字节不变的性质就没了。
   const layerId = info.layerOrder.length > 0 ? info.layerOrder[0] : info.rootId
+  const layerById = new Map()
+  const docLayers = Array.isArray(doc.layers) ? doc.layers : []
+  for (const layer of docLayers) if (layer !== null && typeof layer === 'object' && typeof layer.id === 'string') layerById.set(layer.id, layer)
+  const parentFor = (cell) => {
+    const want = cell !== null && typeof cell === 'object' && typeof cell.layer === 'string' ? cell.layer : null
+    if (want !== null && (layerById.has(want) === true || info.layerIds.has(want) === true)) return want
+    return layerId
+  }
   const rootLineStart = info.modelXml.lastIndexOf('\n', info.innerTo)
   const rootIndent = rootLineStart < 0 ? '' : info.modelXml.slice(rootLineStart + 1, info.innerTo)
   const childIndent = rootIndent + '  '
   const additions = []
   for (const node of nodes) {
     if (node === null || typeof node !== 'object' || info.byId.has(String(node.id))) continue
-    additions.push(nodeCellXml(node, layerId, childIndent))
+    additions.push(nodeCellXml(node, parentFor(node), childIndent))
   }
   for (const edge of edges) {
     if (edge === null || typeof edge !== 'object' || info.byId.has(String(edge.id))) continue
@@ -1217,7 +1284,31 @@ function planDocEdits(originalText, doc) {
       dropped.push(String(edge.id))
       continue
     }
-    additions.push(edgeCellXml(anchors, layerId, childIndent))
+    additions.push(edgeCellXml(anchors, parentFor(edge), childIndent))
+  }
+
+  // 图层：① 已存在的层，改了名字/可见/锁定就做**属性级**定点改写（不动别的字节）；
+  //       ② 模型里有、文件里没有的层 → 新建一个图层单元。
+  // 删除图层（以及层内的单元）留到 v2：那要连单元一起删，属于另一件事。
+  for (const layer of docLayers) {
+    if (layer === null || typeof layer !== 'object' || typeof layer.id !== 'string') continue
+    const cell = info.byId.get(layer.id)
+    const name = typeof layer.name === 'string' ? layer.name : ''
+    const visible = layer.visible !== false
+    const locked = layer.locked === true
+    if (cell === undefined) {
+      additions.push(layerCellXml(layer.id, String(name), visible, locked, childIndent))
+      continue
+    }
+    if (info.layerIds.has(layer.id) === false) continue
+    const original = info.modelXml.slice(cell.start, cell.end)
+    const span = cell.wrapper !== null ? cell.wrapper : cell.attrsSpan
+    const current = info.layers.filter((l) => l.id === layer.id)[0]
+    const want = { value: name, visible: visible ? null : '0', locked: locked ? '1' : null }
+    const had = current === undefined ? { name: '', visible: true, locked: false } : current
+    if (had.name === name && had.visible === visible && had.locked === locked) continue
+    const rebuilt = setAttrsIn(original, span.attrsStart, span.attrsEnd, want)
+    if (rebuilt !== original) edits.push({ start: cell.start, end: cell.end, text: rebuilt })
   }
 
   // 元数据单元（pin 状态）：有就更新，需要而没有就新建，不需要就删掉
@@ -1426,11 +1517,30 @@ export function buildMxfile(doc, options) {
   )
   lines.push('      <root>')
   lines.push('        <mxCell id="0" />')
-  lines.push('        <mxCell id="1" parent="0" />')
-  if (doc.meta !== undefined && doc.meta !== null && doc.meta.pinned === true) lines.push(metaCellXml('1', '        ', doc.meta))
+  // 图层：模型里给了就用它（第一层的 id 取代缺省的 "1"），没给就写缺省的 `<mxCell id="1" parent="0" />`。
+  const layers = Array.isArray(doc.layers) ? doc.layers.filter((l) => l !== null && typeof l === 'object' && typeof l.id === 'string') : []
+  for (const layer of layers) {
+    lines.push(
+      layerCellXml(
+        layer.id,
+        typeof layer.name === 'string' ? layer.name : '',
+        layer.visible !== false,
+        layer.locked === true,
+        '        ',
+      ),
+    )
+  }
+  if (layers.length === 0) lines.push('        <mxCell id="1" parent="0" />')
+  const firstLayerId = layers.length > 0 ? String(layers[0].id) : '1'
+  const parentOf = (cell) => {
+    const want = cell !== null && typeof cell === 'object' && typeof cell.layer === 'string' ? cell.layer : null
+    if (want !== null && layers.some((l) => String(l.id) === want)) return want
+    return firstLayerId
+  }
+  if (doc.meta !== undefined && doc.meta !== null && doc.meta.pinned === true) lines.push(metaCellXml(parentOf(doc.meta), '        ', doc.meta))
   for (const node of nodes) {
     if (node === null || typeof node !== 'object') continue
-    lines.push(nodeCellXml(node, '1', '        '))
+    lines.push(nodeCellXml(node, parentOf(node), '        '))
   }
   for (const edge of edges) {
     if (edge === null || typeof edge !== 'object') continue
@@ -1446,7 +1556,13 @@ export function buildMxfile(doc, options) {
       dropped.push(String(edge.id))
       continue
     }
-    lines.push(edgeCellXml(Object.assign({}, edge, { from: from, to: to, sourcePoint: sourcePoint, targetPoint: targetPoint }), '1', '        '))
+    lines.push(
+      edgeCellXml(
+        Object.assign({}, edge, { from: from, to: to, sourcePoint: sourcePoint, targetPoint: targetPoint }),
+        parentOf(edge),
+        '        ',
+      ),
+    )
   }
   lines.push('      </root>')
   lines.push('    </mxGraphModel>')

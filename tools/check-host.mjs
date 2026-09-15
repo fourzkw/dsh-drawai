@@ -305,12 +305,16 @@ console.log('\ndiagram_read 的输出 schema 必须声明返回体里所有字�
   ok(readSchema !== null, 'diagram_read 声明了 output schema')
   if (readSchema !== null) {
     const edgeProps = readSchema.properties.edges.items.properties
-    for (const field of ['id', 'from', 'to', 'label', 'style', 'dash', 'arrow', 'color', 'exit', 'entry', 'points', 'sourcePoint', 'targetPoint']) {
+    for (const field of ['id', 'from', 'to', 'label', 'style', 'dash', 'arrow', 'color', 'exit', 'entry', 'points', 'sourcePoint', 'targetPoint', 'layer']) {
       ok(edgeProps[field] !== undefined, 'edges schema 声明了 ' + field)
     }
     const nodeProps = readSchema.properties.nodes.items.properties
-    for (const field of ['id', 'label', 'shape', 'style']) {
+    for (const field of ['id', 'label', 'shape', 'style', 'layer']) {
       ok(nodeProps[field] !== undefined, 'nodes schema 声明了 ' + field)
+    }
+    const layerProps = readSchema.properties.layers.items.properties
+    for (const field of ['id', 'name', 'visible', 'locked']) {
+      ok(layerProps[field] !== undefined, 'layers schema 声明了 ' + field)
     }
   }
   // 反向：**拿真实返回值去对 schema** —— 比读源码可靠。
@@ -331,6 +335,54 @@ console.log('\ndiagram_read 的输出 schema 必须声明返回体里所有字�
   ok(out.edges[0].dash === 'dashed' && out.edges[0].arrow === 'both' && out.edges[0].color === '#b85450', '带回的边画法确实是设过的值')
   // 派生字段只是给人/模型看的名字，文档的真相在 style 串里 —— 两者必须同时给得出来。
   ok(styleGet(out.edges[0].style, 'dashed', null) === '1' && styleGet(out.edges[0].style, 'startArrow', null) === 'classic', 'read 的 style 串里能直接看到 drawio 键')
+}
+
+console.log('\n图层：AI 至少要知道"东西在哪几层、哪一层用户看不见"')
+{
+  // 这份文档有 2 层，第二层是隐藏的。AI 读回来必须看到：层表、每层的可见性、
+  // 以及每个单元属于哪一层 —— 否则它会以为隐藏层里的节点"没了"（其实文件里好好的）。
+  seed({
+    version: 2,
+    meta: { pinned: true },
+    layers: [
+      { id: '1', name: '主流程', visible: true, locked: false },
+      { id: 'L2', name: '草稿', visible: false, locked: false },
+    ],
+    nodes: [
+      { id: 'n1', label: '正式', style: '', x: 0, y: 0, w: 120, h: 60, layer: '1' },
+      { id: 'n2', label: '草稿节点', style: '', x: 200, y: 0, w: 120, h: 60, layer: 'L2' },
+    ],
+    edges: [{ id: 'e1', from: 'n1', to: 'n2', layer: '1' }],
+  })
+  const out = await readTool.execute({ path: 'doc.drawio' }, exec)
+  ok(Array.isArray(out.layers) && out.layers.length === 2, 'read 带回图层表（实际 ' + (Array.isArray(out.layers) ? out.layers.length : 'null') + '）')
+  ok(out.layers[0].id === '1' && out.layers[0].name === '主流程' && out.layers[0].visible === true && out.layers[0].locked === false, '第一层：id/名字/可见/未锁都对')
+  ok(out.layers[1].visible === false, '隐藏层如实报 visible:false（不是"这层不存在"）')
+  const byId = new Map(out.nodes.map((n) => [n.id, n]))
+  ok(byId.get('n1').layer === '1' && byId.get('n2').layer === 'L2', '每个节点带自己的 layer')
+  ok(out.edges[0].layer === '1', '边也带 layer')
+  // 隐藏层里的单元**照旧读得到** —— 隐藏是显示状态，不是删除。
+  ok(byId.has('n2'), '隐藏层里的节点仍然读得到（隐藏 ≠ 删除）')
+  // 渲染文本里得看得见层，否则模型只会看文本。
+  const text = readTool.output.render({ path: 'doc.drawio' }, out)
+    .map((r) => r.text)
+    .join('\n')
+  ok(text.includes('主流程') && text.includes('草稿'), '渲染文本里有图层名')
+  ok(text.includes('🚫'), '渲染文本把隐藏层标出来了')
+  ok(text.includes('⟨草稿⟩'), '渲染文本里单元带上它所在的层')
+
+  // 真正的回归点：AI 改一笔之后，图层绝不能掉。
+  // （normalizeDoc 曾经漏传 doc.layers —— 表现是"AI 一改图，所有单元被挂回缺省层、
+  //   用户的图层全没了"，而且不报错。）
+  await apply([{ op: 'setLabel', id: 'n1', label: '改过' }])
+  const after = current()
+  ok(after.layers.length === 2, 'AI 改图之后图层还在（实际 ' + after.layers.length + '）')
+  ok(after.nodes.filter((n) => n.id === 'n2')[0].layer === 'L2', 'AI 改图之后单元的层归属还在')
+  ok(after.nodes.filter((n) => n.id === 'n1')[0].label === '改过', '这一笔改动本身生效了')
+  const raw = store.get(WORKSPACE + '\\doc.drawio')
+  ok(raw.includes('visible="0"'), '隐藏状态仍然写在文件里（改图没把它抹平）')
+  const reread = await readTool.execute({ path: 'doc.drawio' }, exec)
+  ok(reread.layers.length === 2 && reread.nodes.filter((n) => n.id === 'n2')[0].layer === 'L2', '改图之后 read 照样看得到层')
 }
 
 

@@ -281,6 +281,7 @@ console.log('\n工具条：按类型合并为下拉菜单')
       selectAll: () => {},
       revertAiChange: () => {},
       canRevert: true,
+      layerMenuItems: () => [],
       normalizeGeometry: () => {},
       saveNow: () => {},
       openSaveAsPanel: () => {},
@@ -310,7 +311,7 @@ console.log('\n工具条：按类型合并为下拉菜单')
       ok(false, 'toolbarMenus 求值失败（引用了未提供的自由变量？）：' + (error && error.message ? error.message : String(error)))
     }
     if (menus !== null) {
-    ok(menus.map((m) => m.key).join(',') === 'file,edit,view,export', '恰好 4 类：文件 / 编辑 / 视图 / 导出')
+    ok(menus.map((m) => m.key).join(',') === 'file,edit,layers,view,export', '恰好 5 类：文件 / 编辑 / 图层 / 视图 / 导出（实际 ' + menus.map((m) => m.key).join(',') + '）')
     const total = menus.reduce((n, m) => n + m.items.length, 0)
     ok(total === 18, '所有操作都有归处（实际 ' + total + ' 项）')
     ok(menus.every((m) => typeof m.title === 'string' && m.title.length > 0), '每个菜单都有悬停说明（title）')

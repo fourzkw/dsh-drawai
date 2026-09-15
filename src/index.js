@@ -197,7 +197,17 @@ function emptyDoc() {
  */
 function normalizeDoc(raw) {
   const doc = normalizeDrawioDoc(raw)
-  return { version: doc.version, revision: doc.revision, meta: doc.meta, nodes: doc.nodes, edges: doc.edges, labels: doc.labels }
+  return {
+    version: doc.version,
+    revision: doc.revision,
+    meta: doc.meta,
+    nodes: doc.nodes,
+    edges: doc.edges,
+    labels: doc.labels,
+    // 图层必须跟着走：丢掉它 = 保存时把单元挂回缺省层（用户的层就没了），
+    // 而且 AI 读不到"哪一层是隐藏的"。
+    layers: doc.layers,
+  }
 }
 
 /** 节点位置快照，用于判断一次布局到底动没动端点。 */
@@ -913,8 +923,11 @@ const SKILL_BODY = `# DrawAI 画布：怎么读、怎么改
 ## 两个工具怎么配合
 1. **diagram_read(path?)** —— 先读。返回节点（id/label/shape/style/**x·y·w·h 坐标尺寸**）、
    边（id/from/to/label/style/dash/arrow/折点/悬空端的自由点）、revision（**文件内容指纹**，不是版本号）、
-   notes（画布表示不了但会原样保留的东西：多页、图层、分组、图片、HTML 标签）、
+   layers（**图层表**：顺序 = 叠放顺序，含 name/visible/locked）、每个单元的 layer（它在哪一层）、
+   notes（画布表示不了但会原样保留的东西：多页、分组、图片、HTML 标签）、
    highlight（AI 自己请求的高亮，见下）、canRevert（有没有可退回的 AI 改动）。
+   visible:false 的层在画布上不画，但里面的单元**照旧读得到** —— 隐藏是显示状态，不是删除；
+   想让人看见就提醒用户去「图层」菜单打开。
 2. **diagram_apply(path, ops, layout?)** —— 再改。给一组结构化编辑，宿主**无损写回**：只改我们拥有的单元，
    文件其余部分（别的页、未知单元、自定义属性）逐字节保留。打开后原样保存 = 文件一个字节都不变。
 
@@ -945,6 +958,10 @@ revision 是乐观锁：写回时若文件已被别处改过（比如用户同�
   （平移它自己的折点与自由端点；两端接在节点上时端点由节点决定）。
   以前没有 move，想把某个节点挪一下就只好删掉重画 —— 那会丢 id、丢边上的端点约束与折点。
 - **highlight** 只是"让画布选中这几个"给你看，不改文档、也不重排。
+- **没有图层相关的 op**（v1）：你能**看到** layers 与每个单元的 layer，但还不能加层、
+  把单元挪到别的层、按层导出。用户在「图层」菜单里做这些。
+  注意：你 addNode 出来的新单元落在**第一个图层**（"当前层"是画布里的客户端状态，宿主看不到）——
+  用户想让它进别的层，得自己在画布上挪（v3 才会有按层操作的 op）。
 - 糖（shape/style/dash/arrow/color/exit/entry/jettySize/edgeStyle/avoid）由宿主翻译成 drawio 的 style 键，
   **绝不落盘**；keys 用来写任意 drawio 键，值给 null = 删键回默认。
 - shape：rect | rounded | stadium | ellipse | diamond | parallelogram | cylinder | document | hexagon
@@ -1210,7 +1227,8 @@ export function apply(ctx) {
       '读回工作区里的 DrawAI 画布（.drawio，就是 drawio 自己的 mxfile 格式）：节点 id/标签/形状/style 键，边 id/起点/终点/标签/画法/折点。做任何修改前先用它确认当前图。' +
       '文档存的是 drawio 的 style 键（dashed/dashPattern/edgeStyle/jettySize/libavoidRouting/exitX…/endArrow/strokeColor/shape=…），默认值省略；' +
       '返回体的 shape/dash/arrow/color/exit/entry 是**从 style 串推导出来的便于阅读的名字**，改图请改 style 或对应 op 参数；' +
-      'notes 是这个文件里画布表示不了、但会原样保留的东西（多页、图层、分组层级、图片…）。' +
+      'notes 是这个文件里画布表示不了、但会原样保留的东西（多页、分组层级、图片…）。' +
+      'layers 是图层表（顺序 = 叠放顺序；visible:false 的层在画布上不画，但里面的单元照旧读得到它们带 layer 字段）；v1 只能看，按层增删要等后续版本。' +
       '不传 path 时读的是**用户当前打开的那张画布**（返回里的 path 就是它）。',
     parameters: {
       path: {
@@ -1248,6 +1266,23 @@ export function apply(ctx) {
                 y: { type: 'number', required: true },
                 w: { type: 'number', required: true },
                 h: { type: 'number', required: true },
+                // 这个单元在哪一层（图层 id）。多于一层的文档才带。
+                layer: { type: 'string' },
+              },
+            },
+          },
+          // 图层列表：**看得见但 v1 还改不了**（AI 侧按层增删要等 v3 的 ops）。
+          // 让 AI 至少知道"这些东西在哪几层""哪一层当前是隐藏的"。
+          layers: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                id: { type: 'string', required: true },
+                name: { type: 'string', required: true },
+                visible: { type: 'boolean', required: true },
+                locked: { type: 'boolean', required: true },
               },
             },
           },
@@ -1299,12 +1334,21 @@ export function apply(ctx) {
                     y: { type: 'number', required: true },
                   },
                 },
+                layer: { type: 'string' },
               },
             },
           },
         },
       },
       render: function (args, value) {
+        const layers = Array.isArray(value.layers) ? value.layers : []
+        const layerNameOf = function (id) {
+          for (let i = 0; i < layers.length; i += 1) if (layers[i].id === id) return layers[i].name
+          return id
+        }
+        const inLayer = function (item) {
+          return layers.length > 1 && typeof item.layer === 'string' && item.layer.length > 0 ? '  ⟨' + layerNameOf(item.layer) + '⟩' : ''
+        }
         const lines = [
           '画布 ' + value.path + '（revision ' + value.revision + '，' + value.nodes.length + ' 节点 / ' + value.edges.length + ' 边）',
         ]
@@ -1312,7 +1356,7 @@ export function apply(ctx) {
           const n = value.nodes[i]
           lines.push(
             '  节点 ' + n.id + ' [' + n.shape + '] ' + n.label + '  @' + n.x + ',' + n.y + ' ' + n.w + '×' + n.h +
-              (n.style.length === 0 ? '（默认样式）' : '  style: ' + n.style),
+              (n.style.length === 0 ? '（默认样式）' : '  style: ' + n.style) + inLayer(n),
           )
         }
         for (let i = 0; i < value.edges.length; i += 1) {
@@ -1323,10 +1367,18 @@ export function apply(ctx) {
           if (Array.isArray(e.points)) bits.push(e.points.length + ' waypoint(s)')
           lines.push(
             '  边 ' + e.id + ' ' + e.from + ' -> ' + e.to + (typeof e.label === 'string' && e.label.length > 0 ? ' "' + e.label + '"' : '') +
-              ' [' + bits.join(', ') + ']',
+              ' [' + bits.join(', ') + ']' + inLayer(e),
           )
         }
         for (let i = 0; i < value.notes.length; i += 1) lines.push('  ⚠ ' + value.notes[i])
+        // 图层表：v1 只读。名字 + 可见性（隐藏层里的东西 AI 也照读，但它得知道"用户现在看不见"）。
+        if (layers.length > 0) {
+          lines.push('  图层（顺序 = 叠放顺序，后面的在上面）：')
+          for (let i = 0; i < layers.length; i += 1) {
+            const l = layers[i]
+            lines.push('    ' + (l.visible === false ? '🚫' : '👁') + ' ' + l.name + ' (id ' + l.id + ')' + (l.locked === true ? ' 🔒' : ''))
+          }
+        }
         return [{ type: 'text', text: lines.join('\n') }]
       },
     },
@@ -1354,6 +1406,7 @@ export function apply(ctx) {
           y: numberOr(n.y, 0),
           w: numberOr(n.w, DEFAULT_W),
           h: numberOr(n.h, DEFAULT_H),
+          ...(typeof n.layer === 'string' && n.layer.length > 0 ? { layer: n.layer } : {}),
         })
       }
       const edges = []
@@ -1387,6 +1440,7 @@ export function apply(ctx) {
         if (points !== null) item.points = points
         if (e.sourcePoint !== undefined) item.sourcePoint = e.sourcePoint
         if (e.targetPoint !== undefined) item.targetPoint = e.targetPoint
+        if (typeof e.layer === 'string' && e.layer.length > 0) item.layer = e.layer
         edges.push(item)
       }
       // 顺路带两件事（都要在 output.schema 里声明 —— additionalProperties:false 会把
@@ -1403,6 +1457,14 @@ export function apply(ctx) {
         edges: edges,
         highlight: Array.isArray(pendingHighlight) ? pendingHighlight : [],
         canRevert: revertSnapshots.has(snapshotKey(sessionIdOf(exec), loaded.absolute)),
+        // 图层（只读可见）：AI 至少知道自己画的图在哪几层、哪一层是隐藏的
+        //（按层加单元、按层导出要等 v3 的 ops）。
+        layers: (Array.isArray(doc.layers) ? doc.layers : []).map((l) => ({
+          id: String(l.id),
+          name: typeof l.name === 'string' ? l.name : '',
+          visible: l.visible !== false,
+          locked: l.locked === true,
+        })),
       }
     },
   })

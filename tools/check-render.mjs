@@ -1162,6 +1162,62 @@ console.log('\n整体拖动：相对位置一点都不能变')
   ok(onlyMove.x === 15 && onlyMove.y === -5, '只拖连线时按半格吸附：' + JSON.stringify(onlyMove))
 }
 
+console.log('\n图层 v1：隐藏层整层不画、也点不到；新单元进当前层')
+{
+  const doc = {
+    version: 2,
+    revision: '',
+    layers: [
+      { id: '1', name: '主流程', visible: true, locked: false },
+      { id: 'L2', name: '注释', visible: false, locked: false },
+    ],
+    nodes: [
+      { id: 'n1', label: '看得见', x: 0, y: 0, w: 100, h: 40, layer: '1' },
+      { id: 'n2', label: '看不见', x: 200, y: 0, w: 100, h: 40, layer: 'L2' },
+    ],
+    edges: [
+      { id: 'e1', from: 'n1', to: 'n1', style: DEFAULT_EDGE_STYLE, layer: '1' },
+      { id: 'e2', from: 'n2', to: 'n2', style: DEFAULT_EDGE_STYLE, layer: 'L2' },
+    ],
+    labels: [
+      { id: 'lb1', text: '看得见', edgeId: null, x: 500, y: 500, offsetX: 0, offsetY: 0, relative: false, style: '', layer: '1' },
+      { id: 'lb2', text: '看不见', edgeId: null, x: 600, y: 600, offsetX: 0, offsetY: 0, relative: false, style: '', layer: 'L2' },
+    ],
+  }
+  const hidden = internals.hiddenLayerIds(doc)
+  ok(hidden.size === 1 && hidden.has('L2'), '隐藏层集合 = {L2}：' + JSON.stringify([...hidden]))
+  ok(internals.isHiddenCell(hidden, { layer: 'L2' }) === true && internals.isHiddenCell(hidden, { layer: '1' }) === false, 'isHiddenCell 按 layer 判断')
+  ok(internals.isHiddenCell(hidden, {}) === false, '没有 layer 字段的单元视为可见')
+
+  const geometry = internals.buildGeometry(doc)
+  ok(geometry.boxes.length === 1 && geometry.boxes[0].id === 'n1', '几何里只有可见层的节点（隐藏层不参与渲染/命中/避让）：' + geometry.boxes.map((b) => b.id).join(','))
+
+  const tree = renderDiagram(doc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const texts = walk(tree, (n) => n.type === 'text', []).map((t) => String(t.children[0]))
+  ok(texts.indexOf('看得见') >= 0 && texts.indexOf('看不见') < 0, '隐藏层的节点没画：' + JSON.stringify(texts))
+  const pathKeys = walk(tree, (n) => typeof n.props.key === 'string' && n.props.key.indexOf('edge-') === 0, []).map((n) => n.props.key)
+  ok(pathKeys.indexOf('edge-0') >= 0 && pathKeys.indexOf('edge-1') < 0, '隐藏层的连线没画：' + JSON.stringify(pathKeys))
+  const labelTexts = walk(tree, (n) => n.type === 'text' && typeof n.props.className === 'string' && n.props.className.indexOf('drawai-elabel') >= 0, []).map((t) => String(t.children[0]))
+  ok(labelTexts.indexOf('看得见') >= 0 && labelTexts.indexOf('看不见') < 0, '隐藏层的独立标签也没画：' + JSON.stringify(labelTexts))
+
+  // 框选也框不到隐藏层的东西（哪怕框住整张图）
+  const hits = internals.marqueeHits(doc, { x: -1000, y: -1000, w: 4000, h: 4000 }, null)
+  ok(hits.indexOf('n2') < 0 && hits.indexOf('e2') < 0, '全选一遍框选：隐藏层的一个都不在里面：' + hits.join(','))
+  ok(hits.indexOf('n1') >= 0 && hits.indexOf('e1') >= 0, '可见层的照旧：' + hits.join(','))
+
+  // 新建图层 id / 名字兜底
+  ok(internals.nextLayerIdOf(doc) === 'L3', '新层 id 避开已用的：' + internals.nextLayerIdOf(doc))
+  ok(internals.layerLabelOf({ id: 'x', name: '' }, 2) === '第 3 层', '没名字的层用"第 N 层"兜底')
+  ok(internals.layerLabelOf({ id: 'x', name: '注释' }, 0) === '注释', '有名字就用名字')
+
+  // 粘贴进当前层
+  const clip = internals.collectClipboard(doc, ['n1'])
+  const pasted = internals.pasteInto(doc, clip, 20, 20, 'L2')
+  ok(pasted !== null && pasted.doc.nodes.filter((n) => pasted.ids.indexOf(n.id) >= 0).every((n) => n.layer === 'L2'), '粘贴的节点进当前图层')
+  const pastedOwn = internals.pasteInto(doc, clip, 20, 20)
+  ok(pastedOwn !== null && pastedOwn.doc.nodes.filter((n) => pastedOwn.ids.indexOf(n.id) >= 0).every((n) => n.layer === '1'), '不给层时沿用原件那一层')
+}
+
 console.log('\n对齐辅助线 / 批量改样式 / 全选')
 {
   // ① 对齐辅助线（drawio 的 guides）：与**没在拖的**节点比 左/中/右、上/中/下，

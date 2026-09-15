@@ -565,5 +565,77 @@ console.log('\n[9] 边标签的位置：drawio 的 mxGeometry x/y + <mxPoint as=
   ok(applyDocToMxfile(odd, oddMoved).text.indexOf('x="0.5" y="-20"') > 0, '但改折点时它的属性原样保留（不丢）')
 }
 
+console.log('\n[10] 图层（v1：读出来、显示/隐藏、新建、新单元进哪一层）')
+{
+  // drawio 的图层就是"挂在 root 下、既不是顶点也不是边、也没有几何的 mxCell"：
+  //   value = 名字、visible="0" = 隐藏、locked="1" = 锁定；单元的 parent 指向某一层。
+  const src = [
+    '<mxfile host="app.diagrams.net" compressed="false">',
+    '  <diagram id="p1" name="Page-1">',
+    '    <mxGraphModel dx="0" dy="0"><root>',
+    '      <mxCell id="0" />',
+    '      <mxCell id="1" parent="0" value="主流程" />',
+    '      <mxCell id="L2" parent="0" value="注释" visible="0" />',
+    '      <mxCell id="n1" value="A" style="rounded=0;" vertex="1" parent="1"><mxGeometry x="0" y="0" width="80" height="40" as="geometry" /></mxCell>',
+    '      <mxCell id="n2" value="B" style="rounded=0;" vertex="1" parent="L2"><mxGeometry x="200" y="0" width="80" height="40" as="geometry" /></mxCell>',
+    '    </root></mxGraphModel>',
+    '  </diagram>',
+    '</mxfile>',
+    '',
+  ].join('\n')
+
+  const read = parseMxfile(src)
+  ok(read.doc.layers.length === 2, '读到两个图层（' + read.doc.layers.length + '）')
+  const l1 = read.doc.layers[0]
+  const l2 = read.doc.layers[1]
+  ok(l1.id === '1' && l1.name === '主流程' && l1.visible === true && l1.locked === false, '第一层：id/名字/可见/未锁 都对：' + JSON.stringify(l1))
+  ok(l2.id === 'L2' && l2.name === '注释' && l2.visible === false, '第二层：visible="0" 读成 visible=false：' + JSON.stringify(l2))
+  const byId = (id) => read.doc.nodes.filter((n) => n.id === id)[0]
+  ok(byId('n1').layer === '1' && byId('n2').layer === 'L2', '每个单元属于哪一层读出来了：' + byId('n1').layer + ' / ' + byId('n2').layer)
+  ok(applyDocToMxfile(src, read.doc).text === src, '多图层文件原样写回仍然逐字节不变')
+  ok(__plan(src, read.doc).edits.length === 0, '原样写回 0 条编辑')
+
+  // 显示/隐藏：改的是**文件里的属性**（可保存、drawio 也认、也进撤销历史）
+  const hidden = JSON.parse(JSON.stringify(read.doc))
+  hidden.layers[0].visible = false
+  const hiddenText = applyDocToMxfile(src, hidden).text
+  ok(hiddenText.indexOf('visible="0"') > 0 && parseMxfile(hiddenText).doc.layers[0].visible === false, '隐藏第一层 → 属性级写入 visible="0"')
+  const shown = JSON.parse(JSON.stringify(read.doc))
+  shown.layers[1].visible = true
+  ok(applyDocToMxfile(src, shown).text.indexOf('id="L2" parent="0" value="注释" />') > 0, '再显示回来 → visible 属性被删掉（不留 visible="1" 噪音）')
+
+  // 重命名
+  const renamed = JSON.parse(JSON.stringify(read.doc))
+  renamed.layers[1].name = '标注'
+  ok(applyDocToMxfile(src, renamed).text.indexOf('value="标注"') > 0, '重命名图层 → 改 value')
+
+  // 新建图层 + 新单元进指定层
+  const added = JSON.parse(JSON.stringify(read.doc))
+  added.layers.push({ id: 'L3', name: '背景', visible: true, locked: false })
+  added.nodes.push({ id: 'n3', label: 'C', style: '', x: 0, y: 200, w: 80, h: 40, layer: 'L3' })
+  const addedText = applyDocToMxfile(src, added).text
+  ok(addedText.indexOf('<mxCell id="L3" value="背景" parent="0" />') > 0, '新建的图层单元按 drawio 的写法插进去了')
+  ok(/id="n3"[^>]*parent="L3"/.test(addedText), '新节点落进它自己那一层（parent="L3"）')
+  const addedBack = parseMxfile(addedText).doc
+  ok(addedBack.layers.length === 3 && addedBack.layers[2].id === 'L3', '写回去再读：三个图层都在')
+  ok(addedBack.nodes.filter((n) => n.id === 'n3')[0].layer === 'L3', '再读：n3 属于 L3')
+
+  // 从零生成（新建画布）也认图层
+  const built = buildMxfile({
+    version: 2,
+    meta: {},
+    nodes: [{ id: 'n1', label: 'A', style: '', x: 0, y: 0, w: 80, h: 40, layer: 'LA' }],
+    edges: [],
+    layers: [{ id: 'LA', name: '主', visible: true }, { id: 'LB', name: '注释', visible: false }],
+  })
+  ok(built.text.indexOf('<mxCell id="LA" value="主" parent="0" />') > 0 && built.text.indexOf('<mxCell id="LB" value="注释" visible="0" parent="0" />') > 0, '从零生成时图层单元也写出来')
+  const builtBack = parseMxfile(built.text).doc
+  ok(builtBack.nodes[0].layer === 'LA' && builtBack.layers[1].visible === false, '从零生成的文件读回来：层与归属都对')
+
+  // 没有 layers 的文档（老模型 / 空文档）→ 仍然写缺省的单图层
+  const plain = buildMxfile({ version: 2, meta: {}, nodes: [{ id: 'n1', label: 'A', style: '', x: 0, y: 0, w: 80, h: 40 }], edges: [] })
+  ok(plain.text.indexOf('<mxCell id="1" parent="0" />') > 0 && plain.text.indexOf('parent="1"') > 0, '没有图层信息时退回缺省的单图层写法')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1
