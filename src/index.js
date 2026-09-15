@@ -753,6 +753,115 @@ export const name = 'drawai'
 export const inject = ['tools', 'fs', 'sessions', 'sandboxPolicy', 'webServer']
 
 /**
+ * 插件**自带**的使用说明，以"内嵌技能"注册给 DSH 的 skill 注册表
+ * （`ctx.skills.register()`，见 apply() 末尾）。
+ *
+ * 为什么要有它：工具名/描述/schema 本来就随 `lib/index.js` 一起装到任何机器上，模型一定看得到；
+ * 但 README、源码、tools/ 都不会跟着插件走（`package.json.files` 只有 lib 与 cordis.patch.yml）。
+ * 换了电脑、只装了插件时，模型能依仗的就只剩那段工具描述。技能是 DSH 为此准备的**正规通道**：
+ * 它出现在会话的技能目录里，模型需要时按需取全文 —— 于是"怎么在这张画布上操作"这件事
+ * 跟着插件走，而不是跟着这份仓库走。
+ *
+ * 写成模板串但**不用反引号**（markdown 里要写示例，反引号会破坏模板串）：代码块用四空格缩进。
+ */
+const SKILL_BODY = `# DrawAI 画布：怎么读、怎么改
+
+## 一句话
+工作区里任何一个 .drawio 文件**就是**一张 DrawAI 画布 —— 它是 drawio 自己的 mxfile 格式。
+用户在 DSH 右栏画布面板里看到的、以及用 drawio 桌面版打开的，是同一份文件；
+没有"导入/导出"这一步，你直接读写这个文件就是读写那张画布。
+
+## 两个工具怎么配合
+1. **diagram_read(path?)** —— 先读。返回节点（id/label/shape/style）、边（id/from/to/label/style/dash/arrow/折点）、
+   revision（**文件内容指纹**，不是版本号）、notes（画布表示不了但会原样保留的东西：多页、图层、分组、图片、HTML 标签）。
+2. **diagram_apply(path, ops, layout?)** —— 再改。给一组结构化编辑，宿主**无损写回**：只改我们拥有的单元，
+   文件其余部分（别的页、未知单元、自定义属性）逐字节保留。打开后原样保存 = 文件一个字节都不变。
+
+不传 path 时，优先改**用户当前打开的那张画布**（客户端上报的聚焦路径），最后才退回 demo.drawio。
+用户说"这张图"时通常不用传 path。改完可以再 read 一次自查。
+
+revision 是乐观锁：写回时若文件已被别处改过（比如用户同时在 drawio 里编辑），会返回 409 —— 重读一次再改。
+
+## ops 速查
+    {op:"addNode", label:"必填", shape?, style?, keys?, w?, h?, x?, y?}
+    {op:"addEdge", from, to, label?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, keys?}
+    {op:"setLabel", id, label}
+    {op:"setStyle", id, shape?, style?, keys?, w?, h?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, clearPoints?}
+    {op:"remove", id}
+
+- id 省略会自动分配（n1/n2…、e1/e2…）；addEdge 的 from/to 必须是**已存在的节点 id**，
+  引用了不存在的节点会**在写盘之前**直接报错并列出已知 id。
+- 糖（shape/style/dash/arrow/color/exit/entry/jettySize/edgeStyle/avoid）由宿主翻译成 drawio 的 style 键，
+  **绝不落盘**；keys 用来写任意 drawio 键，值给 null = 删键回默认。
+- shape：rect | rounded | stadium | ellipse | diamond | parallelogram | cylinder | document | hexagon
+- style：调色板名 plain|blue|green|orange|yellow|red|purple|grey，或直接给一段 style 串
+- dash：solid|dashed|dotted；arrow：end（单向）|both（双向）|none（无）|start（反向）
+- exit/entry：进出侧 n|e|s|w；edgeStyle：orthogonalEdgeStyle|none（none = 直线）
+- 自环写成 from === to（与 drawio 一致）；自动布局忽略自环，只摆节点。
+
+## 一段完整的例子
+用户说"画一个登录流程，失败回到登录页"：
+
+    diagram_apply({ ops: [
+      {op:"addNode", label:"开始",   shape:"stadium", style:"green"},
+      {op:"addNode", label:"输入账号", shape:"rect",  style:"blue"},
+      {op:"addNode", label:"校验",   shape:"diamond", style:"yellow"},
+      {op:"addNode", label:"进入首页", shape:"rect",  style:"blue"},
+      {op:"addEdge", from:"n1", to:"n2"},
+      {op:"addEdge", from:"n2", to:"n3"},
+      {op:"addEdge", from:"n3", to:"n4", label:"通过"},
+      {op:"addEdge", from:"n3", to:"n2", label:"失败", dash:"dashed", color:"red"}
+    ], layout:"dagre-tb" })
+
+## 布局与坐标
+- **不要自己算坐标**：layout 选 dagre-tb（默认，贴合右栏窄高的形状）、dagre-lr（左到右）、
+  grid（网格）、none（保留现有坐标，只给没有坐标的新节点补位）。
+- 只有"必须摆在某个位置"时才传 x/y（宿主仍会把它吸附到网格）。
+- 画布的吸附单位：**节点 10px，连线的折点/自由端点 5px**。手工摆过的画布带 meta.pinned，
+  这时**不加 layout 就不会重排**（否则你一改图，人手工排好的版面就被冲掉）；想重排必须显式给 layout。
+- 显式重排会清掉"端点已移动"的那些边上的**过期折点**（不然折点会留在旧位置，走线会绕圈）。
+
+## style 键与 drawio 同构
+文档里存的就是 drawio 的 style 键：fillColor / strokeColor / shape= / rounded= / arcSize= /
+dashed / dashPattern / strokeWidth / fontSize / fontColor / edgeStyle / jettySize / orthogonalLoop /
+endArrow / startArrow / exitX·exitY·entryX·entryY / libavoidRouting …
+**默认值一律省略**（写出来等于多一份噪音），认不出的键原样保留。
+边自己的文字存在边的 value 上（diagram_read 里是 label），可以写成多行；
+拖动过的边标签位置存在边几何的 x/y/offset 里（沿边比例 + 垂距 + 残余），一般不用你碰。
+
+## 画布表示不了、但会原样保留的东西（notes 里会列出来）
+多页只显示第 1 页、分组/容器按绝对位置显示、图片按矩形显示、HTML 标签按纯文本显示、
+图层结构原样保留（画布把它们叠在一起显示）、drawio 的独立边标签单元（edgeLabel）只读显示。
+**看到 notes 要如实告诉用户**：这份文件在 drawio 里打开时会和这里看到的略有差别。
+
+## 别做这些
+- 别直接改 .drawio 文件的文本（用 diagram_apply）：手改会破坏"没动的地方逐字节不变"这条保证。
+- 别造别的后缀（.json/.xml/.svg）：画布只认 .drawio，其他后缀会"看起来成功、其实没人能打开"。
+- 别把图重画一遍来表达"挪一下"：用户手工摆过的位置是有意义的。
+
+## 用户可以这样操作（他问"怎么做"时照这个答）
+- 双击节点改文字；双击线段、线段上的文字、或线上的把手，改**线上的文字**
+- 按住线上的文字拖动 = 挪文字（有半格吸附，靠近线会贴回线上）；右键「标签居中」放回中点
+- 选中连线后：绿/红端点拖到别的节点 = 改接；橙色空心把手拖 = 整段平移；右键有「自动路由」清掉折点
+- 空白处左键拖 = 框选（框到节点或线段都算）；Shift 框选是加选；拖选区整体移动（连线形状一起走）
+- Ctrl+C/X/V 复制剪切粘贴、Ctrl+Z/Y 撤销重做、Delete 删除；中键拖动平移、滚轮缩放
+- 「文件 → 新建画布…/打开…/另存为…」；「视图 → 适应内容」；「整理几何（吸附到格线）」把整张图对齐
+- 右键还能改线型/箭头/颜色/顺序（置顶置底）、编辑数据（drawio 用户对象的自定义属性）、删除
+`
+
+/**
+ * 技能目录里那一段（模型先看到简介，需要时才取全文）。
+ * 名字用 kebab-case —— DSH 的注册表按名字寻址并要求这个形状。
+ */
+const SKILL_SUMMARY = {
+  name: 'drawai-canvas',
+  description:
+    '读写工作区里的 DrawAI 画布（.drawio，就是 drawio 的 mxfile）：diagram_read 看现状、diagram_apply 结构化改图（自动布局、无损写回）。',
+  whenToUse:
+    '用户让你画流程图/架构图/泳道图，或让你读/改某张 .drawio 画布，或问"这张图里有什么""画布上怎么操作"时。',
+}
+
+/**
  * 列出工作区里的画布文档（非递归进子目录，最多扫 MAX_SCAN_DIRS 个）。
  *
  * **列目录的 API 是 `list`，不是 `readRelated`**。之前用 readRelated 是错的：
@@ -1678,4 +1787,25 @@ function sanitizeNewName(raw) {
 
   ctx.effect(() => ctx.tools.register(readTool))
   ctx.effect(() => ctx.tools.register(applyTool))
+
+  // 把"怎么用这张画布"注册成**内嵌技能**（见 SKILL_BODY 的注释）：
+  // 换了电脑、只装了插件（没有源码/README/tools）时，模型依然知道该怎么操作。
+  //
+  // `skills` 是**可选**依赖：没装 skill 注册表的部署里照样能用（工具描述本身已经够启动），
+  // 所以走 ctx.get 而不是写进 inject —— 缺它不该让整个插件停在等待态。
+  const skills = typeof ctx.get === 'function' ? ctx.get('skills') : undefined
+  if (skills !== undefined && skills !== null && typeof skills.register === 'function') {
+    ctx.effect(() =>
+      skills.register({
+        name: SKILL_SUMMARY.name,
+        description: SKILL_SUMMARY.description,
+        whenToUse: SKILL_SUMMARY.whenToUse,
+        // `source: 'runtime'` 不能省：注册时只校验 name/description/invocation，
+        // 但**取全文**时注册表会再跑一次 validateDefinition，那里要求 source 是字符串
+        // （少了它，目录里看得见、一 load 就抛 "source must be a string"）。
+        source: 'runtime',
+        content: SKILL_BODY,
+      }),
+    )
+  }
 }

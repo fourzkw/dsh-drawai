@@ -122,5 +122,50 @@ for (const tool of registered) {
   }
 }
 
+console.log('\n[4] 内嵌技能：换了电脑、只装了插件时模型怎么知道该怎么做')
+{
+  // 工具描述会随 lib/index.js 一起装到任何机器上，但 README / 源码 / tools 都不会跟着走
+  // （package.json.files 只有 lib 与 cordis.patch.yml）。所以"怎么用"必须**注册成技能**：
+  // 技能目录里出现一条简介，模型需要时取全文。
+  //
+  // 上面那个假 ctx 故意**没有** get()，为的是验证"没有 skill 注册表时照样能用"（没抛错）。
+  const skills = []
+  let disposed = 0
+  const withSkills = Object.assign({}, ctx, {
+    get(name) {
+      if (name !== 'skills') return undefined
+      return {
+        register(skill) {
+          skills.push(skill)
+          return () => {
+            disposed += 1
+          }
+        },
+      }
+    },
+  })
+  let threw = null
+  try {
+    mod.apply(withSkills)
+  } catch (error) {
+    threw = error && error.message ? error.message : String(error)
+  }
+  check('装了 skill 注册表时 apply 不抛错', threw === null, String(threw))
+  check('注册了恰好一个技能', skills.length === 1, '实际 ' + skills.length)
+  const skill = skills[0] || {}
+  check('技能名是 kebab-case', typeof skill.name === 'string' && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(skill.name), String(skill.name))
+  check('技能有简介（目录里显示这一段）', typeof skill.description === 'string' && skill.description.length > 20, String(skill.description).slice(0, 40))
+  check('技能有 whenToUse（什么时候该取它）', typeof skill.whenToUse === 'string' && skill.whenToUse.length > 10, String(skill.whenToUse).slice(0, 40))
+  // source 不能省：注册表在**取全文**时会再跑一次 validateDefinition，那里要求 source 是字符串。
+  check('技能带 source: runtime（少了它取全文时会抛 source must be a string）', skill.source === 'runtime', String(skill.source))
+  check('技能带 content（正文就是它）', typeof skill.content === 'string', typeof skill.content)
+  const body = typeof skill.content === 'string' ? skill.content : ''
+  check('正文够长（是一份说明，不是一行）', body.length > 1500, body.length + ' 字符')
+  for (const needle of ['.drawio', 'diagram_read', 'diagram_apply', 'addNode', 'addEdge', 'setStyle', 'remove', 'layout', 'pinned', 'from === to', '无损', '别直接改']) {
+    check('正文讲了 ' + needle, body.indexOf(needle) >= 0)
+  }
+  check('注册走的是 Cordis effect（能被卸载）', disposed === 0 && skills.length === 1, 'disposer 还没被调用')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过。' : failures + ' 项失败。'))
 process.exit(failures === 0 ? 0 : 1)

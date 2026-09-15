@@ -605,6 +605,36 @@ dsh plugin --profile <profile> add dsh-drawai
 
 ---
 
+## 装到别的电脑上：AI 怎么知道该怎么操作
+
+插件装到别的机器上时，**跟着走的只有 `lib/` 与 `cordis.patch.yml`**（`package.json` 的 `files`），
+README、`src/`、`tools/` 都不会过去。于是模型能依仗的是三条通道：
+
+| 通道 | 走什么 | 装到任何机器上都有吗 |
+|---|---|---|
+| 工具的 name / description / 参数与输出 schema | 就在 `lib/index.js` 里，DSH 会把它们交给模型 | ✅ 有 |
+| 工具返回值与报错（`diagram_read` 的输出、`diagram_apply` 的 notes、非法 ops 的报错） | 运行时产生 | ✅ 有 |
+| **内嵌技能（skill）** | 插件在 `apply()` 里 `ctx.skills.register(...)` 注册一份**内存里的**使用说明 | ✅ 有（见下） |
+
+第三条是关键：`README` 里那些"什么时候别用 layout""自环怎么写""为什么不能手改文件"的经验，
+原本只活在这份仓库里。现在它们被写成一份**技能正文**（`src/index.js` 的 `SKILL_BODY`，约 3.7k 字），
+注册进 DSH 的 skill 注册表：
+
+- 会话的技能目录里出现一条简介（名字 `drawai-canvas`，带 `whenToUse`），模型按需取全文；
+- 正文随 `lib/index.js` 一起装到任何机器，**不依赖工作区里有没有这个仓库**；
+- `skills` 是**可选**依赖（走 `ctx.get('skills')`，不写进 `inject`）：没装 skill 注册表的部署里
+  插件照常工作，只是少了这份说明；
+- 注册必须带 `source: 'runtime'` —— 注册时只校验 name/description/invocation，
+  但**取全文**时注册表会再跑一次 `validateDefinition`，那里要求 `source` 是字符串
+  （少了它：目录里看得见、一 load 就抛 `source must be a string`）。`tools/check-package.mjs` 盯着这一条。
+
+想让**某台机器**或**某个项目**补充自己的规则（比如"我们团队的图统一用 blue + daguerre"），
+按 DSH 的文件技能放就行，不需要改插件：项目里放 `<项目>/.dsh/skills/<名字>/SKILL.md`、
+用户级放 `<DSH_HOME>/skills/<名字>/SKILL.md`（frontmatter 要有 `name` 与 `description`）。
+同名的项目技能优先级高于插件注册的运行时技能。
+
+---
+
 ## 烟测
 
 不需要 DSH 在跑，也不需要安装。先让它能解析 `@deepseek-ai/dsh-tools`：
