@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 // 自测直接引用样式内核：文档格式的"真相"只有一份，测试跟着它走，而不是把键名再抄一遍。
-import { DEFAULT_EDGE_STYLE, edgeFreePoint, formatStyle, nodeShapeFromStyle, parseStyle, styleGet, styleWithSide } from '../src/style-kernel.js'
+import { DEFAULT_EDGE_STYLE, edgeFreePoint, formatStyle, lineKindFromStyle, nodeShapeFromStyle, parseStyle, styleGet, styleWithSide } from '../src/style-kernel.js'
 // 夹具与断言都用**源文件**的编解码：check-host 打的是 lib/index.js（产物），两边必须同源。
 import { buildMxfile, contentHash, parseMxfile } from '../src/mxfile.js'
 
@@ -452,9 +452,18 @@ console.log('\n线型与字号：AI 也能改（直线 / 曲线 / fontSize）')
   // 别名：arc / 曲线 / curve 都能认
   await apply([{ op: 'setStyle', id: 'e2', line: 'arc' }])
   ok(styleGet(current().edges.filter((e) => e.id === 'e2')[0].style, 'curved', null) === '1', 'line:"arc" 当成曲线（口语别名）')
-  // 换回折线：curved 删掉
+  // 圆角折线：只在折点处倒角（rounded=1），路由仍是正交
+  await apply([{ op: 'setStyle', id: 'e2', line: '圆角折线' }])
+  const roundedEdge = current().edges.filter((e) => e.id === 'e2')[0]
+  ok(styleGet(roundedEdge.style, 'rounded', null) === '1', 'line:"圆角折线" 落成 rounded=1：' + roundedEdge.style)
+  ok(styleGet(roundedEdge.style, 'curved', null) === null && styleGet(roundedEdge.style, 'edgeStyle', null) === 'orthogonalEdgeStyle', '圆角折线与曲线互斥，且仍在正交路由上')
+  ok(lineKindFromStyle(roundedEdge.style) === 'rounded', 'read/再改时认得出它是圆角折线')
+  await apply([{ op: 'setStyle', id: 'e2', line: 'rounded' }])
+  ok(styleGet(current().edges.filter((e) => e.id === 'e2')[0].style, 'rounded', null) === '1', 'line:"rounded" 是同一个意思')
+  // 换回折线：curved 与 rounded 都删掉
   await apply([{ op: 'setStyle', id: 'e2', line: 'orthogonal' }])
   ok(styleGet(current().edges.filter((e) => e.id === 'e2')[0].style, 'curved', null) === null, '换回折线把 curved 删掉')
+  ok(styleGet(current().edges.filter((e) => e.id === 'e2')[0].style, 'rounded', null) === null, '换回折线也把 rounded 删掉（不留 rounded=0 噪音）')
   // 直线：清折点
   await apply([{ op: 'setStyle', id: 'e3', line: 'straight' }])
   ok(current().edges.filter((e) => e.id === 'e3')[0].points === undefined, 'setStyle line:"straight" 也会清掉折点')

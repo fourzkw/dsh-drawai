@@ -604,7 +604,11 @@ console.log('\n线型与字号的手工入口')
   // 线型是"语义 + 几何"两件事（直线要清折点、曲线要补弓形中点），所以走 applyLineKind，
   // 不是普通 updateEdge；字号是三个地方共用同一个控件。
   ok(/function applyLineKind\(/.test(src), '有 applyLineKind（线型连带几何一起改）')
-  ok(/\['straight', '直线'/.test(src) && /\['curved', '曲线'/.test(src) && /\['orthogonal', '折线'/.test(src), '连线菜单里有 直线 / 折线 / 曲线 三个入口')
+  ok(
+    /\['straight', '直线'/.test(src) && /\['sharp', '直角折线'/.test(src) && /\['rounded', '圆角折线'/.test(src) && /\['curved', '曲线'/.test(src),
+    '连线菜单里有 直线 / 直角折线 / 圆角折线 / 曲线 四个入口',
+  )
+  ok(/rounded', '圆角折线', '正交折线，\*\*只在折点处\*\*倒圆角/.test(src), '圆角折线的说明写清了"只在折点处"（rounded=1）')
   ok(/applyLineKind\(edgeTargets, it\[0\]\)/.test(src), '点线型对整组连线生效（与改色/箭头一致）')
   ok(/kind === 'straight'\) \{\s*\n\s*delete e\.points/.test(src) || /if \(kind === 'straight'\) \{\n\s+delete e\.points/.test(src), '选直线会清掉折点')
   ok(/e\.points = \[\{ x: snap\(/.test(src), '选曲线会给"本来就笔直"的边补一个弓形中点（否则弧看不见）')

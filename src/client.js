@@ -2697,7 +2697,9 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     const strokeColor = styleGet(edgeStyle, 'strokeColor', null)
     const arrow = arrowFromStyle(edgeStyle)
     const pattern = dashPatternFromStyle(edgeStyle)
-    const cornerRadius = styleGet(edgeStyle, 'rounded', '0') === '1' ? 6 : 0
+    // drawio 的圆角半径：mxPolyline.paintLine 取 arcSize（缺省 mxConstants.LINE_ARCSIZE = 20）
+    // 再 **除以 2**（那个 x2 是 addPoints 的内部约定，我们不打算复刻）→ 缺省 10px。
+    const cornerRadius = styleGet(edgeStyle, 'rounded', '0') === '1' ? Math.max(0, styleNumber(edgeStyle, 'arcSize', 20) / 2) : 0
     const lineStroke = selected ? '#1a73e8' : strokeColor !== null ? strokeColor : skin.line
     // 线上的文字：先算出**文字框**（渲染与"给线挖空"要用同一个框），
     // 再把落在框里的那几段线挖掉 —— 于是字的位置不画线，而不是盖一层白底。
@@ -5082,10 +5084,11 @@ function CanvasView(props) {
   }
 
   /**
-   * 换连线的**线型**（直线 / 折线 / 曲线）—— 比 updateEdge 多做一件几何上的事。
+   * 换连线的**线型**（直线 / 直角折线 / 圆角折线 / 曲线）—— 比 updateEdge 多做一件几何上的事。
    *
    * - 直线（无折点）：必须把折点清掉。留着折点 + `edgeStyle=none` 在 drawio 里会画成
    *   "穿过折点的折线"，不是用户按「直线」时想要的东西。
+   * - 直角/圆角折线：折点照旧有意义（就是折线的拐角），什么都不动，只改 style 键。
    * - 曲线：`curved=1` 是把**现有走线**抹圆。走线本来就带拐角（自动路由的 L 形、或人摆的折点）时
    *   直接就能看见弧度；但如果这条边是两点直连（完全共线），drawio 的曲线会退化成直线
    *   （mxPolyline.paintCurvedLine 在两点时控制点落在起点上）—— 那时补一个**垂直弓形的中点**，
@@ -6199,9 +6202,10 @@ function CanvasView(props) {
           ),
         )
       rows.push(dashRow([['solid', '实线'], ['dashed', '虚线'], ['dotted', '点线']]))
-      // 线型（drawio 的 Straight / Orthogonal / Curved）：直线会顺手清掉折点，曲线会给
-      // "本来就笔直"的那种边补一个弓形中点 —— 理由见 applyLineKind 的注释。
-      const edgeLineNow = edge === null ? 'orthogonal' : lineKindFromStyle(edgeBaseStyle)
+      // 线型（drawio 的两组键压平成四选一，见内核 styleWithLineKind）：
+      //   直线 / 直角折线 / 圆角折线（只在折点处倒角，rounded=1）/ 曲线（curved=1）。
+      // 直线会顺手清掉折点，曲线会给"本来就笔直"的那种边补一个弓形中点 —— 理由见 applyLineKind。
+      const edgeLineNow = edge === null ? 'sharp' : lineKindFromStyle(edgeBaseStyle)
       const lineRow = (items) =>
         React.createElement(
           'div',
@@ -6222,8 +6226,9 @@ function CanvasView(props) {
       rows.push(
         lineRow([
           ['straight', '直线', '两点之间一条直线，不带折点'],
-          ['orthogonal', '折线', '正交折线（自动路由 / 你摆的折点）'],
-          ['curved', '曲线', '把折线抹成平滑曲线；本来笔直的那种会补一个弓形中点，弧才看得见'],
+          ['sharp', '直角折线', '正交折线，折点是尖角（drawio 的 Sharp）'],
+          ['rounded', '圆角折线', '正交折线，**只在折点处**倒圆角（rounded=1；半径跟 drawio 一样，缺省 10px）'],
+          ['curved', '曲线', '把整条折线抹成平滑曲线；本来笔直的那种会补一个弓形中点，弧才看得见'],
         ]),
       )
       // 字号：线上的文字（边自己的 value）与挂在边上的独立标签都吃 fontSize。

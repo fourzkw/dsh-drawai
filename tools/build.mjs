@@ -132,10 +132,37 @@ export function extractBody(bundle) {
   return bundle.slice(start, end).replace(/\s+$/, '')
 }
 
+/**
+ * 反引号配平检查。
+ *
+ * 为什么必须有：宿主半边的 `SKILL_BODY` 是一整段模板字符串，**在它里面写一个反引号**
+ * （比如给 `rounded=1` 这种键名加行内代码标记）就会把模板字符串提前截断，
+ * 于是整份 lib/index.js 语法错误 —— 而构建器照样"成功"写出产物，直到有人 import 它才发现。
+ * 这个坑已经踩了三次（每次都靠 npm test 里的 SyntaxError 才暴露）。
+ *
+ * 判据是**每份源码里反引号总数必须是偶数**（模板字符串成对出现）。不完美，但足以
+ * 在构建这一步就把"多写了一个反引号"钉住，并指出是哪一行。
+ */
+function assertBackticksBalanced(file, text) {
+  const lines = text.split('\n')
+  const marks = []
+  for (const [index, line] of lines.entries()) {
+    for (let i = 0; i < line.length; i += 1) if (line[i] === '`') marks.push({ line: index + 1, text: line.trim() })
+  }
+  if (marks.length % 2 === 0) return
+  const last = marks[marks.length - 1]
+  throw new Error(
+    file + ' 里的反引号是奇数个（' + marks.length + '）：模板字符串很可能被截断了。' +
+      '最后一个在第 ' + last.line + ' 行：' + last.text + '\n' +
+      '（提示：模板字符串里不要写行内代码反引号 —— 用引号或直接写键名。）',
+  )
+}
+
 export function buildAll() {
   const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
 
   const host = readFileSync('src/index.js', 'utf8')
+  assertBackticksBalanced('src/index.js（宿主半边）', host)
   writeFileSync('lib/index.js', GENERATED + host, 'utf8')
 
   // 宿主半边 import 的样式内核：原样拷（保留 export），加生成横幅。

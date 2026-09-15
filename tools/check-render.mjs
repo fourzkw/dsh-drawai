@@ -1383,18 +1383,27 @@ console.log('\n独立文字：一段没有边框底色的字（drawio 的 text �
 
 console.log('\n线型（直线 / 折线 / 曲线）与字号')
 {
-  // 线型：drawio 的 Straight / Orthogonal / Curved（Format.js:6543 sharp|rounded|curved）。
-  // 直线在我们这里必须显式写 `edgeStyle=none`：drawio 的 Straight 是**删掉 edgeStyle 键**，
-  // 而我们的渲染器把"没有键"当正交 —— 不写 none 两边就不是同一条线。
+  // 线型四选一：直线 / 直角折线 / 圆角折线 / 曲线。
+  // 这是把 drawio 的两组键压平：走线（Straight vs Orthogonal）+ 拐角（sharp/rounded/curved，
+  // 见 Format.js:6543）。直线在我们这里必须显式写 `edgeStyle=none`：drawio 的 Straight 是
+  // **删掉 edgeStyle 键**，而我们的渲染器把"没有键"当正交 —— 不写 none 两边就不是同一条线。
   const base = 'edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=classic;'
   const straight = styleWithLineKind(base, 'straight')
   ok(styleGet(straight, 'edgeStyle', null) === 'none', '直线落成 edgeStyle=none：' + straight)
   ok(lineKindFromStyle(straight) === 'straight', '从样式反推得回直线')
+  ok(styleGet(straight, 'rounded', null) === null, '直线不留 rounded（没有折点可倒角）')
+  const sharp = styleWithLineKind(styleWithLineKind(base, 'rounded'), 'sharp')
+  ok(lineKindFromStyle(sharp) === 'sharp', '直角折线就是缺省的正交折线')
+  ok(styleGet(sharp, 'rounded', null) === null, '切回直角会把 rounded 删掉（不留 rounded=0 噪音）')
+  const roundedLine = styleWithLineKind(base, 'rounded')
+  ok(styleGet(roundedLine, 'rounded', null) === '1' && styleGet(roundedLine, 'edgeStyle', null) === 'orthogonalEdgeStyle', '圆角折线 = rounded=1（仍在正交路由上）：' + roundedLine)
+  ok(lineKindFromStyle(roundedLine) === 'rounded', '从样式反推得回圆角折线')
   const curved = styleWithLineKind(base, 'curved')
   ok(styleGet(curved, 'curved', null) === '1' && styleGet(curved, 'edgeStyle', null) === 'orthogonalEdgeStyle', '曲线 = curved=1（路由仍留着）：' + curved)
   ok(lineKindFromStyle(curved) === 'curved', '从样式反推得回曲线')
-  const back = styleWithLineKind(curved, 'orthogonal')
-  ok(styleGet(back, 'curved', null) === null && lineKindFromStyle(back) === 'orthogonal', '换回折线会把 curved 删掉（不留 curved=0 噪音）')
+  ok(styleGet(styleWithLineKind(roundedLine, 'curved'), 'rounded', null) === null, '曲线与圆角互斥：转曲线时把 rounded 清掉（drawio 里 paintCurvedLine 优先）')
+  ok(styleWithLineKind(base, 'orthogonal') === styleWithLineKind(base, 'sharp'), "'orthogonal' 是 sharp 的别名（AI 老写法仍然有效）")
+  ok(lineKindFromStyle('') === 'sharp', '没有路由键时算直角折线（drawio 的缺省外观）')
   ok(styleWithLineKind(base, 'unknown') === base, '认不出的线型原样返回（不猜）')
   ok(curvedFromStyle(curved) === true && curvedFromStyle(base) === false, 'curvedFromStyle 的判据是 curved=1')
   ok(styleGet(styleWithLineKind(straight, 'curved'), 'edgeStyle', null) === 'none', '直线转曲线：路由保持"直线"，只加 curved（由现有的折点决定弧度）')
@@ -1412,6 +1421,35 @@ console.log('\n线型（直线 / 折线 / 曲线）与字号')
   // 两点 + 曲线：控制点落在起点上 → 退化成直线（与 drawio 一致，不会凭空鼓起来）
   ok(internals.pathOf([{ x: 0, y: 0 }, { x: 50, y: 0 }], 0, true) === 'M 0 0 Q 0 0 50 0', '两点 + 曲线 = 退化成直线（所以"看得见的弧"要靠一个中点）')
   ok(internals.pathOf(pts3, 6, false) === 'M 0 0 L 94 0 Q 100 0 100 6 L 100 80', '不带曲线时还是原来的圆角折线：' + internals.pathOf(pts3, 6, false))
+
+  // 圆角半径：drawio 的 mxPolyline.paintLine 取 arcSize，缺省 mxConstants.LINE_ARCSIZE(20) 再 /2 = 10px；
+  // 样式里给了 arcSize 就用它（同样 /2）。以前写死 6px，与 drawio 对不上。
+  const roundDoc = {
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 100, h: 40 },
+      { id: 'b', x: 300, y: 200, w: 100, h: 40 },
+    ],
+    edges: [
+      { id: 'e1', from: 'a', to: 'b', style: styleWithLineKind(DEFAULT_EDGE_STYLE, 'rounded') },
+      { id: 'e2', from: 'a', to: 'b', style: stylePatch(styleWithLineKind(DEFAULT_EDGE_STYLE, 'rounded'), { arcSize: '40' }) },
+      { id: 'e3', from: 'a', to: 'b', style: styleWithLineKind(DEFAULT_EDGE_STYLE, 'sharp') },
+    ],
+  }
+  const roundTree = renderDiagram(roundDoc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const dOf = (key) => {
+    const el = walk(roundTree, (n) => n.props !== undefined && n.props.key === key, [])[0]
+    return el === undefined ? '' : String(el.props.d)
+  }
+  const radiusOf = (d) => {
+    // 取第一段弧的收尾点与拐点的距离（= 半径）：'L x y Q cx cy bx by'
+    const m = /L ([\d.-]+) ([\d.-]+) Q ([\d.-]+) ([\d.-]+)/.exec(d)
+    if (m === null) return null
+    const [lx, ly, qx, qy] = m.slice(1).map(Number)
+    return Math.round(Math.hypot(qx - lx, qy - ly))
+  }
+  ok(radiusOf(dOf('edge-0')) === 10, '圆角折线的缺省半径 = 10px（drawio 的 LINE_ARCSIZE/2，实际 ' + radiusOf(dOf('edge-0')) + '）')
+  ok(radiusOf(dOf('edge-1')) === 20, 'arcSize=40 → 半径 20px（实际 ' + radiusOf(dOf('edge-1')) + '）')
+  ok(radiusOf(dOf('edge-2')) === 0, '直角折线的圆角半径是 0（不留可见圆角；路径里那个 Q 是零长度、画不出东西）：' + radiusOf(dOf('edge-2')))
 
   // 画面：curved=1 的边用曲线画，命中带也是同一条曲线（否则"看着是弧、点起来按折线算"）
   const d = {
