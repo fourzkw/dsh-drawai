@@ -278,6 +278,9 @@ console.log('\n工具条：按类型合并为下拉菜单')
       copySelection: () => {},
       cutSelection: () => {},
       pasteClipboard: () => {},
+      selectAll: () => {},
+      revertAiChange: () => {},
+      canRevert: true,
       normalizeGeometry: () => {},
       saveNow: () => {},
       openSaveAsPanel: () => {},
@@ -309,7 +312,7 @@ console.log('\n工具条：按类型合并为下拉菜单')
     if (menus !== null) {
     ok(menus.map((m) => m.key).join(',') === 'file,edit,view,export', '恰好 4 类：文件 / 编辑 / 视图 / 导出')
     const total = menus.reduce((n, m) => n + m.items.length, 0)
-    ok(total === 16, '所有操作都有归处（实际 ' + total + ' 项）')
+    ok(total === 18, '所有操作都有归处（实际 ' + total + ' 项）')
     ok(menus.every((m) => typeof m.title === 'string' && m.title.length > 0), '每个菜单都有悬停说明（title）')
     ok(menus.every((m) => m.items.every((i) => typeof i.label === 'string' && i.label.length > 0)), '每一项都有 label')
     ok(menus.every((m) => m.items.every((i) => typeof i.onClick === 'function')), '每一项都有 onClick')
@@ -317,6 +320,7 @@ console.log('\n工具条：按类型合并为下拉菜单')
     for (const gone of ['新建画布…', '打开…', '撤销', '重做', '适应内容', '导出 SVG', '导出 PNG（2×）']) {
       ok(labels.indexOf(gone) >= 0, '旧按钮「' + gone + '」已收进菜单')
     }
+    ok(labels.indexOf('全选') >= 0, '「全选」在编辑菜单里（Ctrl+A 之外的入口）')
     // 工具条本身只应渲染菜单入口
     const headStart = src.indexOf('const head = React.createElement(')
     const headEnd = src.indexOf('  let body', headStart)

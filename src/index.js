@@ -159,6 +159,16 @@ function estimateWidth(label) {
   return Math.ceil(w / 10) * 10
 }
 
+/** 读一个"绝对点"参数（addEdge 的自由端点）。缺省 null；给了但形状不对直接报错。 */
+function edgePointFromOp(value, where) {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'object' || Array.isArray(value)) throw new Error(where + ' must be {x, y}')
+  const x = Number(value.x)
+  const y = Number(value.y)
+  if (Number.isFinite(x) === false || Number.isFinite(y) === false) throw new Error(where + ' needs finite x and y')
+  return { x: x, y: y }
+}
+
 /** 扫描 `<prefix><n>` 形式的 id，返回 max+1 —— 多轮迭代不会打乱已有编号。 */
 function nextId(list, prefix) {
   let max = 0
@@ -361,7 +371,7 @@ function styleNote(style) {
  * 施加 ops。语义校验在这里：任何指向不存在节点的边、任何未知 id，都直接抛错并列出已知节点，
  * 于是失败发生在写盘之前 —— 不会画出半张烂图。
  */
-function applyOps(doc, ops) {
+function applyOps(doc, ops, out) {
   const notes = []
   function findNode(id) {
     for (let i = 0; i < doc.nodes.length; i += 1) if (doc.nodes[i].id === id) return i
@@ -412,19 +422,85 @@ function applyOps(doc, ops) {
     if (kind === 'addEdge') {
       const from = typeof op.from === 'string' ? op.from : undefined
       const to = typeof op.to === 'string' ? op.to : undefined
-      if (from === undefined || to === undefined) throw new Error('ops[' + i + '] addEdge needs string "from" and "to"')
-      if (findNode(from) < 0) throw new Error('ops[' + i + '] addEdge: unknown "from" node "' + from + '". Known nodes: ' + known())
-      if (findNode(to) < 0) throw new Error('ops[' + i + '] addEdge: unknown "to" node "' + to + '". Known nodes: ' + known())
+      // **独立线**：drawio 允许一条边的两端都是自由点（几何里的 sourcePoint/targetPoint），
+      // 于是"先画一条线、再决定接哪儿"是合法形态 —— 线可以完全独立于节点存在。
+      // 糖名用 fromPoint/toPoint（跟 from/to 对齐），模型名 sourcePoint/targetPoint 也认。
+      const fromPoint = edgePointFromOp(op.fromPoint !== undefined ? op.fromPoint : op.sourcePoint, 'ops[' + i + '] addEdge fromPoint')
+      const toPoint = edgePointFromOp(op.toPoint !== undefined ? op.toPoint : op.targetPoint, 'ops[' + i + '] addEdge toPoint')
+      if (from === undefined && fromPoint === null) throw new Error('ops[' + i + '] addEdge needs "from" (node id) or "fromPoint" (absolute point)')
+      if (to === undefined && toPoint === null) throw new Error('ops[' + i + '] addEdge needs "to" (node id) or "toPoint" (absolute point)')
+      if (from !== undefined && findNode(from) < 0) throw new Error('ops[' + i + '] addEdge: unknown "from" node "' + from + '". Known nodes: ' + known())
+      if (to !== undefined && findNode(to) < 0) throw new Error('ops[' + i + '] addEdge: unknown "to" node "' + to + '". Known nodes: ' + known())
       let id = typeof op.id === 'string' && op.id.length > 0 ? op.id : undefined
       if (id !== undefined && findEdge(id) >= 0) throw new Error('ops[' + i + '] addEdge: edge "' + id + '" already exists')
       if (id === undefined) id = nextId(doc.edges, 'e')
-      const edge = { id: id, from: from, to: to }
+      const edge = { id: id }
+      if (from !== undefined) edge.from = from
+      if (to !== undefined) edge.to = to
+      // 自由点只在那一端**没有真实顶点**时生效（drawio 语义，与内核的 edgeFreePoint 一致）。
+      if (from === undefined && fromPoint !== null) edge.sourcePoint = fromPoint
+      if (to === undefined && toPoint !== null) edge.targetPoint = toPoint
       if (typeof op.label === 'string' && op.label.length > 0) edge.label = op.label
       // 建边时就能带上画法：AI 想表达"这是一条异步/可选依赖"时，
       // 不该被迫先 addEdge 再补一次 setStyle（两次写盘、两次往返）。
       edge.style = edgeStyleFromOp(DEFAULT_EDGE_STYLE, op, 'ops[' + i + '] addEdge')
       doc.edges.push(edge)
-      notes.push('+ edge ' + id + ' ' + from + ' -> ' + to + styleNote(edge.style))
+      const head = from !== undefined ? from : '(free ' + fromPoint.x + ',' + fromPoint.y + ')'
+      const tail = to !== undefined ? to : '(free ' + toPoint.x + ',' + toPoint.y + ')'
+      notes.push('+ edge ' + id + ' ' + head + ' -> ' + tail + styleNote(edge.style))
+      continue
+    }
+
+    if (kind === 'move') {
+      const id = typeof op.id === 'string' ? op.id : undefined
+      if (id === undefined) throw new Error('ops[' + i + '] move needs string "id"')
+      const hasX = Number.isFinite(Number(op.x))
+      const hasY = Number.isFinite(Number(op.y))
+      const dx = Number.isFinite(Number(op.dx)) ? Number(op.dx) : 0
+      const dy = Number.isFinite(Number(op.dy)) ? Number(op.dy) : 0
+      if (hasX === false && hasY === false && dx === 0 && dy === 0) {
+        throw new Error('ops[' + i + '] move needs "x"/"y" (absolute) or a non-zero "dx"/"dy"')
+      }
+      // 节点：绝对坐标（给 x/y）或相对位移（给 dx/dy）都行。
+      // 以前只能"删掉重画"来改位置 —— 那会丢 id、丢边上的端点约束与折点，是实打实的损失。
+      const ni = findNode(id)
+      if (ni >= 0) {
+        const n = doc.nodes[ni]
+        n.x = Math.round(hasX ? Number(op.x) : numberOr(n.x, 0) + dx)
+        n.y = Math.round(hasY ? Number(op.y) : numberOr(n.y, 0) + dy)
+        notes.push('~ node ' + id + ' @' + n.x + ',' + n.y)
+        continue
+      }
+      // 连线：整体平移它**自己的**几何（折点 + 悬空端的自由点），
+      // 与画布上"拖整组"完全同一套语义（端点接在节点上时由节点决定，不受影响）。
+      const ei = findEdge(id)
+      if (ei < 0) throw new Error('ops[' + i + '] move: unknown node or edge "' + id + '". Known nodes: ' + known())
+      if (hasX || hasY) throw new Error('ops[' + i + '] move: an edge can only be moved by "dx"/"dy" (its geometry is relative)')
+      const edge = doc.edges[ei]
+      let touched = 0
+      if (Array.isArray(edge.points)) {
+        edge.points = edge.points.map((p) => ({ x: Math.round(p.x + dx), y: Math.round(p.y + dy) }))
+        touched += 1
+      }
+      if (edge.sourcePoint !== undefined && edge.sourcePoint !== null) {
+        edge.sourcePoint = { x: Math.round(edge.sourcePoint.x + dx), y: Math.round(edge.sourcePoint.y + dy) }
+        touched += 1
+      }
+      if (edge.targetPoint !== undefined && edge.targetPoint !== null) {
+        edge.targetPoint = { x: Math.round(edge.targetPoint.x + dx), y: Math.round(edge.targetPoint.y + dy) }
+        touched += 1
+      }
+      notes.push('~ edge ' + id + ' moved by ' + dx + ',' + dy + (touched === 0 ? '（它两端都接在节点上、也没有折点，等于没有可平移的几何）' : ''))
+      continue
+    }
+
+    if (kind === 'highlight') {
+      // **只提示、不改文档**：把几个 id 记成"下次客户端来取时选中它们"，
+      // 于是 AI 能说"你看这几个节点"而不用让用户自己找。
+      const ids = Array.isArray(op.ids) ? op.ids.filter((v) => typeof v === 'string' && v.length > 0) : []
+      if (ids.length === 0) throw new Error('ops[' + i + '] highlight needs non-empty string array "ids"')
+      if (out !== undefined && out !== null) out.highlight = ids.slice()
+      notes.push('👁 已请求高亮 ' + ids.length + ' 项（客户端下次刷新时会选中它们）')
       continue
     }
 
@@ -835,8 +911,10 @@ const SKILL_BODY = `# DrawAI 画布：怎么读、怎么改
 没有"导入/导出"这一步，你直接读写这个文件就是读写那张画布。
 
 ## 两个工具怎么配合
-1. **diagram_read(path?)** —— 先读。返回节点（id/label/shape/style）、边（id/from/to/label/style/dash/arrow/折点）、
-   revision（**文件内容指纹**，不是版本号）、notes（画布表示不了但会原样保留的东西：多页、图层、分组、图片、HTML 标签）。
+1. **diagram_read(path?)** —— 先读。返回节点（id/label/shape/style/**x·y·w·h 坐标尺寸**）、
+   边（id/from/to/label/style/dash/arrow/折点/悬空端的自由点）、revision（**文件内容指纹**，不是版本号）、
+   notes（画布表示不了但会原样保留的东西：多页、图层、分组、图片、HTML 标签）、
+   highlight（AI 自己请求的高亮，见下）、canRevert（有没有可退回的 AI 改动）。
 2. **diagram_apply(path, ops, layout?)** —— 再改。给一组结构化编辑，宿主**无损写回**：只改我们拥有的单元，
    文件其余部分（别的页、未知单元、自定义属性）逐字节保留。打开后原样保存 = 文件一个字节都不变。
 
@@ -851,13 +929,22 @@ revision 是乐观锁：写回时若文件已被别处改过（比如用户同�
 
 ## ops 速查
     {op:"addNode", label:"必填", shape?, style?, keys?, w?, h?, x?, y?}
-    {op:"addEdge", from, to, label?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, keys?}
+    {op:"addEdge", from?, to?, fromPoint?, toPoint?, label?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, keys?}
     {op:"setLabel", id, label}
     {op:"setStyle", id, shape?, style?, keys?, w?, h?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, clearPoints?}
+    {op:"move", id, dx?, dy?, x?, y?}
     {op:"remove", id}
+    {op:"highlight", ids:["n1","n2"]}
 
 - id 省略会自动分配（n1/n2…、e1/e2…）；addEdge 的 from/to 必须是**已存在的节点 id**，
   引用了不存在的节点会**在写盘之前**直接报错并列出已知 id。
+- **线的两端可以给绝对点**（fromPoint/toPoint）而不是节点：两端都给点就是一条**独立线** ——
+  drawio 里边的两端都可以是自由点，线可以完全不接节点（先画线、之后再拖端点接到节点上也行）。
+  只有一端给点就是**悬空端**（另一半接在节点上）。
+- **move**：改已有元素的位置。节点给 dx/dy（相对）或 x/y（绝对）；连线只能给 dx/dy
+  （平移它自己的折点与自由端点；两端接在节点上时端点由节点决定）。
+  以前没有 move，想把某个节点挪一下就只好删掉重画 —— 那会丢 id、丢边上的端点约束与折点。
+- **highlight** 只是"让画布选中这几个"给你看，不改文档、也不重排。
 - 糖（shape/style/dash/arrow/color/exit/entry/jettySize/edgeStyle/avoid）由宿主翻译成 drawio 的 style 键，
   **绝不落盘**；keys 用来写任意 drawio 键，值给 null = 删键回默认。
 - shape：rect | rounded | stadium | ellipse | diamond | parallelogram | cylinder | document | hexagon
@@ -886,7 +973,12 @@ revision 是乐观锁：写回时若文件已被别处改过（比如用户同�
 - 只有"必须摆在某个位置"时才传 x/y（宿主仍会把它吸附到网格）。
 - 画布的吸附单位：**节点 10px，连线的折点/自由端点 5px**。手工摆过的画布带 meta.pinned，
   这时**不加 layout 就不会重排**（否则你一改图，人手工排好的版面就被冲掉）；想重排必须显式给 layout。
+- **ops 里自带几何时（addNode 给了 x/y、或者有 move）也不会重排** ——
+  否则"把 n1 往右挪 40"会被布局立刻冲掉，看起来像工具坏了。
 - 显式重排会清掉"端点已移动"的那些边上的**过期折点**（不然折点会留在旧位置，走线会绕圈）。
+- AI 改完的改动**不在用户本地的撤销历史里**（服务端推新版本时客户端会清空它，免得一次 Ctrl+Z
+  把 AI 的改动悄悄顶掉）。宿主留了一层回退点，用户界面「编辑 → 撤销 AI 改动」可以退回上次 AI 写盘前的版本；
+  read 返回里的 canRevert 就是"有没有这一层"。
 
 ## style 键与 drawio 同构
 文档里存的就是 drawio 的 style 键：fillColor / strokeColor / shape= / rounded= / arcSize= /
@@ -1138,6 +1230,9 @@ export function apply(ctx) {
           // revision = 文件内容指纹（改由文件决定，不再是我们自己 +1 的计数器）
           revision: { type: 'string', required: true },
           notes: { type: 'array', required: true, items: { type: 'string' } },
+          // AI 的高亮请求（取走即清）与"有没有可退回的 AI 改动"。
+          highlight: { type: 'array', items: { type: 'string' } },
+          canRevert: { type: 'boolean' },
           nodes: {
             type: 'array',
             required: true,
@@ -1149,6 +1244,10 @@ export function apply(ctx) {
                 label: { type: 'string', required: true },
                 shape: { type: 'string', required: true },
                 style: { type: 'string', required: true },
+                x: { type: 'number', required: true },
+                y: { type: 'number', required: true },
+                w: { type: 'number', required: true },
+                h: { type: 'number', required: true },
               },
             },
           },
@@ -1211,7 +1310,10 @@ export function apply(ctx) {
         ]
         for (let i = 0; i < value.nodes.length; i += 1) {
           const n = value.nodes[i]
-          lines.push('  节点 ' + n.id + ' [' + n.shape + '] ' + n.label + (n.style.length === 0 ? '（默认样式）' : '  style: ' + n.style))
+          lines.push(
+            '  节点 ' + n.id + ' [' + n.shape + '] ' + n.label + '  @' + n.x + ',' + n.y + ' ' + n.w + '×' + n.h +
+              (n.style.length === 0 ? '（默认样式）' : '  style: ' + n.style),
+          )
         }
         for (let i = 0; i < value.edges.length; i += 1) {
           const e = value.edges[i]
@@ -1246,6 +1348,12 @@ export function apply(ctx) {
           label: typeof n.label === 'string' ? n.label : String(n.id),
           shape: nodeShapeFromStyle(style),
           style: style,
+          // 坐标与尺寸：**AI 也要看得见位置**。不给的话它判断不了"会不会重叠""有没有对齐"
+          // （实测：想让它把某几个节点往右挪一点，它只能靠猜或者干脆删掉重画）。
+          x: numberOr(n.x, 0),
+          y: numberOr(n.y, 0),
+          w: numberOr(n.w, DEFAULT_W),
+          h: numberOr(n.h, DEFAULT_H),
         })
       }
       const edges = []
@@ -1281,18 +1389,37 @@ export function apply(ctx) {
         if (e.targetPoint !== undefined) item.targetPoint = e.targetPoint
         edges.push(item)
       }
-      return { path: loaded.absolute, revision: doc.revision, notes: loaded.notes, nodes: nodes, edges: edges }
+      // 顺路带两件事（都要在 output.schema 里声明 —— additionalProperties:false 会把
+      // 没声明的字段整个判为非法输出，这条踩过一次）：
+      //   highlight —— AI 用 `{op:'highlight'}` 请求的高亮，取走即清；
+      //   canRevert —— 这张画布上有没有可退回的 AI 改动。
+      const pendingHighlight = highlightFor.get(sessionIdOf(exec))
+      if (pendingHighlight !== undefined) highlightFor.delete(sessionIdOf(exec))
+      return {
+        path: loaded.absolute,
+        revision: doc.revision,
+        notes: loaded.notes,
+        nodes: nodes,
+        edges: edges,
+        highlight: Array.isArray(pendingHighlight) ? pendingHighlight : [],
+        canRevert: revertSnapshots.has(snapshotKey(sessionIdOf(exec), loaded.absolute)),
+      }
     },
   })
 
   const applyTool = defineTool({
     name: 'diagram_apply',
     description:
-      '对工作区里的 DrawAI 画布文档施加一组结构化编辑（加节点/连边/改标签/改样式/删除），然后自动布局并写回文件。你不需要也不应该自己计算坐标——布局由这里算。' +
+      '对工作区里的 DrawAI 画布文档施加一组结构化编辑（加节点/连边/改标签/改样式/移动/删除/高亮），然后自动布局并写回文件。布局默认由这里算；ops 里一旦自带几何（addNode 给了 x/y，或有 move）就不再重排，想重排请显式给 layout。' +
       'ops 的每一项形如 {op:"addNode", label:"...", shape?, style?, keys?, w?, h?, x?, y?} / ' +
-      '{op:"addEdge", from, to, label?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, keys?} / ' +
+      '{op:"addEdge", from?, to?, fromPoint?, toPoint?, label?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, keys?} / ' +
       '{op:"setLabel", id, label} / {op:"setStyle", id, shape?, style?, keys?, w?, h?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, avoid?, clearPoints?} / ' +
-      '{op:"remove", id}；节点 id 省略时自动分配。' +
+      '{op:"move", id, dx?, dy?, x?, y?} / {op:"remove", id} / {op:"highlight", ids:[...]}；节点 id 省略时自动分配。' +
+      'addEdge 的两端各自可以给**节点 id** 或**绝对点**（fromPoint/toPoint）—— 两端都给点就是一条**独立线**' +
+      '（drawio 里边的两端都可以是自由点，线可以完全不接节点）。' +
+      'move 改已有元素的位置：节点可以给 dx/dy（相对）或 x/y（绝对），连线只能给 dx/dy（平移它自己的折点与自由端点）。' +
+      '以前没有 move，只能删掉重画 —— 那会丢 id、丢边上的端点约束与折点。' +
+      'highlight 只让客户端选中那几个（不改文档，也不重排）。' +
       '文档里存的是 **drawio 的 style 键**（dashed/dashPattern/edgeStyle/jettySize/libavoidRouting/exitX·exitY·entryX·entryY/endArrow·startArrow/strokeColor/fillColor/shape=/rounded=/arcSize=…），默认值一律省略、认不出的键原样保留；' +
       '上面这些 shape/style/dash/arrow/color/exit/entry 是给模型用的**糖**，由宿主翻译成 style 键，绝不落盘。' +
       'style 既可以是调色板名（plain/blue/green/orange/yellow/red/purple/grey），也可以直接是一段 style 串；keys 用来写任意 drawio 键（值给 null = 删键回默认）。' +
@@ -1362,10 +1489,36 @@ export function apply(ctx) {
       // 人工摆过的文档（meta.pinned）默认不再自动重排 —— 否则 AI 一改图，
       // 人手工调好的位置就被 dagre 全冲掉了。想重排必须显式指定 layout。
       const pinned = doc.meta !== null && typeof doc.meta === 'object' && doc.meta.pinned === true
-      const mode = typeof args.layout === 'string' ? args.layout : pinned ? 'none' : 'dagre-tb'
+      // `highlight` 只是"让客户端选中这几个"，不改文档 —— 于是：
+      //   · 一次全是 highlight 的调用**不写盘**（也不会顺手重排，那条特别危险）；
+      //   · 混着编辑时，它跟着一起生效。
+      const edits = ops.filter((op) => op === null || typeof op !== 'object' || op.op !== 'highlight')
+      const onlyHighlight = edits.length === 0
+      // 默认布局：pinned、纯 highlight、以及**ops 里自带几何**（addNode 给了 x/y、或者有 move）
+      // 时都不重排 —— 否则"把 n1 往右挪 40"会被 dagre 立刻冲掉（实测：move 完坐标原样回来，
+      // 看起来像工具坏了）。想重排就显式给 layout。
+      const explicitGeometry = ops.some(
+        (op) =>
+          op !== null &&
+          typeof op === 'object' &&
+          (op.op === 'move' || (op.op === 'addNode' && (Number.isFinite(Number(op.x)) || Number.isFinite(Number(op.y))))),
+      )
+      const mode = typeof args.layout === 'string' ? args.layout : pinned || onlyHighlight || explicitGeometry ? 'none' : 'dagre-tb'
       if (LAYOUTS.indexOf(mode) < 0) throw new Error('unknown layout "' + mode + '"; use one of ' + LAYOUTS.join(', '))
 
-      const notes = applyOps(doc, ops)
+      const out = {}
+      const notes = applyOps(doc, ops, out)
+      if (Array.isArray(out.highlight)) highlightFor.set(sessionId, out.highlight)
+      if (onlyHighlight) {
+        return {
+          path: loaded.absolute,
+          revision: doc.revision,
+          nodeCount: doc.nodes.length,
+          edgeCount: doc.edges.length,
+          layout: 'none',
+          summary: notes.length === 0 ? '(no change)' : notes.join('\n'),
+        }
+      }
       if (mode === 'none') placeMissing(doc)
       else {
         const before = nodePositions(doc)
@@ -1386,12 +1539,21 @@ export function apply(ctx) {
       doc.revision = rendered.revision
       if (rendered.dropped.length > 0) notes.push('~ ' + rendered.dropped.length + ' 条边的两端都没有落点，已略过：' + rendered.dropped.join(', '))
       const policy = policyFor(sessionId)
+      // 落盘前留一份"上一版"：AI 的改动**不在客户端的撤销历史里**（服务端推新版本时
+      // 客户端会清空本地历史，免得一次 Ctrl+Z 把 AI 的改动悄悄顶掉），
+      // 所以这边给一个一层的回退点，界面上对应「编辑 → 撤销 AI 改动」。
+      if (loaded.exists === true && typeof loaded.text === 'string') {
+        revertSnapshots.set(snapshotKey(sessionId, loaded.absolute), { text: loaded.text, revision: doc.revision })
+      }
       try {
         if (policy === undefined) await ctx.fs.writeText(loaded.target, rendered.text)
         else await ctx.fs.writeText(loaded.target, rendered.text, undefined, undefined, policy)
       } catch (error) {
         const scope = policy === undefined ? 'unresolved policy' : policy.mode + ' @ ' + String(policy.workspaceRoot)
         throw new Error('write "' + loaded.absolute + '" failed: ' + messageOf(error) + ' [sandbox: ' + scope + ']')
+      }
+      if (revertSnapshots.has(snapshotKey(sessionId, loaded.absolute))) {
+        notes.push('↩ 这次改动可以退回：界面上「编辑 → 撤销 AI 改动」')
       }
       return {
         path: loaded.absolute,
@@ -1435,6 +1597,19 @@ function sanitizeNewName(raw) {
   const focusedCanvas = new Map()
   /** 每个会话最近**注入过**的聚焦路径（同一张不重复打扰模型）。 */
   const injectedCanvas = new Map()
+  /**
+   * AI 改动前的"上一版"文本（按 会话+路径 存，**只留一层**）。
+   *
+   * 客户端的撤销历史在服务端推来新版本时会被清空（故意的：否则一次 Ctrl+Z
+   * 会把 AI 刚写的改动悄悄顶掉），所以 AI 的改动要能退，就得宿主自己留一个回退点。
+   */
+  const revertSnapshots = new Map()
+  /** AI 请求的"高亮这些"（按会话，客户端下次来读时取走并清空）。 */
+  const highlightFor = new Map()
+
+  function snapshotKey(sessionId, absolute) {
+    return String(sessionId) + '\n' + String(absolute)
+  }
 
   function focusedPathFor(sessionId) {
     if (typeof sessionId !== 'string' || sessionId.length === 0) return undefined
@@ -1653,6 +1828,11 @@ function sanitizeNewName(raw) {
           return
         }
         const loaded = await loadDoc(rawPath, sessionId)
+        // 两件"顺路带给客户端"的东西：
+        //   highlight —— AI 用 `{op:'highlight', ids}` 请求的高亮，**取走即清**（一次性）；
+        //   canRevert —— 这张画布上有没有可退回的 AI 改动（菜单项据此启用）。
+        const pendingHighlight = highlightFor.get(sessionId)
+        if (pendingHighlight !== undefined) highlightFor.delete(sessionId)
         sendJson(res, 200, {
           ok: true,
           exists: true,
@@ -1661,10 +1841,50 @@ function sanitizeNewName(raw) {
           revision: loaded.doc.revision,
           doc: loaded.doc,
           notes: loaded.notes,
+          highlight: Array.isArray(pendingHighlight) ? pendingHighlight : [],
+          canRevert: revertSnapshots.has(snapshotKey(sessionId, loaded.absolute)),
         })
       } catch (error) {
         sendJson(res, 400, { ok: false, error: '这个文件读不出画布：' + messageOf(error) })
       }
+      return
+    }
+
+    // action: 'revert' —— 退回**上一次 AI 改动**（就一层）。
+    //
+    // 为什么需要这条：客户端的撤销历史在服务端推来新版本时会被清空，
+    // 所以 AI 改完以后用户按 Ctrl+Z 是退不回去的。宿主留一份改动前的文本，这里把它写回去。
+    if (body.action === 'revert') {
+      if (sessionId === undefined || rawPath === undefined) {
+        sendJson(res, 400, { ok: false, error: 'sessionId and path are required' })
+        return
+      }
+      let revertTarget
+      let revertAbsolute
+      try {
+        const loaded = await loadDoc(rawPath, sessionId)
+        revertTarget = loaded.target
+        revertAbsolute = loaded.absolute
+      } catch (error) {
+        sendJson(res, 400, { ok: false, error: '这个文件读不出画布：' + messageOf(error) })
+        return
+      }
+      const key = snapshotKey(sessionId, revertAbsolute)
+      const snapshot = revertSnapshots.get(key)
+      if (snapshot === undefined) {
+        sendJson(res, 200, { ok: false, error: '这张画布没有可退回的 AI 改动（只保留最近一次）' })
+        return
+      }
+      const policy = policyFor(sessionId)
+      try {
+        if (policy === undefined) await ctx.fs.writeText(revertTarget, snapshot.text)
+        else await ctx.fs.writeText(revertTarget, snapshot.text, undefined, undefined, policy)
+      } catch (error) {
+        sendJson(res, 500, { ok: false, error: 'write failed: ' + messageOf(error) })
+        return
+      }
+      revertSnapshots.delete(key)
+      sendJson(res, 200, { ok: true, revision: contentHash(snapshot.text), path: revertAbsolute })
       return
     }
 

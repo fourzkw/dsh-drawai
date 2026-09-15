@@ -1162,6 +1162,57 @@ console.log('\n整体拖动：相对位置一点都不能变')
   ok(onlyMove.x === 15 && onlyMove.y === -5, '只拖连线时按半格吸附：' + JSON.stringify(onlyMove))
 }
 
+console.log('\n对齐辅助线 / 批量改样式 / 全选')
+{
+  // ① 对齐辅助线（drawio 的 guides）：与**没在拖的**节点比 左/中/右、上/中/下，
+  //    差在容差内就吸过去并把那条线画出来。以**整组的外接框**为准。
+  const others = [{ x: 100, y: 0, w: 100, h: 40 }] // 左 100 / 中 150 / 右 200
+  const near = { x: 104, y: 300, w: 60, h: 40 } // 左边差 4px（容差 6 内）
+  const guides = internals.alignGuidesFor(others, near, 6)
+  ok(guides.dx === -4 && guides.dy === 0, '差 4px → 吸过去（dx=-4）：' + JSON.stringify([guides.dx, guides.dy]))
+  ok(guides.guides.length === 1 && guides.guides[0].axis === 'x' && guides.guides[0].at === 100, '出一条竖线辅助线（at=100）：' + JSON.stringify(guides.guides))
+  ok(
+    guides.guides.length === 1 && guides.guides[0].from === 0 && guides.guides[0].to === 340,
+    '辅助线范围覆盖两边（0…340）：' + JSON.stringify(guides.guides[0] === undefined ? null : [guides.guides[0].from, guides.guides[0].to]),
+  )
+  const far = internals.alignGuidesFor(others, { x: 130, y: 300, w: 60, h: 40 }, 6)
+  ok(far.dx === 0 && far.dy === 0 && far.guides.length === 0, '差得远（10px）→ 不吸、不画线')
+  const mid = internals.alignGuidesFor(others, { x: 122, y: 300, w: 60, h: 40 }, 6) // 中 152 vs 150 → 差 2
+  ok(mid.dx === -2 && mid.guides[0].at === 150, '几条都在容差内时取最近的那条（中线 150）：' + JSON.stringify([mid.dx, mid.guides[0].at]))
+  const both = internals.alignGuidesFor(others, { x: 104, y: 3, w: 60, h: 40 }, 6) // 左边差 4、顶边差 3
+  ok(both.dx === -4 && both.dy === -3 && both.guides.length === 2, '两个轴可以同时吸（并出两条线）：' + JSON.stringify([both.dx, both.dy, both.guides.length]))
+  ok(internals.boxOfBoxes([{ x: 10, y: 20, w: 30, h: 40 }, { x: 100, y: 0, w: 20, h: 10 }]).w === 110, '整组外接框：宽 110')
+  ok(internals.boxOfBoxes([]) === null, '空集合 → null')
+
+  const doc = {
+    version: 2,
+    revision: '',
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 60, h: 60 },
+      { id: 'b', x: 200, y: 0, w: 60, h: 60 },
+    ],
+    edges: [],
+    labels: [],
+  }
+  const tree = renderDiagram(doc, 'light', 'u1', { current: null }, { selectedIds: [], guides: [{ axis: 'x', at: 100, from: 0, to: 60 }] }, null)
+  const lines = walk(tree, (n) => n.type === 'line' && typeof n.props.key === 'string' && n.props.key.indexOf('guide-') === 0, [])
+  ok(lines.length === 1 && lines[0].props.x1 === 100 && lines[0].props.strokeDasharray === '4 3', '辅助线真的画进了 SVG（虚线竖线 x=100），实际 ' + lines.length + ' 条')
+
+  // ② 批量改样式：右键点中的那个在选区里 → 整组（且只挑同类型）
+  const isNode = (id) => id === 'n1' || id === 'n2'
+  ok(internals.styleTargets(['n1', 'n2'], 'n1', isNode).join(',') === 'n1,n2', '选区里点一个节点 → 整组节点')
+  ok(internals.styleTargets(['n1', 'n2'], 'n9', isNode).join(',') === 'n9', '点的不在选区里 → 只改它自己')
+  ok(internals.styleTargets(['n1', 'e9', 'n2'], 'n1', isNode).join(',') === 'n1,n2', '连线不在节点操作的名单里（类型分开）')
+  ok(internals.styleTargets(['e9'], 'e9', (id) => id === 'e9').join(',') === 'e9', '类型对得上就整组')
+  ok(internals.styleTargets([], 'n1', isNode).join(',') === 'n1', '没有选区时就是单个')
+
+  // ③ 全选：节点与连线都算（与框选同一套语义）
+  const all = internals.allIdsOf({ nodes: [{ id: 'n1' }, { id: 'n2' }], edges: [{ id: 'e1' }] })
+  ok(all.join(',') === 'n1,n2,e1', '全选 = 节点 + 连线：' + all.join(','))
+  ok(internals.allIdsOf({ nodes: [], edges: [] }).length === 0, '空画布全选 → 空')
+  ok(internals.allIdsOf(null).length === 0, 'null 文档不炸')
+}
+
 console.log('\n框选：节点与连线都要被框到才亮')
 {
   // 用户报的："批量框选时线段也应该有被选中的提示" —— 以前框选只收节点，框住一排线时一条都不亮。

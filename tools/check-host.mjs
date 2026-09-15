@@ -817,5 +817,77 @@ console.log('\n二叉树：父节点居中于两个孩子之间（树/森林专�
   ok(dagAt('n1').x === 0 && dagAt('n2').x === 100, '同层按宽度铺开：a=0 / b=100')
 }
 
+console.log('\nAI 侧补齐：读得到坐标、move、独立线、highlight、撤销 AI 改动')
+{
+  store.clear()
+  // ① 读回节点坐标（以前只有 id/label/shape/style —— AI 看不见位置，判断不了重叠/对齐）
+  await apply([{ op: 'addNode', label: '甲', w: 60, h: 60, x: 10, y: 20 }], { path: 'ai.drawio' })
+  const read1 = await readTool.execute({ path: 'ai.drawio' }, exec)
+  const a1 = read1.nodes.filter((n) => n.id === 'n1')[0]
+  ok(a1 !== undefined && a1.x === 10 && a1.y === 20 && a1.w === 60 && a1.h === 60, 'diagram_read 回了坐标与尺寸：' + JSON.stringify(a1 === undefined ? null : [a1.x, a1.y, a1.w, a1.h]))
+
+  // ② move：相对位移 / 绝对坐标 / 连线（平移它自己的几何）
+  await apply([{ op: 'move', id: 'n1', dx: 40, dy: -20 }], { path: 'ai.drawio' })
+  let moving = parseMxfile(store.get(WORKSPACE + '\\ai.drawio')).doc
+  ok(moving.nodes[0].x === 50 && moving.nodes[0].y === 0, 'move dx/dy 挪节点：50,0（实际 ' + moving.nodes[0].x + ',' + moving.nodes[0].y + '）')
+  await apply([{ op: 'move', id: 'n1', x: 200, y: 100 }], { path: 'ai.drawio' })
+  moving = parseMxfile(store.get(WORKSPACE + '\\ai.drawio')).doc
+  ok(moving.nodes[0].x === 200 && moving.nodes[0].y === 100, 'move x/y 绝对定位：200,100')
+
+  // 独立线：两端都是自由点，之后还能用 move 整体平移它
+  await apply([{ op: 'addNode', label: '乙' }, { op: 'addEdge', fromPoint: { x: 0, y: 0 }, toPoint: { x: 100, y: 0 } }], { path: 'ai.drawio' })
+  moving = parseMxfile(store.get(WORKSPACE + '\\ai.drawio')).doc
+  const free = moving.edges.filter((e) => e.sourcePoint !== undefined)[0]
+  ok(free !== undefined && free.from === undefined && free.to === undefined, '独立线：两端都是自由点，不接任何节点')
+  await apply([{ op: 'move', id: free.id, dx: 15, dy: 5 }], { path: 'ai.drawio' })
+  moving = parseMxfile(store.get(WORKSPACE + '\\ai.drawio')).doc
+  const movedFree = moving.edges.filter((e) => e.id === free.id)[0]
+  ok(movedFree.sourcePoint.x === 15 && movedFree.targetPoint.y === 5, 'move 平移独立线自己的几何：' + JSON.stringify([movedFree.sourcePoint, movedFree.targetPoint]))
+
+  // 错误也要说清楚（都是"写盘之前"失败）
+  let moveErr = null
+  try {
+    await apply([{ op: 'move', id: 'n1' }], { path: 'ai.drawio' })
+  } catch (error) {
+    moveErr = error && error.message ? error.message : String(error)
+  }
+  ok(moveErr !== null && moveErr.indexOf('dx') >= 0, 'move 不给位移参数时明确报错：' + String(moveErr).slice(0, 70))
+  let edgeMoveErr = null
+  try {
+    await apply([{ op: 'move', id: movedFree.id, x: 5 }], { path: 'ai.drawio' })
+  } catch (error) {
+    edgeMoveErr = error && error.message ? error.message : String(error)
+  }
+  ok(edgeMoveErr !== null && edgeMoveErr.indexOf('dx') >= 0, '连线只能用 dx/dy 平移（绝对坐标没有意义）：' + String(edgeMoveErr).slice(0, 70))
+
+  // ③ highlight：只请求高亮 → **不写盘**（尤其不能顺手重排），并挂在下次 read 上一次性取走
+  const beforeText = store.get(WORKSPACE + '\\ai.drawio')
+  const beforeRevision = contentHash(beforeText)
+  const highlighted = await applyTool.execute({ path: 'ai.drawio', ops: [{ op: 'highlight', ids: ['n1', 'n2'] }] }, exec)
+  ok(highlighted.revision === beforeRevision, 'highlight-only 调用没有改文件（revision 不变）：' + highlighted.revision + ' vs ' + beforeRevision)
+  ok(store.get(WORKSPACE + '\\ai.drawio') === beforeText, 'highlight-only 调用逐字节没动文件')
+  ok(highlighted.layout === 'none', '也没顺手重排（layout 强制 none）')
+  const read2 = await readTool.execute({ path: 'ai.drawio' }, exec)
+  ok(Array.isArray(read2.highlight) && read2.highlight.join(',') === 'n1,n2', '高亮挂在下次 read 上：' + JSON.stringify(read2.highlight))
+  const read3 = await readTool.execute({ path: 'ai.drawio' }, exec)
+  ok(Array.isArray(read3.highlight) && read3.highlight.length === 0, '取走即清（第二次 read 没有高亮）')
+
+  // ④ 撤销 AI 改动：read 里能看到 canRevert，revert 后文件回到上一版（只一层）
+  const stage1 = store.get(WORKSPACE + '\\ai.drawio')
+  await apply([{ op: 'setLabel', id: 'n1', label: '改过的甲' }], { path: 'ai.drawio' })
+  const stage2 = store.get(WORKSPACE + '\\ai.drawio')
+  ok(stage1 !== stage2, 'AI 改动前后文件确实不同')
+  const readCan = await readTool.execute({ path: 'ai.drawio' }, exec)
+  ok(readCan.canRevert === true, 'read 里带 canRevert=true')
+  const reverted = await api({ action: 'revert', sessionId: 's1', path: 'ai.drawio' })
+  const stage1Revision = parseMxfile(stage1).doc.revision
+  ok(reverted.payload.ok === true && reverted.payload.revision === stage1Revision, 'revert 端点把文件写回上一版：' + String(reverted.payload.revision))
+  ok(store.get(WORKSPACE + '\\ai.drawio') === stage1, 'revert 之后逐字节等于改动前')
+  const readAfter = await readTool.execute({ path: 'ai.drawio' }, exec)
+  ok(readAfter.canRevert === false, '退回之后 canRevert 变回 false（只有一层）')
+  const again = await api({ action: 'revert', sessionId: 's1', path: 'ai.drawio' })
+  ok(again.payload.ok === false && typeof again.payload.error === 'string', '没有可退回的改动时明确说一句：' + String(again.payload.error))
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

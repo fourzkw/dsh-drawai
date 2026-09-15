@@ -161,7 +161,7 @@ console.log('\n[4] 内嵌技能：换了电脑、只装了插件时模型怎么�
   check('技能带 content（正文就是它）', typeof skill.content === 'string', typeof skill.content)
   const body = typeof skill.content === 'string' ? skill.content : ''
   check('正文够长（是一份说明，不是一行）', body.length > 1500, body.length + ' 字符')
-  for (const needle of ['.drawio', 'diagram_read', 'diagram_apply', 'addNode', 'addEdge', 'setStyle', 'remove', 'layout', 'pinned', 'from === to', '无损', '别直接改']) {
+  for (const needle of ['.drawio', 'diagram_read', 'diagram_apply', 'addNode', 'addEdge', 'setStyle', 'remove', 'move', 'highlight', 'fromPoint', 'canRevert', 'layout', 'pinned', 'from === to', '无损', '别直接改']) {
     check('正文讲了 ' + needle, body.indexOf(needle) >= 0)
   }
   check('注册走的是 Cordis effect（能被卸载）', disposed === 0 && skills.length === 1, 'disposer 还没被调用')
