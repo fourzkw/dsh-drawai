@@ -933,5 +933,44 @@ console.log('\ndrawio 的独立边标签单元：读出来、画在 mxGraph 算�
   void cloned
 }
 
+console.log('\n悬空端：能拖回来、也能拖出去（预览与落盘同一套）')
+{
+  // 一端悬空的边：`to` 不写，只有 `targetPoint`（drawio 的规则：自由点只在那一端没有真实顶点时生效）。
+  const doc = {
+    version: 2,
+    revision: '',
+    nodes: [{ id: 'a', x: 0, y: 0, w: 160, h: 60 }],
+    edges: [{ id: 'e1', from: 'a', targetPoint: { x: 500, y: 300 }, style: DEFAULT_EDGE_STYLE }],
+  }
+  const geometry = internals.buildGeometry(doc)
+  // 拖**悬空**那一端回到某个节点附近：预览必须算得出来（之前 byId 查不到就直接 return null）
+  const doc2 = {
+    version: 2,
+    revision: '',
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 160, h: 60 },
+      { id: 'b', x: 400, y: 200, w: 160, h: 60 },
+    ],
+    edges: [{ id: 'e1', from: 'a', targetPoint: { x: 500, y: 300 }, style: DEFAULT_EDGE_STYLE }],
+  }
+  const geometry2 = internals.buildGeometry(doc2)
+  const toNode = internals.edgePreviewRoute(doc2, geometry2, doc2.edges[0], 'to', { x: 480, y: 230 }, internals.HOT_PAD)
+  ok(toNode !== null && toNode.hot !== null && toNode.hot.id === 'b', '拖悬空端到节点上：预览命中该节点：' + JSON.stringify(toNode === null ? null : toNode.hot))
+  ok(toNode !== null && Array.isArray(toNode.points) && toNode.points.length >= 2, '预览有折线（不是 null）')
+  const toEmpty = internals.edgePreviewRoute(doc2, geometry2, doc2.edges[0], 'to', { x: 700, y: 600 }, internals.HOT_PAD)
+  ok(toEmpty !== null && toEmpty.hot === null, '拖到空白处：预览仍然给出折线、hot 为 null（松手就变成悬空端）')
+  // 拖**连着节点**的那一端出去（kind='from'）：固定端是悬空端，也要算得出来
+  const fromOut = internals.edgePreviewRoute(doc2, geometry2, doc2.edges[0], 'from', { x: -200, y: -100 }, internals.HOT_PAD)
+  ok(fromOut !== null, '拖连着节点的那一端出去时也有预览（固定端是悬空端）')
+  void geometry
+
+  // 源码接线：松手落空 → 建悬空边；端点落空 → 脱离形状
+  const src = composeClientBody()
+  ok(/function finishDanglingEdge\(point\)/.test(src), '有 finishDanglingEdge（落在空白处建悬空边）')
+  ok(/next\.edges\.push\(\{ id: 'e' \+ \(max \+ 1\), from: link\.from, targetPoint:/.test(src), '建出来的边写的是 targetPoint（没有 to）')
+  ok(/delete e\.to\n            e\.targetPoint =/.test(src) || /delete e\.to/.test(src), '端点拖到空处会删掉那一端的顶点、只留自由点')
+  ok(/这一端已脱离形状/.test(src), '落空时有状态提示（不然用户以为没反应）')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

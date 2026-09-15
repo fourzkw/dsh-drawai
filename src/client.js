@@ -1786,11 +1786,13 @@ function routePreviewFor(doc, geometry, cursor, fromId, fromGeo, seed, padding, 
  * 指针滑回它身上时不该高亮它 —— 松手后那条边等于原地不动，把它标成"落点"是在骗人。
  */
 function edgePreviewRoute(doc, geometry, edge, kind, cursor, padding) {
-  const fromBox = geometry.byId[edge.from]
-  const toBox = geometry.byId[edge.to]
-  if (fromBox === undefined || toBox === undefined) return null
-  const fixedId = kind === 'from' ? edge.to : edge.from
-  const hot = hitNodeAt(doc, geometry, cursor.x, cursor.y, padding, fixedId)
+  // 两端都用 endpointBoxOf 解析：**悬空端**是零尺寸盒（自由点），不是 geometry.byId 里的节点。
+  // 之前直接查 byId，于是悬空端既没有预览、也拖不回来（"拖到空处变悬空"没法反向操作）。
+  const fromBox = endpointBoxOf(geometry.byId, edge, 'source')
+  const toBox = endpointBoxOf(geometry.byId, edge, 'target')
+  if (fromBox === null || toBox === null) return null
+  const fixedId = kind === 'from' ? (typeof edge.to === 'string' ? edge.to : null) : typeof edge.from === 'string' ? edge.from : null
+  const hot = hitNodeAt(doc, geometry, cursor.x, cursor.y, padding, fixedId === null ? undefined : fixedId)
 
   // 两个端点各自的盒：固定端来自文档，被拖端是指针所在处。
   const fixedBox = kind === 'from' ? toBox : fromBox
@@ -3398,6 +3400,32 @@ function CanvasView(props) {
   }
 
   /**
+   * 拖线落在**空白处**：建一条一端悬空的边（drawio 里拖到空白就是画一条"还没接上"的线）。
+   *
+   * 文档里那一端不写 `to`，只写 `targetPoint` —— 与 drawio 一致：
+   * `sourcePoint`/`targetPoint` 只在该端**没有**真实顶点时才生效。
+   */
+  function finishDanglingEdge(point) {
+    const link = linkRef.current
+    const current = docRef.current
+    clearConnect()
+    if (link === null || current === null || point === null) return
+    if (nodeById(link.from) === null) return
+    let style = DEFAULT_EDGE_STYLE
+    if (typeof link.side === 'string' && link.side.length > 0) style = styleWithSide(style, 'source', link.side)
+    applyLocal((next) => {
+      let max = 0
+      const re = /^e(\d+)$/
+      for (let i = 0; i < next.edges.length; i += 1) {
+        const m = re.exec(String(next.edges[i].id))
+        if (m !== null && parseInt(m[1], 10) > max) max = parseInt(m[1], 10)
+      }
+      next.edges.push({ id: 'e' + (max + 1), from: link.from, targetPoint: { x: point.x, y: point.y }, style: style })
+    })
+    setSaveNote('连出一条悬空端：把它的端点拖到节点上就接上了')
+  }
+
+  /**
    * 开始一次可能的平移。button 记在 ref 里：松手时只有**左键**的空拖才算"点击空白"
    * （中键平移不应该顺手把选中也清掉）。
    *
@@ -3606,7 +3634,13 @@ function CanvasView(props) {
     if (linkRef.current !== null) {
       const fallback = dropTargetOf(null, connectPreviewRef.current)
       if (fallback !== null) onNodePointerUp(fallback)
-      else clearConnect()
+      else {
+        // 落在空白处：把这一端留成**悬空端**（drawio 里拖到空白就是画一条"还没接上"的线）。
+        // 目标端点用松手时的指针位置（吸附到半格）—— 与折点同一套单位。
+        const at = event === null || event === undefined ? null : toUserSpace(event)
+        const target = at === null ? connectTo : at
+        finishDanglingEdge(target === null ? null : { x: snap(target.x, EDGE_GRID), y: snap(target.y, EDGE_GRID) })
+      }
     }
     // 收尾清理：让"一条线段只有一个把手"这个不变量在每次手势后都重新成立。
     if (geometryChanged) pruneAllEdges()
@@ -4041,15 +4075,46 @@ function CanvasView(props) {
     if (event === null || event === undefined) return
     // 改接端点同理：落在容差里也算连上（预览已经把目标高亮了）。
     const targetId = dropTargetOf(nodeIdAtPoint(event.clientX, event.clientY), edgePreviewRef.current)
-    if (targetId === null) return
     const current = docRef.current
     if (current === null) return
-    const movedNode = nodeById(targetId)
     const dragged = edgeById(drag.edgeId)
-    if (movedNode === null || dragged === null) return
+    if (dragged === null) return
+
+    // ── 松手落在空白处：这一端**脱离形状**，变成悬空端（drawio 里也是这么做的）──
+    // 文档里就用 sourcePoint/targetPoint 表示：那一端没有真实顶点时它才生效。
+    if (targetId === null) {
+      const at = toUserSpace(event)
+      if (at === null) return
+      const free = { x: snap(at.x, EDGE_GRID), y: snap(at.y, EDGE_GRID) }
+      applyLocal((next) => {
+        for (let i = 0; i < next.edges.length; i += 1) {
+          const e = next.edges[i]
+          if (e.id !== drag.edgeId) continue
+          if (drag.kind === 'from') {
+            delete e.from
+            e.sourcePoint = { x: free.x, y: free.y }
+            e.style = styleWithSide(typeof e.style === 'string' ? e.style : DEFAULT_EDGE_STYLE, 'source', null)
+          } else {
+            delete e.to
+            e.targetPoint = { x: free.x, y: free.y }
+            e.style = styleWithSide(typeof e.style === 'string' ? e.style : DEFAULT_EDGE_STYLE, 'target', null)
+          }
+          break
+        }
+      })
+      setSaveNote('这一端已脱离形状（悬空端）；再拖回去就能重新连上')
+      return
+    }
+
+    const movedNode = nodeById(targetId)
+    if (movedNode === null) return
     const fixedNode = nodeById(drag.kind === 'from' ? dragged.to : dragged.from)
-    if (fixedNode === null) return
-    const fixedBox = { id: fixedNode.id, geo: nodeGeoOf(fixedNode) }
+    // 固定端也可能是悬空端（另一端拖回来时）：它的坐标从自由点来，不再是节点。
+    const fixedBox =
+      fixedNode !== null
+        ? { id: fixedNode.id, geo: nodeGeoOf(fixedNode) }
+        : endpointBoxOf(buildGeometry(current).byId, dragged, drag.kind === 'from' ? 'target' : 'source')
+    if (fixedBox === null) return
     const fixedEnd = drag.kind === 'from' ? 'target' : 'source'
     // 固定端保持文档里既有的约束（没有约束就继续不钉）—— 与预览用同一个读法。
     const fixedSide = pinnedSideOf(dragged, fixedEnd)

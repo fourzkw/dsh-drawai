@@ -1064,14 +1064,17 @@ export function apply(ctx) {
           shape: nodeShapeFromStyle(style),
           style: style,
         })
-      }      const edges = []
+      }
+      const edges = []
       for (let i = 0; i < doc.edges.length; i += 1) {
         const e = doc.edges[i]
         const style = typeof e.style === 'string' ? e.style : DEFAULT_EDGE_STYLE
         const item = {
           id: String(e.id),
-          from: String(e.from),
-          to: String(e.to),
+          // 悬空端的这一端**没有真实顶点**：如实报空串，并把自由点一起给出
+          // （报成 String(undefined) 会让模型以为那里真有个叫 "undefined" 的节点）。
+          from: typeof e.from === 'string' ? e.from : '',
+          to: typeof e.to === 'string' ? e.to : '',
           style: style,
           dash: dashFromStyle(style),
           arrow: arrowFromStyle(style),
