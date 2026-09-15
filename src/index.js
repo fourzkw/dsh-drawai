@@ -780,6 +780,10 @@ const SKILL_BODY = `# DrawAI 画布：怎么读、怎么改
 不传 path 时，优先改**用户当前打开的那张画布**（客户端上报的聚焦路径），最后才退回 demo.drawio。
 用户说"这张图"时通常不用传 path。改完可以再 read 一次自查。
 
+**当前是哪一张，有两个来源**：用户在画布面板里切换标签页时，宿主会把"当前画布 = <路径>"
+**注入到会话里**（你会看到一条 plugin 来源的上下文）；不放心时也不带 path 调一次
+diagram_read —— 返回里的 path 就是它（这两条是一致的，同一个记录）。
+
 revision 是乐观锁：写回时若文件已被别处改过（比如用户同时在 drawio 里编辑），会返回 409 —— 重读一次再改。
 
 ## ops 速查
@@ -1051,9 +1055,16 @@ export function apply(ctx) {
       '读回工作区里的 DrawAI 画布（.drawio，就是 drawio 自己的 mxfile 格式）：节点 id/标签/形状/style 键，边 id/起点/终点/标签/画法/折点。做任何修改前先用它确认当前图。' +
       '文档存的是 drawio 的 style 键（dashed/dashPattern/edgeStyle/jettySize/libavoidRouting/exitX…/endArrow/strokeColor/shape=…），默认值省略；' +
       '返回体的 shape/dash/arrow/color/exit/entry 是**从 style 串推导出来的便于阅读的名字**，改图请改 style 或对应 op 参数；' +
-      'notes 是这个文件里画布表示不了、但会原样保留的东西（多页、图层、分组层级、图片…）。',
+      'notes 是这个文件里画布表示不了、但会原样保留的东西（多页、图层、分组层级、图片…）。' +
+      '不传 path 时读的是**用户当前打开的那张画布**（返回里的 path 就是它）。',
     parameters: {
-      path: { type: 'string', description: '工作区相对路径或绝对路径，默认 ' + DEFAULT_PATH },
+      path: {
+        type: 'string',
+        description:
+          '工作区相对路径或绝对路径。**不传 = 用户当前打开的那张画布**（没打开任何画布时才退回 ' +
+          DEFAULT_PATH +
+          '）—— 想知道用户在看哪张，直接不传 path 调一次，返回里的 path 就是它。',
+      },
     },
     output: {
       schema: {
@@ -1224,9 +1235,16 @@ export function apply(ctx) {
       'style 既可以是调色板名（plain/blue/green/orange/yellow/red/purple/grey），也可以直接是一段 style 串；keys 用来写任意 drawio 键（值给 null = 删键回默认）。' +
       'setStyle 的 id 可以是节点也可以是连线：节点用 shape/style/keys/w/h，连线用 dash（solid|dashed|dotted）、arrow（end 单向|both 双向|none 无箭头|start 反向）、color、exit/entry（n|e|s|w 进出侧）、jettySize（引出段长度，数字或 auto）、edgeStyle（orthogonalEdgeStyle|none）、avoid（是否参与避让路由）、clearPoints（清掉折点）。' +
       '文档若带 meta.pinned（人手工摆过位置），不加 layout 就不会重排；显式重排会清掉端点已移动的那些边上的过期折点。' +
-      '边引用了不存在的节点会直接报错，且失败发生在写盘之前。自环写成 from === to（与 drawio 一致）；自动布局会忽略自环，只摆节点。',
+      '边引用了不存在的节点会直接报错，且失败发生在写盘之前。自环写成 from === to（与 drawio 一致）；自动布局会忽略自环，只摆节点。' +
+      '不传 path 时改的是**用户当前打开的那张画布**（没打开才退回 ' + DEFAULT_PATH + '）—— 用户说"这张图"时不用传 path。',
     parameters: {
-      path: { type: 'string', description: '工作区相对路径或绝对路径，默认 ' + DEFAULT_PATH },
+      path: {
+        type: 'string',
+        description:
+          '工作区相对路径或绝对路径。**不传 = 用户当前打开的那张画布**（没打开任何画布时才退回 ' +
+          DEFAULT_PATH +
+          '）—— 想知道用户在看哪张，直接不传 path 调一次，返回里的 path 就是它。',
+      },
       ops: {
         type: 'array',
         required: true,
@@ -1352,10 +1370,51 @@ function sanitizeNewName(raw) {
    * 只存路径、不读内容：画布内容始终以文件为唯一真相源，这里记的只是"在看哪一张"。
    */
   const focusedCanvas = new Map()
+  /** 每个会话最近**注入过**的聚焦路径（同一张不重复打扰模型）。 */
+  const injectedCanvas = new Map()
 
   function focusedPathFor(sessionId) {
     if (typeof sessionId !== 'string' || sessionId.length === 0) return undefined
     return focusedCanvas.get(sessionId)
+  }
+
+  /**
+   * 用户切换画布时，把"当前打开的是哪一张"**注入**到那个会话（Agent 的 model-facing context）。
+   *
+   * 为什么值得主动说一句：工具不传 path 时本来就落到"用户当前打开的那张"，
+   * 但模型在此之前**只能靠先调一次 diagram_read、看返回里的 path** 才知道是哪张 ——
+   * 用户问"我现在看的是哪张图""在这张图上加个节点"时，它得先探一次才敢动。
+   * 注入之后，模型在下一步就能直接看到，不用探。
+   *
+   * `agents` 是**可选**服务（走 ctx.get）：没有它的部署、或注入形状对不上老版本时，
+   * 都只是少了这条提示 —— 工具那条回退链（显式 path > 聚焦画布 > DEFAULT_PATH）仍然是兜底。
+   */
+  function notifyFocusedCanvas(sessionId, path) {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) return
+    const agents = typeof ctx.get === 'function' ? ctx.get('agents') : undefined
+    if (agents === undefined || agents === null || typeof agents.get !== 'function') return
+    let agent
+    try {
+      agent = agents.get(sessionId)
+    } catch (error) {
+      return
+    }
+    if (agent === undefined || agent === null || typeof agent.inject !== 'function') return
+    // 只记"注入过哪一张"，同一张反复报（客户端每次挂载都会报一次）就不再打扰模型。
+    if (injectedCanvas.get(sessionId) === path) return
+    injectedCanvas.set(sessionId, path)
+    const text =
+      path.length > 0
+        ? 'DrawAI 画布：用户现在打开的是 ' + path + '。diagram_read / diagram_apply 不传 path 时默认就操作这一张。'
+        : 'DrawAI 画布：用户关掉了画布（此刻没有打开任何一张）。不传 path 时工具会退回 ' + DEFAULT_PATH + '。'
+    try {
+      // 形状照 @deepseek-ai/dsh-llm 的 UserMessage：role + content + source。
+      // source 用 `{ kind: 'plugin', plugin: <本插件名> }`（与第一方 dsh-agent-instructions 同款）；
+      // 不带 form —— 它只是个"环境事实"，不是 instructions/catalog 那几类。
+      agent.inject({ role: 'user', content: [{ type: 'text', text: text }], source: { kind: 'plugin', plugin: name } })
+    } catch (error) {
+      // 注入失败不该影响画布本身：工具那条回退链还在。
+    }
   }
 
   /**
@@ -1561,9 +1620,11 @@ function sanitizeNewName(raw) {
         return
       }
       const raw = typeof body.path === 'string' ? body.path : ''
+      const before = focusedCanvas.get(sessionId)
       // 空路径 = 清掉聚焦（画布未绑定文件时）
       if (raw.length === 0) {
         focusedCanvas.delete(sessionId)
+        if (before !== undefined) notifyFocusedCanvas(sessionId, '')
         sendJson(res, 200, { ok: true, focused: null })
         return
       }
@@ -1585,6 +1646,7 @@ function sanitizeNewName(raw) {
         return
       }
       focusedCanvas.set(sessionId, raw)
+      if (before !== raw) notifyFocusedCanvas(sessionId, raw)
       sendJson(res, 200, { ok: true, focused: raw })
       return
     }

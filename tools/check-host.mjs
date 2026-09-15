@@ -715,5 +715,60 @@ console.log('\n写回路由：list / read / save / create 都只认 .drawio')
   ok(focus.payload.ok === true && focus.payload.focused === 'flow.drawio', 'focus 记下当前画布')
 }
 
+console.log('\n切换画布 → 主动告诉模型"当前是哪一张"（Agent.inject）')
+{
+  // 工具不传 path 时本来就落到"用户当前打开的那张"，但模型此前**只能先探一次**（调一次
+  // diagram_read 看返回里的 path）才知道是哪张。这里验证：切画布时宿主往那个会话注入一条
+  // 环境事实，于是模型下一步直接看得到。
+  //
+  // 这一节用**第二个实例**（自己的 ctx）来测：注入要 agents 服务，而主 ctx 故意没有它 ——
+  // 那正好也是"没装 agents 的部署照常能用"的验证（主 ctx 那一节已经跑过了）。
+  const injected = []
+  const ctx2 = Object.assign({}, ctx, {
+    get(name) {
+      if (name !== 'agents') return undefined
+      return {
+        get(id) {
+          if (id !== 's1') return undefined
+          return {
+            inject(message) {
+              injected.push(message)
+            },
+          }
+        },
+      }
+    },
+  })
+  mod.apply(ctx2)
+  const route2 = routes[routes.length - 1]
+  const api2 = async (bodyObject) => {
+    const res = fakeRes()
+    await route2.handler(fakeReq(bodyObject), res)
+    return JSON.parse(res.body)
+  }
+
+  const first = await api2({ action: 'focus', sessionId: 's1', path: 'flow.drawio' })
+  ok(first.ok === true && first.focused === 'flow.drawio', '第二个实例照常记下聚焦画布')
+  ok(injected.length === 1, '切到一张画布时注入了一条上下文（实际 ' + injected.length + '）')
+  const message = injected[0] === undefined ? {} : injected[0]
+  const text = message.content !== undefined && message.content[0] !== undefined ? message.content[0].text : ''
+  ok(
+    message.role === 'user' && message.source !== undefined && message.source.kind === 'plugin' && message.source.plugin === 'drawai',
+    '注入形状 = user + plugin source：' + JSON.stringify(message.source),
+  )
+  ok(text.indexOf('flow.drawio') >= 0 && text.indexOf('不传 path') >= 0, '点名了当前画布并说明不传 path 的默认行为：' + text)
+
+  // 客户端每次挂载都会报一次同一张：不能每次都去打扰模型
+  await api2({ action: 'focus', sessionId: 's1', path: 'flow.drawio' })
+  ok(injected.length === 1, '同一张重复上报不再注入')
+  await api2({ action: 'focus', sessionId: 's1', path: 'other.drawio' })
+  ok(injected.length === 2 && injected[1].content[0].text.indexOf('other.drawio') >= 0, '换一张才再注入一次')
+  await api2({ action: 'focus', sessionId: 's1', path: '' })
+  ok(injected.length === 3 && injected[2].content[0].text.indexOf('关掉') >= 0, '画布关掉时也说一声（否则模型还以为是那张）')
+  // 会话对不上（agent 还没起来）时不能炸，也不能乱注入
+  const stranger = await api2({ action: 'focus', sessionId: 's1', path: 'flow.drawio' })
+  ok(stranger.ok === true && injected.length === 4, '切回原来那张会再注入一次（路径确实变了）')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1
