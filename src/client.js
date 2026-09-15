@@ -727,9 +727,11 @@ function borderPointToward(geo, target) {
  * `axis` 是"进来时的方向"：上一段是横的就先横后竖，是竖的就先竖后横。
  *
  * 两条 L 的曼哈顿长度永远是同一个数（|dx|+|dy|），差别只在**先走哪一轴**，
- * 而这一顺序决定了会不会先往反方向折返 —— 见下面的判据。
+ * 而这一顺序决定了会不会出现"原路折返"—— 见下面的判据。
+ *
+ * `next`（可选）是**这一步之后还要去的点**：用来看出另一头的折返。不传就少一条判据。
  */
-function connectOrtho(points, a, b, axis) {
+function connectOrtho(points, a, b, axis, next) {
   const sameX = Math.abs(a.x - b.x) < 0.5
   const sameY = Math.abs(a.y - b.y) < 0.5
   if (sameX && sameY) return axis
@@ -759,23 +761,48 @@ function connectOrtho(points, a, b, axis) {
   //
   // 这里相等时取"先横"，即 `<=`：平手时两种拐点对称，任选一个总长一样，
   // 但 x 方向先走完更符合"从西侧出来"的直觉（且与旧的 axis 行为在多数情况下一致）。
-  let useHorizontalFirst = Math.abs(b.x - a.x) <= Math.abs(b.y - a.y)
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const defaultH = Math.abs(dx) <= Math.abs(dy)
 
-  // 但上面那条只是"先走长的那一轴"，它**不知道我们从哪儿来**，于是会选出一条
-  // 原路折返的 L：横着走进 a 之后又横着往回走，等于把上一段重新描一遍。
-  // 真机截图那条就是这样来的：a=(380,445) 是从左边横着过来的，b=(336,260) 在左上方，
-  // 先横就得到"再往右走 44px"的回程，右下角于是出现两段重合的线。
-  //
-  // 判据只看**进来那一段的方向**：横着进来时若目标在反方向，就改走"先竖后横"
-  // （竖的那一步是新方向，绝不会压在上一段上）；竖着进来同理。
-  // 两个方向都不冲突、或没有上一段时，行为与原来完全一致。
+  // 但"先走长的那一轴"只知道 dx/dy 谁大，两点它都看不见：**我们从哪儿来**、**接下来去哪**。
+  // 于是它会挑出一条原路折返的 L —— 出去再回来，画面上就是两段重合的线（真机报过两次）。
+  // 两条 L 一样长，所以这里按"哪条的**重合段最短**"挑，完全平手才用上面的默认判据：
   const last = points.length > 0 ? points[points.length - 1] : null
   const before = points.length > 1 ? points[points.length - 2] : null
   const atLast = last !== null && Math.abs(last.x - a.x) < 0.5 && Math.abs(last.y - a.y) < 0.5
   const inHorizontal = atLast && before !== null && Math.abs(before.y - a.y) < 0.5 && Math.abs(before.x - a.x) > 0.5
   const inVertical = atLast && before !== null && Math.abs(before.x - a.x) < 0.5 && Math.abs(before.y - a.y) > 0.5
-  if (inHorizontal && (b.x - a.x) * (a.x - before.x) < 0) useHorizontalFirst = false
-  else if (inVertical && (b.y - a.y) * (a.y - before.y) < 0) useHorizontalFirst = true
+
+  /** 第一步压着**上一段**走回去的长度（先横先竖决定第一步走哪一轴）。 */
+  const firstOverlap = (horizontalFirst) => {
+    if (inHorizontal && horizontalFirst === true && dx * (a.x - before.x) < 0) {
+      return Math.min(Math.abs(dx), Math.abs(a.x - before.x))
+    }
+    if (inVertical && horizontalFirst === false && dy * (a.y - before.y) < 0) {
+      return Math.min(Math.abs(dy), Math.abs(a.y - before.y))
+    }
+    return 0
+  }
+  /** 到站方向被**下一段**立刻顶回来的长度：先横后竖时到站是竖的，先竖后横时到站是横的。
+   *  只有下一段是"直的"（同轴）时才必然折返 —— 不直的时候下一段自己会按 firstOverlap 避开。 */
+  const arrivalOverlap = (horizontalFirst) => {
+    if (next === null || next === undefined) return 0
+    const departH = Math.abs(next.y - b.y) < 0.5 && Math.abs(next.x - b.x) > 0.5
+    const departV = Math.abs(next.x - b.x) < 0.5 && Math.abs(next.y - b.y) > 0.5
+    if (horizontalFirst === true && departV && (next.y - b.y) * dy < 0) {
+      return Math.min(Math.abs(dy), Math.abs(next.y - b.y))
+    }
+    if (horizontalFirst === false && departH && (next.x - b.x) * dx < 0) {
+      return Math.min(Math.abs(dx), Math.abs(next.x - b.x))
+    }
+    return 0
+  }
+  // 用**长度**而不是"有没有"：两边都躲不开时，重合 24px 总好过 44px
+  // （真机那条正是如此：44px 的重合压在**用户折点**上，removeRetraces 不许动它，
+  //   而 24px 那条压在目标侧桩点上，顺手就被消干净了）。
+  const overlapOf = (horizontalFirst) => firstOverlap(horizontalFirst) + arrivalOverlap(horizontalFirst)
+  const useHorizontalFirst = overlapOf(!defaultH) < overlapOf(defaultH) ? !defaultH : defaultH
   if (useHorizontalFirst) {
     points.push({ x: b.x, y: a.y })
     points.push({ x: b.x, y: b.y })
@@ -883,11 +910,14 @@ function routeThroughWaypoints(fromBox, toBox, waypoints, obstacleBoxes, userWay
     const pts = [{ x: start.x, y: start.y }]
     let axis = axisToward(fromBox.geo, safe[0])
     let prev = start
+    // 最后的落点先算出来（它只取决于最后一个折点）：它也是最后一个折点的"下一站"，
+    // 传给 connectOrtho 用于判断"到站方向会不会被下一段顶回来"。
+    const end = borderPointToward(toBox.geo, safe[safe.length - 1])
     for (let i = 0; i < safe.length; i += 1) {
-      axis = connectOrtho(pts, prev, safe[i], axis)
+      const next = i + 1 < safe.length ? safe[i + 1] : end
+      axis = connectOrtho(pts, prev, safe[i], axis, next)
       prev = safe[i]
     }
-    const end = borderPointToward(toBox.geo, prev)
     // 落点在左右边 → 最后一段要横着进 → 先竖后横，所以传 'v'；上下边反之。
     const approach = end.side === 'e' || end.side === 'w' ? 'v' : 'h'
     connectOrtho(pts, prev, end, approach)
@@ -1045,7 +1075,8 @@ function selfLoopPath(geo, sourceSide, targetSide, jetty, waypoints) {
     let prev = s
     let axis = axisToward(geo, chain[0])
     for (let i = 0; i < chain.length; i += 1) {
-      axis = connectOrtho(pts, prev, chain[i], axis)
+      const next = i + 1 < chain.length ? chain[i + 1] : t
+      axis = connectOrtho(pts, prev, chain[i], axis, next)
       prev = chain[i]
     }
     connectOrtho(pts, prev, t, axis)

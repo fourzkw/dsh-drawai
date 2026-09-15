@@ -627,6 +627,39 @@ console.log('\n折返（头发夹）：出去又原路描回来的线不能画�
   // 判据本身要能认出坏的那条（否则上面那条"零折返"是假绿）：
   const before = [{ x: 75, y: 340 }, { x: 75, y: 445 }, { x: 380, y: 445 }, { x: 336, y: 445 }, { x: 336, y: 260 }, { x: 360, y: 260 }]
   ok(folds(before) === 1, '同一判据在旧走线上认出 1 段折返（出去又回来）')
+
+  // 第二条真机截图（图一 → 图二）：**出口与入口都在东侧**，折点在目标东侧桩点更右边。
+  // 把下方节点往左拖，原来会在"先横到站"与"先竖到站"之间翻面：
+  // 翻成"先横到站"就是"往右到折点、再原路往左回来"——折点是人摆的，removeRetraces 不许动它，
+  // 于是重合段留在画面上（两个段把手只隔 22px，右键菜单里看得出来）。
+  // 现在的选 L 会看**下一站**（connectOrtho 的 next），直接不选那条。
+  const box = (id, x, y) => ({ id: id, x: x, y: y, w: 130, h: 60 })
+  let style2 = styleWithSide(DEFAULT_EDGE_STYLE, 'source', 'e')
+  style2 = styleWithSide(style2, 'target', 'e')
+  const eastCase = (lowerX) => {
+    const nodes = [box('n3', lowerX, 100), box('n4', -100, -30)]
+    const e = { id: 'e1', from: 'n3', to: 'n4', points: [{ x: 215, y: 0 }], style: style2 }
+    return internals.edgeRoutePoints({ nodes: nodes, edges: [e] }, e)
+  }
+  const wantEast = [{ x: 50, y: 130 }, { x: 215, y: 130 }, { x: 215, y: 0 }, { x: 30, y: 0 }]
+  const gotEast = eastCase(-80)
+  const sameEast =
+    gotEast !== null &&
+    gotEast.length === wantEast.length &&
+    gotEast.every((p, i) => Math.abs(p.x - wantEast[i].x) < 0.51 && Math.abs(p.y - wantEast[i].y) < 0.51)
+  ok(sameEast, '出口/入口同在东侧 + 折点在外侧：先右到折点列、再上、再左进东侧（' + JSON.stringify(gotEast) + '）')
+
+  // 图一 → 图二 的那段拖动：全程零折返（这是用户真正看到的"拖动时冒出重合线段"）。
+  let swept = 0
+  let sweptFolds = 0
+  for (let x = -20; x >= -140; x -= 20) {
+    const pts = eastCase(x)
+    swept += 1
+    if (pts === null || folds(pts) > 0) sweptFolds += 1
+  }
+  ok(swept === 7 && sweptFolds === 0, '拖动下方节点全程零折返（' + swept + ' 个位置，折返 ' + sweptFolds + ' 个）')
+  // 折点是**人摆的**，仍然必须是路径顶点（线要让用户看见它经过那儿）
+  ok(gotEast !== null && gotEast.some((p) => Math.abs(p.x - 215) < 0.5 && Math.abs(p.y - 0) < 0.5), '折点 (215,0) 仍是路径顶点')
 }
 
 console.log('\n共线化简：必须保首尾（这里翻过两次车）')
