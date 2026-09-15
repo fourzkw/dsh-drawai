@@ -872,5 +872,66 @@ console.log('\n短线段也要有可拖的段把手（每段一个，不能因�
   ok(shortIdx.every((i) => pressed.indexOf('segment:' + i) >= 0), '短段的把手也在，并且能按下：' + JSON.stringify(shortIdx))
 }
 
+console.log('\ndrawio 的独立边标签单元：读出来、画在 mxGraph 算出的位置上')
+{
+  // 位置语义对着 mxGraphView.getPoint 核实过：x 是**沿边比例**（0=中点，±1=两端），
+  // y 是垂直偏移（px），offset 是残余偏移。
+  const straight = [{ x: 0, y: 0 }, { x: 200, y: 0 }] // 左→右的横线
+  const mid = internals.edgeLabelPointAt(straight, 0, 0, 0, 0)
+  ok(mid !== null && mid.x === 100 && mid.y === 0, 'x=0 → 落在边的中点：' + JSON.stringify(mid))
+  const atStart = internals.edgeLabelPointAt(straight, -1, 0, 0, 0)
+  ok(atStart !== null && atStart.x === 0, 'x=-1 → 源端：' + JSON.stringify(atStart))
+  const atEnd = internals.edgeLabelPointAt(straight, 1, 0, 0, 0)
+  ok(atEnd !== null && atEnd.x === 200, 'x=+1 → 目标端：' + JSON.stringify(atEnd))
+  const above = internals.edgeLabelPointAt(straight, 0, 10, 0, 0)
+  ok(above !== null && above.y === -10, 'y>0 在横线的上方（mxGraph 的约定）：' + JSON.stringify(above))
+  const shifted = internals.edgeLabelPointAt(straight, 0, 0, 7, -3)
+  ok(shifted !== null && shifted.x === 107 && shifted.y === -3, '残余偏移照加：' + JSON.stringify(shifted))
+  const vertical = [{ x: 0, y: 0 }, { x: 0, y: 100 }]
+  const onVertical = internals.edgeLabelPointAt(vertical, 0, 10, 0, 0)
+  ok(onVertical !== null && onVertical.x === 10 && onVertical.y === 50, '竖线（向下）时 y>0 在右侧：' + JSON.stringify(onVertical))
+  ok(internals.edgeLabelPointAt([{ x: 0, y: 0 }], 0, 0, 0, 0) === null, '路径不足两点 → null（调用方跳过）')
+
+  // 渲染：挂在边上的标签出现在算出来的位置；没挂边的按自己的坐标；空文字不画。
+  const doc = {
+    version: 2,
+    revision: '',
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 160, h: 60 },
+      { id: 'b', x: 400, y: 0, w: 160, h: 60 },
+    ],
+    edges: [{ id: 'e1', from: 'a', to: 'b', style: DEFAULT_EDGE_STYLE }],
+    labels: [
+      { id: 'L1', text: '挂在边上', edgeId: 'e1', x: 0, y: 0, offsetX: 0, offsetY: 0, relative: true, style: 'edgeLabel;' },
+      { id: 'L2', text: '游离的', edgeId: null, x: 700, y: 500, offsetX: 0, offsetY: 0, relative: true, style: 'edgeLabel;' },
+      { id: 'L3', text: '', edgeId: null, x: 900, y: 900, offsetX: 0, offsetY: 0, relative: true, style: 'edgeLabel;' },
+    ],
+  }
+  const tree = renderDiagram(doc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const texts = walk(tree, (n) => n.type === 'text' && typeof n.props.className === 'string' && n.props.className.indexOf('drawai-elabel') >= 0, [])
+  ok(texts.length === 2, '两个有文字的标签画出来了（空文字的不画）：' + texts.length)
+  const pts = internals.edgeRoutePoints(doc, doc.edges[0])
+  const expect = internals.edgeLabelPointAt(pts, 0, 0, 0, 0)
+  const onEdgeText = texts.filter((t) => t.children[0] === '挂在边上')[0]
+  // y 容差 1.6：文字比几何中心低 1px（视觉基线微调，与既有的边标签画法一致）。
+  ok(
+    onEdgeText !== undefined && Math.abs(onEdgeText.props.x - expect.x) < 0.6 && Math.abs(onEdgeText.props.y - expect.y) < 1.6,
+    '挂在边上的画在算出来的落点上：' + JSON.stringify(onEdgeText === undefined ? null : [onEdgeText.props.x, onEdgeText.props.y]),
+  )
+  const free = texts.filter((t) => t.children[0] === '游离的')[0]
+  ok(
+    free !== undefined && free.props.x === 700 && Math.abs(free.props.y - 500) < 1.6,
+    '没挂边的按它自己的坐标画：' + JSON.stringify(free === undefined ? null : [free.props.x, free.props.y]),
+  )
+
+  // **必须穿过归一化**：宿主读出来有 labels，客户端归一化时被抹掉 = 画布上什么都不显示
+  // （这条链路踩过：只在本地造 doc 的测试会漏掉它，所以这里走 docFromPayload）。
+  const viaPayload = internals.docFromPayload({ ok: true, exists: true, revision: '', notes: [], doc: doc })
+  ok(viaPayload.error === undefined && Array.isArray(viaPayload.doc.labels) && viaPayload.doc.labels.length === 3, 'labels 穿过归一化没丢：' + JSON.stringify(viaPayload.doc.labels === undefined ? null : viaPayload.doc.labels.length))
+  ok(viaPayload.doc.labels[0].edgeId === 'e1' && viaPayload.doc.labels[0].offsetX === 0, '穿过之后字段还在（edgeId / offsetX）')
+  const cloned = internals.cloneDocForTest ? null : null
+  void cloned
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

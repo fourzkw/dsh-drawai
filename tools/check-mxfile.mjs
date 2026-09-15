@@ -363,6 +363,22 @@ console.log('\n[6] 边标签单元（drawio 的 edgeLabel）不导入、不拥�
   const labelBlock = /<mxCell id="elabel1"[\s\S]*?<\/mxCell>/.exec(written)
   ok(labelBlock !== null && labelBlock[0].indexOf('relative="1" x="-30" y="10"') > 0, '它的几何没被动过（仍是相对坐标 -30,10）')
   ok(written.indexOf('<mxPoint as="offset" />') > 0, '几何里的 <mxPoint as="offset" /> 也原样保留')
+
+  // 现在**要读得出来**：挂在边上的按"沿边比例 + 垂直偏移 + 残余偏移"记下来，
+  // 没挂在边上的（从别处粘过来那种）按它自己的坐标记下来。
+  ok(Array.isArray(read.doc.labels) && read.doc.labels.length === 1, 'doc.labels 里读到 1 个标签单元（实际 ' + (Array.isArray(read.doc.labels) ? read.doc.labels.length : '-') + '）')
+  const one = read.doc.labels[0]
+  ok(one.id === 'elabel1' && one.text === 'Text', '文本与 id 读对了：' + JSON.stringify({ id: one.id, text: one.text }))
+  ok(one.edgeId === null, '它的 parent 是图层（不是边）→ edgeId 为 null（按自己的坐标显示）')
+  ok(one.relative === true && one.x === -30 && one.y === 10, '相对几何的三个量都读出来了：' + JSON.stringify([one.relative, one.x, one.y]))
+  ok(one.offsetX === 0 && one.offsetY === 0, '<mxPoint as="offset" /> 没有 x/y → 残余偏移 (0,0)')
+
+  // 挂在边上的那种（drawio 真正创建标签时的形态：parent = 边）
+  const onEdge = withLabel.replace('connectable="0" parent="1"', 'connectable="0" parent="e1"').replace('<mxPoint as="offset" />', '<mxPoint x="7" y="-3" as="offset" />')
+  const read2 = parseMxfile(onEdge)
+  ok(read2.doc.labels[0].edgeId === 'e1', 'parent 是边 → 关联到那条边（' + String(read2.doc.labels[0].edgeId) + '）')
+  ok(read2.doc.labels[0].offsetX === 7 && read2.doc.labels[0].offsetY === -3, '残余偏移读对了：' + JSON.stringify([read2.doc.labels[0].offsetX, read2.doc.labels[0].offsetY]))
+  ok(applyDocToMxfile(onEdge, read2.doc).text === onEdge, '这种形态同样：原样写回逐字节不变')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')

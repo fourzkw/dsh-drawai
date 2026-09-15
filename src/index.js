@@ -187,7 +187,7 @@ function emptyDoc() {
  */
 function normalizeDoc(raw) {
   const doc = normalizeDrawioDoc(raw)
-  return { version: doc.version, revision: doc.revision, meta: doc.meta, nodes: doc.nodes, edges: doc.edges }
+  return { version: doc.version, revision: doc.revision, meta: doc.meta, nodes: doc.nodes, edges: doc.edges, labels: doc.labels }
 }
 
 /** 节点位置快照，用于判断一次布局到底动没动端点。 */

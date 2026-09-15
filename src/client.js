@@ -1834,6 +1834,55 @@ function edgePreviewRoute(doc, geometry, edge, kind, cursor, padding) {
   }
 }
 
+/**
+ * drawio 独立边标签单元的落点 —— 与 `mxGraphView.getPoint` **同一套算法**。
+ *
+ * 相对几何的三个量各有含义（对着 drawio 源码核实过，不是猜的）：
+ *   · `x` ∈ [-1,1] 是**沿边的比例**：0 = 中点，-1 = 源端，+1 = 目标端
+ *     （源码里 `dist = (x/2 + 0.5) * 总长`）；
+ *   · `y` 是**垂直偏移**（px），正数在行进方向的左侧 —— 横线左→右时就是"线上方"；
+ *   · `offset`（`<mxPoint as="offset"/>`）是残余偏移，drawio 生成标签时用它把标签对准鼠标。
+ *
+ * 法线用 mxGraph 的约定：横/竖段上 `nx = dy/seg`、`ny = dx/seg`，
+ * 落点 `x = p.x + dx*factor + (nx*y + offsetX)`、`y = p.y + dy*factor - (ny*y - offsetY)`。
+ *
+ * @returns { x, y } 或 null（路径不可用时）
+ */
+function edgeLabelPointAt(pts, x, y, offsetX, offsetY) {
+  if (Array.isArray(pts) === false || pts.length < 2) return null
+  const segs = []
+  let total = 0
+  for (let i = 1; i < pts.length; i += 1) {
+    const len = Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y)
+    segs.push(len)
+    total += len
+  }
+  if (total <= 0) return null
+  const gx = (Number.isFinite(Number(x)) ? Number(x) : 0) / 2
+  let dist = Math.round((gx + 0.5) * total)
+  if (dist < 0) dist = 0
+  if (dist > total) dist = total
+  let acc = 0
+  let index = 0
+  while (index < segs.length - 1 && dist >= Math.round(acc + segs[index])) {
+    acc += segs[index]
+    index += 1
+  }
+  const seg = segs[index]
+  const factor = seg === 0 ? 0 : (dist - acc) / seg
+  const p0 = pts[index]
+  const pe = pts[index + 1]
+  if (p0 === undefined || pe === undefined) return null
+  const dx = pe.x - p0.x
+  const dy = pe.y - p0.y
+  const nx = seg === 0 ? 0 : dy / seg
+  const ny = seg === 0 ? 0 : dx / seg
+  const perp = Number.isFinite(Number(y)) ? Number(y) : 0
+  const ox = Number.isFinite(Number(offsetX)) ? Number(offsetX) : 0
+  const oy = Number.isFinite(Number(offsetY)) ? Number(offsetY) : 0
+  return { x: p0.x + dx * factor + (nx * perp + ox), y: p0.y + dy * factor - (ny * perp - oy) }
+}
+
 /** 边标签落在哪：最长那一段的中点（与渲染保持一致）。 */
 function edgeLabelPosition(pts) {
   if (pts === null || pts.length < 2) return null
@@ -1913,12 +1962,16 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
   }
   children.push(React.createElement('rect', bgProps))
 
+  /** 边的路径：独立边标签要按它算落点（与上面渲染用的是同一次路由结果）。 */
+  const edgePts = {}
+
   for (let i = 0; i < doc.edges.length; i += 1) {
     const edge = doc.edges[i]
     const from = endpointBoxOf(byId, edge, 'source')
     const to = endpointBoxOf(byId, edge, 'target')
     if (from === null || to === null) continue
     let pts = routeEdgeStyled(from, to, boxes, bounds, edge, edgeRouteHint(ui, edge))
+    edgePts[String(edge.id)] = pts
     // 安全网：路由若产出非有限坐标，退化成"中心直线"。
     // 宁可画得难看，也不要让边无声消失 —— 浏览器会静默丢弃 d="M NaN NaN" 的路径，
     // 这正是上面那个 box/geo 混用 bug 能藏这么久的原因。
@@ -2111,6 +2164,46 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
         )
       }
     }
+  }
+
+  // drawio 的**独立边标签单元**：只读显示（画布不改它们，保存时原样带回）。
+  // 位置按 mxGraphView.getPoint 那套算法算 —— 挂在边上的用"沿边比例 + 垂直偏移 + 残余偏移"，
+  // 没挂在边上的（从别处粘过来的那种）按它自己的坐标画。
+  const labels = Array.isArray(doc.labels) ? doc.labels : []
+  for (let i = 0; i < labels.length; i += 1) {
+    const item = labels[i]
+    const text = item === null || item === undefined || typeof item.text !== 'string' ? '' : item.text
+    if (text.length === 0) continue
+    let pos = null
+    if (typeof item.edgeId === 'string' && edgePts[item.edgeId] !== undefined) {
+      pos = edgeLabelPointAt(edgePts[item.edgeId], item.x, item.y, item.offsetX, item.offsetY)
+    } else if (Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y))) {
+      pos = { x: Number(item.x), y: Number(item.y) }
+    }
+    if (pos === null) continue
+    const size = styleNumber(item.style, 'fontSize', 10)
+    const color = styleGet(item.style, 'fontColor', null)
+    const fill = color !== null ? color : skin.text
+    const lw = textWidth(text, size) + 6
+    children.push(React.createElement('rect', { key: 'elabel-bg-' + i, x: pos.x - lw / 2, y: pos.y - 8, width: lw, height: 13, rx: 2, fill: skin.labelBg, opacity: 0.92 }))
+    children.push(
+      React.createElement(
+        'text',
+        {
+          key: 'elabel-' + i,
+          className: 'drawai-elabel',
+          x: pos.x,
+          y: pos.y + 1,
+          textAnchor: 'middle',
+          dominantBaseline: 'middle',
+          fontSize: size,
+          fontFamily: FONT,
+          fill: fill,
+          style: { fill: fill, fontFamily: FONT, fontSize: size + 'px', dominantBaseline: 'middle' },
+        },
+        text,
+      ),
+    )
   }
 
   for (let i = 0; i < boxes.length; i += 1) {
@@ -2410,7 +2503,7 @@ function docFromPayload(payload) {
   // **0 个节点不是错误** —— 空画布是完全合法的状态（刚「新建」出来就是这样，
   // 用户还要靠右键往里面加节点）。真正该报错的是"文件不是画布"。
   return {
-    doc: { version: doc.version, revision: typeof doc.revision === 'string' ? doc.revision : '', meta: doc.meta, nodes: nodes, edges: edges },
+    doc: { version: doc.version, revision: typeof doc.revision === 'string' ? doc.revision : '', meta: doc.meta, nodes: nodes, edges: edges, labels: doc.labels },
     notes: Array.isArray(payload.notes) ? payload.notes : [],
     absolute: typeof payload.absolute === 'string' ? payload.absolute : undefined,
   }
@@ -2527,7 +2620,8 @@ function pasteInto(doc, clip, offsetX, offsetY) {
     ids.push(copy.id)
   }
   return {
-    doc: { version: doc.version, revision: doc.revision, meta: doc.meta, nodes: nodes, edges: edges },
+    // labels 原样带上：独立边标签是只读的，粘贴节点/边不该把它们弄丢。
+    doc: { version: doc.version, revision: doc.revision, meta: doc.meta, nodes: nodes, edges: edges, labels: doc.labels },
     ids: ids,
   }
 }
@@ -2776,6 +2870,8 @@ function CanvasView(props) {
       version: source.version,
       revision: source.revision,
       meta: source.meta === undefined || source.meta === null ? source.meta : Object.assign({}, source.meta),
+      // 独立边标签是只读的：克隆时原样带上（撤销/重做不该把它们弄丢）。
+      labels: Array.isArray(source.labels) ? source.labels.map((l) => Object.assign({}, l)) : [],
       nodes: source.nodes.map((n) => Object.assign({}, n)),
       edges: source.edges.map((e) => {
         const copy = Object.assign({}, e)
@@ -5438,6 +5534,7 @@ exports.__routeInternals = {
   resizeViewFor: resizeViewFor,
   zoomViewAt: zoomViewAt,
   contentBounds: contentBounds,
+  edgeLabelPointAt: edgeLabelPointAt,
   openTabIn: openTabIn,
   tabLabelOf: tabLabelOf,
   edgeRoutePoints: edgeRoutePoints,

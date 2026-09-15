@@ -342,6 +342,13 @@ function scanCells(source, from, to) {
         const y = num(attr(found[1], 'y'))
         return x === undefined || y === undefined ? null : { x: x, y: y }
       }
+      // `<mxPoint as="offset"/>`：drawio 存"标签相对于那个点的残余偏移"用的。
+      // 没有 x/y 属性时按 (0,0) 处理。
+      const offsetMatch = /<mxPoint\b([^>]*?)as\s*=\s*"offset"[^>]*?\/>/.exec(geoInnerText)
+      const offset =
+        offsetMatch === null
+          ? { x: 0, y: 0 }
+          : { x: num(attr(offsetMatch[1], 'x')) === undefined ? 0 : num(attr(offsetMatch[1], 'x')), y: num(attr(offsetMatch[1], 'y')) === undefined ? 0 : num(attr(offsetMatch[1], 'y')) }
       geometry = {
         x: num(attr(geoAttrsText, 'x')),
         y: num(attr(geoAttrsText, 'y')),
@@ -351,6 +358,7 @@ function scanCells(source, from, to) {
         points: points,
         sourcePoint: terminal('sourcePoint'),
         targetPoint: terminal('targetPoint'),
+        offset: offset,
       }
       geo = {
         attrsStart: geoAttrsStart - absStart,
@@ -637,8 +645,36 @@ export function parseMxfile(text, options) {
   if (markupLabels > 0) notes.push(markupLabels + ' 个 HTML 标签按纯文本显示（改标签会写成纯文本）')
   if (dangling > 0) notes.push(dangling + ' 条边是悬空端（用 sourcePoint/targetPoint 保留）')
   if (kept > 0) notes.push(kept + ' 条边的两端都找不到落点：不显示，但原样保留在文件里')
-  if (labelCells > 0) {
-    notes.push(labelCells + ' 个边标签单元（drawio 的 edgeLabel）原样保留：画布只显示连线自身的标签，不动它们')
+
+  // drawio 的**独立边标签单元**：按它自己的几何画出来（只读 —— 画布不改它们，保存原样带回）。
+  // 位置语义与 `mxGraphView.getPoint` 一致：挂在边上的（parent 是那条边）用
+  // x = 沿边比例（0 中点、±1 两端）、y = 垂直偏移、offset = 残余偏移；
+  // 没挂在边上的（例如从别处粘过来、parent 是图层）就按它的绝对坐标显示。
+  const labels = []
+  for (const cell of info.cells) {
+    if (cell.vertex !== true || cell.labelCell !== true) continue
+    const parentCell = typeof cell.parent === 'string' ? info.byId.get(cell.parent) : undefined
+    const onEdge = parentCell !== undefined && parentCell.edge === true
+    const geo = cell.geometry === null ? {} : cell.geometry
+    const offset = geo.offset === undefined || geo.offset === null ? { x: 0, y: 0 } : geo.offset
+    labels.push({
+      id: String(cell.id),
+      text: labelFromValue(cell.label),
+      edgeId: onEdge ? String(cell.parent) : null,
+      x: geo.x === undefined ? 0 : geo.x,
+      y: geo.y === undefined ? 0 : geo.y,
+      offsetX: offset.x,
+      offsetY: offset.y,
+      relative: geo.relative === true,
+      style: cell.style === undefined ? '' : String(cell.style),
+    })
+  }
+  if (labels.length > 0) {
+    const onEdges = labels.filter((l) => l.edgeId !== null).length
+    notes.push(
+      labels.length + ' 个边标签单元（drawio 的 edgeLabel）按原样显示（只读，保存时原样保留）' +
+        (onEdges < labels.length ? '：其中 ' + (labels.length - onEdges) + ' 个没挂在任何边上，按它自己的坐标显示' : ''),
+    )
   }
 
   const existing = options !== undefined && options.existing !== undefined && options.existing !== null ? options.existing : null
@@ -656,6 +692,7 @@ export function parseMxfile(text, options) {
     meta: { pinned: pinned === true },
     nodes: nodes,
     edges: edges,
+    labels: labels,
   }
   if (existing !== null && existing.meta !== undefined && existing.meta !== null && existing.meta.pinned === true) {
     doc.meta.pinned = true
