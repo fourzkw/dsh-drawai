@@ -1483,6 +1483,41 @@ function buildGeometry(doc) {
 }
 
 /**
+ * 选区拖动的**统一位移**：整个选区用同一个 (dx, dy)，相对位置就完全不变。
+ *
+ * 吸附只做一次 —— 拿"抓起来的那个节点"当基准：它的落点吸到整格，其余成员跟着同一个位移
+ * （所以第二、第三个节点保持它们之间原有的错位，不会被各自吸到同一格上叠起来；
+ * 以前正是逐点各自 snap，实测"两个差 3px 的节点一拖就重合"）。
+ * 选区里没有节点时（只拖连线）按半格吸附 —— 与折点、自由端点同一套单位。
+ */
+function dragMoveOf(drag, point) {
+  const dx = point.x - drag.originX
+  const dy = point.y - drag.originY
+  const unit = drag.hasNodes === true ? GRID : EDGE_GRID
+  if (drag.ref === undefined || drag.ref === null) return { x: snapTo(dx, unit), y: snapTo(dy, unit) }
+  return { x: snapTo(drag.ref.x + dx, unit) - drag.ref.x, y: snapTo(drag.ref.y + dy, unit) - drag.ref.y }
+}
+
+/** 选中集合位移后的几何：节点坐标 + 连线自己的那部分几何（折点、自由端点）。
+ *
+ * 纯函数：组件只负责把它写回文档，自测可以直接断言"相对位置没变"。
+ */
+function draggedGeometry(drag, move) {
+  const nodes = drag.starts.map((s) => ({ id: s.id, x: s.x + move.x, y: s.y + move.y }))
+  const edges = []
+  for (let i = 0; i < drag.edgeStarts.length; i += 1) {
+    const e = drag.edgeStarts[i]
+    edges.push({
+      id: e.id,
+      points: e.points === null || e.points === undefined ? null : e.points.map((p) => ({ x: p.x + move.x, y: p.y + move.y })),
+      sourcePoint: e.sourcePoint === null || e.sourcePoint === undefined ? null : { x: e.sourcePoint.x + move.x, y: e.sourcePoint.y + move.y },
+      targetPoint: e.targetPoint === null || e.targetPoint === undefined ? null : { x: e.targetPoint.x + move.x, y: e.targetPoint.y + move.y },
+    })
+  }
+  return { nodes: nodes, edges: edges }
+}
+
+/**
  * 框选命中：与矩形相交的**节点** + 与矩形相交的**连线**。
  *
  * 连线按**段**判定（不是拿整条边的外接矩形去比）：我们的路径每段都是横/竖的，
@@ -2419,7 +2454,9 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     const edgeFace = (extra) => {
       const props = Object.assign({}, extra)
       if (ui !== undefined && ui !== null) {
-        if (typeof ui.onSelectEdge === 'function') props.onPointerDown = (event) => ui.onSelectEdge(edge.id, event)
+        // 按在线段上：选中它（或保留整组）并准备整体拖动；没有 onEdgePointerDown 时退回"只选中"。
+        if (typeof ui.onEdgePointerDown === 'function') props.onPointerDown = (event) => ui.onEdgePointerDown(edge.id, event)
+        else if (typeof ui.onSelectEdge === 'function') props.onPointerDown = (event) => ui.onSelectEdge(edge.id, event)
         if (typeof ui.onEdgeDoubleClick === 'function') props.onDoubleClick = (event) => ui.onEdgeDoubleClick(edge.id, event)
         if (typeof ui.onEdgeContextMenu === 'function') props.onContextMenu = (event) => ui.onEdgeContextMenu(edge.id, event)
       }
@@ -3781,6 +3818,58 @@ function CanvasView(props) {
     }
   }
 
+  /**
+   * 开始拖动**整个选区**：节点、连线的折点、连线的自由端点一起动。
+   *
+   * 以前只挪节点 —— 连线的折点留在原地，于是"框选全部再拖"时线只是重新自动路由，
+   * 形状全变了（用户报的"线段没有被拖动，只是保持着自动路由"）。
+   * 现在同一个位移同时作用在三者上，相对位置**完全不变**。
+   *
+   * `ref` 是抓起来的那一点（节点的起始坐标）；位移由它算出来并被吸附一次：
+   * 逐点各自吸附会把相对位置弄歪（两个节点差 3px 时会被吸到同一格上叠起来）。
+   */
+  function startSelectionDrag(ids, point, reference) {
+    const current = docRef.current
+    if (current === null || point === null) return
+    const starts = []
+    for (let i = 0; i < current.nodes.length; i += 1) {
+      const n = current.nodes[i]
+      if (ids.indexOf(n.id) < 0) continue
+      starts.push({ id: n.id, x: numberOr(n.x, 0), y: numberOr(n.y, 0) })
+    }
+    // 连线上"不是节点算出来的"那部分几何：折点与悬空端的自由点。
+    const edgeStarts = []
+    for (let i = 0; i < current.edges.length; i += 1) {
+      const e = current.edges[i]
+      if (ids.indexOf(e.id) < 0) continue
+      const points = Array.isArray(e.points) ? e.points.map((p) => ({ x: p.x, y: p.y })) : null
+      const sourcePoint = e.sourcePoint === undefined || e.sourcePoint === null ? null : { x: e.sourcePoint.x, y: e.sourcePoint.y }
+      const targetPoint = e.targetPoint === undefined || e.targetPoint === null ? null : { x: e.targetPoint.x, y: e.targetPoint.y }
+      if (points === null && sourcePoint === null && targetPoint === null) continue
+      edgeStarts.push({ id: e.id, points: points, sourcePoint: sourcePoint, targetPoint: targetPoint })
+    }
+    if (starts.length === 0 && edgeStarts.length === 0) return
+    dragRef.current = {
+      originX: point.x,
+      originY: point.y,
+      starts: starts,
+      edgeStarts: edgeStarts,
+      ref: reference === undefined || reference === null ? null : reference,
+      hasNodes: starts.length > 0,
+    }
+  }
+
+  /** 把 pointer capture 挂在画布上：pointermove / pointerup 的处理本来就在画布上。 */
+  function captureOnCanvas(event) {
+    const element = canvasRef.current
+    if (element === null || typeof element.setPointerCapture !== 'function') return
+    try {
+      element.setPointerCapture(event.pointerId)
+    } catch (error) {
+      // 捕获失败不影响拖动：指针仍在画布内时会继续派发 pointermove
+    }
+  }
+
   function onNodePointerDown(id, event) {
     if (event.button !== 0) return
     setMenu(null)
@@ -3801,23 +3890,45 @@ function CanvasView(props) {
     const current = docRef.current
     const point = toUserSpace(event)
     if (current === null || point === null) return
-    // 被 Shift 减掉的节点不再参与拖动。
-    const starts = []
-    for (let i = 0; i < current.nodes.length; i += 1) {
-      const n = current.nodes[i]
-      if (ids.indexOf(n.id) < 0) continue
-      starts.push({ id: n.id, x: numberOr(n.x, 0), y: numberOr(n.y, 0) })
+    // 位移的基准取**抓起来的这个节点**：它的落点会被吸到格线上，其余成员跟同一个位移。
+    const node = nodeById(id)
+    const reference = node === null ? null : { x: numberOr(node.x, 0), y: numberOr(node.y, 0) }
+    startSelectionDrag(ids, point, reference)
+    captureOnCanvas(event)
+  }
+
+  /**
+   * 按在**连线**上：选中它（或保留整组），并准备好拖动整组。
+   *
+   * 这样"框选全部之后随手抓住一条线拖"也能整体移动 —— 只抓节点拖的话，
+   * 用户会以为线不能被拖。折点/自由端点都没有的边（纯自动路由）拖不动：
+   * 它没有"自己的几何"可以平移，改形状要用段把手（拖动某一段）。
+   */
+  function onEdgePointerDown(edgeId, event) {
+    if (event.button !== 0) return
+    setMenu(null)
+    const additive = event.shiftKey === true
+    let ids = selectedIds
+    if (additive) {
+      ids = ids.indexOf(edgeId) >= 0 ? ids.filter((x) => x !== edgeId) : ids.concat([edgeId])
+    } else if (ids.indexOf(edgeId) < 0) {
+      ids = [edgeId]
     }
-    if (starts.length === 0) return
-    dragRef.current = { originX: point.x, originY: point.y, starts: starts }
-    const element = event.currentTarget
-    if (element !== null && element !== undefined && typeof element.setPointerCapture === 'function') {
-      try {
-        element.setPointerCapture(event.pointerId)
-      } catch (error) {
-        // 捕获失败不影响拖动本身，pointermove 仍会冒泡到画布
+    setSelectedIds(ids)
+    const point = toUserSpace(event)
+    if (point === null) return
+    // 抓的是连线：位移基准取选区里的第一个节点（有节点就跟它对齐格线），没有就按半格吸附。
+    const current = docRef.current
+    let reference = null
+    if (current !== null) {
+      for (let i = 0; i < current.nodes.length; i += 1) {
+        if (ids.indexOf(current.nodes[i].id) < 0) continue
+        reference = { x: numberOr(current.nodes[i].x, 0), y: numberOr(current.nodes[i].y, 0) }
+        break
       }
     }
+    startSelectionDrag(ids, point, reference)
+    captureOnCanvas(event)
   }
 
   function onNodePointerUp(id) {
@@ -4062,17 +4173,28 @@ function CanvasView(props) {
     if (drag !== null) {
       const point = toUserSpace(event)
       if (point === null) return
-      const dx = point.x - drag.originX
-      const dy = point.y - drag.originY
-      // 整组一起移动；同一次拖动只记一个撤销快照（coalesceKey 相同就不再压栈）。
-      const key = 'drag:' + drag.starts.map((s) => s.id).join(',')
+      // 整组一起移动：**同一个位移**作用在节点、折点、自由端点上，相对位置不变。
+      // 吸附只做一次（在 dragMoveOf 里），逐点各自吸附会把相对位置弄歪。
+      const move = dragMoveOf(drag, point)
+      const moved = draggedGeometry(drag, move)
+      const key = 'drag:' + drag.starts.map((s) => s.id).join(',') + '|' + drag.edgeStarts.map((e) => e.id).join(',')
       applyLocal((next) => {
-        for (let i = 0; i < next.nodes.length; i += 1) {
-          const n = next.nodes[i]
-          for (let k = 0; k < drag.starts.length; k += 1) {
-            if (drag.starts[k].id !== n.id) continue
-            n.x = snap(drag.starts[k].x + dx)
-            n.y = snap(drag.starts[k].y + dy)
+        for (let i = 0; i < moved.nodes.length; i += 1) {
+          for (let k = 0; k < next.nodes.length; k += 1) {
+            if (next.nodes[k].id !== moved.nodes[i].id) continue
+            next.nodes[k].x = moved.nodes[i].x
+            next.nodes[k].y = moved.nodes[i].y
+            break
+          }
+        }
+        for (let i = 0; i < moved.edges.length; i += 1) {
+          const item = moved.edges[i]
+          for (let k = 0; k < next.edges.length; k += 1) {
+            const e = next.edges[k]
+            if (e.id !== item.id) continue
+            if (item.points !== null) e.points = item.points.map((p) => ({ x: p.x, y: p.y }))
+            if (item.sourcePoint !== null) e.sourcePoint = { x: item.sourcePoint.x, y: item.sourcePoint.y }
+            if (item.targetPoint !== null) e.targetPoint = { x: item.targetPoint.x, y: item.targetPoint.y }
             break
           }
         }
@@ -5306,6 +5428,7 @@ function CanvasView(props) {
     onNodeContextMenu: onNodeContextMenu,
     onHandlePointerDown: onHandlePointerDown,
     onSelectEdge: (id) => setSelectedIds([id]),
+    onEdgePointerDown: onEdgePointerDown,
     onEdgeLabelPointerDown: onEdgeLabelPointerDown,
     onBackgroundPointerDown: onBackgroundPointerDown,
     onEdgeContextMenu: onEdgeContextMenu,
@@ -6355,6 +6478,8 @@ exports.__routeInternals = {
   renderDiagram: renderDiagram,
   computeAlignMoves: computeAlignMoves,
   marqueeHits: marqueeHits,
+  dragMoveOf: dragMoveOf,
+  draggedGeometry: draggedGeometry,
   docFromPayload: docFromPayload,
   pathFromAddress: pathFromAddress,
   computeFitView: computeFitView,

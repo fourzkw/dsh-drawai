@@ -1080,6 +1080,88 @@ console.log('\n拖线上的文字：位置存在边自己的几何上（drawio �
   ok(labelText !== undefined && typeof labelText.props.onDoubleClick === 'function', '标签仍然双击改字（拖动没有把它挤掉）')
 }
 
+console.log('\n整体拖动：相对位置一点都不能变')
+{
+  // 用户报的："框选全部后拖动，线段没有被拖动，只是保持着自动路由" ——
+  // 以前拖动只挪节点坐标，连线的折点留在原地，于是形状被重新路由掉了。
+  // 现在节点、折点、悬空端的自由端点用**同一个位移**一起走。
+  const doc = {
+    version: 2,
+    revision: '',
+    nodes: [
+      // 故意有一个不在格上的节点：它必须保持与其它节点的相对错位
+      { id: 'a', x: 100, y: 100, w: 60, h: 40 },
+      { id: 'b', x: 303, y: 100, w: 60, h: 40 },
+      { id: 'c', x: 100, y: 300, w: 60, h: 40 },
+    ],
+    edges: [
+      { id: 'e1', from: 'a', to: 'b', style: DEFAULT_EDGE_STYLE, points: [{ x: 230, y: 60 }] },
+      { id: 'e2', from: 'c', targetPoint: { x: 277, y: 377 }, style: DEFAULT_EDGE_STYLE },
+    ],
+    labels: [],
+  }
+  const drag = {
+    originX: 130,
+    originY: 120,
+    // 抓起来的是 a：位移由它算，所以它的落点会被吸到整格
+    ref: { x: 100, y: 100 },
+    hasNodes: true,
+    starts: [
+      { id: 'a', x: 100, y: 100 },
+      { id: 'b', x: 303, y: 100 },
+      { id: 'c', x: 100, y: 300 },
+    ],
+    edgeStarts: [
+      { id: 'e1', points: [{ x: 230, y: 60 }], sourcePoint: null, targetPoint: null },
+      { id: 'e2', points: null, sourcePoint: null, targetPoint: { x: 277, y: 377 } },
+    ],
+  }
+  const move = internals.dragMoveOf(drag, { x: drag.originX + 23, y: drag.originY + 17 })
+  ok(move.x === 20 && move.y === 20, '位移是"把抓起来的节点吸到整格"后的值（23,17 → 20,20）：' + JSON.stringify(move))
+  const moved = internals.draggedGeometry(drag, move)
+  const byId = {}
+  for (const n of moved.nodes) byId[n.id] = n
+  ok(byId.a.x === 120 && byId.a.y === 120, '抓起来的节点落在整格上：' + JSON.stringify([byId.a.x, byId.a.y]))
+  ok(byId.b.x - byId.a.x === 203, '**相对位置不变**：b 与 a 的间距还是 203（以前逐点各自吸附会把它吸成 200）')
+  ok(byId.c.y - byId.a.y === 200, '纵向上同样保持不变')
+  const e1 = moved.edges.filter((e) => e.id === 'e1')[0]
+  ok(e1.points[0].x === 250 && e1.points[0].y === 80, '折点跟着同一个位移走：' + JSON.stringify(e1.points[0]))
+  const e2 = moved.edges.filter((e) => e.id === 'e2')[0]
+  ok(e2.targetPoint.x === 297 && e2.targetPoint.y === 397, '悬空端的自由点也跟着走：' + JSON.stringify(e2.targetPoint))
+
+  // 走线形状必须**整体平移**：把移动后的文档路由出来，减掉位移应当与原来逐点相同
+  const after = {
+    version: 2,
+    revision: '',
+    nodes: doc.nodes.map((n) => {
+      const m = byId[n.id]
+      return { id: n.id, x: m.x, y: m.y, w: n.w, h: n.h }
+    }),
+    edges: doc.edges.map((e) => {
+      const m = moved.edges.filter((x) => x.id === e.id)[0]
+      const out = { id: e.id, from: e.from, to: e.to, style: e.style }
+      if (m.points !== null) out.points = m.points
+      if (m.targetPoint !== null) out.targetPoint = m.targetPoint
+      return out
+    }),
+    labels: [],
+  }
+  const beforePts = internals.edgeRoutePoints(doc, doc.edges[0])
+  const afterPts = internals.edgeRoutePoints(after, after.edges[0])
+  const shifted = afterPts === null ? null : afterPts.map((p) => ({ x: p.x - move.x, y: p.y - move.y }))
+  const sameShape =
+    beforePts !== null &&
+    shifted !== null &&
+    beforePts.length === shifted.length &&
+    beforePts.every((p, i) => Math.abs(p.x - shifted[i].x) < 0.01 && Math.abs(p.y - shifted[i].y) < 0.01)
+  ok(sameShape, '折线形状整体平移（逐点相同）：' + JSON.stringify(beforePts) + ' → ' + JSON.stringify(afterPts))
+
+  // 只拖连线（选区里没有节点）：按半格吸附
+  const edgeOnly = { originX: 0, originY: 0, ref: null, hasNodes: false, starts: [], edgeStarts: drag.edgeStarts }
+  const onlyMove = internals.dragMoveOf(edgeOnly, { x: 13, y: -7 })
+  ok(onlyMove.x === 15 && onlyMove.y === -5, '只拖连线时按半格吸附：' + JSON.stringify(onlyMove))
+}
+
 console.log('\n框选：节点与连线都要被框到才亮')
 {
   // 用户报的："批量框选时线段也应该有被选中的提示" —— 以前框选只收节点，框住一排线时一条都不亮。
