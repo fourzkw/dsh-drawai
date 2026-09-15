@@ -1016,5 +1016,36 @@ console.log('\n一次性几何迁移：节点对齐整格、折点与自由端�
   ok(/snapDocGeometry\(current, \{ grid: GRID, edgeGrid: EDGE_GRID/.test(src), '用的是画布自己的单位（GRID / EDGE_GRID）')
 }
 
+console.log('\n顺序（z-order）：菜单里有入口，模型顺序决定覆盖顺序')
+{
+  const src = composeClientBody()
+  ok(/function reorderItem\(kind, id, mode\)/.test(src), '有 reorderItem（节点与边共用）')
+  for (const label of ['置顶', '上移', '下移', '置底']) {
+    ok(src.indexOf("'" + label + "'") > 0, '菜单里有「' + label + '」')
+  }
+  ok(/reorderItem\('node', menu\.id, 'front'\)/.test(src) && /reorderItem\('edge', menu\.id, 'front'\)/.test(src), '节点与边的右键菜单都接了')
+  // 画布渲染顺序 = 模型顺序：把后画的节点放前面，它的 rect 就更早出现（被压在下面）。
+  const two = {
+    version: 2,
+    revision: '',
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 100, h: 60, label: '甲' },
+      { id: 'b', x: 50, y: 30, w: 100, h: 60, label: '乙' },
+    ],
+    edges: [],
+  }
+  const rectOrder = (doc) => {
+    const tree = renderDiagram(doc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+    return walk(tree, (n) => n.type === 'rect' && (n.props.width === 100 || n.props.width === 100), []).length
+  }
+  void rectOrder
+  const treeA = renderDiagram(two, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const groupsA = walk(treeA, (n) => n.type === 'g' && typeof n.props['data-node-id'] === 'string', []).map((g) => g.props['data-node-id'])
+  const swapped = { version: 2, revision: '', nodes: [two.nodes[1], two.nodes[0]], edges: [] }
+  const treeB = renderDiagram(swapped, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const groupsB = walk(treeB, (n) => n.type === 'g' && typeof n.props['data-node-id'] === 'string', []).map((g) => g.props['data-node-id'])
+  ok(groupsA.join(',') === 'a,b' && groupsB.join(',') === 'b,a', '节点的画序跟着模型顺序（' + groupsA.join(',') + ' → ' + groupsB.join(',') + '）')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

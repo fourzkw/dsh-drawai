@@ -381,5 +381,40 @@ console.log('\n[6] 边标签单元（drawio 的 edgeLabel）不导入、不拥�
   ok(applyDocToMxfile(onEdge, read2.doc).text === onEdge, '这种形态同样：原样写回逐字节不变')
 }
 
+console.log('\n[7] 顺序（z-order）：模型里的先后要真的写回文件')
+{
+  // drawio 的"谁在上面"就是单元在 root 里的先后，而画布上节点的先后也决定覆盖顺序 ——
+  // 所以"置顶/置底"改的是模型数组顺序，文件那边必须跟着改，否则重新载入又变回原样。
+  const W = (id, x) => ({ id: id, label: id, style: '', x: x, y: 0, w: 130, h: 60 })
+  const doc = { version: 2, revision: '', meta: {}, nodes: [W('n1', 0), W('n2', 200), W('n3', 400)], edges: [] }
+  const built = buildMxfile(doc).text
+  const back = parseMxfile(built).doc
+  const ids = (text) => [...text.matchAll(/<mxCell id="(n\d)"/g)].map((m) => m[1])
+  ok(ids(built).join(',') === 'n1,n2,n3', '起始顺序：' + ids(built).join(','))
+
+  // 没有改动时**一条编辑都不发**（这条保住了"打开后原样保存逐字节不变"）
+  ok(applyDocToMxfile(built, back).text === built, '没有改动时逐字节不变')
+  ok(__plan(built, back).edits.length === 0, '没有改动时 0 条编辑')
+
+  // 把 n1 置顶：模型顺序变成 n2,n3,n1
+  const front = JSON.parse(JSON.stringify(back))
+  front.nodes.push(front.nodes.shift())
+  const out = applyDocToMxfile(built, front)
+  ok(ids(out.text).join(',') === 'n2,n3,n1', '置顶之后文件里的先后跟着变：' + ids(out.text).join(','))
+  const reread = parseMxfile(out.text).doc
+  ok(reread.nodes.map((n) => n.id).join(',') === 'n2,n3,n1', '读回来的模型顺序一致')
+  ok(reread.nodes.length === 3 && reread.nodes.filter((n) => n.id === 'n1')[0].x === 0, '单元没丢、几何没坏')
+  ok(applyDocToMxfile(out.text, reread).text === out.text, '重排之后仍然幂等')
+
+  // 置底：变成 n1,n2,n3 → 再置底 n1 就是 n2,n3,n1
+  const back2 = JSON.parse(JSON.stringify(back))
+  back2.nodes.unshift(back2.nodes.pop())
+  ok(ids(applyDocToMxfile(built, back2).text).join(',') === 'n3,n1,n2', '置底同样写回：' + ids(applyDocToMxfile(built, back2).text).join(','))
+
+  // 顺序**没**变时不该产生编辑（否则每次保存都会顺手重排文件）
+  const plan = __plan(built, back)
+  ok(plan.edits.every((e) => e.insert === false), '没有重排时不会有"插入"型编辑')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

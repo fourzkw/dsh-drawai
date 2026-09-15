@@ -4271,6 +4271,34 @@ function CanvasView(props) {
     setSaveNote('已整理 ' + result.changes + ' 处几何（节点对齐整格、折点对齐半格；可 Ctrl+Z 撤销）')
   }
 
+  /**
+   * 顺序（z-order）：节点的先后 = 画布上的覆盖顺序，也是 drawio 里"谁在上面"。
+   *
+   * 只改模型数组顺序；**文件那边的先后由写回负责**（`planReorder`），
+   * 不写回去的话重新载入就变回原样，用户会觉得"置顶没生效"。
+   */
+  function reorderItem(kind, id, mode) {
+    const current = docRef.current
+    if (current === null) return
+    applyLocal((next) => {
+      const list = kind === 'edge' ? next.edges : next.nodes
+      let at = -1
+      for (let i = 0; i < list.length; i += 1) {
+        if (list[i].id === id) {
+          at = i
+          break
+        }
+      }
+      if (at < 0) return
+      const item = list.splice(at, 1)[0]
+      if (mode === 'front') list.push(item)
+      else if (mode === 'back') list.unshift(item)
+      else if (mode === 'up') list.splice(Math.min(at + 1, list.length), 0, item)
+      else list.splice(Math.max(at - 1, 0), 0, item)
+    })
+    setMenu(null)
+  }
+
   function deleteSelected() {
     const ids = selectedIds
     if (ids.length === 0) return
@@ -4746,6 +4774,17 @@ function CanvasView(props) {
           React.createElement('button', { className: 'drawai-btn', onClick: () => deleteById(menu.id) }, '删除'),
         ),
       )
+      // 顺序：谁压在谁上面（drawio 的 Bring to Front / Send to Back 那一组）。
+      rows.push(
+        React.createElement(
+          'div',
+          { className: 'drawai-menu-row' },
+          React.createElement('button', { className: 'drawai-btn', onClick: () => reorderItem('node', menu.id, 'front'), title: '置顶（压在其它节点上面）' }, '置顶'),
+          React.createElement('button', { className: 'drawai-btn', onClick: () => reorderItem('node', menu.id, 'up'), title: '上移一层' }, '上移'),
+          React.createElement('button', { className: 'drawai-btn', onClick: () => reorderItem('node', menu.id, 'down'), title: '下移一层' }, '下移'),
+          React.createElement('button', { className: 'drawai-btn', onClick: () => reorderItem('node', menu.id, 'back'), title: '置底（压到其它节点下面）' }, '置底'),
+        ),
+      )
     } else {
       const edge = edgeById(menu.id)
       const hasLabel = edge !== null && typeof edge.label === 'string' && edge.label.length > 0
@@ -4795,6 +4834,16 @@ function CanvasView(props) {
           ),
         )
       rows.push(arrowRow([['end', '→ 单向'], ['both', '↔ 双向'], ['none', '— 无箭头'], ['start', '← 反向']]))
+      rows.push(
+        React.createElement(
+          'div',
+          { className: 'drawai-menu-row' },
+          React.createElement('button', { className: 'drawai-btn', onClick: () => reorderItem('edge', menu.id, 'front'), title: '置顶（压在其它连线上面）' }, '置顶'),
+          React.createElement('button', { className: 'drawai-btn', onClick: () => reorderItem('edge', menu.id, 'up'), title: '上移一层' }, '上移'),
+          React.createElement('button', { className: 'drawai-btn', onClick: () => reorderItem('edge', menu.id, 'down'), title: '下移一层' }, '下移'),
+          React.createElement('button', { className: 'drawai-btn', onClick: () => reorderItem('edge', menu.id, 'back'), title: '置底' }, '置底'),
+        ),
+      )
       rows.push(
         React.createElement(
           'div',
