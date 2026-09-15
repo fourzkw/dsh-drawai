@@ -250,15 +250,23 @@ console.log('\n「打开」一个文件 = 多出它的标签页（不是改名�
 
 console.log('\n工具条：按类型合并为下拉菜单')
 {
-  // 直接从源码里抽出 toolbarMenus 的**函数体**执行它 —— 比把整个组件树跑起来可靠得多：
-  // 组件需要一堆 hook / 边界配合（我在这上面浪费过好几轮），而菜单定义是纯数据，
-  // 验它才是真正要验的东西。
-  const start = src.indexOf('  function toolbarMenus() {')
-  ok(start >= 0, '源码里有 toolbarMenus')
-  if (start >= 0) {
-    const braceOpen = src.indexOf('{', start)
+  // 从源码里抽出**同一段作用域的真实代码**执行它：
+  //   const layerList / activeLayerId  →  item  →  layerMenuItems  →  toolbarMenus
+  //
+  // 为什么不把 layerMenuItems 桩成 `() => []`（曾经就是这么写的）：
+  // 真实事故 —— `item`（菜单项构造器）原来定义在 toolbarMenus 肚子里，而 layerMenuItems
+  // 是外层函数，于是「图层」菜单一被调用就 `ReferenceError: item is not defined`，
+  // 整张画布降级成"画布未渲染"。桩掉之后真实函数体一次都没跑过，全绿到底。
+  // 现在把这段作用域整体求值并**真的调用两个函数**：自由变量对不上会立刻炸出来。
+  const regionStart = src.indexOf('  const layerList = doc !== null')
+  const tbStart = src.indexOf('  function toolbarMenus() {')
+  ok(regionStart >= 0, '源码里有 layerList（图层菜单的数据源）')
+  ok(tbStart > regionStart, 'layerMenuItems 与 toolbarMenus 在同一段作用域里（能一起抽出来跑）')
+
+  let end = -1
+  if (tbStart >= 0) {
+    const braceOpen = src.indexOf('{', tbStart)
     let depth = 0
-    let end = -1
     for (let i = braceOpen; i < src.length; i += 1) {
       if (src[i] === '{') depth += 1
       else if (src[i] === '}') {
@@ -269,10 +277,29 @@ console.log('\n工具条：按类型合并为下拉菜单')
         }
       }
     }
+  }
+  const region = end > regionStart ? src.slice(regionStart, end) : ''
+  const itemDecl = src.indexOf('const item = (label, onClick, opts) => ({')
+  ok(itemDecl >= 0, '源码里有菜单项构造器 item（只此一处）')
+  ok(itemDecl >= 0 && tbStart >= 0 && itemDecl < tbStart, 'item 定义在 toolbarMenus **之外**（否则外层函数看不见它 —— 真实事故）')
+  ok((region.match(/const item = \(label, onClick, opts\)/g) || []).length === 1, '这段作用域里 item 只有一份（两边共用，不各写一份）')
+
+  /** 在沙箱里跑一遍这段真实代码，返回 { menus, items }（失败返回 { error }）。 */
+  const evalMenus = (over) => {
     const sandbox = {
-      // toolbarMenus 引用到的自由变量必须**全部**列在这里，
-      // 否则 new Function 求值时直接 ReferenceError —— 这也是一种接线检查：
-      // 名字对不上会立刻炸出来（比"跑起来才发现菜单点不动"早得多）。
+      // toolbarMenus / layerMenuItems 引用到的自由变量必须**全部**列在这里，
+      // 否则 new Function 求值或调用时直接 ReferenceError —— 这本身就是一种接线检查。
+      doc: {
+        layers: [
+          { id: '1', name: '主流程', visible: true, locked: false },
+          { id: 'L2', name: '草稿', visible: false, locked: false },
+        ],
+      },
+      currentLayerId: null,
+      layerLabelOf: (layer, i) => (typeof layer.name === 'string' && layer.name.length > 0 ? layer.name : '第 ' + (i + 1) + ' 层'),
+      toggleLayerVisible: () => {},
+      setCurrentLayerId: () => {},
+      createLayer: () => {},
       openNewCanvasPanel: () => {},
       openFilePicker: () => {},
       copySelection: () => {},
@@ -281,7 +308,6 @@ console.log('\n工具条：按类型合并为下拉菜单')
       selectAll: () => {},
       revertAiChange: () => {},
       canRevert: true,
-      layerMenuItems: () => [],
       normalizeGeometry: () => {},
       saveNow: () => {},
       openSaveAsPanel: () => {},
@@ -303,17 +329,70 @@ console.log('\n工具条：按类型合并为下拉菜单')
       // 空舞台（一张画布都没打开）时菜单项要禁用 —— 它也是 toolbarMenus 的自由变量。
       empty: false,
     }
+    Object.assign(sandbox, over === undefined ? {} : over)
     const names = Object.keys(sandbox)
-    let menus = null
     try {
-      menus = new Function(...names, src.slice(start, end) + '\n  return toolbarMenus()')(...names.map((n) => sandbox[n]))
+      const out = new Function(...names, region + '\n  return { menus: toolbarMenus(), items: layerMenuItems() }')(
+        ...names.map((n) => sandbox[n]),
+      )
+      return out
     } catch (error) {
-      ok(false, 'toolbarMenus 求值失败（引用了未提供的自由变量？）：' + (error && error.message ? error.message : String(error)))
+      return { error: error && error.message ? error.message : String(error) }
     }
-    if (menus !== null) {
+  }
+
+  const ran = evalMenus()
+  ok(ran.error === undefined, '这一段真实代码能求值并调用（自由变量对不上会在这里炸）：' + (ran.error === undefined ? 'ok' : ran.error))
+  const menus = ran.error === undefined ? ran.menus : null
+  const layerItems = ran.error === undefined ? ran.items : null
+
+  if (layerItems !== null) {
+    ok(layerItems.length === 5, '两层的图层菜单 = 2 显示项 + 2 当前项 + 1 新建（实际 ' + layerItems.length + '）')
+    ok(layerItems[0].label === '👁 主流程' && layerItems[1].label === '🚫 草稿', '显示/隐藏项：眼睛 + 层名（隐藏的画 🚫）')
+    ok(layerItems[2].label === '● 当前：主流程' && layerItems[3].label === '○ 当前：草稿', '当前图层项标出哪一层是当前层（没设过就第一层）')
+    ok(layerItems[4].label === '＋ 新建图层', '有「新建图层」入口')
+    ok(layerItems[0].keepOpen === true && layerItems[2].keepOpen === true, '层内的两项都 keepOpen（连点几层不用重开菜单）')
+    ok(layerItems[4].keepOpen !== true, '「新建图层」点完收起菜单')
+
+    // 点下去要打给**对的**函数、带上**对的**层 id（只断言"有 onClick"是不够的）
+    const hits = []
+    const clicked = evalMenus({
+      toggleLayerVisible: (id) => hits.push('显示:' + id),
+      setCurrentLayerId: (id) => hits.push('当前:' + id),
+      createLayer: () => hits.push('新建'),
+    })
+    ok(clicked.error === undefined, '带记录桩求值成功')
+    if (clicked.error === undefined) {
+      clicked.items[0].onClick()
+      clicked.items[1].onClick()
+      clicked.items[3].onClick()
+      clicked.items[4].onClick()
+      ok(
+        hits.join('|') === '显示:1|显示:L2|当前:L2|新建',
+        '点每一项都打给对的函数与层 id（实际 ' + hits.join('|') + '）',
+      )
+    }
+
+    // 空舞台（doc 还没有）= 一句禁用说明，不能炸、也不能给出点了没用的项
+    const blank = evalMenus({ doc: null })
+    ok(blank.error === undefined, 'doc 为 null（空舞台）时图层菜单照样算得出来')
+    if (blank.error === undefined) {
+      ok(blank.items.length === 1 && blank.items[0].disabled === true, '没有图层信息时只给一项禁用的说明')
+    }
+  }
+
+  if (menus !== null) {
     ok(menus.map((m) => m.key).join(',') === 'file,edit,layers,view,export', '恰好 5 类：文件 / 编辑 / 图层 / 视图 / 导出（实际 ' + menus.map((m) => m.key).join(',') + '）')
     const total = menus.reduce((n, m) => n + m.items.length, 0)
-    ok(total === 18, '所有操作都有归处（实际 ' + total + ' 项）')
+    ok(
+      total === 18 + (layerItems === null ? 0 : layerItems.length),
+      '所有操作都有归处（实际 ' + total + ' 项 = 18 个固定项 + ' + (layerItems === null ? 0 : layerItems.length) + ' 个图层项）',
+    )
+    const layersMenu = menus.filter((m) => m.key === 'layers')[0]
+    ok(
+      layersMenu !== undefined && layersMenu.items.length === (layerItems === null ? -1 : layerItems.length),
+      '「图层」菜单里就是 layerMenuItems() 那几项（实际 ' + (layersMenu === undefined ? '没有这个菜单' : layersMenu.items.length) + '）',
+    )
     ok(menus.every((m) => typeof m.title === 'string' && m.title.length > 0), '每个菜单都有悬停说明（title）')
     ok(menus.every((m) => m.items.every((i) => typeof i.label === 'string' && i.label.length > 0)), '每一项都有 label')
     ok(menus.every((m) => m.items.every((i) => typeof i.onClick === 'function')), '每一项都有 onClick')
@@ -340,9 +419,8 @@ console.log('\n工具条：按类型合并为下拉菜单')
     const styleFn = bodyOf('panelStyle') || ''
     ok(/Math\.min/.test(styleFn) && /maxLeft/.test(styleFn), 'panelStyle 把面板夹在画布范围内（右栏窄，不夹会跑到看不见）')
     ok((src.match(/panelStyle\(docMenuPos\)/g) || []).length === 2, '两个面板（菜单 / 打开面板）都用同一套定位')
-    }
   }
-  }
+}
 
 console.log('\n启动行为：空舞台（没有"未绑定画布"那一套）')
 {

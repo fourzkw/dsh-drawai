@@ -287,7 +287,18 @@ v1 的界面入口在「图层」菜单：列出各层（`👁`/`🚫` 切换显
 新建单元进对层、多图层文件原样写回逐字节不变）、`check-render` 的图层一节
 （隐藏层整层不画/点不到/框不到、新单元与粘贴进当前层）、`check-host` 的图层一节
 （read 回图层表与每单元 `layer`、**改图之后层不能掉** —— 这条抓到过 `normalizeDoc` 漏传 `layers`
-导致"AI 一改图所有单元被挂回缺省层"）。
+导致"AI 一改图所有单元被挂回缺省层"）、`check-component` 的「工具条」一节
+（把 `layerList/activeLayerId/item/layerMenuItems/toolbarMenus` **这段真实代码整体求值并调用**，
+所以"自由变量不在作用域里"会直接炸 —— 见下）。
+
+> **两个自测盲区，各付了一次线上降级的代价。**
+> ① `check-component` 原来把 `layerMenuItems` 桩成 `() => []`：真实函数体一次都没跑过，
+> 于是 `item`（菜单项构造器）被写在 `toolbarMenus` 肚子里、而 `layerMenuItems` 在外层这种
+> **作用域错位**一路全绿 —— 用户打开面板看到的是 `ReferenceError: item is not defined` +
+> "画布未渲染"。现在这段作用域被整体抽出来真跑，我把 `item` 搬回去复现过：断言确实红。
+> ② `check-component` 的 React 桩里 `createElement` 只记录元素、**从不调用子组件**，
+> 所以 `renderOnce` 只跑了最外层那个注册组件，`CanvasView` 本体从没被执行过 ——
+> 渲染期的错误（这个 bug 就属于渲染期，它在 `toolbarMenus()` 里）它看不到。
 
 ## 画布单位与吸附
 
@@ -522,7 +533,7 @@ doc 中心 153、fs 中心 151.5 时生成
 这套几何逻辑可以在命令行里自测，不需要浏览器：
 
 ```sh
-npm test        # 153 项 mxfile 编解码/写回（含顺序/数据/标签单元/标签位置/图层）+ 176 项路由/自环/迟滞/折返 + 188 项宿主（聚焦/注入/树布局/坐标/move/独立线/highlight/撤回/图层）+ 333 项渲染/标签/挖空/框选/辅助线/批量样式/全选/图层 + 86 项组件（合计 936）
+npm test        # 153 项 mxfile 编解码/写回（含顺序/数据/标签单元/标签位置/图层）+ 176 项路由/自环/迟滞/折返 + 188 项宿主（聚焦/注入/树布局/坐标/move/独立线/highlight/撤回/图层）+ 333 项渲染/标签/挖空/框选/辅助线/批量样式/全选/图层 + 102 项组件（菜单真实求值/降级边界）（合计 952）
 ```
 
 - `tools/check-mxfile.mjs` —— mxfile ↔ 文档：拿**真实产物形状**的夹具读（`<object>` 包装、
@@ -542,8 +553,11 @@ npm test        # 153 项 mxfile 编解码/写回（含顺序/数据/标签单�
 - `tools/check-render.mjs` —— 用极简 React 桩驱动 `renderDiagram`：预览折线/收尾线/提示环
   **确实被画进了 SVG**、连线画法（线型/箭头/marker 是否真的在 defs 里）、
   以及 `computeAlignMoves` 的对齐/分布坐标与幂等性；
-- `tools/check-component.mjs` —— 用带 hooks 的 React 桩把整个面板组件跑起来（状态形状不对时不能整块降级），
-  另有一节**键盘归属**：喂假 DOM 节点断言"输入框 / 别的面板里按键时画布一个键都不碰"，
+- `tools/check-component.mjs` —— 用带 hooks 的 React 桩把整个面板组件跑起来（状态形状不对时不能整块降级）；
+  另有**工具条一节**：把 `layerList/activeLayerId/item/layerMenuItems/toolbarMenus` 这一段
+  **真实源码整体抽出来求值并真的调用**（不再把 `layerMenuItems` 桩掉），所以"菜单项定义在
+  看不见它的作用域里"这类自由变量错位会当场炸（真实事故见「图层」一节末尾）；
+  以及一节**键盘归属**：喂假 DOM 节点断言"输入框 / 别的面板里按键时画布一个键都不碰"，
   以及 window 上那个 keydown 确实**先问归属再动手**。
 
 ---
