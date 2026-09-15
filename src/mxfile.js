@@ -566,6 +566,54 @@ function layerOrRoot(info) {
 // ---- 解析 → 语义文档 -------------------------------------------------------
 
 /**
+ * 文件里那条边几何上的**标签位置**（drawio 的 `mxGeometry x/y` + `<mxPoint as="offset">`）。
+ *
+ * 只有 `relative="1"` 是这个语义：`x` 是沿边比例（-1..1，0 = 中点）、`y` 是垂直偏移 px、
+ * `offset` 是"取整后剩下的零头"。非 relative 的那一支是另一套算法（相对两端连线的中点），
+ * 我们**不认**这种位置 —— 返回 null 表示"这块不归我们动"，写回时原样保留。
+ *
+ * `present`：文件里到底写没写 x/y。没有（= 从没拖过，就是中点）与"拖回过中点"在语义上一样，
+ * 但字节上不同，所以写回时要能区分。
+ */
+function relativeLabelPos(geo) {
+  if (geo === null || geo === undefined || geo.relative !== true) return null
+  const x = Number(geo.x)
+  const y = Number(geo.y)
+  const off = geo.offset === null || geo.offset === undefined ? null : geo.offset
+  const offsetX = off === null ? 0 : Number(off.x) === Number(off.x) ? Number(off.x) : 0
+  const offsetY = off === null ? 0 : Number(off.y) === Number(off.y) ? Number(off.y) : 0
+  if (Number.isFinite(x) === false || Number.isFinite(y) === false) {
+    return { x: 0, y: 0, offsetX: offsetX, offsetY: offsetY, present: false }
+  }
+  return { x: x, y: y, offsetX: offsetX, offsetY: offsetY, present: true }
+}
+
+/** 模型里那条边声明的标签位置；没声明（从没拖过）返回 null = 用弧长中点。 */
+function modelLabelPos(edge) {
+  const x = Number(edge.labelX)
+  const y = Number(edge.labelY)
+  if (Number.isFinite(x) === false || Number.isFinite(y) === false) return null
+  const offsetX = Number(edge.labelOffsetX)
+  const offsetY = Number(edge.labelOffsetY)
+  return { x: x, y: y, offsetX: Number.isFinite(offsetX) ? offsetX : 0, offsetY: Number.isFinite(offsetY) ? offsetY : 0 }
+}
+
+/** 位置要不要动：模型里有就按模型写；模型里没有但文件里有（用户把它归中了）就删掉。 */
+function labelPosChanged(filePos, wantPos) {
+  if (filePos === null) return false
+  if (wantPos === null) return filePos.present === true
+  if (filePos.present === false) return true
+  return wantPos.x !== filePos.x || wantPos.y !== filePos.y || wantPos.offsetX !== filePos.offsetX || wantPos.offsetY !== filePos.offsetY
+}
+
+/** `<mxPoint as="offset">` 的值：偏移为 0 就不写这个元素（drawio 缺省也是 0）。 */
+function labelOffsetPoint(pos) {
+  if (pos === null) return null
+  if (pos.offsetX === 0 && pos.offsetY === 0) return null
+  return { x: pos.offsetX, y: pos.offsetY }
+}
+
+/**
  * 解析 mxfile 文本 → 语义文档。
  *
  * @param text `.drawio` 全文
@@ -648,6 +696,19 @@ export function parseMxfile(text, options) {
     if (hasMarkup(cell.label)) markupLabels += 1
     const points = geo.points === undefined ? [] : geo.points
     if (points.length > 0) edge.points = points
+    // drawio 把"拖过的边标签位置"也存在**边自己的 mxGeometry** 上（`mxEdgeHandler.moveLabel`）：
+    //   x = 沿边比例（-1..1，0 = 中点）、y = 垂直偏移 px、offset = 残余偏移 px（取整后剩下的零头）。
+    // 只有 `relative="1"` 是这个语义（非 relative 的那支是"相对两端连线的中点"，另一套算法），
+    // 所以只认 relative，其余一律原样留在文件里、不当成位置。
+    const labelPos = relativeLabelPos(geo)
+    if (labelPos !== null && labelPos.present === true) {
+      edge.labelX = labelPos.x
+      edge.labelY = labelPos.y
+      if (labelPos.offsetX !== 0 || labelPos.offsetY !== 0) {
+        edge.labelOffsetX = labelPos.offsetX
+        edge.labelOffsetY = labelPos.offsetY
+      }
+    }
     edges.push(edge)
   }
 
@@ -755,12 +816,13 @@ function nodeCellXml(node, parentId, indent) {
   )
 }
 
-/** 边的几何内部（自由端点 + 折点）。缩进按 indent 缩进一级。 */
+/** 边的几何内部（自由端点 + 折点 + 标签残余偏移）。缩进按 indent 缩进一级。 */
 function edgeInnerXml(edge, indent) {
   const points = Array.isArray(edge.points) ? edge.points : []
   const sourcePoint = edge.sourcePoint !== undefined && edge.sourcePoint !== null ? edge.sourcePoint : null
   const targetPoint = edge.targetPoint !== undefined && edge.targetPoint !== null ? edge.targetPoint : null
-  if (points.length === 0 && sourcePoint === null && targetPoint === null) return ''
+  const offset = edge.offset === undefined || edge.offset === null ? null : edge.offset
+  if (points.length === 0 && sourcePoint === null && targetPoint === null && offset === null) return ''
   const lines = []
   const inner = indent + '  '
   if (sourcePoint !== null) lines.push(inner + '<mxPoint x="' + Number(sourcePoint.x) + '" y="' + Number(sourcePoint.y) + '" as="sourcePoint" />')
@@ -770,7 +832,13 @@ function edgeInnerXml(edge, indent) {
     for (const point of points) lines.push(inner + '  <mxPoint x="' + Number(point.x) + '" y="' + Number(point.y) + '" />')
     lines.push(inner + '</Array>')
   }
+  if (offset !== null) lines.push(inner + '<mxPoint x="' + Number(offset.x) + '" y="' + Number(offset.y) + '" as="offset" />')
   return '\n' + lines.join('\n') + '\n' + indent
+}
+
+/** 边几何的 x/y 属性（drawio 拿它存标签位置；没拖过就不写）。 */
+function labelPosAttrs(pos) {
+  return pos === null ? '' : ' x="' + Number(pos.x) + '" y="' + Number(pos.y) + '"'
 }
 
 function edgeCellXml(edge, parentId, indent) {
@@ -778,12 +846,14 @@ function edgeCellXml(edge, parentId, indent) {
   const label = typeof edge.label === 'string' && edge.label.length > 0 ? ' value="' + escapeAttr(edge.label) + '"' : ''
   const from = typeof edge.from === 'string' ? ' source="' + escapeAttr(edge.from) + '"' : ''
   const to = typeof edge.to === 'string' ? ' target="' + escapeAttr(edge.to) + '"' : ''
-  const inner = edgeInnerXml(edge, indent)
+  const pos = modelLabelPos(edge)
+  const inner = edgeInnerXml(Object.assign({}, edge, { offset: labelOffsetPoint(pos) }), indent)
   const head = indent + '<mxCell id="' + escapeAttr(String(edge.id)) + '"' + label + style + ' edge="1" parent="' + escapeAttr(parentId) + '"' + from + to + '>'
+  const geoHead = indent + '  <mxGeometry' + labelPosAttrs(pos) + ' relative="1" as="geometry"'
   if (inner.length === 0) {
-    return withDataWrapper([head, indent + '  <mxGeometry relative="1" as="geometry" />', indent + '</mxCell>'], edge, indent)
+    return withDataWrapper([head, geoHead + ' />', indent + '</mxCell>'], edge, indent)
   }
-  return withDataWrapper([head, indent + '  <mxGeometry relative="1" as="geometry">' + inner + '</mxGeometry>', indent + '</mxCell>'], edge, indent)
+  return withDataWrapper([head, geoHead + '>' + inner + '</mxGeometry>', indent + '</mxCell>'], edge, indent)
 }
 
 /** 元数据单元：没有 vertex/edge，所以不会显示，也不会被我们当成图形单元。 */
@@ -997,7 +1067,7 @@ function rebuildEdgeCell(info, cell, edge, chain) {
     changes.push({ attrsStart: cell.attrsSpan.attrsStart, attrsEnd: cell.attrsSpan.attrsEnd, pairs: endpointPairs })
   }
 
-  // 几何内部：折点与自由端点。语义相同就一个字节都不动（保住幂等与最小 diff）。
+  // 几何：折点 / 自由端点 / **标签位置**。语义相同就一个字节都不动（保住幂等与最小 diff）。
   const geo = cell.geometry
   const parsedPoints = geo !== null && Array.isArray(geo.points) ? geo.points : []
   const modelPoints = Array.isArray(edge.points) ? edge.points : []
@@ -1005,14 +1075,30 @@ function rebuildEdgeCell(info, cell, edge, chain) {
   const parsedTarget = geo === null ? null : geo.targetPoint
   const modelSource = from === undefined && edge.sourcePoint !== undefined && edge.sourcePoint !== null ? edge.sourcePoint : null
   const modelTarget = to === undefined && edge.targetPoint !== undefined && edge.targetPoint !== null ? edge.targetPoint : null
-  const innerUnchanged = pointsEqual(parsedPoints, modelPoints) && samePoint(parsedSource, modelSource) && samePoint(parsedTarget, modelTarget)
+  // 标签位置（drawio 的 mxGeometry x/y + offset）：模型里有就写、没有但文件里有就删（归中）。
+  const filePos = relativeLabelPos(geo)
+  const wantPos = modelLabelPos(edge)
+  if (labelPosChanged(filePos, wantPos)) {
+    changes.push({
+      attrsStart: cell.geo.attrsStart,
+      attrsEnd: cell.geo.attrsEnd,
+      pairs: { x: wantPos === null ? null : String(wantPos.x), y: wantPos === null ? null : String(wantPos.y) },
+    })
+  }
+  const parsedOffset = labelOffsetPoint(filePos)
+  const modelOffset = labelOffsetPoint(wantPos)
+  const innerUnchanged =
+    pointsEqual(parsedPoints, modelPoints) && samePoint(parsedSource, modelSource) && samePoint(parsedTarget, modelTarget) && samePoint(parsedOffset, modelOffset)
   const text = withAttrChanges(original, changes)
   if (innerUnchanged) return text
 
   const fresh = rescanCell(text)
   if (fresh === null) return text
-  const inner = edgeInnerXml({ points: modelPoints, sourcePoint: modelSource, targetPoint: modelTarget }, '')
-  const geometry = inner.length === 0 ? '<mxGeometry relative="1" as="geometry" />' : '<mxGeometry relative="1" as="geometry">' + inner + '</mxGeometry>'
+  const inner = edgeInnerXml({ points: modelPoints, sourcePoint: modelSource, targetPoint: modelTarget, offset: modelOffset }, '')
+  // 几何标签上的属性（x/y/relative/as…）**原样保留**：我们只往上面改 x/y（见上面的 changes），
+  // 重建时不能把它们抹掉 —— 否则"拖过标签的边"一改折点就把位置丢了。
+  const keepAttrs = fresh.geo === null ? '' : text.slice(fresh.geo.attrsStart, fresh.geo.attrsEnd)
+  const geometry = inner.length === 0 ? '<mxGeometry' + keepAttrs + ' />' : '<mxGeometry' + keepAttrs + '>' + inner + '</mxGeometry>'
   if (fresh.geo === null) return appendGeometry(text, fresh, geometry)
   if (fresh.geo.selfClosing) return text.slice(0, fresh.geo.start) + geometry + text.slice(fresh.geo.end)
   return text.slice(0, fresh.geo.innerFrom) + inner + text.slice(fresh.geo.innerTo)

@@ -480,5 +480,90 @@ console.log('\n[8] 编辑数据：`<object>` 上的自定义属性')
   ok(parseMxfile(built).doc.nodes[0].data.a === '1', '生成的文件读回来数据在')
 }
 
+console.log('\n[9] 边标签的位置：drawio 的 mxGeometry x/y + <mxPoint as="offset">')
+{
+  // drawio 里拖动线上文字（mxEdgeHandler.moveLabel）就是把位置写进**边自己的 mxGeometry**：
+  //   x = 沿边比例（-1..1，0 = 中点）、y = 垂直偏移 px、offset = 取整剩下的零头。
+  // 这一段盯两件事：读得出来；以及**改折点时不把它弄丢**（修之前会丢，见下）。
+  const head = [
+    '<mxfile host="app.diagrams.net" compressed="false">',
+    '  <diagram id="p1" name="Page-1">',
+    '    <mxGraphModel dx="0" dy="0"><root>',
+    '      <mxCell id="0" /><mxCell id="1" parent="0" />',
+    '      <mxCell id="n1" value="A" style="rounded=0;" vertex="1" parent="1"><mxGeometry x="0" y="0" width="80" height="40" as="geometry" /></mxCell>',
+    '      <mxCell id="n2" value="B" style="rounded=0;" vertex="1" parent="1"><mxGeometry x="300" y="200" width="80" height="40" as="geometry" /></mxCell>',
+  ]
+  const tail = ['    </root></mxGraphModel>', '  </diagram>', '</mxfile>', ''].join('\n')
+  const edgeCell = (inner) =>
+    '      <mxCell id="e1" value="线上的字" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="n1" target="n2">' + inner + '</mxCell>'
+  // A：拖过标签、边上没有折点 → 位置就在 geometry 的属性上（几何是自闭合的）
+  const A = head.concat([edgeCell('<mxGeometry x="0.5" y="-20" relative="1" as="geometry" />')], [tail]).join('\n')
+  // B：拖过标签 + 有折点 → 残余偏移在 <mxPoint as="offset"> 里
+  const B = head
+    .concat([
+      edgeCell(
+        '<mxGeometry x="0.5" y="-20" relative="1" as="geometry"><Array as="points"><mxPoint x="150" y="100" /></Array><mxPoint x="3" y="-4" as="offset" /></mxGeometry>',
+      ),
+    ], [tail])
+    .join('\n')
+
+  const a = parseMxfile(A).doc
+  ok(a.edges[0].labelX === 0.5 && a.edges[0].labelY === -20, '位置读出来了：' + JSON.stringify([a.edges[0].labelX, a.edges[0].labelY]))
+  ok(a.edges[0].labelOffsetX === undefined, '偏移为 0 时不写进模型（缺省就是 0）')
+  ok(applyDocToMxfile(A, a).text === A, '原样写回逐字节不变（含位置属性）')
+  ok(__plan(A, a).edits.length === 0, '原样写回 0 条编辑')
+
+  const b = parseMxfile(B).doc
+  ok(b.edges[0].labelX === 0.5 && b.edges[0].labelOffsetX === 3 && b.edges[0].labelOffsetY === -4, '残余偏移也读出来了：' + JSON.stringify([b.edges[0].labelOffsetX, b.edges[0].labelOffsetY]))
+  ok(applyDocToMxfile(B, b).text === B, 'B 形态同样逐字节不变')
+
+  // ★ 回归：改折点**不能**把位置弄丢。修之前 A 会丢掉 x/y（几何是自闭合的，重建整个 tag），
+  //   B 会丢掉 offset（内部被整体重建）。
+  const aMoved = JSON.parse(JSON.stringify(a))
+  aMoved.edges[0].points = [{ x: 150, y: 100 }]
+  const aOut = applyDocToMxfile(A, aMoved).text
+  const aBack = parseMxfile(aOut).doc.edges[0]
+  ok(aBack.labelX === 0.5 && aBack.labelY === -20, '自闭合几何加折点后，位置还在（' + JSON.stringify([aBack.labelX, aBack.labelY]) + '）')
+  ok(aOut.indexOf('x="0.5"') > 0 && aOut.indexOf('y="-20"') > 0, '位置属性确实写在新几何上')
+
+  const bMoved = JSON.parse(JSON.stringify(b))
+  bMoved.edges[0].points = [{ x: 150, y: 140 }]
+  const bBack = parseMxfile(applyDocToMxfile(B, bMoved).text).doc.edges[0]
+  ok(bBack.points[0].y === 140 && bBack.labelOffsetX === 3 && bBack.labelOffsetY === -4, '改折点后 offset 点也还在：' + JSON.stringify(bBack.labelOffsetX))
+
+  // 拖标签（模拟）：模型里给出位置 → 写进 geometry 的属性 + offset 元素
+  const dragged = JSON.parse(JSON.stringify(b))
+  dragged.edges[0].labelX = -0.25
+  dragged.edges[0].labelY = 17
+  dragged.edges[0].labelOffsetX = 2
+  dragged.edges[0].labelOffsetY = -3
+  const dOut = applyDocToMxfile(B, dragged).text
+  const dBack = parseMxfile(dOut).doc.edges[0]
+  ok(dBack.labelX === -0.25 && dBack.labelY === 17, '新位置写回并读得回来：' + JSON.stringify([dBack.labelX, dBack.labelY]))
+  ok(dBack.labelOffsetX === 2 && dBack.labelOffsetY === -3, '残余偏移也写回：' + JSON.stringify([dBack.labelOffsetX, dBack.labelOffsetY]))
+  ok(dBack.points[0].x === 150 && dBack.label === '线上的字', '折点与文字没被牵连')
+  ok(parseMxfile(dOut).error === undefined, '写出来的仍是合法 mxfile')
+
+  // 「标签居中」：模型里删掉位置 → 文件里的 x/y 与 offset 都要消失
+  const centered = JSON.parse(JSON.stringify(b))
+  delete centered.edges[0].labelX
+  delete centered.edges[0].labelY
+  delete centered.edges[0].labelOffsetX
+  delete centered.edges[0].labelOffsetY
+  const cBack = parseMxfile(applyDocToMxfile(B, centered).text).doc.edges[0]
+  ok(cBack.labelX === undefined && cBack.labelY === undefined && cBack.labelOffsetX === undefined, '归中后位置字段从文件里消失')
+  ok(cBack.points[0].x === 150, '折点仍在（只动位置）')
+
+  // 非 relative 的边：那套语义不同（相对两端连线中点），我们**不认**也不动它
+  const odd = head
+    .concat([edgeCell('<mxGeometry x="0.5" y="-20" as="geometry"><Array as="points"><mxPoint x="150" y="100" /></Array></mxGeometry>')], [tail])
+    .join('\n')
+  const oddDoc = parseMxfile(odd).doc
+  ok(oddDoc.edges[0].labelX === undefined, '非 relative 的边不读位置（语义不同）')
+  const oddMoved = JSON.parse(JSON.stringify(oddDoc))
+  oddMoved.edges[0].points = [{ x: 150, y: 140 }]
+  ok(applyDocToMxfile(odd, oddMoved).text.indexOf('x="0.5" y="-20"') > 0, '但改折点时它的属性原样保留（不丢）')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

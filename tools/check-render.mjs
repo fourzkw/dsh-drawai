@@ -988,6 +988,87 @@ console.log('\n线上的文字（边自己的 value）：落点照 drawio、双�
   ok(hit !== undefined && typeof hit.props.onDoubleClick === 'function' && typeof hit.props.onPointerDown === 'function', '命中带本身仍然挂着双击/单击')
 }
 
+console.log('\n拖线上的文字：位置存在边自己的几何上（drawio 的 moveLabel）')
+{
+  // drawio 的边标签能拖，是因为它把位置**存下来了**（mxEdgeHandler.moveLabel → mxGeometry 的
+  // x/y/offset）。我们这边同理：拖的时候用 relativePointOnPath 反解，存进 labelX/labelY/labelOffset*。
+  // 这一节盯三件事：反解能来回、存下来的形状与 drawio 一致、渲染真的用上了存下来的位置。
+  const path = [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 120 }]
+  const cases = [
+    ['第一段正中', { x: 100, y: 0 }],
+    ['第一段上方 30px', { x: 60, y: -30 }],
+    ['第一段下方 25px', { x: 140, y: 25 }],
+    ['拐点附近', { x: 195, y: 20 }],
+    ['第二段右侧', { x: 230, y: 60 }],
+  ]
+  for (const [label, point] of cases) {
+    const rel = internals.relativePointOnPath(path, point.x, point.y)
+    const back = rel === null ? null : internals.edgeLabelPointAt(path, rel.x, rel.y, 0, 0)
+    ok(
+      rel !== null && back !== null && Math.abs(back.x - point.x) <= 1 && Math.abs(back.y - point.y) <= 1,
+      label + '：反解 → 正算回到原处（' + JSON.stringify(back) + '）',
+    )
+  }
+  // 投影落在路径之外时会被夹住（只有沿边比例 + 垂距，表示不了"越出端点"的那一截）——
+  // 这没关系：拖标签时越出去的部分由 `offset`（残余）承担，见下面的 labelPosFor。
+  const past = internals.relativePointOnPath(path, -40, 0)
+  ok(past !== null && Math.abs(past.x + 1) < 1e-6 && Math.abs(past.y) < 1e-6, '端点之外 → 夹在端点（x=-1, y=0）：' + JSON.stringify(past))
+  const pastPos = internals.labelPosFor(path, { x: -40, y: 0 })
+  const pastBack = pastPos === null ? null : internals.edgeLabelPointAt(path, pastPos.labelX, pastPos.labelY, pastPos.labelOffsetX, pastPos.labelOffsetY)
+  ok(pastBack !== null && Math.abs(pastBack.x + 40) <= 1 && Math.abs(pastBack.y) <= 1, '越出端点的部分由 offset 承担：落点回到指针处（' + JSON.stringify(pastBack) + '）')
+  ok(internals.relativePointOnPath([{ x: 0, y: 0 }], 1, 1) === null, '路径不足两点 → null')
+  ok(internals.relativePointOnPath([{ x: 5, y: 5 }, { x: 5, y: 5 }], 9, 9) === null, '零长路径 → null')
+
+  // 存下来的形状与 drawio 的 moveLabel 一致：x 四位小数、y 取整、零头进 offset。
+  const pos = internals.labelPosFor(path, { x: 63.3, y: -27.7 })
+  ok(pos !== null && pos.labelX === Math.round(pos.labelX * 10000) / 10000, 'x 只留 4 位小数：' + pos.labelX)
+  ok(pos !== null && pos.labelY === Math.round(pos.labelY), 'y 取整：' + pos.labelY)
+  ok(pos !== null && pos.labelY > 0, '横线上方 → y 为正（drawio 的约定：正数在行进方向左侧/上方）')
+  const below = internals.labelPosFor(path, { x: 100, y: 30 })
+  ok(below !== null && below.labelY < 0, '横线下方 → y 为负：' + below.labelY)
+  const landed = internals.edgeLabelPointAt(path, pos.labelX, pos.labelY, pos.labelOffsetX, pos.labelOffsetY)
+  ok(landed !== null && Math.abs(landed.x - 63.3) <= 1 && Math.abs(landed.y + 27.7) <= 1, '落点仍在指针附近（零头补上了取整的差）：' + JSON.stringify(landed))
+
+  // 渲染：模型里的位置真的被用上（否则拖了跟没拖一样）
+  const doc = {
+    version: 2,
+    revision: '',
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 160, h: 60 },
+      { id: 'b', x: 400, y: 300, w: 160, h: 60 },
+    ],
+    edges: [{ id: 'e1', from: 'a', to: 'b', label: '线上的字', style: DEFAULT_EDGE_STYLE, labelX: 0.5, labelY: 40, labelOffsetX: 2, labelOffsetY: -1 }],
+  }
+  const tree = renderDiagram(doc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const text = walk(tree, (n) => n.type === 'text' && n.props.key === 'edge-text-0', [])[0]
+  const pts = internals.edgeRoutePoints(doc, doc.edges[0])
+  const want = internals.edgeLabelPointAt(pts, 0.5, 40, 2, -1)
+  const center = internals.edgeLabelPointAt(pts, 0, 0, 0, 0)
+  ok(want !== null && center !== null && Math.abs(want.x - center.x) + Math.abs(want.y - center.y) > 1, '这组位置与"弧长中点"确实不同（否则下面是假绿）')
+  ok(text !== undefined && Math.abs(text.props.x - want.x) < 0.6 && Math.abs(text.props.y - want.y) < 1.6, '文字画在存下来的位置上：' + JSON.stringify(text === undefined ? null : [text.props.x, text.props.y]))
+  ok(text !== undefined && Math.abs(text.props.x - center.x) + Math.abs(text.props.y - center.y) > 1, '不再是弧长中点')
+  // 归一化是那道会静默丢字段的闸门（labels 和键盘归属都在这里踩过）
+  const viaPayload = internals.docFromPayload({ ok: true, exists: true, revision: '', notes: [], doc: doc })
+  ok(viaPayload.error === undefined && viaPayload.doc.edges[0].labelX === 0.5 && viaPayload.doc.edges[0].labelY === 40, '位置穿过归一化没丢：' + JSON.stringify([viaPayload.doc.edges[0].labelX, viaPayload.doc.edges[0].labelY]))
+  ok(viaPayload.doc.edges[0].labelOffsetX === 2 && viaPayload.doc.edges[0].labelOffsetY === -1, '残余偏移也穿过了：' + JSON.stringify([viaPayload.doc.edges[0].labelOffsetX, viaPayload.doc.edges[0].labelOffsetY]))
+
+  // 交互接线：标签按住是"拖标签"，命中带按住是"选中这条线"
+  const calls = []
+  const ui = {
+    selectedIds: ['e1'],
+    onSelectEdge: (id) => calls.push('select:' + id),
+    onEdgeLabelPointerDown: (id) => calls.push('drag:' + id),
+    onEdgeDoubleClick: (id) => calls.push('edit:' + id),
+  }
+  const tree2 = renderDiagram(doc, 'light', 'u1', { current: null }, ui, null)
+  const bg = walk(tree2, (n) => n.type === 'rect' && n.props.key === 'edge-bg-0', [])[0]
+  const band = walk(tree2, (n) => n.props.key === 'edge-hit-0', [])[0]
+  if (bg !== undefined) bg.props.onPointerDown({})
+  if (band !== undefined) band.props.onPointerDown({})
+  ok(calls.join(',') === 'drag:e1,select:e1', '标签按住 = 拖标签，命中带按住 = 选中（实际 ' + calls.join(',') + '）')
+  ok(bg !== undefined && typeof bg.props.onDoubleClick === 'function', '标签仍然双击改字（拖动没有把它挤掉）')
+}
+
 console.log('\n悬空端：能拖回来、也能拖出去（预览与落盘同一套）')
 {
   // 一端悬空的边：`to` 不写，只有 `targetPoint`（drawio 的规则：自由点只在那一端没有真实顶点时生效）。

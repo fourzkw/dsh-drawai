@@ -651,6 +651,17 @@ function normalizeDrawioDoc(raw) {
     if (sourcePoint !== null) item.sourcePoint = sourcePoint
     var targetPoint = normalizePoint(edge.targetPoint)
     if (targetPoint !== null) item.targetPoint = targetPoint
+    // 边标签的位置（drawio 的 mxGeometry x/y + offset）：拖过标签才有，缺省 = 弧长中点。
+    // 必须原样穿过归一化 —— 丢了它，画布会把用户拖过的标签画回中点（和 labels 那次踩的同一个坑）。
+    var hasPos = edge.labelX !== undefined && edge.labelX !== null && edge.labelY !== undefined && edge.labelY !== null
+    if (hasPos && Number.isFinite(Number(edge.labelX)) && Number.isFinite(Number(edge.labelY))) {
+      item.labelX = Number(edge.labelX)
+      item.labelY = Number(edge.labelY)
+      var offX = Number(edge.labelOffsetX)
+      var offY = Number(edge.labelOffsetY)
+      if (Number.isFinite(offX) && offX !== 0) item.labelOffsetX = offX
+      if (Number.isFinite(offY) && offY !== 0) item.labelOffsetY = offY
+    }
     if (isObject(edge.data)) item.data = copyData(edge.data)
     edges.push(item)
   }
