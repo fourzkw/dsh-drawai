@@ -278,6 +278,7 @@ console.log('\n工具条：按类型合并为下拉菜单')
       copySelection: () => {},
       cutSelection: () => {},
       pasteClipboard: () => {},
+      normalizeGeometry: () => {},
       saveNow: () => {},
       openSaveAsPanel: () => {},
       pickDirectoryAndList: () => {},
@@ -308,7 +309,7 @@ console.log('\n工具条：按类型合并为下拉菜单')
     if (menus !== null) {
     ok(menus.map((m) => m.key).join(',') === 'file,edit,view,export', '恰好 4 类：文件 / 编辑 / 视图 / 导出')
     const total = menus.reduce((n, m) => n + m.items.length, 0)
-    ok(total === 15, '所有操作都有归处（实际 ' + total + ' 项）')
+    ok(total === 16, '所有操作都有归处（实际 ' + total + ' 项）')
     ok(menus.every((m) => typeof m.title === 'string' && m.title.length > 0), '每个菜单都有悬停说明（title）')
     ok(menus.every((m) => m.items.every((i) => typeof i.label === 'string' && i.label.length > 0)), '每一项都有 label')
     ok(menus.every((m) => m.items.every((i) => typeof i.onClick === 'function')), '每一项都有 onClick')

@@ -972,5 +972,49 @@ console.log('\n悬空端：能拖回来、也能拖出去（预览与落盘同�
   ok(/这一端已脱离形状/.test(src), '落空时有状态提示（不然用户以为没反应）')
 }
 
+console.log('\n一次性几何迁移：节点对齐整格、折点与自由端点对齐半格')
+{
+  const off = {
+    version: 2,
+    revision: 'x',
+    meta: { pinned: true },
+    nodes: [
+      { id: 'n1', label: '甲', style: 'fillColor=#dae8fc;', x: 37, y: 211, w: 186, h: 56 },
+      { id: 'n2', label: '乙', style: '', x: 300, y: 200, w: 130, h: 60 },
+    ],
+    edges: [
+      { id: 'e1', from: 'n1', to: 'n2', label: '带折点', style: 'endArrow=classic;', points: [{ x: 202, y: 93 }, { x: 240, y: 100 }] },
+      { id: 'e2', from: 'n1', targetPoint: { x: 503, y: 307 }, style: '' },
+    ],
+    labels: [{ id: 'L', text: '独立标签', edgeId: null, x: 5, y: 5, offsetX: 0, offsetY: 0, relative: true, style: 'edgeLabel;' }],
+  }
+  const result = internals.snapDocGeometry(off, { grid: 10, edgeGrid: 5, minW: 60, minH: 40 })
+  const n1 = result.doc.nodes[0]
+  ok(n1.x === 40 && n1.y === 210 && n1.w === 190 && n1.h === 60, '节点位置与尺寸都对齐到整格：' + JSON.stringify([n1.x, n1.y, n1.w, n1.h]))
+  ok(result.doc.nodes[1].x === 300 && result.doc.nodes[1].w === 130, '本来就在格线上的节点不动：' + JSON.stringify([result.doc.nodes[1].x, result.doc.nodes[1].w]))
+  const e1 = result.doc.edges[0]
+  ok(e1.points[0].x === 200 && e1.points[0].y === 95 && e1.points[1].x === 240 && e1.points[1].y === 100, '折点对齐到半格：' + JSON.stringify(e1.points))
+  ok(e1.style === 'endArrow=classic;' && e1.label === '带折点' && e1.from === 'n1' && e1.to === 'n2', '只动几何：style / 标签 / 两端都没碰')
+  const e2 = result.doc.edges[1]
+  ok(e2.sourcePoint === undefined && e2.targetPoint.x === 505 && e2.targetPoint.y === 305, '自由端点也对齐到半格：' + JSON.stringify(e2.targetPoint))
+  ok(e2.to === undefined, '悬空端仍然没有 to（迁移不会替它接上谁）')
+  ok(result.doc.labels === off.labels, '独立边标签原样带过（只读，不参与迁移）')
+  ok(result.changes > 0, 'changes 报出了改动数量（' + result.changes + '）')
+
+  // 尺寸下限：太小的节点被抬到下限，而不是被抹成 0。
+  const tiny = internals.snapDocGeometry({ version: 2, nodes: [{ id: 't', x: 1, y: 1, w: 8, h: 6 }], edges: [] }, { grid: 10, edgeGrid: 5, minW: 60, minH: 40 })
+  ok(tiny.doc.nodes[0].w === 60 && tiny.doc.nodes[0].h === 40, '尺寸被抬到下限：' + JSON.stringify([tiny.doc.nodes[0].w, tiny.doc.nodes[0].h]))
+
+  // 已经在格线上 → 一处都不改（幂等），且不改变任何字段。
+  const clean = internals.snapDocGeometry(result.doc, { grid: 10, edgeGrid: 5, minW: 60, minH: 40 })
+  ok(clean.changes === 0, '再跑一次是幂等的（changes=0）')
+  ok(JSON.stringify(clean.doc.nodes) === JSON.stringify(result.doc.nodes) && JSON.stringify(clean.doc.edges) === JSON.stringify(result.doc.edges), '幂等时不产生任何差异')
+
+  // 源码接线：菜单里真的有这个入口
+  const src = composeClientBody()
+  ok(/item\('整理几何（吸附到格线）', normalizeGeometry/.test(src), '编辑菜单里有「整理几何（吸附到格线）」')
+  ok(/snapDocGeometry\(current, \{ grid: GRID, edgeGrid: EDGE_GRID/.test(src), '用的是画布自己的单位（GRID / EDGE_GRID）')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

@@ -36,6 +36,7 @@ const {
   jettyFromStyle,
   nodeShapeFromStyle,
   normalizeDrawioDoc,
+  snapDocGeometry,
   parseStyle,
   sideFromStyle,
   styleGet,
@@ -4246,6 +4247,30 @@ function CanvasView(props) {
     })
   }
 
+  /**
+   * 一次性几何迁移：把这张画布上的几何对齐到格线（节点整格、折点与自由端点半格）。
+   *
+   * 为什么值得有一个手动入口：画布自己的手势是吸附的，但从 drawio 手画来的图、
+   * AI 早期写下的坐标、旧版本估宽留下的 186/56 这种尺寸都不会自己变整齐 ——
+   * 而"差几像素的台阶"正是"同一条线上两个段把手""连线抖动"那类毛病的温床。
+   * 只动几何，style / 标签 / 两端约束 / 层级一律不碰。
+   */
+  function normalizeGeometry() {
+    const current = docRef.current
+    if (current === null) return
+    const result = snapDocGeometry(current, { grid: GRID, edgeGrid: EDGE_GRID, minW: MIN_NODE_W, minH: MIN_NODE_H })
+    setMenu(null)
+    if (result.changes === 0) {
+      setSaveNote('几何已经都在格线上，不用整理')
+      return
+    }
+    applyLocal((next) => {
+      next.nodes = result.doc.nodes
+      next.edges = result.doc.edges
+    })
+    setSaveNote('已整理 ' + result.changes + ' 处几何（节点对齐整格、折点对齐半格；可 Ctrl+Z 撤销）')
+  }
+
   function deleteSelected() {
     const ids = selectedIds
     if (ids.length === 0) return
@@ -5140,6 +5165,7 @@ function CanvasView(props) {
           item('复制', copySelection, { hint: 'Ctrl+C', disabled: empty || selectedIds.length === 0 }),
           item('剪切', cutSelection, { hint: 'Ctrl+X', disabled: empty || selectedIds.length === 0 }),
           item('粘贴', pasteClipboard, { hint: 'Ctrl+V（跨标签页也能贴）', disabled: empty }),
+          item('整理几何（吸附到格线）', normalizeGeometry, { hint: '节点对齐整格、折点对齐半格；从 drawio 手画来的图常用', disabled: empty }),
         ],
       },
       {
@@ -5600,6 +5626,7 @@ exports.__routeInternals = {
   zoomViewAt: zoomViewAt,
   contentBounds: contentBounds,
   edgeLabelPointAt: edgeLabelPointAt,
+  snapDocGeometry: snapDocGeometry,
   openTabIn: openTabIn,
   tabLabelOf: tabLabelOf,
   edgeRoutePoints: edgeRoutePoints,
