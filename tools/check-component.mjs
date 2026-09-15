@@ -608,7 +608,7 @@ console.log('\n线型与字号的手工入口')
     /\['straight', '直线'/.test(src) && /\['sharp', '直角折线'/.test(src) && /\['rounded', '圆角折线'/.test(src) && /\['curved', '曲线'/.test(src),
     '连线菜单里有 直线 / 直角折线 / 圆角折线 / 曲线 四个入口',
   )
-  ok(/rounded', '圆角折线', '正交折线，\*\*只在折点处\*\*倒圆角/.test(src), '圆角折线的说明写清了"只在折点处"（rounded=1）')
+  ok(/rounded', '圆角折线', '正交折线，只在折点处倒圆角/.test(src), '圆角折线的说明写清了"只在折点处"（rounded=1）')
   ok(/applyLineKind\(edgeTargets, it\[0\]\)/.test(src), '点线型对整组连线生效（与改色/箭头一致）')
   ok(/kind === 'straight'\) \{\s*\n\s*delete e\.points/.test(src) || /if \(kind === 'straight'\) \{\n\s+delete e\.points/.test(src), '选直线会清掉折点')
   ok(/e\.points = \[\{ x: snap\(/.test(src), '选曲线会给"本来就笔直"的边补一个弓形中点（否则弧看不见）')
@@ -619,9 +619,43 @@ console.log('\n线型与字号的手工入口')
   // 字号：节点/文字与连线共用同一个控件
   ok(/function fontSizeRow\(/.test(src), '有 fontSizeRow（三个地方共用）')
   ok(/const FONT_SIZE_PRESETS = \[/.test(src), '字号有档位表（不写死在 UI 里）')
-  ok(/rows\.push\(fontSizeRow\(nodeStyle,/.test(src), '节点菜单（含独立文字）有字号行')
-  ok(/rows\.push\(fontSizeRow\(edgeBaseStyle,/.test(src), '连线菜单有字号行（改的是线上的字）')
+  ok(/'fontSize',\s*\n\s*'字号',\s*\n\s*styleSummary\(nodeStyle, 'fontSize'\)/.test(src), '节点菜单（含独立文字）有字号行')
+  ok(/'fontSize',\s*\n\s*'字号',\s*\n\s*styleSummary\(edgeBaseStyle, 'fontSize'\)/.test(src), '连线菜单有字号行（改的是线上的字）')
   ok(/fontSize: v === null \? null : String\(v\)/.test(src), '「默认」= 删掉 fontSize 键（不留 fontSize=0 之类噪音）')
+}
+
+console.log('\n右键菜单：一类一行只显示当前值，选项在下拉里')
+{
+  // 需求："右键时不要把所有元素的所有类型都展示出来……仅展示每一类的当前值，每一类可通过下拉列表切换"。
+  // 以前一屏铺着 形状 10 个缩略图 + 配色 8 个色块 + 字号 6 个 + 线型 4 个 + 样式 3 个 + 箭头 4 个。
+  ok(/function menuSelect\(rowKey, label, currentText, body, hint\)/.test(src), '有 menuSelect（一类一个下拉）')
+  ok(/menu\.openKey === rowKey/.test(src), '展开状态记在 menu.openKey 上（换元素右键自动收起、点另一类收起上一类）')
+  ok(/className: 'drawai-btn drawai-menu-select'/.test(src), '行按钮用 drawai-menu-select 样式（整行可点 + caret）')
+  ok(/label \+ '：' \+ currentText/.test(src), '行上显示的就是「类名：当前值」')
+  ok(/if \(open\) out\.push\(React\.createElement\('div'/.test(src), '选项体只在展开时才渲染（收起时一个按钮都不多）')
+  ok(/function closeSelect\(\)/.test(src), '选完一个值就收起来')
+
+  // 每一类都走 menuSelect —— 这些 picker 不再被当成整行直接铺出来
+  const categories = ['shape', 'color', 'fontSize', 'line', 'dash', 'arrow']
+  for (const key of categories) {
+    ok(new RegExp("menuSelect\\(\\s*\\n?\\s*'" + key + "'").test(src), '「' + key + '」这一类走的是下拉（menuSelect）')
+  }
+  ok(!/rows\.push\(shapeGrid\(/.test(src), '形状不再把 10 个缩略图直接铺在菜单里')
+  ok(!/rows\.push\(swatchRow\(/.test(src), '配色不再把 8 个色块直接铺在菜单里')
+  ok(!/rows\.push\(fontSizeRow\(/.test(src), '字号不再把 6 个档位直接铺在菜单里')
+  ok(
+    !/rows\.push\(dashRow\(/.test(src) && !/rows\.push\(arrowRow\(/.test(src) && !/rows\.push\(\s*\n\s*lineRow\(/.test(src),
+    '样式/箭头/线型也不再直接铺开',
+  )
+
+  // 当前值必须来自纯函数（能被命令行自测直接断言），而不是在 JSX 里现拼
+  ok(/styleSummary: styleSummary,/.test(src), 'styleSummary 挂进 internals（自测能直接调）')
+  ok(/PALETTE_LABELS\[menuStyle\] === undefined \? styleSummary\(menuStyle, 'color'\)/.test(src), '空白处右键的「配色」显示当前选中的那个（而不是颜色名表里查不到就空着）')
+  ok(/createNodeAt\(menuShape, menuStyle, menu\.userX, menu\.userY\)/.test(src), '「＋ 新增节点」放的就是下拉里选中的形状（当前值语义）')
+  // 动作类（改标签/删除/顺序…）仍然是一排按钮：它们没有"当前值"，收进下拉反而多一次点击
+  ok(/reorderItem\('node', menu\.id, 'front'\)/.test(src) && /openNodeEditor\(menu\.id\)/.test(src), '动作类仍然是按钮（顺序 / 改标签 / 删除…）')
+  // 下拉本体的样式：缩进 + 左侧竖线，看起来是那一行的子面板
+  ok(/\.drawai-menu-select\{/.test(src) && /\.drawai-menu-select-body\{/.test(src), '下拉行与下拉体有对应样式')
 }
 
 console.log('\n独立文字：右键空白处能放一段字（不接节点、也不接边）')

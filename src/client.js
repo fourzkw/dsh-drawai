@@ -247,6 +247,12 @@ const CSS = [
   // 当前生效的选项（线型/箭头方向）—— 和色板用同一套"被选中"语言。
   '.drawai-btn.on{outline:2px solid var(--dsw-alias-brand-primary,#4c8dff);outline-offset:1px}',
   '.drawai-menu-row{display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1,#3a3a3a)}',
+  // 「一类一个下拉」：平时只显示当前值（形状：矩形 ▾），点开才铺开这一类的全部选项。
+  // 整行可点、左对齐、右侧一个 caret；展开体缩进一格，看起来是它的"子面板"。
+  '.drawai-menu-select{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;margin-top:8px;white-space:nowrap}',
+  '.drawai-menu-select-label{overflow:hidden;text-overflow:ellipsis}',
+  '.drawai-menu-caret{opacity:.7;margin-left:8px}',
+  '.drawai-menu-select-body{margin:4px 0 0 10px;padding-left:8px;border-left:2px solid var(--dsw-alias-border-l1,#3a3a3a)}',
   // 新建/打开面板：固定在工具条下方左侧，盖在画布上（和右键菜单同一层）。
   // 下拉面板：left/top 由**触发它的按钮**算出来（inline style），这里只给宽度与兜底位置。
   // 兜底 left:8px;top:38px 用于"量不到按钮位置"的情形（首帧 ref 还没挂）。
@@ -1508,7 +1514,53 @@ const SHAPE_LIBRARY = [
 // 调色板（8 个经典色）由样式内核的 PALETTE 提供，见文件顶部从 styleKernel 的解构 ——
 // 这里不再留第二份"颜色名 → 十六进制"的表，否则两边迟早会漂移。
 
-/** 从节点集合算出 box / 索引 / 包围盒。渲染与命中都走它，避免两处算法漂移。
+/**
+ * 菜单里"当前值"要用到的几个中文名。与选项行用的是**同一份表**（下面那些 row 也读它），
+ * 所以"当前值显示什么"和"下拉里有什么"不会各说一套。
+ */
+const PALETTE_LABELS = { plain: '默认', blue: '蓝', green: '绿', orange: '橙', yellow: '黄', red: '红', purple: '紫', grey: '灰' }
+const LINE_KIND_LABELS = { straight: '直线', sharp: '直角折线', rounded: '圆角折线', curved: '曲线' }
+const DASH_LABELS = { solid: '实线', dashed: '虚线', dotted: '点线' }
+const ARROW_LABELS = { end: '→ 单向', both: '↔ 双向', none: '— 无箭头', start: '← 反向' }
+
+/**
+ * 右键菜单里每一类的**当前值**文字。
+ *
+ * 菜单不再把每一类的全部选项铺出来（形状 10 个缩略图 + 配色 8 个色块 + 字号 6 个 +
+ * 线型 4 个 + 样式 3 个 + 箭头 4 个 —— 一屏全是按钮），改成"一类一行、只显示当前值 ▾"，
+ * 点开才铺选项。这里只负责算那行文字：纯函数，能被命令行自测直接断言。
+ *
+ * @param {string} style 节点的或连线的 style 串
+ * @param {string} kind 'shape' | 'color' | 'fontSize' | 'line' | 'dash' | 'arrow'
+ */
+function styleSummary(style, kind) {
+  const s = typeof style === 'string' ? style : ''
+  if (kind === 'shape') {
+    const shape = nodeShapeFromStyle(s)
+    for (let i = 0; i < SHAPE_LIBRARY.length; i += 1) if (SHAPE_LIBRARY[i].shape === shape) return SHAPE_LIBRARY[i].label
+    return shape
+  }
+  if (kind === 'color') {
+    // 独立文字没有填充/描边：它的"配色"就是字色（见 styleWithTextColorName）。
+    const isText = nodeShapeFromStyle(s) === 'text'
+    const name = isText ? textColorNameFromStyle(s) : colorNameFromStyle(s)
+    if (name !== null) return PALETTE_LABELS[name] === undefined ? name : PALETTE_LABELS[name]
+    // 认不出的颜色（drawio 文件里本来就只有十六进制）：把那个值原样给人看，别显示"未知"。
+    const hex = isText ? styleGet(s, 'fontColor', null) : styleGet(s, 'fillColor', null) !== null ? styleGet(s, 'fillColor', null) : styleGet(s, 'strokeColor', null)
+    return hex === null ? '默认' : String(hex)
+  }
+  if (kind === 'fontSize') {
+    const n = styleNumber(s, 'fontSize', null)
+    return n === null ? '默认' : String(n)
+  }
+  if (kind === 'line') return LINE_KIND_LABELS[lineKindFromStyle(s)]
+  if (kind === 'dash') return DASH_LABELS[dashFromStyle(s)]
+  if (kind === 'arrow') return ARROW_LABELS[arrowFromStyle(s)]
+  return ''
+}
+
+/**
+ * 从节点集合算出 box / 索引 / 包围盒。渲染与命中都走它，避免两处算法漂移。
  *
  * **隐藏图层的节点不进来** —— 这里是"什么可见"的唯一咽喉：渲染、命中（`hitNodeAt`）、
  * 框选、路由障碍全都读它，于是"隐藏一层"在这些地方自动一致（不会出现
@@ -3698,6 +3750,10 @@ function CanvasView(props) {
   const menuStyleState = React.useState('blue')
   const menuStyle = menuStyleState[0]
   const setMenuStyle = menuStyleState[1]
+  // 空白处右键"元素库"里选中的形状：菜单只显示它的名字，选中的那个就是「＋ 新增节点」放的东西。
+  const menuShapeState = React.useState('rect')
+  const menuShape = menuShapeState[0]
+  const setMenuShape = menuShapeState[1]
   const edgeDragRef = React.useRef(null) // { edgeId, kind: 'segment'|'from'|'to', ... }
   const labelDragRef = React.useRef(null) // 拖边标签 { edgeId, originX, originY, moved }
   const guidesState = React.useState([]) // 拖动时的对齐辅助线 [{axis,at,from,to}]
@@ -6023,6 +6079,41 @@ function CanvasView(props) {
     )
   }
 
+  /**
+   * 右键菜单里的**一类一个下拉**。
+   *
+   * 以前每一类都把全部选项铺在菜单里（形状 10 个缩略图 + 配色 8 个色块 + 字号 6 个 +
+   * 线型 4 个 + 样式 3 个 + 箭头 4 个），右栏又窄，一屏全是按钮、看不出"现在是什么"。
+   * 现在一类只占一行：`形状：矩形 ▾`，点开才铺这一类的选项。展开状态记在 menu 对象上
+   * （`menu.openKey`）—— 换一个元素右键时 menu 是新对象，下拉自然收起；同一个菜单里
+   * 点另一类会把上一类收起来。
+   *
+   * @returns 要 push 进 rows 的元素数组（未展开时只有一个行按钮）
+   */
+  /** 选完一个值就把下拉收起来（菜单回到"一类一行"的样子）。 */
+  function closeSelect() {
+    setMenu(Object.assign({}, menu, { openKey: null }))
+  }
+
+  function menuSelect(rowKey, label, currentText, body, hint) {
+    const open = menu.openKey === rowKey
+    const out = [
+      React.createElement(
+        'button',
+        {
+          key: 'sel-' + rowKey,
+          className: 'drawai-btn drawai-menu-select' + (open ? ' on' : ''),
+          title: hint === undefined ? '展开这一类的可选值' : hint,
+          onClick: () => setMenu(Object.assign({}, menu, { openKey: open ? null : rowKey })),
+        },
+        React.createElement('span', { className: 'drawai-menu-select-label' }, label + '：' + currentText),
+        React.createElement('span', { className: 'drawai-menu-caret' }, open ? '▴' : '▾'),
+      ),
+    ]
+    if (open) out.push(React.createElement('div', { key: 'body-' + rowKey, className: 'drawai-menu-select-body' }, body))
+    return out
+  }
+
   function renderMenu() {
     if (menu === null) return null
     const rows = []
@@ -6064,8 +6155,33 @@ function CanvasView(props) {
 
     if (menu.kind === 'canvas') {
       rows.push(menuTitle('元素库 —— 选一个放到这里'))
-      rows.push(shapeGrid((shape) => createNodeAt(shape, menuStyle, menu.userX, menu.userY)))
-      rows.push(swatchRow((style) => setMenuStyle(style), menuStyle))
+      // 形状/配色也只显示"当前值"，选项在下拉里；「＋ 新增节点」放的就是当前形状 + 当前配色。
+      rows.push.apply(
+        rows,
+        menuSelect(
+          'shape',
+          '形状',
+          styleSummary(styleWithNodeShape('', menuShape), 'shape'),
+          shapeGrid((shape) => {
+            setMenuShape(shape)
+            closeSelect()
+          }),
+          '换一个形状（「＋ 新增节点」用的就是它）',
+        ),
+      )
+      rows.push.apply(
+        rows,
+        menuSelect(
+          'color',
+          '配色',
+          PALETTE_LABELS[menuStyle] === undefined ? styleSummary(menuStyle, 'color') : PALETTE_LABELS[menuStyle],
+          swatchRow((style) => {
+            setMenuStyle(style)
+            closeSelect()
+          }, menuStyle),
+          '新建节点用的配色',
+        ),
+      )
       // 工具条的「＋ 节点」去掉之后，这里补一格"不挑形状、就放一个"的快捷入口：
       // 和上面点某个形状等价（同一个 createNodeAt、同一套新 id 规则），
       // 但不是每个人都记得九宫格里哪个是自己要的方框。
@@ -6073,7 +6189,7 @@ function CanvasView(props) {
         React.createElement(
           'div',
           { className: 'drawai-menu-row' },
-          React.createElement('button', { className: 'drawai-btn', onClick: () => createNodeAt('rect', menuStyle, menu.userX, menu.userY) }, '＋ 新增节点'),
+          React.createElement('button', { className: 'drawai-btn', onClick: () => createNodeAt(menuShape, menuStyle, menu.userX, menu.userY) }, '＋ 新增节点'),
           // 独立文字：一个只有文字、没有边框底色的元素（drawio 的 text 形状）。
           // 放在这里的原因是"要在哪就放哪"：它不接节点、也不接边，位置就是点的地方。
           React.createElement(
@@ -6128,13 +6244,35 @@ function CanvasView(props) {
       rows.push(menuTitle('节点：' + label + (nodeTargets.length > 1 ? '（共 ' + nodeTargets.length + ' 个）' : '')))
       // 形状与配色都改成**键级改写**：不再往文档里写 shape 字段，也不再用颜色名当 style。
       // 整组改色时以**点中的那个**的当前样式为基准（把它的配色推广给其它成员）。
-      rows.push(shapeGrid((shape) => updateNode(nodeTargets, { style: styleWithNodeShape(nodeStyle, shape) })))
+      // 菜单只显示当前值（形状：矩形 ▾ / 配色：蓝 ▾ / 字号：默认 ▾），选项在下拉里。
+      rows.push.apply(
+        rows,
+        menuSelect(
+          'shape',
+          '形状',
+          styleSummary(nodeStyle, 'shape'),
+          shapeGrid((shape) => {
+            updateNode(nodeTargets, { style: styleWithNodeShape(nodeStyle, shape) })
+            closeSelect()
+          }),
+        ),
+      )
       // 配色：文字元素能换的只有**字色**（它没有填充与描边）—— 否则点了一圈颜色屏幕上毫无变化。
       const isTextNode = nodeShapeFromStyle(nodeStyle) === 'text'
-      rows.push(
-        swatchRow(
-          (color) => updateNode(nodeTargets, { style: isTextNode ? styleWithTextColorName(nodeStyle, color) : styleWithColorName(nodeStyle, color) }),
-          isTextNode ? textColorNameFromStyle(nodeStyle) : colorNameFromStyle(nodeStyle),
+      rows.push.apply(
+        rows,
+        menuSelect(
+          'color',
+          '配色',
+          styleSummary(nodeStyle, 'color'),
+          swatchRow(
+            (color) => {
+              updateNode(nodeTargets, { style: isTextNode ? styleWithTextColorName(nodeStyle, color) : styleWithColorName(nodeStyle, color) })
+              closeSelect()
+            },
+            isTextNode ? textColorNameFromStyle(nodeStyle) : colorNameFromStyle(nodeStyle),
+          ),
+          isTextNode ? '独立文字换的是字色' : '填充与描边',
         ),
       )
       rows.push(
@@ -6149,7 +6287,18 @@ function CanvasView(props) {
         ),
       )
       // 字号：节点标签与独立文字共用这套控件（文字元素没有填充描边，字号是它少数能改的东西）。
-      rows.push(fontSizeRow(nodeStyle, (v) => updateNode(nodeTargets, { style: stylePatch(nodeStyle, { fontSize: v === null ? null : String(v) }) })))
+      rows.push.apply(
+        rows,
+        menuSelect(
+          'fontSize',
+          '字号',
+          styleSummary(nodeStyle, 'fontSize'),
+          fontSizeRow(nodeStyle, (v) => {
+            updateNode(nodeTargets, { style: stylePatch(nodeStyle, { fontSize: v === null ? null : String(v) }) })
+            closeSelect()
+          }),
+        ),
+      )
       rows.push(
         React.createElement(
           'div',
@@ -6186,22 +6335,31 @@ function CanvasView(props) {
 
       // 连线的画法。落盘是 style 键（dashed/dashPattern/endArrow/startArrow/strokeColor），
       // 这里只是它的手工入口 —— AI 侧走同一个 setStyle（dash/arrow/color 是糖），两边改的是同一批键。
+      // 四类各占一行、**只显示当前值**（线型：直角折线 ▾ / 样式：实线 ▾ / 箭头：→ 单向 ▾ / 字号：默认 ▾），
+      // 选项在各自的下拉里 —— 以前一屏铺 3+4+4+6 个按钮，看不出"现在是什么"。
       const edgeBaseStyle = edge === null || typeof edge.style !== 'string' ? DEFAULT_EDGE_STYLE : edge.style
       const edgeDashNow = edge === null ? 'solid' : dashFromStyle(edgeBaseStyle)
       const edgeArrowNow = edge === null ? 'end' : arrowFromStyle(edgeBaseStyle)
       const dashRow = (items) =>
         React.createElement(
           'div',
-          { className: 'drawai-menu-row' },
+          { className: 'drawai-menu-row', style: { marginTop: 0, paddingTop: 0, borderTop: 'none' } },
           items.map((it) =>
             React.createElement(
               'button',
-              { key: it[0], className: 'drawai-btn' + (edgeDashNow === it[0] ? ' on' : ''), onClick: () => updateEdge(edgeTargets, { dash: it[0] }) },
+              {
+                key: it[0],
+                className: 'drawai-btn' + (edgeDashNow === it[0] ? ' on' : ''),
+                onClick: () => {
+                  updateEdge(edgeTargets, { dash: it[0] })
+                  closeSelect()
+                },
+              },
               it[1],
             ),
           ),
         )
-      rows.push(dashRow([['solid', '实线'], ['dashed', '虚线'], ['dotted', '点线']]))
+      rows.push.apply(rows, menuSelect('dash', '样式', DASH_LABELS[edgeDashNow], dashRow([['solid', '实线'], ['dashed', '虚线'], ['dotted', '点线']])))
       // 线型（drawio 的两组键压平成四选一，见内核 styleWithLineKind）：
       //   直线 / 直角折线 / 圆角折线（只在折点处倒角，rounded=1）/ 曲线（curved=1）。
       // 直线会顺手清掉折点，曲线会给"本来就笔直"的那种边补一个弓形中点 —— 理由见 applyLineKind。
@@ -6209,7 +6367,7 @@ function CanvasView(props) {
       const lineRow = (items) =>
         React.createElement(
           'div',
-          { className: 'drawai-menu-row' },
+          { className: 'drawai-menu-row', style: { marginTop: 0, paddingTop: 0, borderTop: 'none' } },
           items.map((it) =>
             React.createElement(
               'button',
@@ -6217,35 +6375,62 @@ function CanvasView(props) {
                 key: it[0],
                 className: 'drawai-btn' + (edgeLineNow === it[0] ? ' on' : ''),
                 title: it[2],
-                onClick: () => applyLineKind(edgeTargets, it[0]),
+                onClick: () => {
+                  applyLineKind(edgeTargets, it[0])
+                  closeSelect()
+                },
               },
               it[1],
             ),
           ),
         )
-      rows.push(
-        lineRow([
-          ['straight', '直线', '两点之间一条直线，不带折点'],
-          ['sharp', '直角折线', '正交折线，折点是尖角（drawio 的 Sharp）'],
-          ['rounded', '圆角折线', '正交折线，**只在折点处**倒圆角（rounded=1；半径跟 drawio 一样，缺省 10px）'],
-          ['curved', '曲线', '把整条折线抹成平滑曲线；本来笔直的那种会补一个弓形中点，弧才看得见'],
-        ]),
+      rows.push.apply(
+        rows,
+        menuSelect(
+          'line',
+          '线型',
+          LINE_KIND_LABELS[edgeLineNow],
+          lineRow([
+            ['straight', '直线', '两点之间一条直线，不带折点'],
+            ['sharp', '直角折线', '正交折线，折点是尖角（drawio 的 Sharp）'],
+            ['rounded', '圆角折线', '正交折线，只在折点处倒圆角（rounded=1；半径跟 drawio 一样，缺省 10px）'],
+            ['curved', '曲线', '把整条折线抹成平滑曲线；本来笔直的那种会补一个弓形中点，弧才看得见'],
+          ]),
+        ),
       )
-      // 字号：线上的文字（边自己的 value）与挂在边上的独立标签都吃 fontSize。
-      rows.push(fontSizeRow(edgeBaseStyle, (v) => updateEdge(edgeTargets, { fontSize: v })))
       const arrowRow = (items) =>
         React.createElement(
           'div',
-          { className: 'drawai-menu-row' },
+          { className: 'drawai-menu-row', style: { marginTop: 0, paddingTop: 0, borderTop: 'none' } },
           items.map((it) =>
             React.createElement(
               'button',
-              { key: it[0], className: 'drawai-btn' + (edgeArrowNow === it[0] ? ' on' : ''), onClick: () => updateEdge(edgeTargets, { arrow: it[0] }) },
+              {
+                key: it[0],
+                className: 'drawai-btn' + (edgeArrowNow === it[0] ? ' on' : ''),
+                onClick: () => {
+                  updateEdge(edgeTargets, { arrow: it[0] })
+                  closeSelect()
+                },
+              },
               it[1],
             ),
           ),
         )
-      rows.push(arrowRow([['end', '→ 单向'], ['both', '↔ 双向'], ['none', '— 无箭头'], ['start', '← 反向']]))
+      rows.push.apply(rows, menuSelect('arrow', '箭头', ARROW_LABELS[edgeArrowNow], arrowRow([['end', '→ 单向'], ['both', '↔ 双向'], ['none', '— 无箭头'], ['start', '← 反向']])))
+      // 字号：线上的文字（边自己的 value）与挂在边上的独立标签都吃 fontSize。
+      rows.push.apply(
+        rows,
+        menuSelect(
+          'fontSize',
+          '字号',
+          styleSummary(edgeBaseStyle, 'fontSize'),
+          fontSizeRow(edgeBaseStyle, (v) => {
+            updateEdge(edgeTargets, { fontSize: v })
+            closeSelect()
+          }),
+        ),
+      )
       rows.push(
         React.createElement(
           'div',
@@ -7191,6 +7376,7 @@ exports.__routeInternals = {
   docFromPayload: docFromPayload,
   cloneDoc: cloneDoc,
   defaultLayer: defaultLayer,
+  styleSummary: styleSummary,
   pathFromAddress: pathFromAddress,
   computeFitView: computeFitView,
   resizeViewFor: resizeViewFor,

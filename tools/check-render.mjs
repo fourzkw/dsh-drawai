@@ -1479,6 +1479,47 @@ console.log('\n线型（直线 / 折线 / 曲线）与字号')
   ok(styleGet(stylePatch(fs, { fontSize: null }), 'fontSize', null) === null, '删键回缺省')
 }
 
+console.log('\n右键菜单的"当前值"（一类一行只显示它）')
+{
+  // 菜单改成"一类一行 + 下拉"之后，风险从"按钮排不下"变成"当前值显示错了"——
+  // 显示错了比铺开更糟：用户以为现在是直角折线，其实点开才发现是曲线。
+  const sum = internals.styleSummary
+  ok(typeof sum === 'function', 'styleSummary 有导出（自测能直接断言）')
+  if (typeof sum === 'function') {
+    // 形状：枚举 → 中文名；认不出的形状原样给名字，不显示"未知"
+    ok(sum('', 'shape') === '矩形', '没有形状键 = 矩形：' + sum('', 'shape'))
+    ok(sum('rounded=1', 'shape') === '圆角矩形', 'rounded=1 → 圆角矩形（不是"圆角"这种含糊说法）')
+    ok(sum('text;html=1', 'shape') === '文字', 'text → 文字')
+    ok(sum('shape=cylinder3', 'shape') === '数据库', '容器形状也认得：' + sum('shape=cylinder3', 'shape'))
+    // 认不出的形状：内核的判据是"落回 rect"，而画面上我们确实按矩形画 —— 所以显示"矩形"是与画面一致的
+    ok(sum('shape=whateverUnknown', 'shape') === '矩形', '认不出的形状按矩形显示（与渲染一致：它真的画成矩形）')
+
+    // 配色：命中调色板给中文名；认不出的十六进制就把那个值给人看
+    ok(sum('', 'color') === '默认', '空样式 = 默认配色')
+    ok(sum('fillColor=#dae8fc;strokeColor=#6c8ebf', 'color') === '蓝', '蓝色命中调色板 → 蓝')
+    ok(sum('fillColor=#123456;strokeColor=#654321', 'color') === '#123456', '认不出的颜色显示十六进制：' + sum('fillColor=#123456;strokeColor=#654321', 'color'))
+    ok(sum('text;html=1;fontColor=#b85450', 'color') === '红', '独立文字的"配色"读的是字色')
+    ok(sum('text;html=1', 'color') === '默认', '文字没设字色 = 默认')
+
+    // 字号：没写键 = 默认（而不是 0 或空）
+    ok(sum('', 'fontSize') === '默认', '没写 fontSize = 默认')
+    ok(sum('fontSize=18', 'fontSize') === '18', '写了就是那个数：' + sum('fontSize=18', 'fontSize'))
+
+    // 连线三类：与下拉里高亮的那一项必须同源
+    ok(sum('', 'line') === '直角折线', '缺省线型 = 直角折线')
+    ok(sum('edgeStyle=none', 'line') === '直线', 'edgeStyle=none → 直线')
+    ok(sum('rounded=1', 'line') === '圆角折线', 'rounded=1 → 圆角折线')
+    ok(sum('curved=1', 'line') === '曲线', 'curved=1 → 曲线')
+    ok(sum('', 'dash') === '实线' && sum('dashed=1', 'dash') === '虚线' && sum('dashed=1;dashPattern=1 2', 'dash') === '点线', '实线/虚线/点线认得出来')
+    ok(sum(DEFAULT_EDGE_STYLE, 'arrow') === '→ 单向', '我们新建的边（缺省样式带 endArrow=classic）→ 单向')
+    ok(sum('', 'arrow') === '— 无箭头', '样式串里没有箭头键 = 不画箭头（drawio 的 mxConnector 语义）')
+    ok(sum('endArrow=none', 'arrow') === '— 无箭头', 'endArrow=none → 无箭头')
+    ok(sum('endArrow=classic;startArrow=classic', 'arrow') === '↔ 双向', '两端都有 → 双向')
+    ok(sum('startArrow=classic', 'arrow') === '← 反向', '只有起点有 → 反向')
+    ok(sum('', 'nonsense') === '', '认不出的类返回空串（不猜）')
+  }
+}
+
 console.log('\n对齐辅助线 / 批量改样式 / 全选')
 {
   // ① 对齐辅助线（drawio 的 guides）：与**没在拖的**节点比 左/中/右、上/中/下，
