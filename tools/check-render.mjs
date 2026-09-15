@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { composeClientBody } from './build.mjs'
 // 造 style 键夹具时直接用内核（与宿主/客户端同一份），免得把键名再抄一遍。
-import { DEFAULT_EDGE_STYLE, stylePatch } from '../src/style-kernel.js'
+import { DEFAULT_EDGE_STYLE, normalizeDrawioDoc, stylePatch } from '../src/style-kernel.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 /** 源码文本断言用（CSS 串、函数名这些在 src/client.js 里就有）。 */
@@ -1216,6 +1216,68 @@ console.log('\n图层 v1：隐藏层整层不画、也点不到；新单元进�
   ok(pasted !== null && pasted.doc.nodes.filter((n) => pasted.ids.indexOf(n.id) >= 0).every((n) => n.layer === 'L2'), '粘贴的节点进当前图层')
   const pastedOwn = internals.pasteInto(doc, clip, 20, 20)
   ok(pastedOwn !== null && pastedOwn.doc.nodes.filter((n) => pastedOwn.ids.indexOf(n.id) >= 0).every((n) => n.layer === '1'), '不给层时沿用原件那一层')
+}
+
+console.log('\n文档在客户端里转一圈不能把字段吃掉（图层就是这么丢的）')
+{
+  // 真实事故：图层菜单一直说"（这张画布没有图层信息）"，而文件里明明有图层 ——
+  // 因为**客户端**有三处把文档"逐个字段抄"了一遍，都漏了 layers：
+  //   docFromPayload（宿主 → 客户端）、cloneDoc（每次本地改动/撤销快照）、pasteInto（粘贴）。
+  // 表现是：层显示不出来；而且"显示/隐藏"是**空操作**（mutate 拿到的 next.layers 是 undefined）。
+  //
+  // 这里用**键集合**来钉，而不是逐个字段写断言：拿"内核归一化后的文档"当基准，
+  // 谁抄漏了字段就报出缺了哪个 —— 以后内核再加文档级字段，这三处必须自动跟上。
+  const payload = {
+    ok: true,
+    exists: true,
+    path: 'a.drawio',
+    absolute: 'D:/ws/a.drawio',
+    notes: [],
+    doc: {
+      version: 2,
+      revision: 'abc123abc123',
+      meta: { pinned: true },
+      layers: [
+        { id: '1', name: '主流程', visible: true, locked: false },
+        { id: 'L2', name: '草稿', visible: false, locked: false },
+      ],
+      nodes: [{ id: 'n1', label: 'A', x: 0, y: 0, w: 100, h: 40, layer: '1' }],
+      edges: [{ id: 'e1', from: 'n1', to: 'n1', style: DEFAULT_EDGE_STYLE, layer: '1' }],
+      labels: [],
+    },
+  }
+  /** 少了哪些键（基准 = 内核归一化后的文档键集合）。 */
+  const missingKeys = (base, candidate) => Object.keys(base).filter((k) => Object.prototype.hasOwnProperty.call(candidate, k) === false)
+
+  const fromPayload = internals.docFromPayload(payload)
+  ok(fromPayload.error === undefined, 'docFromPayload 读得动')
+  const d1 = fromPayload.doc
+  const normalized = normalizeDrawioDoc(payload.doc)
+  ok(Array.isArray(d1.layers) && d1.layers.length === 2, 'docFromPayload 带上图层表（实际 ' + JSON.stringify(d1.layers) + '）')
+  ok(d1.layers[1].visible === false && d1.layers[1].name === '草稿', '图层的可见性与名字都在')
+  ok(missingKeys(normalized, d1).length === 0, 'docFromPayload 不丢任何一个文档级字段（缺：' + JSON.stringify(missingKeys(normalized, d1)) + '）')
+  ok(d1.meta.pinned === true && d1.nodes.length === 1 && d1.edges.length === 1, '原有的 meta/nodes/edges 照旧')
+
+  // 文件还不存在（地址栏直接开新路径 / 新建画布）：空画布也要有缺省图层，
+  // 否则图层面板在这张画布上永远说"没有图层信息"，一存一开又有了。
+  const fresh = internals.docFromPayload({ ok: true, exists: false, path: 'new.drawio' })
+  ok(fresh.error === undefined && Array.isArray(fresh.doc.layers) && fresh.doc.layers.length === 1, '文件还不存在时给一个缺省图层')
+  ok(fresh.doc.layers.length === 1 && fresh.doc.layers[0].id === '1' && fresh.doc.layers[0].visible === true, '缺省图层与盘上那个 `<mxCell id="1" parent="0" />` 对应')
+
+  // cloneDoc：本地每一次改动、每一个撤销快照都走它
+  const cloned = internals.cloneDoc(d1)
+  ok(Array.isArray(cloned.layers) && cloned.layers.length === 2, 'cloneDoc 带上图层表（实际 ' + JSON.stringify(cloned.layers) + '）')
+  ok(missingKeys(d1, cloned).length === 0, 'cloneDoc 不丢字段（缺：' + JSON.stringify(missingKeys(d1, cloned)) + '）')
+  ok(cloned.nodes !== d1.nodes && cloned.edges !== d1.edges && cloned.labels !== d1.labels, '数组是新的（快照互相不影响）')
+  ok(cloned.layers !== d1.layers && cloned.layers[0] !== d1.layers[0], '图层对象也是新的 —— 否则改可见性会连快照一起改')
+  cloned.layers[0].visible = false
+  ok(d1.layers[0].visible === true, '改克隆出来的层不会回头改原件（撤销快照不能被写坏）')
+
+  // pasteInto：粘贴一次不该把图层结构弄丢
+  const clip = internals.collectClipboard(d1, ['n1'])
+  const pasted = internals.pasteInto(d1, clip, 20, 20, 'L2')
+  ok(Array.isArray(pasted.doc.layers) && pasted.doc.layers.length === 2, 'pasteInto 保留图层表')
+  ok(missingKeys(d1, pasted.doc).length === 0, 'pasteInto 不丢字段（缺：' + JSON.stringify(missingKeys(d1, pasted.doc)) + '）')
 }
 
 console.log('\n对齐辅助线 / 批量改样式 / 全选')

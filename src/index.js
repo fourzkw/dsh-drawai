@@ -186,7 +186,18 @@ function nextId(list, prefix) {
 function emptyDoc() {
   // revision 是**文件内容指纹**（载体即真相，没有第二个地方存版本号）：
   // 空文档的指纹就是空串，第一次落盘后由写入器算出来。
-  return { version: 2, revision: '', meta: { layout: 'dagre-tb' }, nodes: [], edges: [] }
+  //
+  // 带一个缺省图层：落盘时写出来的就是 `<mxCell id="1" parent="0" />`（与 drawio 一致，
+  // 字节不变），而**内存里的形状与"落盘后再打开"一致** —— 否则新建出来的画布在图层面板里
+  // 会显示"没有图层信息"，一存一开又有了。
+  return {
+    version: 2,
+    revision: '',
+    meta: { layout: 'dagre-tb' },
+    nodes: [],
+    edges: [],
+    layers: [{ id: '1', name: '', visible: true, locked: false }],
+  }
 }
 
 /**

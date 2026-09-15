@@ -383,6 +383,12 @@ console.log('\n图层：AI 至少要知道"东西在哪几层、哪一层用户�
   ok(raw.includes('visible="0"'), '隐藏状态仍然写在文件里（改图没把它抹平）')
   const reread = await readTool.execute({ path: 'doc.drawio' }, exec)
   ok(reread.layers.length === 2 && reread.nodes.filter((n) => n.id === 'n2')[0].layer === 'L2', '改图之后 read 照样看得到层')
+
+  // 还不存在（= 刚「新建画布」）的文档也要有缺省图层：否则图层面板在这张画布上
+  // 一直说"没有图层信息"，保存一次再打开又有了 —— 同一个画布两种样子。
+  const blank = await readTool.execute({ path: 'fresh.drawio' }, exec)
+  ok(Array.isArray(blank.layers) && blank.layers.length === 1, '还不存在的画布：read 报一个缺省图层（实际 ' + JSON.stringify(blank.layers) + '）')
+  ok(blank.layers[0].id === '1' && blank.layers[0].visible === true && blank.layers[0].locked === false, '缺省图层就是 drawio 那个 `<mxCell id="1" parent="0" />`')
 }
 
 
