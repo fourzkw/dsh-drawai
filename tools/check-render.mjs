@@ -814,5 +814,63 @@ console.log('\n剪贴板：复制/粘贴的语义（id 不撞、折点不共享�
   ok(internals.pasteInto(doc, null, 0, 0) === null, '空剪贴板粘不出东西')
 }
 
+console.log('\n短线段也要有可拖的段把手（每段一个，不能因为短就省略）')
+{
+  // 实测报过："短线段没有可移动的段点"。原来渲染时 `if (segLen < 26) continue` ——
+  // 短段整段挪不动，而差几像素的台阶、贴边的引出段恰恰都是短段。
+  // 造一条**确有短段**的边：两个节点只隔 10px，那条边就是一整段 10px。
+  const doc = {
+    version: 2,
+    revision: '',
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 160, h: 60 },
+      { id: 'b', x: 170, y: 0, w: 160, h: 60 },
+    ],
+    edges: [{ id: 'e1', from: 'a', to: 'b', style: DEFAULT_EDGE_STYLE }],
+  }
+  const pts = internals.edgeRoutePoints(doc, doc.edges[0])
+  ok(Array.isArray(pts) && pts.length >= 2, '这条边算得出路径（实际 ' + (pts === null ? '-' : pts.length) + ' 个点）')
+  const segLengths = []
+  for (let i = 1; i < pts.length; i += 1) segLengths.push(Math.abs(pts[i].x - pts[i - 1].x) + Math.abs(pts[i].y - pts[i - 1].y))
+  const shortSegs = segLengths.filter((n) => n < 26).length
+  ok(shortSegs > 0, '用例里确实存在短段（' + shortSegs + ' 段 < 26px：' + segLengths.map((n) => Math.round(n)).join(',') + '）')
+
+  const pressed = []
+  const ui = {
+    selectedIds: ['e1'],
+    onEdgeHandlePointerDown: (edgeId, kind, index) => pressed.push(kind + ':' + index),
+  }
+  const tree = renderDiagram(doc, 'light', 'u1', { current: null }, ui, null)
+  const handles = walk(tree, (n) => n.type === 'circle' && n.props.stroke === '#f2a900', [])
+  ok(handles.length === pts.length - 1, '每一段都有一个段把手（段 ' + (pts.length - 1) + ' 个，把手 ' + handles.length + ' 个）')
+  const endpoints = walk(tree, (n) => n.type === 'circle' && (n.props.fill === '#0a7d32' || n.props.fill === '#b85450'), [])
+  ok(endpoints.length === 2, '两个端点把手还在（绿/红）')
+
+  // 每个把手都落在它负责的那一段上（不许飘到别处）。
+  const onSomeSegment = handles.every((h) =>
+    segLengths.some((_, s) => {
+      const a = pts[s]
+      const b = pts[s + 1]
+      const inX = h.props.cx >= Math.min(a.x, b.x) - 0.6 && h.props.cx <= Math.max(a.x, b.x) + 0.6
+      const inY = h.props.cy >= Math.min(a.y, b.y) - 0.6 && h.props.cy <= Math.max(a.y, b.y) + 0.6
+      return inX && inY
+    }),
+  )
+  ok(onSomeSegment, '每个段把手都落在某一段上（不飘）')
+
+  // 真正按下每一个把手：必须报到对应的段号（这就是"能不能拖"的判据）。
+  for (let s = 0; s < handles.length; s += 1) {
+    const down = handles[s].props.onPointerDown
+    if (typeof down === 'function') down({ button: 0, preventDefault: () => {}, stopPropagation: () => {}, pointerId: 1 })
+  }
+  ok(
+    pressed.length === pts.length - 1 && pressed.every((tag, i) => tag === 'segment:' + i),
+    '每个段把手按下都报到对应的段号：' + JSON.stringify(pressed),
+  )
+  // 短段的手把必须真的在里面（这是这次报的 bug 的核心）。
+  const shortIdx = segLengths.map((n, i) => (n < 26 ? i : -1)).filter((i) => i >= 0)
+  ok(shortIdx.every((i) => pressed.indexOf('segment:' + i) >= 0), '短段的把手也在，并且能按下：' + JSON.stringify(shortIdx))
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1
