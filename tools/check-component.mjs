@@ -619,26 +619,29 @@ console.log('\n线型与字号的手工入口')
   // 字号：节点/文字与连线共用同一个控件
   ok(/function fontSizeRow\(/.test(src), '有 fontSizeRow（三个地方共用）')
   ok(/const FONT_SIZE_PRESETS = \[/.test(src), '字号有档位表（不写死在 UI 里）')
-  ok(/'fontSize',\s*\n\s*'字号',\s*\n\s*styleSummary\(nodeStyle, 'fontSize'\)/.test(src), '节点菜单（含独立文字）有字号行')
-  ok(/'fontSize',\s*\n\s*'字号',\s*\n\s*styleSummary\(edgeBaseStyle, 'fontSize'\)/.test(src), '连线菜单有字号行（改的是线上的字）')
+  ok(/key: 'fontSize',\s*\n\s*label: '字号',\s*\n\s*value: styleSummary\(nodeStyle, 'fontSize'\)/.test(src), '节点菜单（含独立文字）有字号行')
+  ok(/key: 'fontSize',\s*\n\s*label: '字号',\s*\n\s*value: styleSummary\(edgeBaseStyle, 'fontSize'\)/.test(src), '连线菜单有字号行（改的是线上的字）')
   ok(/fontSize: v === null \? null : String\(v\)/.test(src), '「默认」= 删掉 fontSize 键（不留 fontSize=0 之类噪音）')
 }
 
-console.log('\n右键菜单：一类一行只显示当前值，选项在下拉里')
+console.log('\n右键菜单：几类只显示当前值，并排成一行')
 {
-  // 需求："右键时不要把所有元素的所有类型都展示出来……仅展示每一类的当前值，每一类可通过下拉列表切换"。
+  // 需求："右键时不要把所有元素的所有类型都展示出来……仅展示每一类的当前值，每一类可通过下拉列表切换"，
+  // 随后确认："三个「类：当前值」并排成一行"。
   // 以前一屏铺着 形状 10 个缩略图 + 配色 8 个色块 + 字号 6 个 + 线型 4 个 + 样式 3 个 + 箭头 4 个。
-  ok(/function menuSelect\(rowKey, label, currentText, body, hint\)/.test(src), '有 menuSelect（一类一个下拉）')
-  ok(/menu\.openKey === rowKey/.test(src), '展开状态记在 menu.openKey 上（换元素右键自动收起、点另一类收起上一类）')
-  ok(/className: 'drawai-btn drawai-menu-select'/.test(src), '行按钮用 drawai-menu-select 样式（整行可点 + caret）')
-  ok(/label \+ '：' \+ currentText/.test(src), '行上显示的就是「类名：当前值」')
-  ok(/if \(open\) out\.push\(React\.createElement\('div'/.test(src), '选项体只在展开时才渲染（收起时一个按钮都不多）')
+  ok(/function menuSelectRow\(cats\)/.test(src), '有 menuSelectRow（一次给出若干类）')
+  ok(/menu\.openKey === cat\.key/.test(src), '展开状态记在 menu.openKey 上（换元素右键自动收起、点另一类收起上一类）')
+  ok(/className: 'drawai-btn drawai-select-chip'/.test(src), '每一类是一个 chip 按钮（不是整行）')
+  ok(/cat\.label \+ '：' \+ cat\.value/.test(src), 'chip 上显示的就是「类名：当前值」')
+  ok(/if \(menu\.openKey !== cats\[i\]\.key\) continue/.test(src), '选项体只在展开的那一类下面渲染（收起时一个按钮都不多）')
   ok(/function closeSelect\(\)/.test(src), '选完一个值就收起来')
 
-  // 每一类都走 menuSelect —— 这些 picker 不再被当成整行直接铺出来
+  // 三个菜单各自**一次**menuSelectRow 调用里给出全部类 —— 这才是"并排成一行"
+  const callSites = src.match(/menuSelectRow\(\[/g) || []
+  ok(callSites.length === 3, '三处右键菜单各调用一次 menuSelectRow（画布 / 节点 / 连线），实际 ' + callSites.length + ' 处')
   const categories = ['shape', 'color', 'fontSize', 'line', 'dash', 'arrow']
   for (const key of categories) {
-    ok(new RegExp("menuSelect\\(\\s*\\n?\\s*'" + key + "'").test(src), '「' + key + '」这一类走的是下拉（menuSelect）')
+    ok(new RegExp("key: '" + key + "'").test(src), '「' + key + '」这一类在 menuSelectRow 的 cats 里')
   }
   ok(!/rows\.push\(shapeGrid\(/.test(src), '形状不再把 10 个缩略图直接铺在菜单里')
   ok(!/rows\.push\(swatchRow\(/.test(src), '配色不再把 8 个色块直接铺在菜单里')
@@ -648,14 +651,20 @@ console.log('\n右键菜单：一类一行只显示当前值，选项在下拉�
     '样式/箭头/线型也不再直接铺开',
   )
 
+  // 并排：chips 横排 + 每个 chip 不换行；菜单再夹一道最大宽度（否则宽出来的部分会被 overflow:hidden 裁掉）
+  ok(/\.drawai-select-chips\{display:flex;flex-wrap:wrap/.test(src), 'chips 是横向 flex（右栏放不下才折行）')
+  ok(/\.drawai-select-chip\{display:inline-flex;align-items:center;gap:2px;white-space:nowrap\}/.test(src), '单个 chip 是 inline-flex 且不换行（"形状：矩形 ▾"不会被拆成两行）')
+  ok(/const maxWidth = size\.w > 0 \? Math\.max\(180, size\.w - left - 8\)/.test(src), '菜单夹了一道最大宽度（chips 横排后可能比 214px 宽）')
+  ok(/maxWidth: maxWidth === undefined \? undefined : maxWidth \+ 'px'/.test(src), '这个最大宽度真的落到菜单的 style 上')
+
   // 当前值必须来自纯函数（能被命令行自测直接断言），而不是在 JSX 里现拼
   ok(/styleSummary: styleSummary,/.test(src), 'styleSummary 挂进 internals（自测能直接调）')
   ok(/PALETTE_LABELS\[menuStyle\] === undefined \? styleSummary\(menuStyle, 'color'\)/.test(src), '空白处右键的「配色」显示当前选中的那个（而不是颜色名表里查不到就空着）')
   ok(/createNodeAt\(menuShape, menuStyle, menu\.userX, menu\.userY\)/.test(src), '「＋ 新增节点」放的就是下拉里选中的形状（当前值语义）')
   // 动作类（改标签/删除/顺序…）仍然是一排按钮：它们没有"当前值"，收进下拉反而多一次点击
   ok(/reorderItem\('node', menu\.id, 'front'\)/.test(src) && /openNodeEditor\(menu\.id\)/.test(src), '动作类仍然是按钮（顺序 / 改标签 / 删除…）')
-  // 下拉本体的样式：缩进 + 左侧竖线，看起来是那一行的子面板
-  ok(/\.drawai-menu-select\{/.test(src) && /\.drawai-menu-select-body\{/.test(src), '下拉行与下拉体有对应样式')
+  // 展开体的样式：缩进 + 左侧竖线，看起来是那排 chips 的下拉面板
+  ok(/\.drawai-menu-select-body\{/.test(src), '展开体有对应样式（缩进 + 左侧竖线）')
 }
 
 console.log('\n下拉里的选项横着排 + 字号可手动调节')
