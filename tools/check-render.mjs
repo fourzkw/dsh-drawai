@@ -1080,6 +1080,68 @@ console.log('\n拖线上的文字：位置存在边自己的几何上（drawio �
   ok(labelText !== undefined && typeof labelText.props.onDoubleClick === 'function', '标签仍然双击改字（拖动没有把它挤掉）')
 }
 
+console.log('\n框选：节点与连线都要被框到才亮')
+{
+  // 用户报的："批量框选时线段也应该有被选中的提示" —— 以前框选只收节点，框住一排线时一条都不亮。
+  const doc = {
+    version: 2,
+    revision: '',
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 60, h: 40 },
+      { id: 'b', x: 300, y: 200, w: 60, h: 40 },
+      { id: 'c', x: 600, y: 0, w: 60, h: 40 },
+    ],
+    edges: [
+      { id: 'e1', from: 'a', to: 'b', style: DEFAULT_EDGE_STYLE },
+      { id: 'e2', from: 'a', to: 'c', style: DEFAULT_EDGE_STYLE },
+    ],
+    labels: [],
+  }
+  const pts1 = internals.edgeRoutePoints(doc, doc.edges[0])
+  ok(pts1 !== null && pts1.length >= 3, 'a→b 是条折线（' + (pts1 === null ? '-' : pts1.length) + ' 点）')
+
+  // 框住 c（它在右边，和 a/b 离得远）→ 必须有 c，且不能牵连 a/b。
+  // 注意：c 身上连着 e2 的落点，所以框住一个节点时"从它身上过的线"也会被选中 —— 这是对的。
+  const hitsNode = internals.marqueeHits(doc, { x: 595, y: -5, w: 70, h: 50 }, null)
+  ok(hitsNode.indexOf('c') >= 0 && hitsNode.indexOf('a') < 0 && hitsNode.indexOf('b') < 0, '框住一个节点：它被选中，远处的节点不受牵连（' + hitsNode.join(',') + '）')
+  // 框住 e1 最后一段的中段（y=220 那条，离 e2 的 y=20 很远）→ 只该选中 e1
+  const lastA = pts1[pts1.length - 2]
+  const lastB = pts1[pts1.length - 1]
+  const mid = { x: (lastA.x + lastB.x) / 2, y: (lastA.y + lastB.y) / 2 }
+  const hitsLine = internals.marqueeHits(doc, { x: mid.x - 10, y: mid.y - 10, w: 20, h: 20 }, null)
+  ok(hitsLine.join(',') === 'e1', '框住折线中间的一段 → 只选中那条线（实际 ' + hitsLine.join(',') + '）')
+  // 框住节点 + 从它身上过的线 → 两者都要
+  const hitsBoth = internals.marqueeHits(doc, { x: -5, y: -5, w: 100, h: 50 }, null)
+  ok(hitsBoth.indexOf('a') >= 0 && hitsBoth.indexOf('e2') >= 0, '框住节点与从它出发的线 → 都选中：' + hitsBoth.join(','))
+  // 空框 → 什么都不选
+  ok(internals.marqueeHits(doc, { x: 2000, y: 2000, w: 10, h: 10 }, null).length === 0, '框在空白处 → 空选集')
+  // 悬空端也要能框到（它的路径算得出来）
+  const dangling = {
+    version: 2,
+    revision: '',
+    nodes: [{ id: 'a', x: 0, y: 0, w: 60, h: 40 }],
+    edges: [{ id: 'ed', from: 'a', targetPoint: { x: 300, y: 0 }, style: DEFAULT_EDGE_STYLE }],
+    labels: [],
+  }
+  ok(internals.marqueeHits(dangling, { x: 280, y: -10, w: 40, h: 20 }, null).join(',') === 'ed', '悬空端的线也能被框到')
+
+  // 判定按**段**而不是按整条边的外接框：后者会把离得很远的边也选中（drawio 的 cell state 外接框就是这个毛病）
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const p of pts1) {
+    minX = Math.min(minX, p.x)
+    minY = Math.min(minY, p.y)
+    maxX = Math.max(maxX, p.x)
+    maxY = Math.max(maxY, p.y)
+  }
+  const hole = { x: minX + 10, y: minY + 10, w: 30, h: 30 }
+  const bboxOverlaps = hole.x < maxX && hole.x + hole.w > minX && hole.y < maxY && hole.y + hole.h > minY
+  const hitsHole = internals.marqueeHits(doc, hole, null)
+  ok(bboxOverlaps && hitsHole.indexOf('e1') < 0, '框在边的外接框里、但离线还远 → 不选它（按段判定，不是按外接框）：' + hitsHole.join(','))
+}
+
 console.log('\n线在文字的位置断开 + 拖动吸附')
 {
   // 用户的两条要求：

@@ -1483,6 +1483,43 @@ function buildGeometry(doc) {
 }
 
 /**
+ * 框选命中：与矩形相交的**节点** + 与矩形相交的**连线**。
+ *
+ * 连线按**段**判定（不是拿整条边的外接矩形去比）：我们的路径每段都是横/竖的，
+ * 段的外接矩形就是它自己，所以"框到线才算选中"是精确的 —— 用整条边的外接框会把
+ * 绕了大弯的边在离得很远的地方也选中（drawio 用的 cell state 外接框正是这个毛病）。
+ *
+ * 抽成纯函数是为了能被断言：之前它只收节点，框住一排线时**一条都不亮**，
+ * 用户报的"批量框选时线段也应该有被选中的提示"就是这个。
+ */
+function marqueeHits(doc, rect, memory) {
+  const hits = []
+  if (doc === null || doc === undefined) return hits
+  const nodes = Array.isArray(doc.nodes) ? doc.nodes : []
+  for (let i = 0; i < nodes.length; i += 1) {
+    const n = nodes[i]
+    const x = numberOr(n.x, 0)
+    const y = numberOr(n.y, 0)
+    const w = numberOr(n.w, FALLBACK_NODE_W)
+    const h = numberOr(n.h, FALLBACK_NODE_H)
+    if (x < rect.x + rect.w && x + w > rect.x && y < rect.y + rect.h && y + h > rect.y) hits.push(n.id)
+  }
+  const edges = Array.isArray(doc.edges) ? doc.edges : []
+  for (let i = 0; i < edges.length; i += 1) {
+    const edge = edges[i]
+    const pts = edgeRoutePoints(doc, edge, memory)
+    if (pts === null || pts.length < 2) continue
+    for (let s = 0; s < pts.length - 1; s += 1) {
+      if (segmentHitsBox(pts[s], pts[s + 1], rect, 0)) {
+        hits.push(edge.id)
+        break
+      }
+    }
+  }
+  return hits
+}
+
+/**
  * 批量对齐 / 分布的**纯计算**部分：只算出"谁该挪到哪"，不碰文档、不碰 React。
  *
  * 刻意抽成纯函数：这段是"差两个像素也说得过去、但错了很难看出来"的类型，
@@ -4274,7 +4311,8 @@ function CanvasView(props) {
     image.src = url
   }
 
-  /** 收尾框选：没拖动过就是一次"点空白"（取消选中），否则按矩形相交挑节点。 */  function finishMarquee() {
+  /** 收尾框选：没拖动过就是一次"点空白"（取消选中），否则按矩形相交挑节点与连线。 */
+  function finishMarquee() {
     const drag = marqueeRef.current
     if (drag === null) return
     marqueeRef.current = null
@@ -4289,16 +4327,7 @@ function CanvasView(props) {
     const maxX = Math.max(drag.x0, drag.x1)
     const minY = Math.min(drag.y0, drag.y1)
     const maxY = Math.max(drag.y0, drag.y1)
-    const hits = []
-    for (let i = 0; i < current.nodes.length; i += 1) {
-      const n = current.nodes[i]
-      const x = numberOr(n.x, 0)
-      const y = numberOr(n.y, 0)
-      const w = numberOr(n.w, FALLBACK_NODE_W)
-      const h = numberOr(n.h, FALLBACK_NODE_H)
-      const overlaps = x < maxX && x + w > minX && y < maxY && y + h > minY
-      if (overlaps) hits.push(n.id)
-    }
+    const hits = marqueeHits(current, { x: minX, y: minY, w: maxX - minX, h: maxY - minY }, routeMemoryRef.current)
     if (drag.additive === true) {
       const merged = selectedIds.slice()
       for (let i = 0; i < hits.length; i += 1) if (merged.indexOf(hits[i]) < 0) merged.push(hits[i])
@@ -6325,6 +6354,7 @@ exports.__routeInternals = {
   pathCost: pathCost,
   renderDiagram: renderDiagram,
   computeAlignMoves: computeAlignMoves,
+  marqueeHits: marqueeHits,
   docFromPayload: docFromPayload,
   pathFromAddress: pathFromAddress,
   computeFitView: computeFitView,
