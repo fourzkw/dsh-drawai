@@ -2093,7 +2093,11 @@ function sanitizeNewName(raw) {
         return
       }
       // 空画布也打 meta.pinned：它是人手工建的，不该被 AI 的自动布局重排。
-      const blankBuilt = buildMxfile({ version: 2, revision: '', meta: { pinned: true }, nodes: [], edges: [] }, { name: nameCheck.name.replace(/\.drawio$/i, '') })
+      // 文档形状直接用 emptyDoc()（**含那个缺省图层**）—— 别再手搭一份
+      // `{version, meta, nodes, edges}`：这就是同一个"逐个字段抄"的毛病，
+      // 抄漏 layers 之后内存里的画布与盘上的文件对不上。
+      const blankDoc = Object.assign({}, emptyDoc(), { meta: { pinned: true } })
+      const blankBuilt = buildMxfile(blankDoc, { name: nameCheck.name.replace(/\.drawio$/i, '') })
       const createPolicy = policyFor(sessionId)
       try {
         if (createPolicy === undefined) await ctx.fs.writeText(createTarget, blankBuilt.text)

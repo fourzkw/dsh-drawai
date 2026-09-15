@@ -760,6 +760,13 @@ console.log('\n写回路由：list / read / save / create 都只认 .drawio')
   const createdText = store.get(WORKSPACE + '\\brand-new.drawio')
   ok(typeof createdText === 'string' && createdText.indexOf('<mxfile') === 0, '新建出来的是一份 mxfile')
   ok(parseMxfile(createdText).doc.meta.pinned === true, '新建的画布带 pinned（人手工建的，AI 别重排）')
+  // 新建的文件必须有那个缺省图层单元 —— 否则图层面板在这张画布上说"没有图层信息"，
+  // 而 drawio 打开同一份文件却有"背景"那一层（同一张画布两种样子）。
+  ok(parseMxfile(createdText).doc.layers.length === 1, '新建的文件带一个缺省图层（实际 ' + JSON.stringify(parseMxfile(createdText).doc.layers) + '）')
+  ok(createdText.indexOf('<mxCell id="1" parent="0" />') >= 0, '缺省图层单元的写法与 drawio 一致')
+  // 再读一遍（客户端新建完就是这么做的）：图层表要能从盘上读回来
+  const createdRead = await api({ action: 'read', sessionId: 's1', path: 'brand-new.drawio' })
+  ok(createdRead.payload.ok === true && createdRead.payload.doc.layers.length === 1, '新建后回读：图层表在（这才是图层面板看到的那份文档）')
   ok(created.payload.revision === contentHash(createdText), 'create 返回的 revision 也是内容指纹')
   const created2 = await api({ action: 'create', sessionId: 's1', name: 'brand-new.drawio' })
   ok(created2.payload.ok !== true && created2.payload.exists === true, '同名文件已存在时不覆盖')
