@@ -550,17 +550,83 @@ console.log('\n折线不该在空地上来回折返（"不是最简洁路径"就
     ok(len <= bound, label + '：在给定折点下已接近最短（' + len + ' ≤ 下界+' + 3 * (wps.length + 1) + ' = ' + bound + '）')
   }
 
-  // 每个折点都必须**出现在路径里**：这是 points[] 与路径顶点一一对应的前提，
-  // 也是段把手能拖得动的前提（ensurePinned/pathIndexOf 找不到折点就返回 -1）。
+  // 每个折点都必须**被线经过**：这是"人摆的点不许被路由器吃掉"的判据。
   //
   // 这里曾经用"长度 ≤ 1150 / ≤ 450"当防回归 —— 那两条数字其实是在**奖励偷偷丢掉折点**：
   // 折出去再折回来的那条路径，消掉中间那个折点会短一大截，但它没经过用户摆的点。
-  // 现在改成守住真正的不变量；上面的"接近最短"上界仍然在，那才是长度的判据。
+  //
+  // 判据从"必须是路径顶点"放宽成"落在路径上（顶点或某一段内部）"：
+  // 折返被消掉之后（见下面 removeRetraces 那节），用户折点有可能正好变成一条长直线**中间**的点，
+  // 那时线依然经过它、画面完全一样；硬留成顶点反而会在同一条线上多挂一个段把手。
+  // 折返尖点（被吃掉会少一整段的那类）另有专门断言，不受这次放宽影响。
+  const onPath = (pts, w) => {
+    for (let i = 0; i < pts.length; i += 1) {
+      if (Math.abs(pts[i].x - w.x) < 0.5 && Math.abs(pts[i].y - w.y) < 0.5) return true
+      const a = pts[i]
+      const b = pts[i + 1]
+      if (b === undefined) continue
+      if (Math.abs(a.y - b.y) < 0.5 && Math.abs(w.y - a.y) < 0.5) {
+        if (w.x >= Math.min(a.x, b.x) - 0.5 && w.x <= Math.max(a.x, b.x) + 0.5) return true
+      } else if (Math.abs(a.x - b.x) < 0.5 && Math.abs(w.x - a.x) < 0.5) {
+        if (w.y >= Math.min(a.y, b.y) - 0.5 && w.y <= Math.max(a.y, b.y) + 0.5) return true
+      }
+    }
+    return false
+  }
   for (const [label, wps] of cases) {
     const pts = internals.routeThroughWaypoints(db, hb, wps)
-    const missing = wps.filter((w) => pts.every((p) => Math.abs(p.x - w.x) >= 0.5 || Math.abs(p.y - w.y) >= 0.5))
-    ok(missing.length === 0, label + '：每个折点都在路径里（没经过的：' + JSON.stringify(missing) + '）')
+    const missing = wps.filter((w) => !onPath(pts, w))
+    ok(missing.length === 0, label + '：线经过每个折点（没经过的：' + JSON.stringify(missing) + '）')
   }
+}
+
+console.log('\n折返（头发夹）：出去又原路描回来的线不能画出来')
+{
+  // 真机截图：把右侧节点从右往左拖，右下角那条线变成"往右走 44px 再原路描回来"——
+  // 同一个 y 上两段重合，pathOf 还会在尖点处鼓出一个 6px 的小包，
+  // 看上去就是"本来只有一条线段，现在画了两条"。
+  const apex = internals.isFoldApex
+  ok(apex({ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 40, y: 0 }) === true, 'isFoldApex：横线上折回来 → 是尖点')
+  ok(apex({ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 140, y: 0 }) === false, 'isFoldApex：继续往前走 → 不是尖点')
+  ok(apex({ x: 0, y: 0 }, { x: 0, y: 100 }, { x: 0, y: 40 }) === true, 'isFoldApex：竖线上折回来 → 是尖点')
+  ok(apex({ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 40 }) === false, 'isFoldApex：转了 90° → 不是尖点')
+
+  const rr = internals.removeRetraces
+  const folded = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 40, y: 0 }, { x: 40, y: 50 }]
+  const flat = rr(folded, [])
+  ok(flat.length === 3 && flat[0].x === 0 && flat[1].x === 40 && flat[2].y === 50, '消折返：尖点被去掉，拐点留在 x=40')
+  ok(rr(folded, [{ x: 100, y: 0 }]).length === 4, '尖点是**人摆的折点**时一个点都不动（折点是用户数据）')
+  const zig = [{ x: 0, y: 0 }, { x: 50, y: 0 }, { x: 50, y: 50 }, { x: 20, y: 50 }]
+  ok(rr(zig, []).length === 4, '正常的 Z 形路径不会被误伤')
+
+  // 用户的真实操作复现：n3 在左、n2 在右，n2 被从右往左拖到"西侧入口落在折点左边"之后。
+  // 期望值与 drawio 的 mxEdgeStyle.SegmentConnector 逐点一致
+  // （它也是先竖着上去、最后一段横着进西侧 —— 见上面对 drawio 源码的核对）。
+  const doc = {
+    nodes: [
+      { id: 'n3', x: 10, y: 280, w: 130, h: 60 },
+      { id: 'n2', x: 360, y: 230, w: 130, h: 60 },
+    ],
+    edges: [],
+  }
+  let style = styleWithSide(DEFAULT_EDGE_STYLE, 'source', 's')
+  style = styleWithSide(style, 'target', 'w')
+  const edge = { id: 'e2', from: 'n3', to: 'n2', points: [{ x: 380, y: 445 }], style: style }
+  const got = internals.edgeRoutePoints({ nodes: doc.nodes, edges: [edge] }, edge)
+  const want = [{ x: 75, y: 340 }, { x: 75, y: 445 }, { x: 380, y: 445 }, { x: 380, y: 260 }, { x: 360, y: 260 }]
+  const same =
+    got !== null && got.length === want.length && got.every((p, i) => Math.abs(p.x - want[i].x) < 0.51 && Math.abs(p.y - want[i].y) < 0.51)
+  ok(same, '拖窄后的走线 == drawio 的走线：' + JSON.stringify(got))
+
+  const folds = (pts) => {
+    let n = 0
+    for (let i = 2; i < pts.length; i += 1) if (apex(pts[i - 2], pts[i - 1], pts[i])) n += 1
+    return n
+  }
+  ok(got !== null && folds(got) === 0, '修好之后这条边一段折返都没有')
+  // 判据本身要能认出坏的那条（否则上面那条"零折返"是假绿）：
+  const before = [{ x: 75, y: 340 }, { x: 75, y: 445 }, { x: 380, y: 445 }, { x: 336, y: 445 }, { x: 336, y: 260 }, { x: 360, y: 260 }]
+  ok(folds(before) === 1, '同一判据在旧走线上认出 1 段折返（出去又回来）')
 }
 
 console.log('\n共线化简：必须保首尾（这里翻过两次车）')
@@ -967,9 +1033,12 @@ console.log('\n画布真图的连线不变量（直接读工作区里的 demo.dr
       for (let i = 0; i < mids.length; i += 1) {
         for (let j = i + 1; j < mids.length; j += 1) minGap = Math.min(minGap, Math.abs(mids[i].x - mids[j].x) + Math.abs(mids[i].y - mids[j].y))
       }
-      const bad = tiny > 0 || minGap < 30
+      // 折返段：同一条线上出去又回来，画面上就是两段重合的线（用户报的就是这个）。
+      let folds = 0
+      for (let s = 2; s < pts.length; s += 1) if (internals.isFoldApex(pts[s - 2], pts[s - 1], pts[s])) folds += 1
+      const bad = tiny > 0 || minGap < 30 || folds > 0
       if (bad) broken += 1
-      ok(!bad, edge.id + ' ' + edge.from + '→' + edge.to + '：最短段 ' + minSeg + 'px，把手最近 ' + (minGap === Infinity ? '-' : minGap) + 'px')
+      ok(!bad, edge.id + ' ' + edge.from + '→' + edge.to + '：最短段 ' + minSeg + 'px，把手最近 ' + (minGap === Infinity ? '-' : minGap) + 'px，折返 ' + folds + ' 段')
     }
     // 这条是**防假绿**的关键：上面 `if (pts === null) continue` 会让"算不出路径"静默通过，
     // 于是整节报"全部通过"却什么都没测 —— 必须显式数一遍非 null 的路径数。
