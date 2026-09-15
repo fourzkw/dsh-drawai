@@ -2640,6 +2640,59 @@ function parseDataLines(text) {
 }
 
 /**
+ * 这个 DOM 节点是不是"正在编辑文本"的地方（按键该归它，不该归画布）。
+ *
+ * `input/textarea/select` 只覆盖了一半的输入场景：**DSH 的输入框是 Lexical 的
+ * contenteditable div**，而事件目标常常是它内部的 span —— 只看 tagName 会认不出来，
+ * 于是"在输入框里按退格"变成"删掉画布里的选中内容"，`Ctrl+C/V` 也被 preventDefault 掉，
+ * 输入框里既删不了字也复制粘贴不了（用户实测报的两条）。
+ *
+ * 三种信号都要认：
+ *   · `isContentEditable` —— 宿主与它内部的子节点都是 true（浏览器算好的）；
+ *   · 往上找 `[contenteditable]` —— 覆盖 `contenteditable="false"` 的子块（它自己 false，
+ *     但仍然长在输入框里）以及老浏览器不实现 isContentEditable 的情况；
+ *   · `role="textbox"` —— 富文本编辑器常给自己挂这个角色。
+ */
+function isTextEntry(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return false
+  if (node.isContentEditable === true) return true
+  if (typeof node.tagName === 'string') {
+    const tag = node.tagName.toLowerCase()
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return true
+  }
+  if (typeof node.closest === 'function') {
+    if (node.closest('[contenteditable=""],[contenteditable="true"],[role="textbox"]') !== null) return true
+  }
+  return false
+}
+
+/**
+ * 画布该不该处理这次按键。
+ *
+ * 画布的快捷键挂在 `window` 上（这样"点过画布之后"不用先把焦点放进某个元素里），
+ * 代价是**别的面板里的按键也会经过这里** —— 而 DSH 的输入框就在同一个页面里。
+ * 两条判据，任何一条成立就放手：
+ *
+ *   1. 事件目标或当前焦点是**输入宿主**（见 isTextEntry）→ 那是人家在打字；
+ *   2. 焦点已经落在**别的控件**上（另一个面板的按钮、链接、树节点…）→ 也不抢。
+ *      只有"焦点没了"（刚点过画布空白，焦点回到 body）或"焦点就在本面板里"才算画布的。
+ *
+ * 第 2 条是为了防同类毛病：焦点在侧边栏某个按钮上时按退格，同样不该删画布里的东西。
+ */
+function canvasOwnsKeyboard(event, root, active) {
+  const target = event === null || event === undefined ? null : event.target
+  if (isTextEntry(target)) return false
+  if (isTextEntry(active)) return false
+  if (active === null || active === undefined) return true
+  if (typeof active.tagName === 'string') {
+    const tag = active.tagName.toUpperCase()
+    if (tag === 'BODY' || tag === 'HTML') return true
+  }
+  if (root === null || root === undefined || typeof root.contains !== 'function') return true
+  return root.contains(active) === true
+}
+
+/**
  * 剪贴板：**模块级**（不属于某个标签页）—— 在一个标签页里复制、切到另一个标签页粘贴，
  * 是画布的常规用法，做成每个标签页一份反而奇怪。
  *
@@ -4521,8 +4574,10 @@ function CanvasView(props) {
 
   React.useEffect(() => {
     function onKey(event) {
-      const tag = event.target !== null && event.target !== undefined && event.target.tagName ? String(event.target.tagName).toLowerCase() : ''
-      if (tag === 'input' || tag === 'textarea') return
+      // 归属判定见 canvasOwnsKeyboard：**在别处打字时这里一律不动手**。
+      // 之前只挡了 input/textarea，而 DSH 的输入框是 contenteditable，
+      // 于是输入框里按退格会删掉画布里的选中内容、Ctrl+C/V 也被吞掉。
+      if (!canvasOwnsKeyboard(event, rootRef.current, document.activeElement)) return
       const accel = event.ctrlKey === true || event.metaKey === true
       if (accel && (event.key === 'z' || event.key === 'Z')) {
         event.preventDefault()
@@ -4536,7 +4591,7 @@ function CanvasView(props) {
         return
       }
       // 复制 / 剪切 / 粘贴：与 drawio 同一套快捷键（Ctrl+C / Ctrl+X / Ctrl+V）。
-      // 必须挡在输入框之外 —— 上面的 tag 判断已经保证在改标签时不会走到这里。
+      // 必须挡在输入框之外 —— 上面的归属判定已经保证在改标签时不会走到这里。
       if (accel && (event.key === 'c' || event.key === 'C')) {
         event.preventDefault()
         copySelection()
@@ -5915,6 +5970,9 @@ exports.__routeInternals = {
   nextSideOf: nextSideOf,
   collectClipboard: collectClipboard,
   pasteInto: pasteInto,
+  // 按键归属：谁在打字、这次按键算不算画布的 —— 纯函数，自测直接喂假 DOM 节点。
+  isTextEntry: isTextEntry,
+  canvasOwnsKeyboard: canvasOwnsKeyboard,
   ensurePinned: ensurePinned,
   SIDES: SIDES,
   HOT_PAD: HOT_PAD,

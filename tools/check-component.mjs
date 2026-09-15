@@ -404,5 +404,61 @@ console.log('\n自环与复制粘贴的接线（手势与快捷键必须真的�
   ok(/let clipboard = null/.test(source), '剪贴板是模块级的（跨标签页也能贴）')
 }
 
+console.log('\n键盘归属：在别处打字时画布一个键都不许碰')
+{
+  // 用户实测报过两条：
+  //   · 在输入框里按退格 → 删掉的是**画布里的选中内容**；
+  //   · 画布打开时，输入框里的 Ctrl+C/V 不管用。
+  // 根因是画布的快捷键挂在 window 上，而**DSH 的输入框是 Lexical 的 contenteditable**：
+  // 之前只挡 input/textarea，事件目标又常常是输入框内部的 span，于是全部漏过去。
+  //
+  // 这一节喂假 DOM 节点给那个纯函数，把判据钉住。
+  const mod = { exports: {} }
+  new Function('module', 'exports', 'require', 'window', 'document', src)(
+    mod,
+    mod.exports,
+    (s) => {
+      if (s === 'react') return makeReact()
+      throw new Error('unexpected require ' + s)
+    },
+    { addEventListener() {}, removeEventListener() {} },
+    fakeDocument,
+  )
+  const internals = mod.exports.__routeInternals
+  const owns = internals.canvasOwnsKeyboard
+  const isText = internals.isTextEntry
+
+  const el = (tag, extra) => Object.assign({ tagName: tag, closest: () => null }, extra || {})
+  /** 输入框**里面**的 span：closest 能找到外面的 contenteditable。 */
+  const innerOf = (host) => el('SPAN', { closest: (sel) => (String(sel).indexOf('contenteditable') >= 0 ? host : null) })
+  const root = { contains: (node) => node === root || node.inRoot === true }
+  const key = (target, active) => owns({ target: target }, root, active)
+
+  ok(isText(el('TEXTAREA')) && isText(el('INPUT')) && isText(el('SELECT')), 'isTextEntry：input / textarea / select 都算')
+  ok(isText(el('DIV', { isContentEditable: true })) === true, 'isTextEntry：contenteditable 宿主算（DSH 的输入框就是它）')
+  const lexicalHost = el('DIV', { isContentEditable: true })
+  ok(isText(innerOf(lexicalHost)) === true, 'isTextEntry：输入框里的 span 也算（事件目标就是它）')
+  ok(isText(el('DIV', { isContentEditable: false })) === false, 'isTextEntry：普通 div 不算')
+
+  ok(key(el('TEXTAREA'), el('TEXTAREA')) === false, '<textarea> 里按键 → 画布放手')
+  ok(key(innerOf(lexicalHost), lexicalHost) === false, 'Lexical 输入框里按键 → 画布放手（退格不再删画布内容）')
+  ok(key(el('DIV', { isContentEditable: true }), el('BODY')) === false, '目标就是输入宿主 → 放手')
+  ok(key(el('BODY'), el('BODY')) === true, '焦点在 body（刚点过画布）→ 画布处理')
+  ok(key(el('BODY'), undefined) === true, '什么都没有聚焦 → 画布处理')
+  ok(key(el('BUTTON', { inRoot: true }), el('BUTTON', { inRoot: true })) === true, '焦点在本面板的按钮上 → 画布处理')
+  ok(key(el('BUTTON'), el('BUTTON')) === false, '焦点在别的面板的按钮上 → 画布放手')
+  ok(key(el('BODY'), null) === true, '焦点是 null → 画布处理')
+
+  // 接线：window 上的那个 keydown 必须**先问归属**再动任何东西（否则上面这些判据白搭）。
+  const onKeyStart = src.indexOf('function onKey(event) {')
+  const onKeyBody = onKeyStart >= 0 ? src.slice(onKeyStart, src.indexOf('window.addEventListener(', onKeyStart)) : ''
+  ok(/canvasOwnsKeyboard\(event, rootRef\.current, document\.activeElement\)/.test(onKeyBody), 'onKey 第一件事就是问 canvasOwnsKeyboard')
+  const guardAt = onKeyBody.indexOf('canvasOwnsKeyboard(')
+  const firstAction = Math.min(
+    ...[onKeyBody.indexOf('preventDefault()'), onKeyBody.indexOf('deleteSelected()'), onKeyBody.indexOf('copySelection()')].filter((i) => i >= 0),
+  )
+  ok(guardAt >= 0 && guardAt < firstAction, '归属判定排在 preventDefault / 删除 / 复制之前')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1
