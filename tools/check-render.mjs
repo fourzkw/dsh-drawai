@@ -933,6 +933,61 @@ console.log('\ndrawio 的独立边标签单元：读出来、画在 mxGraph 算�
   void cloned
 }
 
+console.log('\n线上的文字（边自己的 value）：落点照 drawio、双击/右键真能加上去')
+{
+  // 用户报的两个问题都在这一节：
+  //   · "无法在线段上添加文字" —— 标签的底衬/文字、以及选中后压在**段中点**上的把手
+  //     都画在 12px 命中带**上面**，又都没挂处理函数，于是双击被它们吃掉、编辑器永远不弹；
+  //   · "和 drawio 有什么区别" —— drawio 把边自己的文字画在**整条折线的弧长中点**
+  //     （mxGraphView.updateEdgeLabelOffset：geometry 是 relative 时走 getPoint()，x/y 缺省=0
+  //      → dist = 0.5 × 总长），我们以前画在"第 2 段的中点"上。
+  const doc = {
+    version: 2,
+    revision: '',
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 160, h: 60 },
+      { id: 'b', x: 400, y: 300, w: 160, h: 60 },
+    ],
+    // 折点让它拐两个弯：这时"弧长中点"和"第 2 段中点"必然不在同一处。
+    edges: [{ id: 'e1', from: 'a', to: 'b', label: '线上文字', style: DEFAULT_EDGE_STYLE, points: [{ x: 300, y: 30 }] }],
+  }
+  const pts = internals.edgeRoutePoints(doc, doc.edges[0])
+  const arc = internals.edgeLabelPointAt(pts, 0, 0, 0, 0)
+  const secondSeg = { x: (pts[1].x + pts[2].x) / 2, y: (pts[1].y + pts[2].y) / 2 }
+  ok(arc !== null && Math.abs(arc.x - secondSeg.x) + Math.abs(arc.y - secondSeg.y) > 1, '这组几何下两种落点算法确实不同（否则下面的断言是假绿）')
+
+  const calls = []
+  const ui = {
+    selectedIds: ['e1'],
+    onSelectEdge: (id) => calls.push('select:' + id),
+    onEdgeDoubleClick: (id) => calls.push('edit:' + id),
+    onEdgeContextMenu: (id) => calls.push('menu:' + id),
+  }
+  const tree = renderDiagram(doc, 'light', 'u1', { current: null }, ui, null)
+  const text = walk(tree, (n) => n.type === 'text' && n.props.key === 'edge-text-0', [])[0]
+  const bg = walk(tree, (n) => n.type === 'rect' && n.props.key === 'edge-bg-0', [])[0]
+  ok(text !== undefined && bg !== undefined, '有文字的边画出了文字与底衬')
+  ok(text !== undefined && Math.abs(text.props.x - arc.x) < 0.6 && Math.abs(text.props.y - arc.y) < 1.6, '边自己的文字落在**弧长中点**上（drawio 的规则）：' + JSON.stringify(text === undefined ? null : [text.props.x, text.props.y]))
+  ok(text !== undefined && Math.abs(text.props.x - secondSeg.x) + Math.abs(text.props.y - secondSeg.y) > 1, '不再是"第 2 段的中点"（旧算法的落点不同）')
+
+  ok(text !== undefined && typeof text.props.onDoubleClick === 'function', '标签文字挂了双击 → 能就地改字')
+  ok(bg !== undefined && typeof bg.props.onPointerDown === 'function' && typeof bg.props.onContextMenu === 'function', '标签底衬挂了单击 / 右键')
+  if (bg !== undefined) bg.props.onPointerDown({})
+  if (text !== undefined) text.props.onDoubleClick({})
+  if (text !== undefined) text.props.onContextMenu({})
+  ok(calls.join(',') === 'select:e1,edit:e1,menu:e1', '三处都报到这条线上：' + calls.join(','))
+
+  // 把手：它正压在**段的中点**上 —— 恰恰是"给线加字"最自然的双击位置。
+  const handles = byClass(tree, 'drawai-handle')
+  ok(handles.length === pts.length - 1 + 2, '选中时画出两端的端点把手 + 每段一个段把手（' + handles.length + ' 个）')
+  ok(handles.every((h) => typeof h.props.onDoubleClick === 'function'), '每个把手都挂了双击')
+  const before = calls.length
+  handles[handles.length - 1].props.onDoubleClick({})
+  ok(calls.length === before + 1 && calls[calls.length - 1] === 'edit:e1', '双击把手 = 双击这条线（第二下不再被吃掉）')
+  const hit = walk(tree, (n) => n.props.key === 'edge-hit-0', [])[0]
+  ok(hit !== undefined && typeof hit.props.onDoubleClick === 'function' && typeof hit.props.onPointerDown === 'function', '命中带本身仍然挂着双击/单击')
+}
+
 console.log('\n悬空端：能拖回来、也能拖出去（预览与落盘同一套）')
 {
   // 一端悬空的边：`to` 不写，只有 `targetPoint`（drawio 的规则：自由点只在那一端没有真实顶点时生效）。
