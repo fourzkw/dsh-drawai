@@ -315,5 +315,55 @@ console.log('\n[5] 无损写回：在原文件上做定点手术')
   ok(plainWritten === plainFile, '非压缩文件同样"原样写回逐字节不变"')
 }
 
+console.log('\n[6] 边标签单元（drawio 的 edgeLabel）不导入、不拥有、原样保留')
+{
+  // 真实产物里就有这种单元：drawio 的"边标签"是一个 **vertex**，
+  // 样式带 `edgeLabel`、几何是 `relative="1"` + `<mxPoint as="offset"/>`。
+  // 当成普通节点读进来会出两件坏事：画布上多一个鬼影框；被拖动时写回会把绝对坐标
+  // 写进一个"相对"几何里，把 drawio 里的标签偏移弄歪。
+  const withLabel = [
+    '<mxfile host="app.diagrams.net" compressed="false">',
+    '  <diagram id="p1" name="Page-1">',
+    '    <mxGraphModel dx="0" dy="0"><root>',
+    '      <mxCell id="0" /><mxCell id="1" parent="0" />',
+    '      <mxCell id="n1" value="起点" style="rounded=1;" vertex="1" parent="1">',
+    '        <mxGeometry x="40" y="40" width="120" height="60" as="geometry" />',
+    '      </mxCell>',
+    '      <mxCell id="n2" value="终点" style="rounded=1;" vertex="1" parent="1">',
+    '        <mxGeometry x="400" y="40" width="120" height="60" as="geometry" />',
+    '      </mxCell>',
+    '      <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;" edge="1" parent="1" source="n1" target="n2">',
+    '        <mxGeometry relative="1" as="geometry" />',
+    '      </mxCell>',
+    '      <mxCell id="elabel1" value="Text" style="edgeLabel;html=1;align=center;points=[];" vertex="1" connectable="0" parent="1">',
+    '        <mxGeometry relative="1" x="-30" y="10" as="geometry"><mxPoint as="offset" /></mxGeometry>',
+    '      </mxCell>',
+    '    </root></mxGraphModel>',
+    '  </diagram>',
+    '</mxfile>',
+    '',
+  ].join('\n')
+
+  const read = parseMxfile(withLabel)
+  ok(read.doc.nodes.length === 2, '两个真节点（边标签单元不算节点，实际 ' + read.doc.nodes.length + '）')
+  ok(read.doc.nodes.every((n) => n.id !== 'elabel1'), '边标签单元没有被当成节点导入')
+  ok(read.doc.edges.length === 1 && read.doc.edges[0].id === 'e1', '那条边照常导入')
+  ok(read.notes.join(' | ').indexOf('边标签单元') >= 0, 'notes 里说明了它被原样保留：' + read.notes.join(' | '))
+
+  // 打开后原样保存：逐字节不变，且**没有任何编辑** —— 这说明它不在我们的所有权里
+  // （一旦被"拥有"，模型里没有它就会被当成用户删除而抹掉，那是真正的数据丢失）。
+  ok(applyDocToMxfile(withLabel, read.doc).text === withLabel, '原样写回逐字节不变（含那个标签单元）')
+  ok(__plan(withLabel, read.doc).edits.length === 0, '原样写回时 0 条编辑（它不归我们管，所以不会被删）')
+
+  // 挪一个真节点：标签单元仍在，几何还是相对坐标，没被动过。
+  const moved = JSON.parse(JSON.stringify(read.doc))
+  moved.nodes.filter((n) => n.id === 'n1')[0].x = 80
+  const written = applyDocToMxfile(withLabel, moved).text
+  ok(written.indexOf('id="elabel1"') > 0 && written.indexOf('edgeLabel;') > 0, '挪别的节点之后，边标签单元仍在文件里')
+  const labelBlock = /<mxCell id="elabel1"[\s\S]*?<\/mxCell>/.exec(written)
+  ok(labelBlock !== null && labelBlock[0].indexOf('relative="1" x="-30" y="10"') > 0, '它的几何没被动过（仍是相对坐标 -30,10）')
+  ok(written.indexOf('<mxPoint as="offset" />') > 0, '几何里的 <mxPoint as="offset" /> 也原样保留')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1
