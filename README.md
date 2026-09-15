@@ -146,14 +146,16 @@ npm 包（可选）：**发不发都不影响收录**；发了的话市场会显
       npm/pnpm 也不会因为预发布而 ERESOLVE）；
 - [x] 去掉 **`"private": true`**（`npm publish` 之前它会让发布直接被拒）；
 - [x] `keywords` 补齐（含 `dsh-plugin`，与 hub 的约定一致）。
+- [x] **LICENSE + `"license": "MIT"`**（见文末「许可」一节）。npm 会把 `LICENSE` 自动打进包
+      （`npm pack --dry-run` 现在是 8 个文件），所以不用写进 `files` 白名单。
 
 **还需要人来做的（我做不了：要 GitHub 账号 / 你要拍板）**：
 
 - [ ] **建一个公开 GitHub 仓库并 push** —— 现在 `git remote -v` 是空的，仓库只在本地。
       没有它就没有 `url` 可填，CI 也读不到 `package.json`。同时给仓库加 **`dsh-plugin` topic**。
-- [ ] 定 **LICENSE**（生态里几乎都是 MIT：dshmarket、dsh-package-manifest 都是），
-      然后在 `package.json` 补 `license` 与 **`repository`**（后者必须指回那个仓库，
-      否则将来发了 npm 也不会与条目关联）。
+- [ ] 仓库地址定了以后补 **`repository`**（必须指回被收录的那个仓库，否则将来发了 npm
+      也不会与条目关联）；想的话再把 `LICENSE` 的版权行从 `dsh-drawai contributors`
+      改成你的名字或 handle，并加一个 `"author"` 字段。
 - [ ] 可选但推荐：**发到 npm**（`dsh-drawai` 这个名字我查过，**npm 上还没被占用**）——
       预构建安装可以跳过 `allowBuilds` 构建授权那一步；不发也行，我们的 `lib/` 是提交进仓库的，
       从 GitHub 源码装也不需要构建。
@@ -955,3 +957,23 @@ node tools/check-package.mjs
 
 > 这个 junction 只是本机自测用的**机器相关**路径，不要提交，也不要在安装后保留：
 > 装进 profile 后应当让包走部署自己的模块解析（同 `dsh-better-sidebar` 的做法）。
+
+---
+
+## 许可
+
+**MIT** —— 全文见 [`LICENSE`](LICENSE)，`package.json` 里也写了 `"license": "MIT"`。
+
+选它的理由很实际：DSH 本体与官方 `@deepseek-ai/*` 包（`dsh`、`dsh-tools`、`dsh-web-app`、
+`dsh-package-manifest` …）都是 MIT，社区市场 `dshmarket` 也是 MIT —— 跟随生态里最常见的那一个，
+别人拿去用/改/再分发都不会有授权问题。**没有许可证的公开仓库默认是"保留所有权利"**：
+代码看得见，但法律上谁都不能用，这跟"社区插件"是矛盾的。
+
+版权行现在写的是 `Copyright (c) 2026 dsh-drawai contributors`（集体署名，不绑定某个人）。
+要改成你自己的名字或 GitHub handle，只改 `LICENSE` 里那一行即可 —— 顺带也可以在
+`package.json` 加一个 `"author"` 字段。
+
+> 换别的许可证也可以，但注意差别：**Apache-2.0** 额外给了专利授权、要求保留 NOTICE（企业友好，
+> 文件更长）；**AGPL-3.0** 是强著佐权，会要求把服务端改过的代码也开源 —— 对一个"装在用户本机
+> 的 DSH 插件"来说通常没必要，而且会挡住一部分社区复用。MIT 是最省事的默认值。
+

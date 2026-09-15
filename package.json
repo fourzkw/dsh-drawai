@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "description": "DSH 右侧栏 draw.io 风格画布 + AI 语义绘图工具（diagram_apply / diagram_read）",
+  "license": "MIT",
   "main": "lib/index.js",
   "scripts": {
     "build": "node tools/build.mjs",
