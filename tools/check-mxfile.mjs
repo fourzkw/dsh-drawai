@@ -416,5 +416,69 @@ console.log('\n[7] 顺序（z-order）：模型里的先后要真的写回文件
   ok(plan.edits.every((e) => e.insert === false), '没有重排时不会有"插入"型编辑')
 }
 
+console.log('\n[8] 编辑数据：`<object>` 上的自定义属性')
+{
+  // drawio 的"编辑数据"就存在 `<object>` 包装的自定义属性上（mxCell 上的陌生属性会被它丢掉）。
+  const src = [
+    '<mxfile host="app.diagrams.net" compressed="false">',
+    '  <diagram id="p1" name="Page-1">',
+    '    <mxGraphModel dx="0" dy="0"><root>',
+    '      <mxCell id="0" /><mxCell id="1" parent="0" />',
+    '      <object label="带数据的节点" placeholders="1" subnet="192.168.0" id="n1">',
+    '        <mxCell style="rounded=1;" vertex="1" parent="1">',
+    '          <mxGeometry x="40" y="40" width="120" height="60" as="geometry" />',
+    '        </mxCell>',
+    '      </object>',
+    '      <mxCell id="n2" value="没有数据的节点" style="" vertex="1" parent="1">',
+    '        <mxGeometry x="300" y="40" width="120" height="60" as="geometry" />',
+    '      </mxCell>',
+    '    </root></mxGraphModel>',
+    '  </diagram>',
+    '</mxfile>',
+    '',
+  ].join('\n')
+
+  const read = parseMxfile(src)
+  const n1 = read.doc.nodes.filter((n) => n.id === 'n1')[0]
+  ok(n1 !== undefined && n1.data !== undefined, '包装上的自定义属性读进了 node.data')
+  ok(n1.data.placeholders === '1' && n1.data.subnet === '192.168.0', '数据值都读对了：' + JSON.stringify(n1.data))
+  ok(n1.data.id === undefined && n1.data.label === undefined, 'id / label 不算数据（它们是包装的固定字段）')
+  ok(read.doc.nodes.filter((n) => n.id === 'n2')[0].data === undefined, '没有包装的节点没有 data')
+  ok(applyDocToMxfile(src, read.doc).text === src, '原样写回逐字节不变（含数据属性）')
+
+  // 改数据：只动包装上的属性
+  const edited = JSON.parse(JSON.stringify(read.doc))
+  edited.nodes.filter((n) => n.id === 'n1')[0].data = { placeholders: '1', subnet: '10.1.2.0', owner: '我' }
+  const outText = applyDocToMxfile(src, edited).text
+  const out = parseMxfile(outText).doc
+  const n1b = out.nodes.filter((n) => n.id === 'n1')[0]
+  ok(n1b.data.subnet === '10.1.2.0' && n1b.data.owner === '我', '改值 + 新增键都写回了：' + JSON.stringify(n1b.data))
+  ok(n1b.data.placeholders === '1', '没动的键还在')
+  ok(outText.indexOf('placeholders="1"') > 0, '属性仍在包装上（不是写进 mxCell）')
+  ok(parseMxfile(outText).doc.nodes.filter((n) => n.id === 'n2')[0].label === '没有数据的节点', '别的单元没被牵连')
+
+  // 删键：模型里去掉的键要从包装上消失
+  const removed = JSON.parse(JSON.stringify(out))
+  removed.nodes.filter((n) => n.id === 'n1')[0].data = { subnet: '10.1.2.0' }
+  const removedText = applyDocToMxfile(outText, removed).text
+  ok(removedText.indexOf('placeholders=') < 0 && removedText.indexOf('owner=') < 0, '模型里删掉的键从包装上消失')
+  ok(parseMxfile(removedText).doc.nodes.filter((n) => n.id === 'n1')[0].data.subnet === '10.1.2.0', '留着的键还在')
+
+  // 给**裸 mxCell** 加数据 → 要包成 `<object>`（否则 drawio 保存时会把属性丢掉）
+  const wrapped = JSON.parse(JSON.stringify(read.doc))
+  wrapped.nodes.filter((n) => n.id === 'n2')[0].data = { kind: '服务器' }
+  const wrappedText = applyDocToMxfile(src, wrapped).text
+  ok(/<object label="没有数据的节点" kind="服务器" id="n2">/.test(wrappedText), '裸 mxCell 被包成 <object>，label 移到外层：' + JSON.stringify((/<object[^>]*n2[^>]*>/.exec(wrappedText) || [''])[0]))
+  const reWrapped = parseMxfile(wrappedText).doc.nodes.filter((n) => n.id === 'n2')[0]
+  ok(reWrapped.data.kind === '服务器' && reWrapped.label === '没有数据的节点', '读回来：数据与标签都对')
+  ok(reWrapped.x === 300 && reWrapped.w === 120, '几何没被包装弄坏')
+  ok(applyDocToMxfile(wrappedText, parseMxfile(wrappedText).doc).text === wrappedText, '包好之后再保存是幂等的')
+
+  // 从零生成：带数据的单元也要包一层
+  const built = buildMxfile({ version: 2, revision: '', meta: {}, nodes: [{ id: 'x', label: '甲', style: '', x: 0, y: 0, w: 100, h: 60, data: { a: '1' } }], edges: [] }).text
+  ok(/<object label="甲" a="1" id="x">/.test(built), '生成的 mxfile 里也带包装')
+  ok(parseMxfile(built).doc.nodes[0].data.a === '1', '生成的文件读回来数据在')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

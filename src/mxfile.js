@@ -378,10 +378,19 @@ function scanCells(source, from, to) {
     // 文件里躺一串重复的 drawai-meta。
     const innerId = attr(cellAttrsText, 'id')
     const cellId = innerId === undefined && wrapperAttrs !== null ? attr(wrapperAttrs, 'id') : innerId
+    // 包装上的**自定义属性**（除了 id/label）就是 drawio 的"编辑数据"。
+    const data = {}
+    if (wrapperAttrs !== null) {
+      for (const entry of parseAttrs(wrapperAttrs, 0, wrapperAttrs.length)) {
+        if (entry.name === 'id' || entry.name === 'label') continue
+        data[entry.name] = decodeEntities(entry.value)
+      }
+    }
     cells.push({
       element: kind,
       id: cellId,
       label: wrapperAttrs !== null && attr(wrapperAttrs, 'label') !== undefined ? attr(wrapperAttrs, 'label') : attr(cellAttrsText, 'value'),
+      data: data,
       style: rawAttr(cellAttrsText, 'style') === undefined ? '' : decodeEntities(rawAttr(cellAttrsText, 'style')),
       parent: attr(cellAttrsText, 'parent'),
       source: attr(cellAttrsText, 'source'),
@@ -600,7 +609,7 @@ export function parseMxfile(text, options) {
     if (hasMarkup(cell.label)) markupLabels += 1
     const offset = parentOffsetOf(info, cell)
     const geo = cell.geometry
-    nodes.push({
+    const node = {
       id: String(cell.id),
       label: labelFromValue(cell.label),
       style: cell.style === undefined ? '' : String(cell.style),
@@ -608,7 +617,9 @@ export function parseMxfile(text, options) {
       y: (geo !== null && geo.y !== undefined ? geo.y : 0) + offset.y,
       w: geo !== null && geo.width !== undefined ? geo.width : 120,
       h: geo !== null && geo.height !== undefined ? geo.height : 60,
-    })
+    }
+    if (cell.data !== undefined && cell.data !== null && Object.keys(cell.data).length > 0) node.data = cell.data
+    nodes.push(node)
   }
 
   const edges = []
@@ -633,6 +644,7 @@ export function parseMxfile(text, options) {
     if (!hasTarget && freeTarget !== null) edge.targetPoint = freeTarget
     const label = labelFromValue(cell.label)
     if (label.length > 0) edge.label = label
+    if (cell.data !== undefined && cell.data !== null && Object.keys(cell.data).length > 0) edge.data = cell.data
     if (hasMarkup(cell.label)) markupLabels += 1
     const points = geo.points === undefined ? [] : geo.points
     if (points.length > 0) edge.points = points
@@ -702,6 +714,29 @@ export function parseMxfile(text, options) {
 
 // ---- 单元的 XML 生成（新单元、以及从零生成一份文件时共用）--------------------
 
+/**
+ * 有数据（drawio 的"编辑数据"）时包一层 `<object>`。
+ *
+ * 为什么必须包：mxCodec 只解 mxCell 认识的字段，写在 mxCell 上的陌生属性会被 drawio
+ * 重新保存时丢掉；`<object>`/`<UserObject>` 上的自定义属性才活得下来（drawio 发明它的原因）。
+ * label 也随之移到外层 —— 与 drawio 的形态一致。
+ */
+function withDataWrapper(lines, item, indent) {
+  const data = item.data !== undefined && item.data !== null && typeof item.data === 'object' ? dataPairs(item.data) : null
+  if (data === null || Object.keys(data).length === 0) return lines.join('\n')
+  const first = lines[0]
+  // 内层那行去掉 value（label 已经在包装上），并整体再缩进一级
+  const inner = indent + '  ' + first.slice(indent.length).replace(/ value="[^"]*"/, '')
+  const rest = lines.slice(1).map((line) => indent + '  ' + line.slice(indent.length))
+  let attrs = ''
+  for (const key of Object.keys(data)) attrs += ' ' + key + '="' + data[key] + '"'
+  const label = typeof item.label === 'string' && item.label.length > 0 ? escapeAttr(item.label) : ''
+  return [indent + '<object label="' + label + '"' + attrs + ' id="' + escapeAttr(String(item.id)) + '">', inner]
+    .concat(rest)
+    .concat([indent + '</object>'])
+    .join('\n')
+}
+
 function nodeCellXml(node, parentId, indent) {
   const style = typeof node.style === 'string' && node.style.length > 0 ? ' style="' + escapeAttr(node.style) + '"' : ''
   const label = typeof node.label === 'string' && node.label.length > 0 ? ' value="' + escapeAttr(node.label) + '"' : ''
@@ -709,11 +744,15 @@ function nodeCellXml(node, parentId, indent) {
   const y = Number.isFinite(Number(node.y)) ? Number(node.y) : 0
   const w = Number.isFinite(Number(node.w)) ? Number(node.w) : 120
   const h = Number.isFinite(Number(node.h)) ? Number(node.h) : 60
-  return [
-    indent + '<mxCell id="' + escapeAttr(String(node.id)) + '"' + label + style + ' vertex="1" parent="' + escapeAttr(parentId) + '">',
-    indent + '  <mxGeometry x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" as="geometry" />',
-    indent + '</mxCell>',
-  ].join('\n')
+  return withDataWrapper(
+    [
+      indent + '<mxCell id="' + escapeAttr(String(node.id)) + '"' + label + style + ' vertex="1" parent="' + escapeAttr(parentId) + '">',
+      indent + '  <mxGeometry x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" as="geometry" />',
+      indent + '</mxCell>',
+    ],
+    node,
+    indent,
+  )
 }
 
 /** 边的几何内部（自由端点 + 折点）。缩进按 indent 缩进一级。 */
@@ -742,9 +781,9 @@ function edgeCellXml(edge, parentId, indent) {
   const inner = edgeInnerXml(edge, indent)
   const head = indent + '<mxCell id="' + escapeAttr(String(edge.id)) + '"' + label + style + ' edge="1" parent="' + escapeAttr(parentId) + '"' + from + to + '>'
   if (inner.length === 0) {
-    return [head, indent + '  <mxGeometry relative="1" as="geometry" />', indent + '</mxCell>'].join('\n')
+    return withDataWrapper([head, indent + '  <mxGeometry relative="1" as="geometry" />', indent + '</mxCell>'], edge, indent)
   }
-  return [head, indent + '  <mxGeometry relative="1" as="geometry">' + inner + '</mxGeometry>', indent + '</mxCell>'].join('\n')
+  return withDataWrapper([head, indent + '  <mxGeometry relative="1" as="geometry">' + inner + '</mxGeometry>', indent + '</mxCell>'], edge, indent)
 }
 
 /** 元数据单元：没有 vertex/edge，所以不会显示，也不会被我们当成图形单元。 */
@@ -821,24 +860,80 @@ function rescanCell(text) {
   return cells.length > 0 ? cells[0] : null
 }
 
+/** 数据对象 → 一组属性（转义后），id/label 不算数据。 */
+function dataPairs(data) {
+  const pairs = {}
+  for (const key of Object.keys(data)) {
+    if (key === 'id' || key === 'label') continue
+    pairs[key] = escapeAttr(String(data[key]))
+  }
+  return pairs
+}
+
+/**
+ * drawio 的"编辑数据"要落在 **`<object>` 包装**上。
+ *
+ * 为什么不能写在 mxCell 上：mxCodec 只解它认识的字段（id/value/style/parent/vertex/edge/
+ * source/target/geometry），写在 mxCell 上的陌生属性**被 drawio 重新保存时直接丢掉**。
+ * 这正是 drawio 发明 `<object>`/`<UserObject>` 包装的原因 —— 它的自定义属性才活得下来。
+ */
+function dataChangeFor(cell, data) {
+  if (cell.wrapper === null) return null
+  const span = cell.wrapper
+  const pairs = dataPairs(data)
+  // 模型里已经去掉的键要从包装上删掉（不动 id/label）
+  if (cell.wrapperAttrs !== null) {
+    for (const entry of parseAttrs(cell.wrapperAttrs, 0, cell.wrapperAttrs.length)) {
+      if (entry.name === 'id' || entry.name === 'label') continue
+      if (Object.prototype.hasOwnProperty.call(pairs, entry.name) === false) pairs[entry.name] = null
+    }
+  }
+  return { attrsStart: span.attrsStart, attrsEnd: span.attrsEnd, pairs: pairs }
+}
+
+/** 把裸 mxCell 包成 `<object>`（label 移到包装上、并带上数据），返回单元原文。 */
+function wrapAsObject(cell, text, data) {
+  const inner = setAttrsIn(text, cell.attrsSpan.attrsStart, cell.attrsSpan.attrsEnd, { value: null })
+  let attrs = ''
+  const pairs = dataPairs(data)
+  for (const key of Object.keys(pairs)) attrs += ' ' + key + '="' + pairs[key] + '"'
+  return '<object label="' + escapeAttr(labelFromValue(cell.label)) + '"' + attrs + ' id="' + escapeAttr(String(cell.id)) + '">' + inner + '</object>'
+}
+
 /** 改写一个顶点单元：标签、style、几何（几何要写回**相对父级**的坐标）。 */
 function rebuildNodeCell(info, cell, node, chain) {
   // 单元跨度是**相对页体（mxGraphModel）**的，不是相对整份文件 —— 切错参照系会把
   // 页面开头的几十个字符当成这个单元的原文（实测：改一个坐标把 mxGraphModel 标签搬进了单元里）。
-  const original = info.modelXml.slice(cell.start, cell.end)
+  let original = info.modelXml.slice(cell.start, cell.end)
+  let subject = cell
+  const data = node.data !== undefined && node.data !== null && typeof node.data === 'object' ? node.data : null
+  // 还没有包装、却有了数据 → 先包一层（drawio 的用户对象形态），再照常改。
+  // 包装会改变各处跨度，所以必须**先包、再重新定位**，否则后面的属性改写会写错位置。
+  if (data !== null && cell.wrapper === null) {
+    const wrapped = wrapAsObject(cell, original, data)
+    const fresh = rescanCell(wrapped)
+    if (fresh !== null) {
+      original = wrapped
+      subject = fresh
+    }
+  }
   const changes = []
   const label = typeof node.label === 'string' ? node.label : ''
-  if (label !== labelFromValue(cell.label)) {
-    const span = cell.wrapper !== null ? cell.wrapper : cell.attrsSpan
+  if (label !== labelFromValue(subject.label)) {
+    const span = subject.wrapper !== null ? subject.wrapper : subject.attrsSpan
     changes.push({
       attrsStart: span.attrsStart,
       attrsEnd: span.attrsEnd,
-      pairs: { [cell.wrapper !== null ? 'label' : 'value']: escapeAttr(label) },
+      pairs: { [subject.wrapper !== null ? 'label' : 'value']: escapeAttr(label) },
     })
   }
   const style = typeof node.style === 'string' ? node.style : ''
-  if (stylesEqual(cell.style, style, false) === false) {
-    changes.push({ attrsStart: cell.attrsSpan.attrsStart, attrsEnd: cell.attrsSpan.attrsEnd, pairs: { style: style.length > 0 ? escapeAttr(style) : null } })
+  if (stylesEqual(subject.style, style, false) === false) {
+    changes.push({ attrsStart: subject.attrsSpan.attrsStart, attrsEnd: subject.attrsSpan.attrsEnd, pairs: { style: style.length > 0 ? escapeAttr(style) : null } })
+  }
+  if (data !== null) {
+    const entry = dataChangeFor(subject, data)
+    if (entry !== null) changes.push(entry)
   }
 
   const offset = chain.offset
@@ -847,25 +942,25 @@ function rebuildNodeCell(info, cell, node, chain) {
   const w = Number.isFinite(Number(node.w)) ? Number(node.w) : 120
   const h = Number.isFinite(Number(node.h)) ? Number(node.h) : 60
   // 父级换了（原来的容器被删了）也要写回，否则文件里留下悬空 parent。
-  if (typeof chain.parentId === 'string' && chain.parentId !== cell.parent) {
-    changes.push({ attrsStart: cell.attrsSpan.attrsStart, attrsEnd: cell.attrsSpan.attrsEnd, pairs: { parent: escapeAttr(chain.parentId) } })
+  if (typeof chain.parentId === 'string' && chain.parentId !== subject.parent) {
+    changes.push({ attrsStart: subject.attrsSpan.attrsStart, attrsEnd: subject.attrsSpan.attrsEnd, pairs: { parent: escapeAttr(chain.parentId) } })
   }
-  const geo = cell.geometry
+  const geo = subject.geometry
   const unchanged = geo !== null && geo.x === x && geo.y === y && geo.width === w && geo.height === h
   if (unchanged) return withAttrChanges(original, changes)
 
-  if (cell.geo !== null && cell.geo.selfClosing) {
+  if (subject.geo !== null && subject.geo.selfClosing) {
     // 只有属性、没有子元素：连 x/y/width/height 一起在一次批量改写里做（同一区域！）
     const pairs = { x: String(x), y: String(y), width: String(w), height: String(h) }
-    if (attrIn(original, cell.geo.attrsStart, cell.geo.attrsEnd, 'as') === undefined) pairs.as = 'geometry'
-    changes.push({ attrsStart: cell.geo.attrsStart, attrsEnd: cell.geo.attrsEnd, pairs: pairs })
+    if (attrIn(original, subject.geo.attrsStart, subject.geo.attrsEnd, 'as') === undefined) pairs.as = 'geometry'
+    changes.push({ attrsStart: subject.geo.attrsStart, attrsEnd: subject.geo.attrsEnd, pairs: pairs })
     return withAttrChanges(original, changes)
   }
-  if (cell.geo !== null) {
+  if (subject.geo !== null) {
     // 几何带子元素（例如 `<mxRectangle as="alternateBounds">`）：只改属性，子元素原样留着。
     const pairs = { x: String(x), y: String(y), width: String(w), height: String(h) }
-    if (attrIn(original, cell.geo.attrsStart, cell.geo.attrsEnd, 'as') === undefined) pairs.as = 'geometry'
-    changes.push({ attrsStart: cell.geo.attrsStart, attrsEnd: cell.geo.attrsEnd, pairs: pairs })
+    if (attrIn(original, subject.geo.attrsStart, subject.geo.attrsEnd, 'as') === undefined) pairs.as = 'geometry'
+    changes.push({ attrsStart: subject.geo.attrsStart, attrsEnd: subject.geo.attrsEnd, pairs: pairs })
     return withAttrChanges(original, changes)
   }
   // 本来没有几何：先做属性改写，**重新定位**后再补几何。

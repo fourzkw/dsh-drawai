@@ -1047,5 +1047,37 @@ console.log('\n顺序（z-order）：菜单里有入口，模型顺序决定覆�
   ok(groupsA.join(',') === 'a,b' && groupsB.join(',') === 'b,a', '节点的画序跟着模型顺序（' + groupsA.join(',') + ' → ' + groupsB.join(',') + '）')
 }
 
+console.log('\n编辑数据：`key=value` 互转、穿过归一化、菜单接线')
+{
+  ok(internals.formatDataLines({ a: '1', b: '两' }) === 'a=1\nb=两', '数据 → 文本：' + JSON.stringify(internals.formatDataLines({ a: '1', b: '两' })))
+  ok(internals.formatDataLines(undefined) === '' && internals.formatDataLines(null) === '', '没有数据 → 空文本（面板里就是空框）')
+  const parsed = internals.parseDataLines('  subnet = 10.0.0.1 \n\n# 注释\nowner=我\n没有等号\n=空键\n')
+  ok(JSON.stringify(parsed) === JSON.stringify({ subnet: '10.0.0.1', owner: '我' }), '文本 → 数据（裁空白、忽略空行/注释/无等号/=空键）：' + JSON.stringify(parsed))
+  ok(internals.parseDataLines('id=x\nlabel=y\n').constructor === Object && Object.keys(internals.parseDataLines('id=x\nlabel=y')).length === 0, 'id / label 不算数据')
+  ok(JSON.stringify(internals.parseDataLines(internals.formatDataLines({ k: 'v' }))) === JSON.stringify({ k: 'v' }), '互转是往返的')
+
+  // 穿过归一化：宿主读出来的 data 不能在客户端被抹掉（否则"改数据"改的是空气）
+  const viaPayload = internals.docFromPayload({
+    ok: true,
+    exists: true,
+    revision: '',
+    notes: [],
+    doc: {
+      version: 2,
+      revision: '',
+      nodes: [{ id: 'n1', x: 0, y: 0, w: 100, h: 60, data: { subnet: '10.0.0.0', n: 3 } }],
+      edges: [{ id: 'e1', from: 'n1', to: 'n1', style: '', data: { note: 'x' } }],
+    },
+  })
+  ok(viaPayload.error === undefined && viaPayload.doc.nodes[0].data.subnet === '10.0.0.0', '节点的 data 穿过归一化还在')
+  ok(viaPayload.doc.nodes[0].data.n === '3', '非字符串值在入口就收敛成字符串：' + JSON.stringify(viaPayload.doc.nodes[0].data))
+  ok(viaPayload.doc.edges !== undefined && viaPayload.doc.edges.length === 1, '边照常解析')
+
+  const src = composeClientBody()
+  ok(/function openDataEditor\(kind, id\)/.test(src) && /function commitDataEditor\(kind, id, text\)/.test(src), '有编辑数据的开关与提交')
+  ok(/openDataEditor\('node', menu\.id\)/.test(src) && /openDataEditor\('edge', menu\.id\)/.test(src), '节点与边的右键菜单都接了「编辑数据…」')
+  ok(/className: 'drawai-data'/.test(src) && /\.drawai-data\{/.test(src), '面板用 textarea，样式也在')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

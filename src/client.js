@@ -198,6 +198,8 @@ const CSS = [
   '.drawai-edge-hit{cursor:pointer;stroke:transparent;stroke-width:12;fill:none}',
   '.drawai-sel{stroke:#1a73e8 !important;stroke-width:2 !important}',
   '.drawai-handle{cursor:crosshair}',
+  // 「编辑数据」面板里的多行输入：等宽字体、跟着菜单宽度走。
+  '.drawai-data{width:100%;box-sizing:border-box;font:12px/1.5 ui-monospace,Consolas,monospace;color:inherit;background:transparent;border:1px solid currentColor;border-radius:4px;padding:4px;resize:vertical}',
   '.drawai-link{cursor:crosshair}',
   // 连线拖拽的实时预览（路由后的正交预览线 + 落点提示）。
   // 这两条路径都是纯视觉件，绝不能挡住命中测试 —— .drawai-edge-hit 的 12px 透明带子、
@@ -2513,6 +2515,35 @@ function docFromPayload(payload) {
 }
 
 /**
+ * 编辑数据面板里用的两个纯函数：数据对象 ↔ 多行文本（每行 `key=value`）。
+ *
+ * 为什么用文本而不是表格：数据就是"drawio 用户对象上的自定义属性"，键名随人定、
+ * 值都是字符串 —— 表格反而挡路。空行与 `#` 开头的行忽略；没有 `=` 的行也忽略（不猜）。
+ */
+function formatDataLines(data) {
+  if (data === null || data === undefined || typeof data !== 'object') return ''
+  const keys = Object.keys(data)
+  const lines = []
+  for (let i = 0; i < keys.length; i += 1) lines.push(keys[i] + '=' + String(data[keys[i]]))
+  return lines.join('\n')
+}
+
+function parseDataLines(text) {
+  const out = {}
+  const lines = String(text === undefined || text === null ? '' : text).split('\n')
+  for (let i = 0; i < lines.length; i += 1) {
+    const trimmed = lines[i].trim()
+    if (trimmed.length === 0 || trimmed.charAt(0) === '#') continue
+    const at = trimmed.indexOf('=')
+    if (at <= 0) continue
+    const key = trimmed.slice(0, at).trim()
+    if (key.length === 0 || key === 'id' || key === 'label') continue
+    out[key] = trimmed.slice(at + 1).trim()
+  }
+  return out
+}
+
+/**
  * 剪贴板：**模块级**（不属于某个标签页）—— 在一个标签页里复制、切到另一个标签页粘贴，
  * 是画布的常规用法，做成每个标签页一份反而奇怪。
  *
@@ -4299,6 +4330,35 @@ function CanvasView(props) {
     setMenu(null)
   }
 
+  /**
+   * 「编辑数据…」：把 drawio 用户对象上的自定义属性摊成 `key=value` 几行来改。
+   *
+   * 数据最终写在 `<object>` 包装上（mxCell 上的陌生属性会被 drawio 保存时丢掉），
+   * 所以这里只管"键值对"，包装的事交给写回；裸单元第一次加数据时写回会自动包一层。
+   */
+  function openDataEditor(kind, id) {
+    const item = kind === 'edge' ? edgeById(id) : nodeById(id)
+    if (item === null) return
+    setSelectedIds([id])
+    setMenu(Object.assign({}, menu, { kind: 'data', dataKind: kind, id: id, text: formatDataLines(item.data) }))
+  }
+
+  function commitDataEditor(kind, id, text) {
+    const data = parseDataLines(text)
+    applyLocal((next) => {
+      const list = kind === 'edge' ? next.edges : next.nodes
+      for (let i = 0; i < list.length; i += 1) {
+        if (list[i].id !== id) continue
+        if (Object.keys(data).length === 0) delete list[i].data
+        else list[i].data = data
+        break
+      }
+    })
+    setMenu(null)
+    const count = Object.keys(data).length
+    setSaveNote(count === 0 ? '已清空这条单元的数据' : '已保存 ' + count + ' 项数据（写在 <object> 上，drawio 也认）')
+  }
+
   function deleteSelected() {
     const ids = selectedIds
     if (ids.length === 0) return
@@ -4719,6 +4779,41 @@ function CanvasView(props) {
     if (menu === null) return null
     const rows = []
 
+    // 「编辑数据…」面板：数据就是 drawio 用户对象上的自定义属性，摊成 key=value 几行来改。
+    if (menu.kind === 'data') {
+      const dataKind = menu.dataKind === 'edge' ? 'edge' : 'node'
+      rows.push(menuTitle(dataKind === 'edge' ? '连线的数据' : '节点的数据'))
+      rows.push(
+        React.createElement('textarea', {
+          key: 'data-text',
+          className: 'drawai-data',
+          autoFocus: true,
+          rows: 6,
+          value: typeof menu.text === 'string' ? menu.text : '',
+          placeholder: '每行一项，形如：\nsubnet=192.168.0\nowner=我',
+          onChange: (event) => setMenu(Object.assign({}, menu, { text: event.target.value })),
+          onKeyDown: (event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              setMenu(null)
+            }
+          },
+        }),
+      )
+      rows.push(React.createElement('div', { className: 'drawai-note' }, '空行与 # 开头的行忽略；没有 = 的行也忽略。这些属性写在 <object> 上，drawio 同样认。'))
+      rows.push(
+        React.createElement(
+          'div',
+          { className: 'drawai-menu-row' },
+          React.createElement('button', { className: 'drawai-btn', onClick: () => commitDataEditor(dataKind, menu.id, menu.text) }, '保存'),
+          React.createElement('button', { className: 'drawai-btn', onClick: () => setMenu(null) }, '取消'),
+        ),
+      )
+      const leftD = Math.max(0, Math.min(menu.left, size.w - 214))
+      const topD = Math.max(0, Math.min(menu.top, size.h - 8))
+      return React.createElement('div', { className: 'drawai-menu', style: { left: leftD + 'px', top: topD + 'px' } }, rows)
+    }
+
     if (menu.kind === 'canvas') {
       rows.push(menuTitle('元素库 —— 选一个放到这里'))
       rows.push(shapeGrid((shape) => createNodeAt(shape, menuStyle, menu.userX, menu.userY)))
@@ -4772,6 +4867,7 @@ function CanvasView(props) {
           React.createElement('button', { className: 'drawai-btn', onClick: copySelection, title: 'Ctrl+C' }, '复制'),
           React.createElement('button', { className: 'drawai-btn', onClick: cutSelection, title: 'Ctrl+X' }, '剪切'),
           React.createElement('button', { className: 'drawai-btn', onClick: () => deleteById(menu.id) }, '删除'),
+          React.createElement('button', { className: 'drawai-btn', onClick: () => openDataEditor('node', menu.id) }, '编辑数据…'),
         ),
       )
       // 顺序：谁压在谁上面（drawio 的 Bring to Front / Send to Back 那一组）。
@@ -4848,6 +4944,7 @@ function CanvasView(props) {
         React.createElement(
           'div',
           { className: 'drawai-menu-row' },
+          React.createElement('button', { className: 'drawai-btn', onClick: () => openDataEditor('edge', menu.id) }, '编辑数据…'),
           React.createElement('button', { className: 'drawai-btn', onClick: () => deleteById(menu.id) }, '删除连线'),
         ),
       )
@@ -5675,6 +5772,8 @@ exports.__routeInternals = {
   zoomViewAt: zoomViewAt,
   contentBounds: contentBounds,
   edgeLabelPointAt: edgeLabelPointAt,
+  formatDataLines: formatDataLines,
+  parseDataLines: parseDataLines,
   snapDocGeometry: snapDocGeometry,
   openTabIn: openTabIn,
   tabLabelOf: tabLabelOf,

@@ -588,6 +588,26 @@ function snapDocGeometry(doc, options) {
 }
 
 /**
+ * 自定义属性（drawio 的"编辑数据"）：只保留字符串值。
+ *
+ * 为什么单列一个函数：数据最终要写成 XML 属性，非字符串值（嵌套对象、数字以外的东西）
+ * 没有意义，与其在写回时悄悄 String() 一下，不如在入口就收敛成字符串。
+ */
+function copyData(data) {
+  var out = {}
+  if (isObject(data) === false) return out
+  var keys = Object.keys(data)
+  for (var i = 0; i < keys.length; i += 1) {
+    var key = keys[i]
+    if (key === 'id' || key === 'label') continue
+    var value = data[key]
+    if (value === undefined || value === null) continue
+    out[key] = typeof value === 'string' ? value : String(value)
+  }
+  return out
+}
+
+/**
  * 文档归一化（字段清洗）。两侧半边都用它，保证读写同一套判据。
  *
  * 载体是 `.drawio`（drawio 的 mxfile）之后，这里**不再有 v1 迁移**：
@@ -614,6 +634,8 @@ function normalizeDrawioDoc(raw) {
     out.y = Number.isFinite(Number(rawNode.y)) ? Number(rawNode.y) : 0
     out.w = Number.isFinite(Number(rawNode.w)) ? Number(rawNode.w) : 0
     out.h = Number.isFinite(Number(rawNode.h)) ? Number(rawNode.h) : 0
+    // 编辑数据（drawio 用户对象上的自定义属性）：只收字符串值，原样带上。
+    if (isObject(rawNode.data)) out.data = copyData(rawNode.data)
     nodes.push(out)
   }
 
@@ -629,6 +651,7 @@ function normalizeDrawioDoc(raw) {
     if (sourcePoint !== null) item.sourcePoint = sourcePoint
     var targetPoint = normalizePoint(edge.targetPoint)
     if (targetPoint !== null) item.targetPoint = targetPoint
+    if (isObject(edge.data)) item.data = copyData(edge.data)
     edges.push(item)
   }
 
