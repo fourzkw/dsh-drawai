@@ -10,3 +10,7 @@ node_modules/
 Thumbs.db
 desktop.ini
 *.log
+# 画布文件：仓库里只留 demo.drawio（示例图，画布默认读它）
+# 其余 *.drawio 都是各人工作区里的图，不进仓库
+*.drawio
+!demo.drawio

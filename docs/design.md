@@ -845,7 +845,7 @@ tools/check-route-preview.mjs # 连线预览的路由自测（纯几何，无需
 tools/check-host.mjs    # 宿主半边行为自测（内存文件系统，无需 DSH）
 tools/check-render.mjs  # 渲染 + 对齐/连线画法自测（React 桩驱动 renderDiagram）
 tools/check-component.mjs # 客户端组件自测（tab 注册、工作栏/菜单文案与入口）
-demo.drawio             # 示例图（画布默认读它）
+demo.drawio             # 示例图（画布默认读它；仓库里唯一被跟踪的 .drawio，其余被 .gitignore 挡住）
 docs/design.md          # 本文档
 docs/release.md         # 发布与收录流程
 ```
