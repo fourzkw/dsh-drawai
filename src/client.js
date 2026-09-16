@@ -23,6 +23,7 @@ const React = require('react')
  */
 const {
   DEFAULT_EDGE_STYLE,
+  DEFAULT_FONT,
   NODE_SHAPES,
   PALETTE,
   arrowFromStyle,
@@ -90,6 +91,13 @@ function tabLabelOf(path) {
 }
 
 const POLL_MS = 3000
+/**
+ * 选区上报的防抖时间（ms）。
+ *
+ * 框选时指针每移动一下都会 `setSelectedIds` —— 不防抖就是把宿主按帧打。
+ * 300ms 足够让 AI 在下一次 `diagram_read` 里看到"用户刚选了什么"，又不会刷请求。
+ */
+const SELECTION_REPORT_MS = 300
 /** 人工编辑的写回端点（宿主半边注册，见 src/index.js）。 */
 const SAVE_ENDPOINT = '/drawai/api/save'
 /** 自定义请求头，宿主用它做 CSRF 围栏。 */
@@ -334,6 +342,30 @@ function wrapLabel(label, maxWidth) {
 }
 
 /**
+ * 文档没给**字色**时，这个节点里的字该是什么色 —— 由**它自己的填充**算出来，不跟主题走。
+ *
+ * 为什么不能跟主题：填充常常是文档里写死的浅色（drawio 调色板 `#ffe6cc` / `#dae8fc`…），
+ * 主题不改它；而缺省字色原来取 `skin.text`（暗色 = `#e8e8e8`）—— 于是**切到暗色外观，
+ * 浅底节点上的字一起变浅，直接看不见**。现在的规矩：浅底黑字、深底浅字，只看填充。
+ * 于是"换主题"不再改动节点里的字色（与上面那条"颜色是文档的一部分"同一个立场）。
+ */
+const ON_DARK_FONT = '#e8e8e8'
+function defaultFontOnFill(fill) {
+  const hex = typeof fill === 'string' ? fill.trim() : ''
+  const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(hex)
+  // 认不出的填充（名字色、透明、渐变…）保守给黑字：drawio 的缺省也是黑字。
+  if (m === null) return DEFAULT_FONT
+  const body = m[1].length === 3 ? m[1][0] + m[1][0] + m[1][1] + m[1][1] + m[1][2] + m[1][2] : m[1]
+  const r = parseInt(body.slice(0, 2), 16)
+  const g = parseInt(body.slice(2, 4), 16)
+  const b = parseInt(body.slice(4, 6), 16)
+  // 相对亮度的常用近似（0.299R + 0.587G + 0.114B）。0.55 让调色板里的颜色都算浅底，
+  // 而主题给无填充节点的 #2a2a2a、以及用户自己写的深色都算深底。
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  return luminance > 0.55 ? DEFAULT_FONT : ON_DARK_FONT
+}
+
+/**
  * 节点的配色：**文档的 style 键说了算**，主题只在"没写"时补缺省。
  *
  * 这与 v1 相反 —— v1 把 node.style 当颜色名去查主题表，于是暗色主题会改写文档颜色，
@@ -345,10 +377,13 @@ function colorOf(node, mode) {
   const fill = styleGet(style, 'fillColor', null)
   const stroke = styleGet(style, 'strokeColor', null)
   const font = styleGet(style, 'fontColor', null)
+  const resolvedFill = fill !== null ? fill : skin.default.fill
   return {
-    fill: fill !== null ? fill : skin.default.fill,
+    fill: resolvedFill,
     stroke: stroke !== null ? stroke : skin.default.stroke,
-    font: font !== null ? font : skin.text,
+    // 字色：文档写了就用文档的；没写就**按这块填充**算（浅底黑字/深底浅字），不跟主题走 ——
+    // 否则暗色外观会把浅色节点上的字一起翻成浅色，看不见（见 defaultFontOnFill）。
+    font: font !== null ? font : defaultFontOnFill(resolvedFill),
   }
 }
 
@@ -1447,7 +1482,16 @@ function clampNumber(value, lo, hi) {
   return value
 }
 
-/** 文档内容的包围盒（不含留白）。 */
+/**
+ * 文档内容的包围盒（不含留白）：节点框 **∪ 连线的几何**。
+ *
+ * 连线必须算进来：**独立线**（两端都是自由点）、**伸出节点外的折点**、悬空端的自由点，
+ * 都属于"内容"。只算节点框的话，导出/看图会按节点框把线裁掉（实测：画好的猫，胡须与尾巴
+ * 被切成贴着画框的两截，看图的人/AI 都会以为"线断了"），「视图 → 适应内容」也会看不全。
+ *
+ * 边自己的文字位置（labelX/labelY 是**沿边相对量**）算不出来 —— 它得先有走线。所以这一层
+ * 只保证"线的几何"进来；标签由那 24px 的留白兜着。
+ */
 function contentBounds(doc) {
   let minX = Infinity
   let minY = Infinity
@@ -1463,6 +1507,25 @@ function contentBounds(doc) {
     if (y < minY) minY = y
     if (x + w > maxX) maxX = x + w
     if (y + h > maxY) maxY = y + h
+  }
+  const edges = Array.isArray(doc.edges) ? doc.edges : []
+  const grow = (point) => {
+    if (point === null || point === undefined || typeof point !== 'object') return
+    const px = Number(point.x)
+    const py = Number(point.y)
+    if (Number.isFinite(px) === false || Number.isFinite(py) === false) return
+    if (px < minX) minX = px
+    if (py < minY) minY = py
+    if (px > maxX) maxX = px
+    if (py > maxY) maxY = py
+  }
+  for (let i = 0; i < edges.length; i += 1) {
+    const e = edges[i]
+    if (e === null || typeof e !== 'object') continue
+    const points = Array.isArray(e.points) ? e.points : []
+    for (let k = 0; k < points.length; k += 1) grow(points[k])
+    grow(e.sourcePoint)
+    grow(e.targetPoint)
   }
   if (!Number.isFinite(minX)) return { minX: 0, minY: 0, maxX: 1, maxY: 1 }
   return { minX: minX, minY: minY, maxX: maxX, maxY: maxY }
@@ -1574,6 +1637,13 @@ function styleSummary(style, kind) {
     if (name !== null) return PALETTE_LABELS[name] === undefined ? name : PALETTE_LABELS[name]
     // 认不出的颜色（drawio 文件里本来就只有十六进制）：把那个值原样给人看，别显示"未知"。
     const hex = isText ? styleGet(s, 'fontColor', null) : styleGet(s, 'fillColor', null) !== null ? styleGet(s, 'fillColor', null) : styleGet(s, 'strokeColor', null)
+    return hex === null ? '默认' : String(hex)
+  }
+  if (kind === 'fontColor') {
+    // 字色：命中调色板给中文名，认不出的十六进制把那个值给人看（drawio 文件里本来就只有十六进制）。
+    const name = textColorNameFromStyle(s)
+    if (name !== null) return PALETTE_LABELS[name] === undefined ? name : PALETTE_LABELS[name]
+    const hex = styleGet(s, 'fontColor', null)
     return hex === null ? '默认' : String(hex)
   }
   if (kind === 'fontSize') {
@@ -3821,6 +3891,31 @@ function CanvasView(props) {
   const exportState = React.useState(null) // null | 'svg' | 'png'
   const exportRequest = exportState[0]
   const setExportRequest = exportState[1]
+  /**
+   * AI 触发的那次导出：记住**已经处理过**的请求 id。
+   *
+   * 为什么需要：导出请求挂在宿主 `read` 的回执上，而客户端每 3 秒轮询一次 —— 不去重的话，
+   * 回执慢一点同一条请求就会被反复取到（表现是"每 3 秒下载一次 PNG"）。
+   */
+  const exportHandledRef = React.useRef(null)
+  /**
+   * AI 的「看一眼」请求（`diagram_read {render:true}`）：`{ requestId }`。
+   *
+   * 与导出分开：导出是**给人**的（下载/落文件），这一条是**给模型**看的 —— 渲成 PNG 回执给宿主，
+   * 由宿主存进 DSH 的附件库（工作区零文件），再作为 image 内容块进模型上下文。
+   */
+  const lookState = React.useState(null)
+  const lookRequest = lookState[0]
+  const setLookRequest = lookState[1]
+  /** 同一个请求只处理一次（轮询每 3 秒一次，不去重会反复渲染）。 */
+  const lookHandledRef = React.useRef(null)
+  /**
+   * 回执的体量上限（base64 字符数）。
+   *
+   * 回执走的是写回路由，body 上限 4MB（宿主 SAVE_MAX_BYTES）；base64 比原图大 1/3，
+   * 所以客户端先自己收着点：超了就先降到 1× 重渲，再超就如实回失败（而不是发出去被拒）。
+   */
+  const LOOK_MAX_BASE64 = 2800000
   // 文档三件套的弹出面板：null | 'new'（输入文件名） | 'open'（选择已有文件）
   const docMenuState = React.useState(null)
   const docMenu = docMenuState[0]
@@ -4870,6 +4965,97 @@ function CanvasView(props) {
     return { node: clone, width: w, height: h }
   }
 
+  /**
+   * 把导出结果回执给宿主 —— AI 的 `{op:'export'}` 靠这一条闭环（渲染器只在这半边）。
+   *
+   * 回执失败只是"AI 不知道结果"（宿主的请求还挂着，下次刷新会重来），不该在界面上冒错。
+   */
+  async function reportExportResult(requestId, format, payload) {
+    try {
+      await fetch(SAVE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [SAVE_HEADER]: '1' },
+        body: JSON.stringify(
+          Object.assign(
+            { action: 'export-result', sessionId: sessionId, path: target, requestId: requestId, format: format },
+            payload === undefined || payload === null ? {} : payload,
+          ),
+        ),
+      })
+    } catch (error) {
+      /* 网络抖动就算了：宿主那边请求还挂着，用户下次操作会重来 */
+    }
+  }
+
+  /**
+   * 把当前画布渲成 PNG 的 base64（给 AI「看一眼」用）。
+   *
+   * 与 `downloadPng` 同一套取图路径（SVG 序列化 → Image → canvas → PNG），区别只在这里
+   * **返回数据**而不是触发下载：图片不进用户的工作区、也不进下载目录，直接回执给宿主。
+   * 复用同一条路径是刻意的 —— 两处各画一遍迟早会不一样。
+   */
+  function renderPngPayload(node, width, height, scale) {
+    return new Promise((resolve, reject) => {
+      const markup = new XMLSerializer().serializeToString(node)
+      const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }))
+      const image = new Image()
+      image.onload = () => {
+        try {
+          const px = Math.max(1, Math.round(width * scale))
+          const py = Math.max(1, Math.round(height * scale))
+          const canvas = document.createElement('canvas')
+          canvas.width = px
+          canvas.height = py
+          const context = canvas.getContext('2d')
+          if (context === null) {
+            URL.revokeObjectURL(url)
+            reject(new Error('画布拿不到 2D 上下文'))
+            return
+          }
+          // 底色跟随主题（与导出同一套）：深色模式下不要给模型一张纯白底图。
+          context.fillStyle = mode === 'dark' ? '#1b1b1b' : '#ffffff'
+          context.fillRect(0, 0, px, py)
+          context.drawImage(image, 0, 0, px, py)
+          URL.revokeObjectURL(url)
+          const dataUrl = canvas.toDataURL('image/png')
+          const comma = dataUrl.indexOf(',')
+          if (comma < 0) {
+            reject(new Error('PNG 编码失败'))
+            return
+          }
+          resolve({ base64: dataUrl.slice(comma + 1), width: px, height: py })
+        } catch (error) {
+          URL.revokeObjectURL(url)
+          reject(error)
+        }
+      }
+      image.onerror = () => {
+        URL.revokeObjectURL(url)
+        reject(new Error('SVG 转图片失败（画布内容里有浏览器渲染不了的东西？）'))
+      }
+      image.src = url
+    })
+  }
+
+  /**
+   * 把「看一眼」的结果回执给宿主 —— 图片走附件通道，**工作区零文件**。
+   *
+   * 失败也要回执（`ok:false`）：宿主那边请求还挂着，不回声模型会永远看到 pending。
+   */
+  async function reportRenderResult(requestId, payload) {
+    try {
+      await fetch(SAVE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [SAVE_HEADER]: '1' },
+        body: JSON.stringify(
+          Object.assign({ action: 'render-result', sessionId: sessionId, path: target, requestId: requestId }, payload || {}),
+        ),
+      })
+    } catch (error) {
+      /* 网络抖动：宿主那边请求还挂着，用户下次操作会重来 */
+    }
+  }
+
   function downloadBlob(blob, filename) {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -5158,6 +5344,8 @@ function CanvasView(props) {
         if (has(patch, 'arrow')) style = styleWithArrow(style, patch.arrow)
         if (has(patch, 'line')) style = styleWithLineKind(style, patch.line)
         if (has(patch, 'fontSize')) style = stylePatch(style, { fontSize: patch.fontSize === null ? null : String(patch.fontSize) })
+        // 字色：`fontColor`。值给的是**调色板名**（'plain' = 删键），与节点上那一类同一套语义。
+        if (has(patch, 'fontColor')) style = styleWithTextColorName(style, patch.fontColor)
         if (has(patch, 'color')) {
           style = stylePatch(style, { strokeColor: typeof patch.color === 'string' && patch.color.length > 0 ? patch.color : null })
         }
@@ -5239,8 +5427,11 @@ function CanvasView(props) {
         const e = next.edges[i]
         if (e.id !== id) continue
         delete e.points
-        delete e.sourcePoint
-        delete e.targetPoint
+        // **自由端点不是折点**：那一端没有真实顶点时，自由点就是它的落点。无条件删掉，
+        // "两端都自由"的独立线就一个落点都不剩 —— 写回会整条跳过它（线上直接消失）。
+        // 所以只在该端有真实顶点时才删（那种情况下 drawio 本来就忽略自由点）。
+        if (typeof e.from === 'string') delete e.sourcePoint
+        if (typeof e.to === 'string') delete e.targetPoint
         let style = typeof e.style === 'string' ? e.style : DEFAULT_EDGE_STYLE
         style = styleWithSide(style, 'source', null)
         style = styleWithSide(style, 'target', null)
@@ -5845,22 +6036,84 @@ function CanvasView(props) {
 
   // 导出。刻意放在 effect 里跑：按钮先清掉选中，等这一帧渲染完（DOM 里没有手柄和选中框了）
   // 再序列化，产物才干净。若在点击回调里直接导，会把手柄一起拍进去。
+  //
+  // 两种触发形态：菜单里点的是字符串（'svg' / 'png'）→ 浏览器下载；AI 要的是对象
+  // （`{format, requestId, name}`）→ svg 把文本回执给宿主落盘、png 仍走浏览器下载。
   React.useEffect(() => {
     if (exportRequest === null) return
     const request = exportRequest
     setExportRequest(null)
+    const fromAi = typeof request === 'object' && request !== null
+    const format = fromAi ? request.format : request
+    const requestId = fromAi && typeof request.requestId === 'string' ? request.requestId : null
+    const askedName = fromAi && typeof request.name === 'string' && request.name.length > 0 ? request.name : null
     const built = buildExportSvg()
-    if (built === null) return
+    if (built === null) {
+      if (requestId !== null) reportExportResult(requestId, format, { ok: false, error: '画布还没准备好，导出没做成' })
+      return
+    }
     // 导出文件名：绑定文件就用它的名字；没有绑定就叫 'diagram'，别去借 demo 的名字。
     const source = typeof status.path === 'string' && status.path.length > 0 && status.path[0] !== '(' ? status.path : 'diagram'
-    const name = String(source).split(/[\\/]/).pop().replace(/\.drawio$/i, '')
-    if (request === 'svg') {
+    const name = askedName !== null ? askedName : String(source).split(/[\\/]/).pop().replace(/\.drawio$/i, '')
+    if (format === 'svg') {
       const markup = new XMLSerializer().serializeToString(built.node)
+      // AI 要的是"落成工作区里的一个文件"：把文本回执给宿主，由它写在 .drawio 旁边。
+      if (requestId !== null) {
+        setSaveNote('AI 要的 SVG 已渲染，交给宿主落盘…')
+        reportExportResult(requestId, 'svg', { ok: true, svg: markup })
+        return
+      }
       downloadBlob(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }), name + '.svg')
       return
     }
     downloadPng(built.node, built.width, built.height, name + '.png')
+    // PNG 走浏览器下载（AI 触发的也一样）：宿主写二进制得另开通道，而"点一次导出"就有的东西
+    // 不值得为它搬 base64。下载成不成浏览器不给回执，所以这里只报"已经交给下载"。
+    if (requestId !== null) {
+      setSaveNote('AI 要的 PNG 已交给浏览器下载')
+      reportExportResult(requestId, 'png', { ok: true, downloaded: true })
+    }
   }, [exportRequest])
+
+  // AI 的「看一眼」。与导出同一个理由放在 effect 里：pull() 先清掉选中，等这一帧渲染完
+  // （DOM 里没有手柄与选中框）再序列化，模型看到的才是干净的图。
+  React.useEffect(() => {
+    if (lookRequest === null) return
+    const request = lookRequest
+    setLookRequest(null)
+    const requestId = typeof request.requestId === 'string' ? request.requestId : null
+    if (requestId === null) return
+    const built = buildExportSvg()
+    if (built === null) {
+      setSaveNote('AI 想看一眼，但画布还没准备好')
+      reportRenderResult(requestId, { ok: false, error: '画布还没准备好，渲染没做成' })
+      return
+    }
+    setSaveNote('正在把画布渲成图片给 AI 看…')
+    // 先按 2× 渲（与手动导出同一档）；超过回执上限就降到 1× 再试一次。
+    renderPngPayload(built.node, built.width, built.height, 2)
+      .catch(() => renderPngPayload(built.node, built.width, built.height, 1))
+      .then((payload) => {
+        if (payload.base64.length > LOOK_MAX_BASE64) {
+          return renderPngPayload(built.node, built.width, built.height, 1).then((small) => {
+            if (small.base64.length > LOOK_MAX_BASE64) {
+              throw new Error('这张图渲染出来太大（' + Math.round(small.base64.length / 1000) + 'KB 的 PNG），超过了能交给 AI 的上限；可以先缩小画布范围或减少单元')
+            }
+            return small
+          })
+        }
+        return payload
+      })
+      .then((payload) => {
+        reportRenderResult(requestId, { ok: true, png: payload.base64, width: payload.width, height: payload.height })
+        setSaveNote('已把画布交给 AI 看（图片存在宿主那边，你的工作区不会多出文件）')
+      })
+      .catch((error) => {
+        const message = error && error.message ? error.message : String(error)
+        setSaveNote('渲染给 AI 失败：' + message)
+        reportRenderResult(requestId, { ok: false, error: message })
+      })
+  }, [lookRequest])
 
   React.useEffect(() => {
     if (client === null) {
@@ -5928,6 +6181,38 @@ function CanvasView(props) {
         setSaveNote('AI 选中了 ' + wantHighlight.length + ' 项')
       }
       setCanRevert(payload.canRevert === true)
+      // AI 请求的导出（宿主挂在 read 回执上）：交给渲染那一帧去做，结果再回执给宿主。
+      // 用 requestId 去重 —— 轮询每 3 秒一次，不去重就会反复渲染/反复下载。
+      const wantExport = payload.export
+      if (
+        wantExport !== null &&
+        typeof wantExport === 'object' &&
+        typeof wantExport.requestId === 'string' &&
+        exportHandledRef.current !== wantExport.requestId
+      ) {
+        exportHandledRef.current = wantExport.requestId
+        // 先清掉选中：等这一帧渲染完（DOM 里没有手柄与选中框）再序列化，产物才干净。
+        setSelectedIds([])
+        setExportRequest({
+          format: wantExport.format === 'png' ? 'png' : 'svg',
+          requestId: wantExport.requestId,
+          name: typeof wantExport.name === 'string' ? wantExport.name : '',
+        })
+      }
+      // AI 的「看一眼」（diagram_read {render:true}）：渲成 PNG 回执给宿主存进**附件库**，
+      // 工作区零文件；宿主下一次把 image 块交给模型。
+      const wantLook = payload.render
+      if (
+        wantLook !== null &&
+        typeof wantLook === 'object' &&
+        typeof wantLook.requestId === 'string' &&
+        lookHandledRef.current !== wantLook.requestId
+      ) {
+        lookHandledRef.current = wantLook.requestId
+        // 同样先清选中：图片里不该有手柄/选中框。
+        setSelectedIds([])
+        setLookRequest({ requestId: wantLook.requestId })
+      }
       if (parsed.error !== undefined) {
         setStatus({ kind: 'error', path: absolute, error: parsed.error, absolute: absolute })
         return
@@ -5988,6 +6273,31 @@ function CanvasView(props) {
     reportFocus()
   }, [active, target])
 
+  /**
+   * 把"用户现在选中了哪几个单元"告诉宿主 —— AI 的 `diagram_read` 会把它们带回去。
+   *
+   * 为什么需要：用户说"把这几个换成绿色""把它们往右挪一点"时，AI 原来只能靠坐标猜
+   * "这几个"是哪几个（画布只上报了"在看哪一张"，从没说过"选中了谁"）。
+   *
+   * 三条实现上的注意：
+   *   · **防抖**：框选时指针每动一下就 `setSelectedIds`，直接发请求等于按帧打宿主；
+   *   · 请求带着 `path`：宿主按"文件"配对，切了标签之后的旧选区不会串到新画布上
+   *     （两个文件里都叫 n1 太常见了）；
+   *   · 失败静默：主机没这条路由（老宿主）或网络抖动时只是"AI 少知道一次选区"，
+   *     不该在用户界面上冒一个错误（画布该怎么用还怎么用）。
+   */
+  React.useEffect(() => {
+    if (client === null || !active) return undefined
+    const handle = setTimeout(() => {
+      fetch(SAVE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [SAVE_HEADER]: '1' },
+        body: JSON.stringify({ action: 'selection', sessionId: sessionId, path: hasPath ? target : '', ids: selectedIds }),
+      }).catch(() => {})
+    }, SELECTION_REPORT_MS)
+    return () => clearTimeout(handle)
+  }, [selectedIds, target, sessionId, active, hasPath])
+
   // 视口：宽高比跟着容器走（h 由 aspect 推出），所以容器尺寸变化时不会变形。
   const aspect = size.w > 0 && size.h > 0 ? size.h / size.w : 1
   const fitView = doc === null ? null : computeFitView(contentBounds(doc), aspect)
@@ -6037,17 +6347,33 @@ function CanvasView(props) {
     return React.createElement('div', { className: 'drawai-menu-title' }, text)
   }
 
-  function swatchRow(onPick, activeColor) {
+  /**
+   * 色板。
+   *
+   * `kind === 'font'` 时预览的是**字色**（= 点下去会写进 `fontColor` 的那个值，调色板取 stroke 那一支，
+   * 与 styleWithTextColorName 同一套）。不这么做的话，字色那一行会显示一排填充色，
+   * 用户点"黄"却得到黄边色的字，看着像点错了。
+   *
+   * 字色那一行里 `plain` 就是**黑**：它写出去是"删掉 fontColor 键"，而画出来就是缺省黑字 ——
+   * 所以叫「黑」（用户要的是"把字弄成黑色"）。叫「默认」在颜色行里没有意义：一排颜色里
+   * 混一个"默认"，既说不清它是什么色，又和"选个深色"是同一件事。
+   */
+  function swatchRow(onPick, activeColor, kind) {
+    const forFont = kind === 'font'
     const buttons = []
     // 调色板来自样式内核（PALETTE）：这里的"名字"只是 UI 的叫法，点下去生成 fillColor/strokeColor 键。
     for (let i = 0; i < PALETTE.length; i += 1) {
       const entry = PALETTE[i]
+      const isPlain = entry.name === 'plain'
+      const label = forFont && isPlain ? '黑' : entry.name
       buttons.push(
         React.createElement('button', {
           key: 'swatch-' + entry.name,
           className: activeColor === entry.name ? 'drawai-swatch on' : 'drawai-swatch',
-          title: entry.name,
-          style: { background: entry.fill, borderColor: entry.stroke },
+          title: (forFont ? '字色：' : '') + label,
+          style: forFont
+            ? { background: isPlain ? '#000000' : entry.stroke, borderColor: isPlain ? '#9aa0a6' : entry.stroke }
+            : { background: entry.fill, borderColor: entry.stroke },
           onClick: () => onPick(entry.name),
         }),
       )
@@ -6087,14 +6413,17 @@ function CanvasView(props) {
    */
   function fontSizeRow(style, apply) {
     const current = styleNumber(style, 'fontSize', null)
-    const items = [[null, '默认']].concat(FONT_SIZE_PRESETS.map((n) => [n, String(n)]))
+    // 档位里**没有「默认」这一项**：它唯一的作用是删掉 fontSize 键，而看到的样子和"选中那个
+    // 等价档位"完全一样（节点缺省 12、连线缺省 10 —— 两个都在下面这排档位里）。
+    // 一个"选了等于没选"的选项只会让人犹豫。
+    const items = FONT_SIZE_PRESETS.map((n) => [n, String(n)])
     const cells = items.map((it) =>
       React.createElement(
         'button',
         {
           key: 'fs-' + String(it[0]),
           className: 'drawai-btn' + (String(current) === String(it[0]) ? ' on' : ''),
-          title: it[0] === null ? '回到缺省字号' : '字号 ' + it[0] + 'px',
+          title: '字号 ' + it[0] + 'px',
           onClick: () => {
             if (String(current) !== String(it[0])) apply(it[0])
             closeSelect()
@@ -6127,7 +6456,7 @@ function CanvasView(props) {
         max: FONT_SIZE_MAX,
         step: 1,
         defaultValue: current === null ? '' : String(current),
-        placeholder: '默认',
+        placeholder: '字号',
         title: '直接输入字号（' + FONT_SIZE_MIN + '–' + FONT_SIZE_MAX + '），回车生效',
         onKeyDown: (event) => {
           if (event.key === 'Enter') {
@@ -6336,9 +6665,9 @@ function CanvasView(props) {
           },
           {
             key: 'color',
-            label: '配色',
+            label: isTextNode ? '字色' : '配色',
             value: styleSummary(nodeStyle, 'color'),
-            hint: isTextNode ? '独立文字换的是字色' : '填充与描边',
+            hint: isTextNode ? '独立文字只有字色可换' : '填充与描边',
             body: swatchRow(
               (color) => {
                 updateNode(nodeTargets, { style: isTextNode ? styleWithTextColorName(nodeStyle, color) : styleWithColorName(nodeStyle, color) })
@@ -6347,6 +6676,26 @@ function CanvasView(props) {
               isTextNode ? textColorNameFromStyle(nodeStyle) : colorNameFromStyle(nodeStyle),
             ),
           },
+          // 字色：普通节点也能改标签颜色（`fontColor` 键）。独立文字上面那一类已经是字色了，
+          // 再给一类就是同一件事的两个入口 —— 所以只对"有填充描边"的元素出现。
+          ...(isTextNode
+            ? []
+            : [
+                {
+                  key: 'fontColor',
+                  label: '字色',
+                  value: styleSummary(nodeStyle, 'fontColor'),
+                  hint: '标签文字的颜色',
+                  body: swatchRow(
+                    (color) => {
+                      updateNode(nodeTargets, { style: styleWithTextColorName(nodeStyle, color) })
+                      closeSelect()
+                    },
+                    textColorNameFromStyle(nodeStyle),
+                    'font',
+                  ),
+                },
+              ]),
           {
             key: 'fontSize',
             label: '字号',
@@ -6512,6 +6861,21 @@ function CanvasView(props) {
             body: fontSizeRow(edgeBaseStyle, (v) => {
               updateEdge(edgeTargets, { fontSize: v })
             }),
+          },
+          // 字色：连线上的文字。与上面「字号」同一批作用对象（边自己的 value + 挂在边上的标签单元）。
+          {
+            key: 'fontColor',
+            label: '字色',
+            value: styleSummary(edgeBaseStyle, 'fontColor'),
+            hint: '线上的文字颜色',
+            body: swatchRow(
+              (color) => {
+                updateEdge(edgeTargets, { fontColor: color })
+                closeSelect()
+              },
+              textColorNameFromStyle(edgeBaseStyle),
+              'font',
+            ),
           },
         ]),
       )

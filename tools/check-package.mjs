@@ -161,7 +161,9 @@ console.log('\n[4] 内嵌技能：换了电脑、只装了插件时模型怎么�
   check('技能带 content（正文就是它）', typeof skill.content === 'string', typeof skill.content)
   const body = typeof skill.content === 'string' ? skill.content : ''
   check('正文够长（是一份说明，不是一行）', body.length > 1500, body.length + ' 字符')
-  for (const needle of ['.drawio', 'diagram_read', 'diagram_apply', 'addNode', 'addEdge', 'setStyle', 'remove', 'move', 'highlight', 'fromPoint', 'canRevert', 'layout', 'pinned', 'from === to', 'layers', '无损', '别直接改']) {
+  // 关键字是"这份说明有没有随插件一起发出去"的最低保证：换了电脑、只装了 lib/ 时，
+  // 模型能依仗的就只有它。新增能力（比如选区、乐观锁）必须在这里留一条，否则删掉了也没人发现。
+  for (const needle of ['.drawio', 'diagram_read', 'diagram_apply', 'addNode', 'addEdge', 'setStyle', 'remove', 'move', 'highlight', 'fromPoint', 'canRevert', 'layout', 'pinned', 'from === to', 'layers', '无损', '别直接改', 'selection', 'expectRevision', 'created', 'as', 'setEdge', 'setLabelPos', 'order', 'duplicate', 'addLayer', 'setLayer', 'export', 'revertSteps', '纸张', 'filtered', 'fontColor', 'render:true']) {
     check('正文讲了 ' + needle, body.indexOf(needle) >= 0)
   }
   check('注册走的是 Cordis effect（能被卸载）', disposed === 0 && skills.length === 1, 'disposer 还没被调用')

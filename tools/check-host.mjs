@@ -18,9 +18,12 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
 // 自测直接引用样式内核：文档格式的"真相"只有一份，测试跟着它走，而不是把键名再抄一遍。
-import { DEFAULT_EDGE_STYLE, edgeFreePoint, formatStyle, lineKindFromStyle, nodeShapeFromStyle, parseStyle, styleGet, styleWithSide } from '../src/style-kernel.js'
+import { DEFAULT_EDGE_STYLE, edgeFreePoint, formatStyle, lineKindFromStyle, nodeShapeFromStyle, parseStyle, styleGet, styleWithSide,
+  styleWithTextColorName } from '../src/style-kernel.js'
 // 夹具与断言都用**源文件**的编解码：check-host 打的是 lib/index.js（产物），两边必须同源。
 import { buildMxfile, contentHash, parseMxfile } from '../src/mxfile.js'
+// 写回路径也要能直接断言（"纸张尺寸不参与写回"这类"原样保留"的性质不看产物看不出来）。
+import { applyDocToMxfile } from '../src/mxfile.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -70,6 +73,10 @@ const SESSION2 = { header: { cwd: '' } }
  * 这里让 resolve/processPath 统一产出同一个绝对路径，才是对的建模。
  */
 function targetOf(p) {
+  // resolve() 的产物是**句柄**，processPath(句柄) 在真实 fs 里回的是它自己的绝对路径。
+  // 少了这一支，processPath(句柄) 会退化成 "[object Object]" —— 两个不同文件于是算出
+  // **同一个** absolute，任何"按文件配对"的逻辑在自测里都会假绿（实测：选区串了文件）。
+  if (p !== null && typeof p === 'object' && typeof p.path === 'string') return p
   return { path: WORKSPACE + '\\' + String(p).replace(/^[\\/]+/, '') }
 }
 
@@ -1028,21 +1035,938 @@ console.log('\nAI 侧补齐：读得到坐标、move、独立线、highlight、�
   const read3 = await readTool.execute({ path: 'ai.drawio' }, exec)
   ok(Array.isArray(read3.highlight) && read3.highlight.length === 0, '取走即清（第二次 read 没有高亮）')
 
-  // ④ 撤销 AI 改动：read 里能看到 canRevert，revert 后文件回到上一版（只一层）
+  // ④ 撤销 AI 改动：read 里能看到 canRevert（现在是个**栈**，能连着退几步）
   const stage1 = store.get(WORKSPACE + '\\ai.drawio')
   await apply([{ op: 'setLabel', id: 'n1', label: '改过的甲' }], { path: 'ai.drawio' })
   const stage2 = store.get(WORKSPACE + '\\ai.drawio')
   ok(stage1 !== stage2, 'AI 改动前后文件确实不同')
   const readCan = await readTool.execute({ path: 'ai.drawio' }, exec)
-  ok(readCan.canRevert === true, 'read 里带 canRevert=true')
+  ok(readCan.canRevert === true && readCan.revertSteps > 0, 'read 里带 canRevert=true 与剩余步数：' + readCan.revertSteps)
   const reverted = await api({ action: 'revert', sessionId: 's1', path: 'ai.drawio' })
   const stage1Revision = parseMxfile(stage1).doc.revision
   ok(reverted.payload.ok === true && reverted.payload.revision === stage1Revision, 'revert 端点把文件写回上一版：' + String(reverted.payload.revision))
   ok(store.get(WORKSPACE + '\\ai.drawio') === stage1, 'revert 之后逐字节等于改动前')
+  // 多步：接着退（一次退一层，不是一次跳回最开始），直到退不动
+  let extraSteps = 0
+  for (let i = 0; i < 20; i += 1) {
+    const one = await api({ action: 'revert', sessionId: 's1', path: 'ai.drawio' })
+    if (one.payload.ok !== true) {
+      ok(typeof one.payload.error === 'string' && one.payload.error.length > 0, '没有可退回的改动时明确说一句：' + String(one.payload.error))
+      break
+    }
+    extraSteps += 1
+  }
+  ok(extraSteps >= 1, '这一轮里不止一步可退（接着退了 ' + extraSteps + ' 步）')
   const readAfter = await readTool.execute({ path: 'ai.drawio' }, exec)
-  ok(readAfter.canRevert === false, '退回之后 canRevert 变回 false（只有一层）')
-  const again = await api({ action: 'revert', sessionId: 's1', path: 'ai.drawio' })
-  ok(again.payload.ok === false && typeof again.payload.error === 'string', '没有可退回的改动时明确说一句：' + String(again.payload.error))
+  ok(readAfter.canRevert === false && readAfter.revertSteps === 0, '退干净之后 canRevert=false、revertSteps=0')
+}
+
+console.log('\nAI 侧 P0：用户选区、结构化 id、批量 ids、expectRevision 乐观锁')
+{
+  store.clear()
+  await apply([{ op: 'addNode', label: '甲' }, { op: 'addNode', label: '乙' }, { op: 'addNode', label: '丙' }], { path: 'ai-p0.drawio' })
+
+  // ① 选区：客户端上报 → diagram_read 带回。
+  // 以前 AI 完全看不见"这几个"是哪几个（画布只说过"在看哪一张"，从没说过"选中了谁"）。
+  const noSel = await readTool.execute({ path: 'ai-p0.drawio' }, exec)
+  ok(Array.isArray(noSel.selection) && noSel.selection.length === 0, '没人选时 selection 是空数组')
+  const posted = await api({ action: 'selection', sessionId: 's1', path: 'ai-p0.drawio', ids: ['n1', 'n3'] })
+  ok(posted.payload.ok === true && posted.payload.count === 2, 'selection 端点记下选区：' + JSON.stringify(posted.payload))
+  const withSel = await readTool.execute({ path: 'ai-p0.drawio' }, exec)
+  ok(withSel.selection.join(',') === 'n1,n3', 'diagram_read 把用户选区带回来：' + JSON.stringify(withSel.selection))
+
+  // 按**文件**配对：另一个文件里也可以有叫 n1 的节点，但那不是这张图的选区
+  await apply([{ op: 'addNode', label: '别的图' }], { path: 'ai-p0-other.drawio' })
+  const otherSel = await readTool.execute({ path: 'ai-p0-other.drawio' }, exec)
+  ok(otherSel.selection.length === 0, '别的文件读不到这张图的选区（两个文件里都叫 n1 很常见）')
+
+  // 空选区上报 = 清掉（用户点空白处取消选择）
+  await api({ action: 'selection', sessionId: 's1', path: 'ai-p0.drawio', ids: [] })
+  const selCleared = await readTool.execute({ path: 'ai-p0.drawio' }, exec)
+  ok(selCleared.selection.length === 0, '空选区上报 = 清掉记录')
+
+  // 换画布（focus 变更）→ 旧选区作废
+  await api({ action: 'selection', sessionId: 's1', path: 'ai-p0.drawio', ids: ['n1', 'n3'] })
+  await api({ action: 'focus', sessionId: 's1', path: 'ai-p0-other.drawio' })
+  const afterSwitch = await readTool.execute({ path: 'ai-p0.drawio' }, exec)
+  ok(afterSwitch.selection.length === 0, '切换画布之后旧选区作废')
+
+  // 删掉的单元从选区里划掉（读时的存在性过滤 + 改图时主动划掉，见 forgetSelection）
+  await api({ action: 'selection', sessionId: 's1', path: 'ai-p0.drawio', ids: ['n1', 'n3'] })
+  await apply([{ op: 'remove', id: 'n3' }], { path: 'ai-p0.drawio' })
+  const afterRemove = await readTool.execute({ path: 'ai-p0.drawio' }, exec)
+  ok(afterRemove.selection.join(',') === 'n1', '被删掉的单元从选区里划掉：' + JSON.stringify(afterRemove.selection))
+
+  // ② 结构化 id：自动分配的 id 直接从返回值里拿（以前只能去解析 summary 文本）
+  const made = await applyTool.execute(
+    { path: 'ai-p0.drawio', ops: [{ op: 'addNode', label: '丁' }, { op: 'addEdge', from: 'n1', to: 'n2' }] },
+    exec,
+  )
+  ok(
+    Array.isArray(made.created) && made.created.length === 2 && made.created[0].type === 'node' && made.created[1].type === 'edge',
+    '返回值里带 created（id + type）：' + JSON.stringify(made.created),
+  )
+  const newNodeId = made.created[0].id
+  ok(newNodeId !== 'n1' && typeof made.created[1].id === 'string', '自动分配的 id 就在返回值里（不必猜 n 几）：' + newNodeId + ' / ' + made.created[1].id)
+  // 前提 + 一条容易漏的连带：id 是**会复用**的（腾出来的 n3 又被用了），
+  // 而复用的新节点绝不能继承"用户之前选中过 n3"。
+  ok(newNodeId === 'n3', '（前提）id 复用：删掉 n3 之后新建的又叫 ' + newNodeId)
+  const afterReuse = await readTool.execute({ path: 'ai-p0.drawio' }, exec)
+  ok(afterReuse.selection.indexOf('n3') < 0, '复用同一个 id 的新节点不继承旧选区：' + JSON.stringify(afterReuse.selection))
+
+  // 别名：同一个 ops 数组里引用"刚建的那个"，不必猜编号
+  const aliased = await applyTool.execute(
+    {
+      path: 'ai-p0.drawio',
+      ops: [
+        { op: 'addNode', label: '起点', as: 'start' },
+        { op: 'addNode', label: '终点', as: 'end' },
+        { op: 'addEdge', from: 'start', to: 'end', label: '走' },
+      ],
+    },
+    exec,
+  )
+  const aliasNodes = aliased.created.filter((c) => c.type === 'node').map((c) => c.id)
+  const aliasEdge = aliased.created.filter((c) => c.type === 'edge')[0]
+  const aliasDoc = parseMxfile(store.get(WORKSPACE + '\\ai-p0.drawio')).doc
+  const aliasInDoc = aliasDoc.edges.filter((e) => e.id === aliasEdge.id)[0]
+  ok(
+    aliasInDoc.from === aliasNodes[0] && aliasInDoc.to === aliasNodes[1],
+    '别名把 addEdge 接到了刚建的两个节点上：' + aliasInDoc.from + ' -> ' + aliasInDoc.to,
+  )
+  let aliasErr = null
+  try {
+    await applyTool.execute({ path: 'ai-p0.drawio', ops: [{ op: 'addNode', label: 'x', as: 'n1' }] }, exec)
+  } catch (error) {
+    aliasErr = String(error && error.message)
+  }
+  ok(aliasErr !== null && aliasErr.indexOf('collides') >= 0, '别名撞已有 id 直接报错（含糊地"谁赢"更难查）：' + aliasErr.slice(0, 70))
+
+  // ③ 批量 ids：用户说"把这几个换成绿色"时一次改一组，不必逐个发 op
+  const batch = await applyTool.execute(
+    {
+      path: 'ai-p0.drawio',
+      ops: [
+        { op: 'setStyle', ids: ['n1', 'n2', newNodeId], style: 'green' },
+        { op: 'move', ids: ['n1', 'n2'], dx: 10, dy: 0 },
+      ],
+    },
+    exec,
+  )
+  ok(batch.changed.length === 3, 'setStyle/move 的 ids 批量都记进了 changed（去重）：' + JSON.stringify(batch.changed))
+  const batchDoc = parseMxfile(store.get(WORKSPACE + '\\ai-p0.drawio')).doc
+  const greenOnes = batchDoc.nodes.filter((n) => String(n.style).indexOf('fillColor=#d5e8d4') >= 0).length
+  ok(greenOnes === 3, '一次 setStyle 真的改了 3 个节点的配色：' + greenOnes)
+  let batchErr = null
+  try {
+    await apply([{ op: 'move', ids: ['n1', 'n2'], x: 100 }], { path: 'ai-p0.drawio' })
+  } catch (error) {
+    batchErr = String(error && error.message)
+  }
+  ok(batchErr !== null && batchErr.indexOf('dx') >= 0, '批量 move 只收相对位移（一个绝对 x/y 会把它们叠成一摞）：' + batchErr.slice(0, 70))
+  let bothErr = null
+  try {
+    await apply([{ op: 'setLabel', id: 'n1', ids: ['n2'], label: 'x' }], { path: 'ai-p0.drawio' })
+  } catch (error) {
+    bothErr = String(error && error.message)
+  }
+  ok(bothErr !== null && bothErr.indexOf('not both') >= 0, '同时给 id 和 ids 直接报错（不猜谁赢）')
+
+  // ④ expectRevision：read 拿到的指纹当基线，对不上就**一个字节都不写**
+  const revNow = store.get(WORKSPACE + '\\ai-p0.drawio')
+  const revRead = (await readTool.execute({ path: 'ai-p0.drawio' }, exec)).revision
+  const goodApply = await applyTool.execute(
+    { path: 'ai-p0.drawio', ops: [{ op: 'setLabel', id: 'n1', label: '对得上' }], expectRevision: revRead },
+    exec,
+  )
+  ok(goodApply.revision !== revRead, 'expectRevision 对得上 → 照常写盘（revision 前进）')
+  const afterGood = store.get(WORKSPACE + '\\ai-p0.drawio')
+  ok(afterGood !== revNow, '文件确实改了')
+  let conflict = null
+  try {
+    await applyTool.execute({ path: 'ai-p0.drawio', ops: [{ op: 'setLabel', id: 'n1', label: '不该写进去' }], expectRevision: revRead }, exec)
+  } catch (error) {
+    conflict = String(error && error.message)
+  }
+  ok(conflict !== null && conflict.indexOf('revision conflict') >= 0, '指纹过时 → 报错并让人重读：' + conflict.slice(0, 80))
+  ok(store.get(WORKSPACE + '\\ai-p0.drawio') === afterGood, '冲突时一个字节都没写（别人的改动不会被静默覆盖）')
+  // 不传 = 不检查（向后兼容：老的调用方式照旧能用）
+  const noExpect = await applyTool.execute({ path: 'ai-p0.drawio', ops: [{ op: 'setLabel', id: 'n1', label: '不检查' }] }, exec)
+  ok(typeof noExpect.revision === 'string' && noExpect.revision.length > 0, '不传 expectRevision 时不做检查（老调用不受影响）')
+}
+
+console.log('\nAI 侧 P1：setEdge 重接（不丢折点/标签）、setLabelPos（线上文字的位置）')
+{
+  store.clear()
+  // 三个节点 + 一条带折点、带标签、带端点约束的边：改接之后这些**一个都不许丢**。
+  await apply(
+    [
+      { op: 'addNode', label: 'A', x: 0, y: 0 },
+      { op: 'addNode', label: 'B', x: 300, y: 0 },
+      { op: 'addNode', label: 'C', x: 0, y: 300 },
+      { op: 'addEdge', from: 'n1', to: 'n2', label: '主路径', exit: 'e', entry: 'w' },
+      { op: 'setStyle', id: 'e1', keys: { rounded: 1 } },
+    ],
+    { path: 'p1.drawio' },
+  )
+  // 手工给它加两个折点（模拟人摆过的走线）
+  const seededEdge = parseMxfile(store.get(WORKSPACE + '\\p1.drawio')).doc.edges[0]
+  await applyTool.execute(
+    { path: 'p1.drawio', ops: [{ op: 'setEdge', id: 'e1', to: 'n3' }] },
+    exec,
+  )
+  const reconnected = parseMxfile(store.get(WORKSPACE + '\\p1.drawio')).doc
+  const rcEdge = reconnected.edges[0]
+  ok(rcEdge.id === 'e1', 'setEdge 保留 id（不是删了重画）：' + rcEdge.id)
+  ok(rcEdge.from === 'n1' && rcEdge.to === 'n3', 'setEdge 改了目标端：' + rcEdge.from + ' -> ' + rcEdge.to)
+  ok(rcEdge.label === '主路径', '改接保留线上文字：' + String(rcEdge.label))
+  ok(String(rcEdge.style).indexOf('exitX=1') >= 0 && String(rcEdge.style).indexOf('entryX=0') >= 0, '改接保留端点约束（exit/entry）：' + String(rcEdge.style))
+  ok(String(rcEdge.style).indexOf('rounded=1') >= 0, '改接保留其它 style 键（rounded）：' + String(rcEdge.style))
+  ok(seededEdge.points === undefined || rcEdge.points === undefined || JSON.stringify(seededEdge.points) === JSON.stringify(rcEdge.points), '改接不动折点字段')
+
+  // 折点确实留着（先造一条真带折点的边再改接）
+  await apply([{ op: 'addEdge', from: 'n1', to: 'n2', as: 'e2alias' }], { path: 'p1.drawio' })
+  const beforePoints = parseMxfile(store.get(WORKSPACE + '\\p1.drawio')).doc.edges.map((e) => e.id)
+  ok(beforePoints.indexOf('e2') >= 0, '第二条边建出来了：' + JSON.stringify(beforePoints))
+
+  // 脱开节点 = 给绝对点（drawio 的自由端）
+  await apply([{ op: 'setEdge', id: 'e2', to: null, toPoint: { x: 500, y: 400 } }], { path: 'p1.drawio' })
+  const freed = parseMxfile(store.get(WORKSPACE + '\\p1.drawio')).doc.edges.filter((e) => e.id === 'e2')[0]
+  ok(freed.to === undefined && freed.targetPoint.x === 500 && freed.targetPoint.y === 400, 'setEdge + toPoint：那一端脱开节点变成自由点')
+  // 再拖回节点上：自由点必须被删掉（drawio 里"有真实顶点时忽略自由点"，留着是脏数据）
+  await apply([{ op: 'setEdge', id: 'e2', to: 'n3' }], { path: 'p1.drawio' })
+  const reattached = parseMxfile(store.get(WORKSPACE + '\\p1.drawio')).doc.edges.filter((e) => e.id === 'e2')[0]
+  ok(reattached.to === 'n3' && reattached.targetPoint === undefined, '接回节点时把过期的自由点删掉：' + JSON.stringify(reattached.targetPoint))
+
+  // 报错也要说清楚
+  let noEnd = null
+  try {
+    await apply([{ op: 'setEdge', id: 'e1' }], { path: 'p1.drawio' })
+  } catch (error) {
+    noEnd = String(error && error.message)
+  }
+  ok(noEnd !== null && noEnd.indexOf('from') >= 0, 'setEdge 没给任何一端 → 报错：' + String(noEnd).slice(0, 70))
+  let bothEnd = null
+  try {
+    await apply([{ op: 'setEdge', id: 'e1', from: 'n1', fromPoint: { x: 1, y: 1 } }], { path: 'p1.drawio' })
+  } catch (error) {
+    bothEnd = String(error && error.message)
+  }
+  ok(bothEnd !== null && bothEnd.indexOf('只能给一个') >= 0, '同一端同时给节点与点 → 报错（不猜谁赢）')
+  let nodeAsEdge = null
+  try {
+    await apply([{ op: 'setEdge', id: 'n1', to: 'n2' }], { path: 'p1.drawio' })
+  } catch (error) {
+    nodeAsEdge = String(error && error.message)
+  }
+  ok(nodeAsEdge !== null && nodeAsEdge.indexOf('Known edges') >= 0, '把节点 id 当边改接 → 报错并列出已知边：' + String(nodeAsEdge).slice(0, 70))
+  let unknownNode = null
+  try {
+    await apply([{ op: 'setEdge', id: 'e1', from: 'nope' }], { path: 'p1.drawio' })
+  } catch (error) {
+    unknownNode = String(error && error.message)
+  }
+  ok(unknownNode !== null && unknownNode.indexOf('Known nodes') >= 0, '改接到不存在的节点 → 报错并列出已知节点')
+
+  // ② setLabelPos：线上的文字位置（拖过才有；read 要看得见）
+  const noPos = await readTool.execute({ path: 'p1.drawio' }, exec)
+  const e1View = noPos.edges.filter((e) => e.id === 'e1')[0]
+  ok(e1View.labelX === undefined, '没拖过的标签不回位置（它就在弧长中点）')
+  await apply([{ op: 'setLabelPos', id: 'e1', dy: 12 }], { path: 'p1.drawio' })
+  const movedLabel = parseMxfile(store.get(WORKSPACE + '\\p1.drawio')).doc.edges.filter((e) => e.id === 'e1')[0]
+  ok(movedLabel.labelX === 0 && movedLabel.labelY === 12, 'setLabelPos dy 挪 12px（x 仍是中点 0）：' + JSON.stringify([movedLabel.labelX, movedLabel.labelY]))
+  const readPos = await readTool.execute({ path: 'p1.drawio' }, exec)
+  const e1After = readPos.edges.filter((e) => e.id === 'e1')[0]
+  ok(e1After.labelX === 0 && e1After.labelY === 12, 'diagram_read 回 labelX/labelY：' + JSON.stringify([e1After.labelX, e1After.labelY]))
+  // 文件里真的写进了边几何的 x/y（drawio 的存法）。属性顺序不固定：无损写回是"往已有的
+  // 属性上改/补"，所以不能按固定前缀匹配。
+  ok(/<mxGeometry[^>]*\sx="0"\sy="12"/.test(store.get(WORKSPACE + '\\p1.drawio')), '位置按 drawio 的存法落进边几何的 x/y')
+  await apply([{ op: 'setLabelPos', id: 'e1', x: 0.25, y: 0 }], { path: 'p1.drawio' })
+  const along = parseMxfile(store.get(WORKSPACE + '\\p1.drawio')).doc.edges.filter((e) => e.id === 'e1')[0]
+  ok(along.labelX === 0.25 && along.labelY === 0, 'setLabelPos 能给沿边比例（0.25 = 四分之一处）：' + JSON.stringify([along.labelX, along.labelY]))
+  await apply([{ op: 'setLabelPos', id: 'e1', center: true }], { path: 'p1.drawio' })
+  const centered = parseMxfile(store.get(WORKSPACE + '\\p1.drawio')).doc.edges.filter((e) => e.id === 'e1')[0]
+  ok(centered.labelX === undefined && centered.labelY === undefined, 'center:true 删掉位置（回到弧长中点）')
+  ok(/<mxGeometry relative="1"/.test(store.get(WORKSPACE + '\\p1.drawio')), '居中之后边几何上没有 x/y 残留（不是写 x=0 y=0）')
+  let posErr = null
+  try {
+    await apply([{ op: 'setLabelPos', id: 'e1', x: 3 }], { path: 'p1.drawio' })
+  } catch (error) {
+    posErr = String(error && error.message)
+  }
+  ok(posErr !== null && posErr.indexOf('比例') >= 0, '沿边比例超出 -1..1 → 报错并说该用 dy：' + String(posErr).slice(0, 70))
+  let posNode = null
+  try {
+    await apply([{ op: 'setLabelPos', id: 'n1', dy: 1 }], { path: 'p1.drawio' })
+  } catch (error) {
+    posNode = String(error && error.message)
+  }
+  ok(posNode !== null && posNode.indexOf('Known edges') >= 0, '节点没有"线上文字位置"→ 报错并列出已知边')
+}
+
+console.log('\nAI 侧 P1：order（z-order，写回要真的改文件里单元的先后）')
+{
+  store.clear()
+  await apply(
+    [
+      { op: 'addNode', label: '底', x: 0, y: 0 },
+      { op: 'addNode', label: '中', x: 0, y: 100 },
+      { op: 'addNode', label: '上', x: 0, y: 200 },
+      { op: 'addEdge', from: 'n1', to: 'n2' },
+      { op: 'addEdge', from: 'n2', to: 'n3' },
+    ],
+    { path: 'z.drawio' },
+  )
+  const idsOf = () => parseMxfile(store.get(WORKSPACE + '\\z.drawio')).doc
+  ok(idsOf().nodes.map((n) => n.id).join(',') === 'n1,n2,n3', '起始顺序 n1,n2,n3')
+  await apply([{ op: 'order', id: 'n1', to: 'front' }], { path: 'z.drawio' })
+  ok(idsOf().nodes.map((n) => n.id).join(',') === 'n2,n3,n1', 'order front 把 n1 放到最后（= 画在最上面）：' + idsOf().nodes.map((n) => n.id).join(','))
+  // 关键：不只是内存里的顺序，**文件里单元的先后**也得跟着变（否则重新打开就变回原样）
+  const rawText = store.get(WORKSPACE + '\\z.drawio')
+  const cellAt = (id) => rawText.indexOf('id="' + id + '"')
+  ok(cellAt('n1') > cellAt('n3') && cellAt('n3') > cellAt('n2'), '写回把文件里 n1 的单元挪到了 n2/n3 之后（实际 n1@' + cellAt('n1') + ' n2@' + cellAt('n2') + ' n3@' + cellAt('n3') + '）')
+  await apply([{ op: 'order', id: 'n1', to: 'back' }], { path: 'z.drawio' })
+  ok(idsOf().nodes.map((n) => n.id).join(',') === 'n1,n2,n3', 'order back 放回最前（= 压在最下面）')
+  await apply([{ op: 'order', id: 'n1', to: 'up' }], { path: 'z.drawio' })
+  ok(idsOf().nodes.map((n) => n.id).join(',') === 'n2,n1,n3', 'order up 上移一层')
+  await apply([{ op: 'order', id: 'n1', to: 'down' }], { path: 'z.drawio' })
+  ok(idsOf().nodes.map((n) => n.id).join(',') === 'n1,n2,n3', 'order down 下移一层')
+  // 一组：整体置顶，组内相对顺序不变
+  await apply([{ op: 'order', ids: ['n2', 'n1'], to: 'front' }], { path: 'z.drawio' })
+  ok(idsOf().nodes.map((n) => n.id).join(',') === 'n3,n1,n2', '一组 front 按原相对顺序整体置顶：' + idsOf().nodes.map((n) => n.id).join(','))
+  // 连线是另一条序列
+  await apply([{ op: 'order', id: 'e1', to: 'front' }], { path: 'z.drawio' })
+  ok(idsOf().edges.map((e) => e.id).join(',') === 'e2,e1', '连线按自己的序列排：' + idsOf().edges.map((e) => e.id).join(','))
+  // 顺序没真的变 → 文件一个字节都不动（无损的第一条不变量）
+  const beforeNoop = store.get(WORKSPACE + '\\z.drawio')
+  await apply([{ op: 'order', id: 'e1', to: 'front' }], { path: 'z.drawio' })
+  ok(store.get(WORKSPACE + '\\z.drawio') === beforeNoop, '置顶一个已经在顶上的 → 文件逐字节不变')
+
+  let badTo = null
+  try {
+    await apply([{ op: 'order', id: 'n1', to: 'top' }], { path: 'z.drawio' })
+  } catch (error) {
+    badTo = String(error && error.message)
+  }
+  ok(badTo !== null && badTo.indexOf('front') >= 0, 'order 的 to 不认识时列出可选值：' + String(badTo).slice(0, 70))
+  let groupUp = null
+  try {
+    await apply([{ op: 'order', ids: ['n1', 'n2'], to: 'up' }], { path: 'z.drawio' })
+  } catch (error) {
+    groupUp = String(error && error.message)
+  }
+  ok(groupUp !== null && groupUp.indexOf('front/back') >= 0, '一组做 up/down 直接拒绝（谁先谁后说不清）')
+  let mixed = null
+  try {
+    await apply([{ op: 'order', ids: ['n1', 'e1'], to: 'front' }], { path: 'z.drawio' })
+  } catch (error) {
+    mixed = String(error && error.message)
+  }
+  ok(mixed !== null && mixed.indexOf('两条序列') >= 0, '节点与连线混在一组 → 报错（它们是两条序列）')
+  let unknown = null
+  try {
+    await apply([{ op: 'order', id: 'zzz', to: 'front' }], { path: 'z.drawio' })
+  } catch (error) {
+    unknown = String(error && error.message)
+  }
+  ok(unknown !== null && unknown.indexOf('Known nodes') >= 0, 'order 未知 id → 报错并列出已知节点')
+}
+
+console.log('\nAI 侧 P1：duplicate（复制一组，折点/端点约束/标签位置都带过去）')
+{
+  store.clear()
+  // 一次调用里全部建好：**只要这一批里有 addNode 带 x/y，整批就不重排**（自带的几何要保住）。
+  await applyTool.execute(
+    {
+      path: 'dup.drawio',
+      ops: [
+        { op: 'addNode', label: '网关', x: 100, y: 100, style: 'blue' },
+        { op: 'addNode', label: '服务', x: 100, y: 300, style: 'green' },
+        { op: 'addEdge', from: 'n1', to: 'n2', label: '调用', exit: 's', entry: 'n' },
+        { op: 'setLabelPos', id: 'e1', dy: 8 },
+        { op: 'addEdge', fromPoint: { x: 600, y: 600 }, toPoint: { x: 700, y: 600 }, label: '说明线' },
+      ],
+    },
+    exec,
+  )
+
+  const dupResult = await applyTool.execute({ path: 'dup.drawio', ops: [{ op: 'duplicate', ids: ['n1', 'n2'] }] }, exec)
+  const dupNodeIds = dupResult.created.filter((c) => c.type === 'node').map((c) => c.id)
+  const dupEdgeIds = dupResult.created.filter((c) => c.type === 'edge').map((c) => c.id)
+  ok(dupNodeIds.length === 2 && dupEdgeIds.length === 1, 'duplicate 建了 2 个节点 + 1 条内部边：' + JSON.stringify(dupResult.created))
+  const dupDoc = parseMxfile(store.get(WORKSPACE + '\\dup.drawio')).doc
+  const cloneA = dupDoc.nodes.filter((n) => n.id === dupNodeIds[0])[0]
+  ok(cloneA.x === 120 && cloneA.y === 120, '默认位移两格（+20/+20）：' + cloneA.x + ',' + cloneA.y)
+  ok(cloneA.id !== 'n1' && cloneA.label === '网关' && String(cloneA.style).indexOf('fillColor=#dae8fc') >= 0, '复制保留标签与样式')
+  const cloneEdge = dupDoc.edges.filter((e) => e.id === dupEdgeIds[0])[0]
+  ok(cloneEdge.from === dupNodeIds[0] && cloneEdge.to === dupNodeIds[1], '新边接在**新节点**上（不是原来的）：' + cloneEdge.from + ' -> ' + cloneEdge.to)
+  ok(cloneEdge.label === '调用', '新边保留线上文字：' + String(cloneEdge.label))
+  ok(cloneEdge.labelX === 0 && cloneEdge.labelY === 8, '新边保留标签位置（相对位置照旧）：' + JSON.stringify([cloneEdge.labelX, cloneEdge.labelY]))
+  ok(String(cloneEdge.style).indexOf('exitX=0.5') >= 0 && String(cloneEdge.style).indexOf('entryX=0.5') >= 0, '新边保留端点约束')
+  // 深拷：改新边的折点不该动到原边
+  await apply([{ op: 'setStyle', id: dupEdgeIds[0], clearPoints: true }], { path: 'dup.drawio' })
+  const afterClear = parseMxfile(store.get(WORKSPACE + '\\dup.drawio')).doc
+  ok(afterClear.edges.filter((e) => e.id === 'e1')[0].points === undefined || Array.isArray(afterClear.edges.filter((e) => e.id === 'e1')[0].points), '清折点只作用于被改的那条边')
+
+  // 独立线：单条复制 + 位移
+  const freeDup = await applyTool.execute({ path: 'dup.drawio', ops: [{ op: 'duplicate', id: 'e2' }] }, exec)
+  const freeCloneId = freeDup.created[0].id
+  const freeClone = parseMxfile(store.get(WORKSPACE + '\\dup.drawio')).doc.edges.filter((e) => e.id === freeCloneId)[0]
+  ok(freeClone.sourcePoint.x === 620 && freeClone.targetPoint.x === 720, '独立线复制后两端自由点一起位移：' + JSON.stringify([freeClone.sourcePoint, freeClone.targetPoint]))
+  ok(freeClone.label === '说明线', '独立线复制保留标签')
+
+  // withEdges:false —— 只要节点
+  const nodesOnly = await applyTool.execute({ path: 'dup.drawio', ops: [{ op: 'duplicate', id: 'n1', withEdges: false }] }, exec)
+  ok(nodesOnly.created.length === 1 && nodesOnly.created[0].type === 'node', 'withEdges:false 只复制节点：' + JSON.stringify(nodesOnly.created))
+
+  // as：别名指向**复制出来的那个**
+  const aliased = await applyTool.execute(
+    {
+      path: 'dup.drawio',
+      ops: [
+        { op: 'duplicate', id: 'n1', withEdges: false, as: 'copy1' },
+        { op: 'setLabel', id: 'copy1', label: '副本' },
+      ],
+    },
+    exec,
+  )
+  const copyId = aliased.created[0].id
+  const copyNode = parseMxfile(store.get(WORKSPACE + '\\dup.drawio')).doc.nodes.filter((n) => n.id === copyId)[0]
+  ok(copyNode.label === '副本', 'as 别名指向复制出来的那个（setLabel 改的是副本）：' + copyNode.label)
+  ok(parseMxfile(store.get(WORKSPACE + '\\dup.drawio')).doc.nodes.filter((n) => n.id === 'n1')[0].label === '网关', '原节点没被改到')
+
+  // 错误路径
+  let replayErr = null
+  try {
+    await apply([{ op: 'duplicate', id: 'e1' }], { path: 'dup.drawio' })
+  } catch (error) {
+    replayErr = String(error && error.message)
+  }
+  ok(replayErr !== null && replayErr.indexOf('两端') >= 0, '只复制一条接在节点上的边 → 明确要求把两端一起复制：' + String(replayErr).slice(0, 80))
+  let asErr = null
+  try {
+    await apply([{ op: 'duplicate', ids: ['n1', 'n2'], as: 'x' }], { path: 'dup.drawio' })
+  } catch (error) {
+    asErr = String(error && error.message)
+  }
+  ok(asErr !== null && asErr.indexOf('单个节点') >= 0, '一组复制不给 as → 报错（没有唯一的新 id 可指）')
+  let unknown = null
+  try {
+    await apply([{ op: 'duplicate', id: 'zzz' }], { path: 'dup.drawio' })
+  } catch (error) {
+    unknown = String(error && error.message)
+  }
+  ok(unknown !== null && unknown.indexOf('Known nodes') >= 0, 'duplicate 未知 id → 报错并列出已知节点')
+}
+
+console.log('\nAI 侧 P1：按层操作（addLayer / addNode.layer / setLayer / setLayerProps）')
+{
+  store.clear()
+  await apply([{ op: 'addNode', label: '甲', x: 0, y: 0 }], { path: 'ly.drawio' })
+  // ① 新建一层 + 新单元直接落进去（AI 原来只能"新东西一律进第一层"）。
+  // 别名只在**同一次调用**里有效，所以建层与用它要在同一个 ops 数组里（跨调用按层名引用）。
+  const madeLayer = await applyTool.execute(
+    {
+      path: 'ly.drawio',
+      ops: [
+        { op: 'addLayer', name: '标注', as: 'note' },
+        { op: 'addNode', label: '说明文字', shape: 'text', layer: 'note' },
+      ],
+    },
+    exec,
+  )
+  const layerId = madeLayer.created[0].id
+  ok(madeLayer.created[0].type === 'layer' && layerId !== '1', 'addLayer 返回新层的 id（避开已用的 1）：' + JSON.stringify(madeLayer.created[0]))
+  let lyDoc = parseMxfile(store.get(WORKSPACE + '\\ly.drawio')).doc
+  ok(lyDoc.layers.length === 2 && lyDoc.layers[1].name === '标注', '层表里多了一层「标注」：' + JSON.stringify(lyDoc.layers))
+  ok(lyDoc.nodes.filter((n) => n.id === 'n2')[0].layer === layerId, 'addNode 的 layer 收别名，单元落在新层：' + String(lyDoc.nodes.filter((n) => n.id === 'n2')[0].layer))
+  ok(lyDoc.nodes.filter((n) => n.id === 'n1')[0].layer === '1', '没写 layer 的单元还在原来的层')
+  // 文件里 parent 真的指到那一层（drawio 打开也是这个层级）
+  ok(new RegExp('id="n2"[^>]*parent="' + layerId + '"').test(store.get(WORKSPACE + '\\ly.drawio')), '写回时单元的 parent 指向新层')
+  const readLy = await readTool.execute({ path: 'ly.drawio' }, exec)
+  ok(readLy.layers.length === 2 && readLy.nodes.filter((n) => n.id === 'n2')[0].layer === layerId, 'diagram_read 回新层表与单元的 layer')
+
+  // ② 移到别的层（层名也认）+ 连线一起搬
+  await apply(
+    [
+      { op: 'addNode', label: '乙', x: 200, y: 0, layer: layerId },
+      { op: 'addEdge', from: 'n1', to: 'n2', layer: layerId },
+    ],
+    { path: 'ly.drawio' },
+  )
+  lyDoc = parseMxfile(store.get(WORKSPACE + '\\ly.drawio')).doc
+  ok(lyDoc.edges.filter((e) => e.id === 'e1')[0].layer === layerId, 'addEdge 的 layer 也生效（连线在同一层）')
+  await apply([{ op: 'setLayer', ids: ['n1', 'e1'], layer: '标注' }], { path: 'ly.drawio' })
+  lyDoc = parseMxfile(store.get(WORKSPACE + '\\ly.drawio')).doc
+  ok(lyDoc.nodes.filter((n) => n.id === 'n1')[0].layer === layerId, 'setLayer 按**层名**把节点移过去（实际 ' + String(lyDoc.nodes.filter((n) => n.id === 'n1')[0].layer) + ' 目标 ' + layerId + '）')
+  ok(lyDoc.edges.filter((e) => e.id === 'e1')[0].layer === layerId, 'setLayer 也能搬连线（一起写 ids）')
+  ok(lyDoc.layers.filter((l) => l.id === '1')[0] !== undefined && lyDoc.nodes.filter((n) => n.layer === '1').length === 0, '原来的层还在，只是空了（实际还挂着 ' + lyDoc.nodes.filter((n) => n.layer === '1').map((n) => n.id).join(',') + '）')
+
+  // ③ 层的显示/隐藏/改名/锁定（纯文档状态，隐藏 ≠ 删除）
+  const beforeHide = store.get(WORKSPACE + '\\ly.drawio')
+  await apply([{ op: 'setLayerProps', layer: layerId, visible: false }], { path: 'ly.drawio' })
+  lyDoc = parseMxfile(store.get(WORKSPACE + '\\ly.drawio')).doc
+  ok(lyDoc.layers.filter((l) => l.id === layerId)[0].visible === false, 'setLayerProps 隐藏一层')
+  ok(lyDoc.nodes.length === 3 && lyDoc.edges.length === 1, '隐藏不等于删除：层里的单元一个都没少')
+  ok(store.get(WORKSPACE + '\\ly.drawio') !== beforeHide, '隐藏是**写进文件**的（drawio 打开也是隐藏的）')
+  ok(/visible="0"/.test(store.get(WORKSPACE + '\\ly.drawio')), '隐藏写成 visible="0"')
+  await apply([{ op: 'setLayerProps', layer: '标注', visible: true, name: '批注', locked: true }], { path: 'ly.drawio' })
+  lyDoc = parseMxfile(store.get(WORKSPACE + '\\ly.drawio')).doc
+  const renamed = lyDoc.layers.filter((l) => l.id === layerId)[0]
+  ok(renamed.visible === true && renamed.name === '批注' && renamed.locked === true, '显示回来 + 改名 + 锁定：' + JSON.stringify(renamed))
+  ok(/locked="1"/.test(store.get(WORKSPACE + '\\ly.drawio')), '锁定写成 locked="1"')
+  ok(/visible="1"/.test(store.get(WORKSPACE + '\\ly.drawio')) === false, '显示回来是**删掉** visible 属性（不写 visible="1" 这种噪音）')
+
+  // ④ 错误路径
+  let badLayer = null
+  try {
+    await apply([{ op: 'setLayer', id: 'n1', layer: '不存在的层' }], { path: 'ly.drawio' })
+  } catch (error) {
+    badLayer = String(error && error.message)
+  }
+  ok(badLayer !== null && badLayer.indexOf('Layers:') >= 0, '移到不存在的层 → 报错并列出层表：' + String(badLayer).slice(0, 80))
+  let addNodeBadLayer = null
+  try {
+    await apply([{ op: 'addNode', label: 'x', layer: 'nope' }], { path: 'ly.drawio' })
+  } catch (error) {
+    addNodeBadLayer = String(error && error.message)
+  }
+  ok(addNodeBadLayer !== null && addNodeBadLayer.indexOf('unknown layer') >= 0, 'addNode 给了不存在的层 → 写盘之前报错')
+  let dupLayerId = null
+  try {
+    await apply([{ op: 'addLayer', name: '再来一层', id: layerId }], { path: 'ly.drawio' })
+  } catch (error) {
+    dupLayerId = String(error && error.message)
+  }
+  ok(dupLayerId !== null && dupLayerId.indexOf('already exists') >= 0, 'addLayer 撞已有层 id → 报错')
+  let noProps = null
+  try {
+    await apply([{ op: 'setLayerProps', layer: layerId }], { path: 'ly.drawio' })
+  } catch (error) {
+    noProps = String(error && error.message)
+  }
+  ok(noProps !== null && noProps.indexOf('at least one') >= 0, 'setLayerProps 什么都不给 → 报错（而不是静默成功）')
+  let aliasClash = null
+  try {
+    await apply([{ op: 'addLayer', name: '同名', as: '批注' }], { path: 'ly.drawio' })
+  } catch (error) {
+    aliasClash = String(error && error.message)
+  }
+  ok(aliasClash !== null && aliasClash.indexOf('collides with a layer') >= 0, '别名撞层名 → 报错（否则层名与别名谁赢说不清）')
+}
+
+console.log('\nAI 侧 P1：容器层级可读（把"移容器不带走子单元"从暗坑变成已知）')
+{
+  store.clear()
+  // 一份 drawio 真实形状的文件：容器 cont + 子单元 child（相对坐标）
+  const containerFile =
+    '<mxfile host="app.diagrams.net">\n' +
+    '  <diagram id="p1" name="Page-1">\n' +
+    '    <mxGraphModel dx="0" dy="0"><root>\n' +
+    '      <mxCell id="0" />\n' +
+    '      <mxCell id="1" parent="0" />\n' +
+    '      <mxCell id="cont" value="分组" style="container=1;fillColor=#EDF5FF;" vertex="1" parent="1"><mxGeometry x="100" y="100" width="400" height="300" as="geometry" /></mxCell>\n' +
+    '      <mxCell id="child" value="里面那个" style="rounded=1;" vertex="1" parent="cont"><mxGeometry x="20" y="30" width="80" height="40" as="geometry" /></mxCell>\n' +
+    '    </root></mxGraphModel>\n' +
+    '  </diagram>\n' +
+    '</mxfile>\n'
+  store.set(WORKSPACE + '\\grp.drawio', containerFile)
+  const grpRead = await readTool.execute({ path: 'grp.drawio' }, exec)
+  const childView = grpRead.nodes.filter((n) => n.id === 'child')[0]
+  const contView = grpRead.nodes.filter((n) => n.id === 'cont')[0]
+  ok(childView.parent === 'cont', 'diagram_read 告诉 AI 它在哪个容器里：' + String(childView.parent))
+  ok(contView.parent === undefined, '普通单元没有 parent（图层不算容器）')
+  ok(childView.x === 120 && childView.y === 130, '容器子单元读到的是**绝对**坐标（画布按绝对位置显示）：' + childView.x + ',' + childView.y)
+  // 画布语义如此：移动容器**不会**带走子单元 —— 这条要显式钉住（AI 得靠 ids 一起搬）
+  await apply([{ op: 'move', id: 'cont', dx: 200, dy: 0 }], { path: 'grp.drawio' })
+  const afterMove = parseMxfile(store.get(WORKSPACE + '\\grp.drawio')).doc
+  ok(afterMove.nodes.filter((n) => n.id === 'cont')[0].x === 300, '容器被挪了：cont.x=300')
+  ok(
+    afterMove.nodes.filter((n) => n.id === 'child')[0].x === 120 && afterMove.nodes.filter((n) => n.id === 'child')[0].y === 130,
+    '子单元**留在原地**（与画布所见一致）—— 要一起动就把它们一起写进 ids',
+  )
+  // 一起搬：move 的批量正是为此（这就是 P0 的 ids 与容器信息的配合）
+  await apply([{ op: 'move', ids: ['child', 'cont'], dx: 0, dy: 50 }], { path: 'grp.drawio' })
+  const afterBoth = parseMxfile(store.get(WORKSPACE + '\\grp.drawio')).doc
+  ok(afterBoth.nodes.filter((n) => n.id === 'child')[0].y === 180 && afterBoth.nodes.filter((n) => n.id === 'cont')[0].y === 150, '一组一起搬：容器与子单元的相对位置不变')
+  // 层级没被写坏
+  ok(/id="child"[^>]*parent="cont"/.test(store.get(WORKSPACE + '\\grp.drawio')), '搬完之后容器层级照旧（parent 还是 cont）')
+}
+
+console.log('\nAI 侧 P1：导出通道（请求 → 浏览器渲染 → 回执落盘）')
+{
+  store.clear()
+  await apply([{ op: 'addNode', label: '导出的图', x: 0, y: 0 }], { path: 'exp.drawio' })
+  const beforeExport = store.get(WORKSPACE + '\\exp.drawio')
+
+  // ① 请求导出：**不改文档、不写盘**（渲染在浏览器那一半），返回 pending
+  const asked = await applyTool.execute({ path: 'exp.drawio', ops: [{ op: 'export', format: 'svg' }] }, exec)
+  ok(asked.export !== undefined && asked.export.status === 'pending' && asked.export.format === 'svg', '导出请求返回 pending：' + JSON.stringify(asked.export))
+  ok(store.get(WORKSPACE + '\\exp.drawio') === beforeExport, '请求导出没有改动 .drawio（一个字节都没动）')
+  ok(asked.layout === 'none', '纯导出的调用也没顺手重排')
+
+  // ② 客户端从 read 里取走请求（宿主挂在回执上）
+  const readForExport = await api({ action: 'read', sessionId: 's1', path: 'exp.drawio' })
+  const req = readForExport.payload.export
+  ok(req !== null && typeof req.requestId === 'string' && req.format === 'svg', 'read 把导出请求带给客户端：' + JSON.stringify(req))
+
+  // ③ 客户端渲染完回执 → 宿主把 svg 写在 .drawio 旁边
+  const svgText = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>'
+  const posted = await api({ action: 'export-result', sessionId: 's1', path: 'exp.drawio', requestId: req.requestId, format: 'svg', ok: true, svg: svgText })
+  ok(posted.payload.ok === true && typeof posted.payload.path === 'string' && posted.payload.path.endsWith('.svg'), '回执之后写出 .svg：' + String(posted.payload.path))
+  ok(store.get(WORKSPACE + '\\exp.svg') === svgText, 'svg 落在 .drawio 旁边（同名 .svg）：' + String(store.get(WORKSPACE + '\\exp.svg')).slice(0, 40))
+  ok(store.get(WORKSPACE + '\\exp.drawio') === beforeExport, '导出过程仍然没碰 .drawio')
+  const readDone = await readTool.execute({ path: 'exp.drawio' }, exec)
+  ok(readDone.export !== undefined && readDone.export.status === 'done' && String(readDone.export.path).endsWith('.svg'), 'diagram_read 报 done + 文件路径：' + JSON.stringify(readDone.export))
+
+  // ④ png：浏览器直接下载，宿主只记一笔（不写二进制文件）
+  const askedPng = await applyTool.execute({ path: 'exp.drawio', ops: [{ op: 'export', format: 'png', name: '架构图' }] }, exec)
+  ok(askedPng.export.status === 'pending' && askedPng.export.format === 'png', 'png 导出也是 pending：' + JSON.stringify(askedPng.export))
+  const readPng = await api({ action: 'read', sessionId: 's1', path: 'exp.drawio' })
+  ok(readPng.payload.export.name === '架构图', '自定义基名带到客户端：' + JSON.stringify(readPng.payload.export))
+  await api({ action: 'export-result', sessionId: 's1', path: 'exp.drawio', requestId: readPng.payload.export.requestId, format: 'png', ok: true, downloaded: true })
+  const readPngDone = await readTool.execute({ path: 'exp.drawio' }, exec)
+  ok(readPngDone.export.status === 'downloaded' && readPngDone.export.format === 'png', 'png 报 downloaded（浏览器下载，不落盘）：' + JSON.stringify(readPngDone.export))
+  ok(store.get(WORKSPACE + '\\架构图.png') === undefined && store.get(WORKSPACE + '\\exp.png') === undefined, '宿主没有写 png 文件（二进制走浏览器下载）')
+
+  // ⑤ 渲染失败也要如实报（模型得能告诉用户"这张图没出来"）
+  await applyTool.execute({ path: 'exp.drawio', ops: [{ op: 'export', format: 'svg' }] }, exec)
+  const readFail = await api({ action: 'read', sessionId: 's1', path: 'exp.drawio' })
+  await api({ action: 'export-result', sessionId: 's1', path: 'exp.drawio', requestId: readFail.payload.export.requestId, format: 'svg', ok: false, error: 'canvas 还没准备好' })
+  const readFailed = await readTool.execute({ path: 'exp.drawio' }, exec)
+  ok(readFailed.export.status === 'failed' && readFailed.export.error.indexOf('canvas') >= 0, '渲染失败如实报 failed + 原因：' + JSON.stringify(readFailed.export))
+
+  // ⑥ 护栏：没有请求时不许写文件；requestId 对不上不许写；空 svg / 带路径的 name 都拒收
+  const noPending = await api({ action: 'export-result', sessionId: 's1', path: 'exp.drawio', requestId: 'x', format: 'svg', ok: true, svg: svgText })
+  ok(noPending.status === 409, '没有挂着的请求时回执被拒（否则谁都能往工作区写文件）：' + noPending.status)
+  await applyTool.execute({ path: 'exp.drawio', ops: [{ op: 'export', format: 'svg' }] }, exec)
+  const readStale = await api({ action: 'read', sessionId: 's1', path: 'exp.drawio' })
+  const stale = await api({ action: 'export-result', sessionId: 's1', path: 'exp.drawio', requestId: 'nope', format: 'svg', ok: true, svg: svgText })
+  ok(stale.status === 409, 'requestId 对不上 → 409（不认旧客户端/乱发的 POST）')
+  const emptySvg = await api({ action: 'export-result', sessionId: 's1', path: 'exp.drawio', requestId: readStale.payload.export.requestId, format: 'svg', ok: true, svg: '   ' })
+  ok(emptySvg.status === 400, '空 svg → 400')
+  let badName = null
+  try {
+    await apply([{ op: 'export', format: 'svg', name: '../逃逸' }], { path: 'exp.drawio' })
+  } catch (error) {
+    badName = String(error && error.message)
+  }
+  ok(badName !== null && badName.indexOf('基名') >= 0, 'name 带路径分隔符 → 报错（导出只落在 .drawio 旁边）：' + String(badName).slice(0, 70))
+  let badFormat = null
+  try {
+    await apply([{ op: 'export', format: 'pdf' }], { path: 'exp.drawio' })
+  } catch (error) {
+    badFormat = String(error && error.message)
+  }
+  ok(badFormat !== null && badFormat.indexOf('svg') >= 0, '不支持的格式 → 报错并说明只有 svg/png：' + String(badFormat).slice(0, 70))
+}
+
+console.log('\nAI 侧 P2：多步回退、纸张尺寸、按层/按 id 读')
+{
+  store.clear()
+  // ① 多步回退：三次改动 → 退三次，每次退**一层**（不是一次跳回最开始）
+  await apply([{ op: 'addNode', label: 'L0', x: 0, y: 0 }], { path: 'rev.drawio' })
+  await apply([{ op: 'setLabel', id: 'n1', label: 'L1' }], { path: 'rev.drawio' })
+  await apply([{ op: 'setLabel', id: 'n1', label: 'L2' }], { path: 'rev.drawio' })
+  await apply([{ op: 'setLabel', id: 'n1', label: 'L3' }], { path: 'rev.drawio' })
+  const labelOf = () => parseMxfile(store.get(WORKSPACE + '\\rev.drawio')).doc.nodes[0].label
+  const readRev = await readTool.execute({ path: 'rev.drawio' }, exec)
+  ok(readRev.revertSteps === 3, '三次改动 → read 报 3 步可退：' + readRev.revertSteps)
+  const back1 = await api({ action: 'revert', sessionId: 's1', path: 'rev.drawio' })
+  ok(back1.payload.ok === true && back1.payload.stepsLeft === 2, '退一步之后剩两步：' + String(back1.payload.stepsLeft))
+  ok(labelOf() === 'L2', '退回的是**上一步**（L2），不是最开始：' + labelOf())
+  await api({ action: 'revert', sessionId: 's1', path: 'rev.drawio' })
+  ok(labelOf() === 'L1', '再退一步 → L1：' + labelOf())
+  await api({ action: 'revert', sessionId: 's1', path: 'rev.drawio' })
+  ok(labelOf() === 'L0', '再退一步 → L0（新建时的样子）：' + labelOf())
+  const readRevEnd = await readTool.execute({ path: 'rev.drawio' }, exec)
+  ok(readRevEnd.canRevert === false && readRevEnd.revertSteps === 0, '退干净之后没有可退的了')
+  ok(store.get(WORKSPACE + '\\rev.drawio') === buildMxfile(parseMxfile(store.get(WORKSPACE + '\\rev.drawio')).doc).text, '退回去的文件本身是干净的（能被重新生成）')
+
+  // ② 纸张尺寸：文件里写了就报出来（AI 做布局/导出建议要看它）
+  const autoPage = await readTool.execute({ path: 'rev.drawio' }, exec)
+  ok(autoPage.page !== undefined && autoPage.page.w === 850 && autoPage.page.h === 1100, '新建的画布报 drawio 缺省纸张：' + JSON.stringify(autoPage.page))
+  const wideFile =
+    '<mxfile host="app.diagrams.net">\n' +
+    '  <diagram id="p1" name="Page-1">\n' +
+    '    <mxGraphModel dx="0" dy="0" pageWidth="1200" pageHeight="800"><root>\n' +
+    '      <mxCell id="0" />\n' +
+    '      <mxCell id="1" parent="0" />\n' +
+    '      <mxCell id="n1" value="A" style="" vertex="1" parent="1"><mxGeometry x="0" y="0" width="80" height="40" as="geometry" /></mxCell>\n' +
+    '    </root></mxGraphModel>\n' +
+    '  </diagram>\n' +
+    '</mxfile>\n'
+  store.set(WORKSPACE + '\\wide.drawio', wideFile)
+  const wideRead = await readTool.execute({ path: 'wide.drawio' }, exec)
+  ok(wideRead.page !== undefined && wideRead.page.w === 1200 && wideRead.page.h === 800, '横版纸张如实报（1200×800）：' + JSON.stringify(wideRead.page))
+  ok(applyDocToMxfile(wideFile, parseMxfile(wideFile).doc).text === wideFile, '纸张尺寸不参与写回（原样保存逐字节不变）')
+
+  // ③ 按层 / 按 id 读：大图省上下文，但整张的计数与层表照旧
+  await apply(
+    [
+      { op: 'addLayer', name: '批注', as: 'notes' },
+      { op: 'addNode', label: '主体', x: 0, y: 0 },
+      { op: 'addNode', label: '备注', x: 0, y: 200, layer: 'notes' },
+      { op: 'addEdge', from: 'n1', to: 'n1' },
+    ],
+    { path: 'big.drawio' },
+  )
+  const allRead = await readTool.execute({ path: 'big.drawio' }, exec)
+  ok(allRead.filtered === undefined && allRead.nodes.length === 2, '不传 layer/ids 时照旧全量（也不带 filtered 标记）')
+  const layerRead = await readTool.execute({ path: 'big.drawio', layer: '批注' }, exec)
+  ok(layerRead.filtered === true && layerRead.nodes.length === 1 && layerRead.nodes[0].label === '备注', '按层名过滤只看那一层：' + JSON.stringify(layerRead.nodes.map((n) => n.id)))
+  ok(layerRead.totalNodes === 2 && layerRead.totalEdges === 1, '过滤时同时报"整张有多少"：' + layerRead.totalNodes + '/' + layerRead.totalEdges)
+  ok(layerRead.layers.length === 2, '层表照旧整份回（不然过滤之后不知道自己漏了哪层）')
+  const layerById = await readTool.execute({ path: 'big.drawio', layer: allRead.layers[1].id }, exec)
+  ok(layerById.nodes.length === 1 && layerById.nodes[0].label === '备注', '按层 id 过滤也一样')
+  const idsRead = await readTool.execute({ path: 'big.drawio', ids: ['n1', 'e1'] }, exec)
+  ok(idsRead.nodes.length === 1 && idsRead.edges.length === 1 && idsRead.filtered === true, '按 ids 只回那几个单元')
+  let badLayer = null
+  try {
+    await readTool.execute({ path: 'big.drawio', layer: '不存在' }, exec)
+  } catch (error) {
+    badLayer = String(error && error.message)
+  }
+  ok(badLayer !== null && badLayer.indexOf('Layers:') >= 0, '读不存在的层 → 报错并列出层表：' + String(badLayer).slice(0, 70))
+}
+
+console.log('\nAI 侧：字色（fontColor）—— 节点标签与连线文字都能改')
+{
+  store.clear()
+  await apply(
+    [
+      { op: 'addNode', label: '甲', x: 0, y: 0 },
+      { op: 'addNode', label: '乙', x: 200, y: 0 },
+      { op: 'addEdge', from: 'n1', to: 'n2', label: '连起来' },
+    ],
+    { path: 'fc.drawio' },
+  )
+  const styleOf = (kind, id) => {
+    const d = parseMxfile(store.get(WORKSPACE + '\\fc.drawio')).doc
+    const list = kind === 'node' ? d.nodes : d.edges
+    return String(list.filter((it) => it.id === id)[0].style)
+  }
+  // ① 建的时候就带字色（不必先建再补一次 setStyle）
+  await apply([{ op: 'addNode', label: '丙', fontColor: '#b85450', x: 0, y: 200 }], { path: 'fc.drawio' })
+  ok(styleGet(styleOf('node', 'n3'), 'fontColor', null) === '#b85450', 'addNode 的 fontColor 落到 fontColor 键：' + styleOf('node', 'n3'))
+  // ② 调色板名：与画布上"文字换色"取同一支（红 = #b85450），不是填充色 #f8cecc
+  await apply([{ op: 'setStyle', id: 'n1', fontColor: 'red' }], { path: 'fc.drawio' })
+  ok(styleGet(styleOf('node', 'n1'), 'fontColor', null) === '#b85450', '调色板名按文字色那一支取色（红 → #b85450）：' + styleOf('node', 'n1'))
+  ok(styleGet(styleOf('node', 'n1'), 'fillColor', null) === null, '换字色不动填充（两类互不串）')
+  // ③ 一次改一组（用户说"这几个字都换成灰的"）
+  await apply([{ op: 'setStyle', ids: ['n1', 'n2'], fontColor: '#123456' }], { path: 'fc.drawio' })
+  ok(
+    styleGet(styleOf('node', 'n1'), 'fontColor', null) === '#123456' && styleGet(styleOf('node', 'n2'), 'fontColor', null) === '#123456',
+    'ids 批量换字色：' + styleOf('node', 'n2'),
+  )
+  // ④ 连线上的文字也吃它（边自己的 value）
+  await apply([{ op: 'addEdge', from: 'n2', to: 'n3', label: '虚线', fontColor: '#82b366' }], { path: 'fc.drawio' })
+  await apply([{ op: 'setStyle', id: 'e1', fontColor: 'blue' }], { path: 'fc.drawio' })
+  ok(styleGet(styleOf('edge', 'e2'), 'fontColor', null) === '#82b366', 'addEdge 的 fontColor：' + styleOf('edge', 'e2'))
+  ok(styleGet(styleOf('edge', 'e1'), 'fontColor', null) === '#6c8ebf', '连线的调色板名也按文字色取（蓝 → #6c8ebf）：' + styleOf('edge', 'e1'))
+  ok(styleGet(styleOf('edge', 'e1'), 'strokeColor', null) === null, '换连线字色不动线本身颜色')
+  // ⑤ null / 'plain' = 删键回缺省（不留 fontColor=#000000 这种噪音）
+  await apply([{ op: 'setStyle', id: 'n1', fontColor: null }], { path: 'fc.drawio' })
+  await apply([{ op: 'setStyle', id: 'e1', fontColor: 'plain' }], { path: 'fc.drawio' })
+  ok(styleGet(styleOf('node', 'n1'), 'fontColor', null) === null, 'fontColor:null 删键（回缺省黑字）')
+  ok(styleGet(styleOf('edge', 'e1'), 'fontColor', null) === null, "'plain' 同样是删键")
+  // 读回来能看见（AI 自查"现在字是什么颜色"）
+  const fcRead = await readTool.execute({ path: 'fc.drawio' }, exec)
+  ok(
+    String(fcRead.nodes.filter((n) => n.id === 'n3')[0].style).indexOf('fontColor=#b85450') >= 0,
+    'diagram_read 回得到字色（style 原样）：' + fcRead.nodes.filter((n) => n.id === 'n3')[0].style,
+  )
+  ok(fcRead.nodes.filter((n) => n.id === 'n3')[0].fontColor === 'red', '派生的 fontColor 给**调色板名**（AI 能原样回喂）：' + String(fcRead.nodes.filter((n) => n.id === 'n3')[0].fontColor))
+  ok(fcRead.nodes.filter((n) => n.id === 'n2')[0].fontColor === '#123456', '认不出的字色给十六进制：' + String(fcRead.nodes.filter((n) => n.id === 'n2')[0].fontColor))
+  ok(fcRead.nodes.filter((n) => n.id === 'n1')[0].fontColor === undefined, '缺省黑字不报（与派生 color 的规矩一致）')
+  ok(fcRead.edges.filter((e) => e.id === 'e2')[0].fontColor === 'green', '连线的字色也派生出来（#82b366 = 调色板的绿）：' + String(fcRead.edges.filter((e) => e.id === 'e2')[0].fontColor))
+  // ⑥ 写错颜色名要报错，而不是静默写一个 drawio 不认的字面值
+  let badColor = null
+  try {
+    await apply([{ op: 'setStyle', id: 'n1', fontColor: 'gren' }], { path: 'fc.drawio' })
+  } catch (error) {
+    badColor = String(error && error.message)
+  }
+  ok(badColor !== null && badColor.indexOf('palette name') >= 0, '认不出的颜色名 → 报错并提示可用写法：' + String(badColor).slice(0, 80))
+  let badColorAtCreate = null
+  try {
+    await apply([{ op: 'addNode', label: 'x', fontColor: 'nope' }], { path: 'fc.drawio' })
+  } catch (error) {
+    badColorAtCreate = String(error && error.message)
+  }
+  ok(badColorAtCreate !== null && badColorAtCreate.indexOf('font color') >= 0, 'addNode 上写错也一样在写盘之前报错')
+  // ⑦ 两边同一个名字必须是同一个颜色：画布上的「字色」走内核 styleWithTextColorName，
+  //    AI 走宿主糖 fontColorValue —— 两处若各取一支（fill 还是 stroke），同一个"红"会是两种颜色。
+  const uiRed = styleGet(styleWithTextColorName('', 'red'), 'fontColor', null)
+  const uiPlain = styleGet(styleWithTextColorName('fontColor=#b85450', 'plain'), 'fontColor', null)
+  ok(uiRed === '#b85450' && uiPlain === null, '（前提）画布那一侧：红 = #b85450、默认 = 删键')
+  await apply([{ op: 'setStyle', id: 'n1', fontColor: 'red' }], { path: 'fc.drawio' })
+  ok(styleGet(styleOf('node', 'n1'), 'fontColor', null) === uiRed, 'AI 的 fontColor:"red" 与画布上「字色：红」写的是同一个值：' + uiRed)
+}
+
+console.log('\nAI 侧：「看一眼」画布效果图（图片走附件通道，工作区零文件）')
+{
+  // 这一节要附件服务与 llm 服务，而主 ctx 故意没有它们。两种 ctx 都测：
+  //   · 没有附件服务 → 明确说"看不了图"，其余功能照旧（不抛错）；
+  //   · 有附件服务 → 请求 → 回执 → 下一次 read 带 image 块，且**工作区一个文件都不多**。
+  const savedShots = []
+  const baseServices = {
+    attachments: {
+      imageLimits: { mediaTypes: ['image/png'], maxImageBytes: 4000000, maxMessageImageBytes: 4000000, maxImageDimension: 4000, maxImagePixels: 16000000 },
+      async saveImage(input) {
+        savedShots.push(input)
+        return { attachmentId: 'sha256:shot', mediaType: input.mediaType, bytes: input.data.length, width: 800, height: 600, name: input.name }
+      },
+    },
+    llm: {
+      async resolveModelInfo() {
+        return { inputModalities: ['text', 'image'] }
+      },
+    },
+  }
+  /** 造一个带假附件/llm 服务的实例：返回它的工具与它的 api（注册表按名字覆盖，所以取最新的那个）。 */
+  function lookInstance(overrides) {
+    const services = Object.assign({}, baseServices, overrides === undefined ? {} : overrides)
+    const instanceCtx = Object.assign({}, ctx, {
+      get(name) {
+        return services[name]
+      },
+    })
+    mod.apply(instanceCtx)
+    const instanceRoute = routes[routes.length - 1]
+    const apiN = async (bodyObject) => {
+      const res = fakeRes()
+      await instanceRoute.handler(fakeReq(bodyObject), res)
+      return JSON.parse(res.body)
+    }
+    return { api: apiN, read: tools.get('diagram_read') }
+  }
+  const execLook = { agent: { id: 's1', options: { provider: 'deepseek', model: 'vision' } } }
+  const pngBase64 = Buffer.from('fake-png-bytes-for-test').toString('base64')
+
+  store.clear()
+  await apply([{ op: 'addNode', label: '看一眼', x: 0, y: 0 }], { path: 'look.drawio' })
+  const beforeLook = store.get(WORKSPACE + '\\look.drawio')
+  const filesBefore = Array.from(store.keys()).sort().join('|')
+
+  // ① 没有附件服务的部署：给一句人话，不抛错、也不写文件
+  const bare = lookInstance({ attachments: undefined, llm: undefined })
+  const bareRead = await bare.read.execute({ path: 'look.drawio', render: true }, execLook)
+  ok(bareRead.look !== undefined && bareRead.look.status === 'unsupported', '没装附件服务 → look.status=unsupported：' + JSON.stringify(bareRead.look))
+  ok(bareRead.image === undefined, '看不了图时不塞 image 字段')
+  ok(Array.from(store.keys()).sort().join('|') === filesBefore, '看不了图也不写任何文件')
+
+  // ② 模型不声明图片输入：同样明说（而不是发一张它读不了的图）
+  const textOnly = lookInstance({ llm: { async resolveModelInfo() { return { inputModalities: ['text'] } } } })
+  const textOnlyRead = await textOnly.read.execute({ path: 'look.drawio', render: true }, execLook)
+  ok(
+    textOnlyRead.look.status === 'unsupported' && String(textOnlyRead.look.error).indexOf('图片输入') >= 0,
+    '模型不支持图片 → 明确说清：' + JSON.stringify(textOnlyRead.look),
+  )
+
+  // ③ 正常路径：第一次 read 挂请求（pending），画布渲染回执之后第二次 read 带图
+  const live = lookInstance()
+  const asked = await live.read.execute({ path: 'look.drawio', render: true }, execLook)
+  ok(asked.look !== undefined && asked.look.status === 'pending', '第一次 render:true → pending（渲染在画布那一半做）：' + JSON.stringify(asked.look))
+  ok(asked.image === undefined, 'pending 时没有图')
+  ok(store.get(WORKSPACE + '\\look.drawio') === beforeLook && Array.from(store.keys()).sort().join('|') === filesBefore, '请求看图**不动文件、不建文件**')
+  const readPayload = await live.api({ action: 'read', sessionId: 's1', path: 'look.drawio' })
+  const renderReq = readPayload.render
+  ok(renderReq !== null && typeof renderReq.requestId === 'string', 'read 回执把渲染请求带给客户端：' + JSON.stringify(renderReq))
+  ok(readPayload.export === null, '看图请求与导出请求是两条通道（export 仍为 null）')
+
+  const posted = await live.api({ action: 'render-result', sessionId: 's1', path: 'look.drawio', requestId: renderReq.requestId, ok: true, png: pngBase64, width: 800, height: 600 })
+  ok(posted.ok === true && posted.bytes === Buffer.from(pngBase64, 'base64').length, '回执收下并交给附件服务：' + JSON.stringify(posted))
+  ok(savedShots.length === 1 && savedShots[0].mediaType === 'image/png' && savedShots[0].data.length > 0, '图片存进了附件库（不是工作区）：' + savedShots.length + ' 张，' + savedShots[0].data.length + ' 字节')
+  ok(String(savedShots[0].name).endsWith('.png'), '附件名字给了个像样的基名：' + String(savedShots[0].name))
+  ok(
+    store.get(WORKSPACE + '\\look.drawio') === beforeLook && Array.from(store.keys()).sort().join('|') === filesBefore,
+    '**工作区零文件**：回执之后 store 里还是原来那些 key（没有 .png/.svg）',
+  )
+
+  const looked = await live.read.execute({ path: 'look.drawio', render: true }, execLook)
+  ok(looked.look.status === 'ready' && looked.look.stale === undefined, '第二次 render:true → ready（且不是过期图）：' + JSON.stringify(looked.look))
+  ok(looked.image !== undefined && looked.image.attachmentId === 'sha256:shot', 'image 字段带回附件引用：' + JSON.stringify(looked.image))
+  // 真正给模型看的东西是 **render 的输出块**：这里直接调它，确认第二块是 image
+  const blocks = live.read.output.render({ path: 'look.drawio', render: true }, looked)
+  ok(Array.isArray(blocks) && blocks.length === 2 && blocks[0].type === 'text', 'render 输出：一段文字 + 一张图')
+  ok(blocks[1].type === 'image' && blocks[1].attachment.attachmentId === 'sha256:shot', '第二块是 image 内容块（模型就是这么"看见"的）：' + JSON.stringify(blocks[1].attachment))
+
+  // ④ 取走即清：模型看过就不再重复塞给它
+  const again = await live.read.execute({ path: 'look.drawio', render: true }, execLook)
+  ok(again.image === undefined && again.look.status === 'pending', '图取走即清：再要一次要重新渲染（不会反复塞同一张）')
+
+  // ⑤ 渲染期间文件被改过 → 仍然给图，但**如实标注**它可能过期
+  const req2 = (await live.api({ action: 'read', sessionId: 's1', path: 'look.drawio' })).render
+  await live.api({ action: 'render-result', sessionId: 's1', path: 'look.drawio', requestId: req2.requestId, ok: true, png: pngBase64, width: 800, height: 600 })
+  await apply([{ op: 'setLabel', id: 'n1', label: '改过了' }], { path: 'look.drawio' })
+  const staleRead = await live.read.execute({ path: 'look.drawio', render: true }, execLook)
+  ok(staleRead.look.status === 'ready' && staleRead.look.stale === true, '渲染之后文件又被改过 → look.stale=true（不假装是最新的）')
+  ok(staleRead.image !== undefined, '过期图仍然给（附了说明，比不给更有用）')
+
+  // ⑥ 渲染失败要如实回给模型（否则永远 pending）
+  await live.read.execute({ path: 'look.drawio', render: true }, execLook)
+  const req3 = (await live.api({ action: 'read', sessionId: 's1', path: 'look.drawio' })).render
+  await live.api({ action: 'render-result', sessionId: 's1', path: 'look.drawio', requestId: req3.requestId, ok: false, error: '画布还没渲染' })
+  const failedRead = await live.read.execute({ path: 'look.drawio', render: true }, execLook)
+  ok(failedRead.look.status === 'failed' && String(failedRead.look.error).indexOf('画布') >= 0, '渲染失败 → look.status=failed + 原因：' + JSON.stringify(failedRead.look))
+  ok(failedRead.image === undefined, '失败时不带图')
+
+  // ⑦ 护栏：没挂请求不许回执；requestId 对不上不许回执；空图 / 超大图 / 不接受的类型都拒收
+  const noPending = await live.api({ action: 'render-result', sessionId: 's1', path: 'look.drawio', requestId: 'x', ok: true, png: pngBase64 })
+  ok(noPending.ok !== true, '没有挂着的请求 → 拒收（否则谁都能往附件库里塞图）：' + JSON.stringify(noPending))
+  await live.read.execute({ path: 'look.drawio', render: true }, execLook)
+  const liveReq = (await live.api({ action: 'read', sessionId: 's1', path: 'look.drawio' })).render
+  const stale = await live.api({ action: 'render-result', sessionId: 's1', path: 'look.drawio', requestId: 'nope', ok: true, png: pngBase64 })
+  ok(stale.ok !== true, 'requestId 对不上 → 拒收')
+  const emptyPng = await live.api({ action: 'render-result', sessionId: 's1', path: 'look.drawio', requestId: liveReq.requestId, ok: true, png: '   ' })
+  ok(emptyPng.ok !== true, '空图 → 拒收：' + JSON.stringify(emptyPng))
+
+  const tinyLimits = lookInstance({ attachments: Object.assign({}, baseServices.attachments, { imageLimits: { mediaTypes: ['image/png'], maxImageBytes: 8 } }) })
+  await tinyLimits.read.execute({ path: 'look.drawio', render: true }, execLook)
+  const tinyReq = (await tinyLimits.api({ action: 'read', sessionId: 's1', path: 'look.drawio' })).render
+  const tooBig = await tinyLimits.api({ action: 'render-result', sessionId: 's1', path: 'look.drawio', requestId: tinyReq.requestId, ok: true, png: pngBase64 })
+  ok(tooBig.ok !== true && String(tooBig.error).indexOf('too large') >= 0, '超过部署图片上限 → 拒收并说明：' + String(tooBig.error))
+  const afterTooBig = await tinyLimits.read.execute({ path: 'look.drawio', render: true }, execLook)
+  ok(afterTooBig.look.status === 'failed', '超限之后是 failed（模型知道这条路走不通，而不是永远 pending）')
+
+  const noPng = lookInstance({ attachments: Object.assign({}, baseServices.attachments, { imageLimits: { mediaTypes: ['image/jpeg'], maxImageBytes: 4000000 } }) })
+  await noPng.read.execute({ path: 'look.drawio', render: true }, execLook)
+  const jpegReq = (await noPng.api({ action: 'read', sessionId: 's1', path: 'look.drawio' })).render
+  const wrongType = await noPng.api({ action: 'render-result', sessionId: 's1', path: 'look.drawio', requestId: jpegReq.requestId, ok: true, png: pngBase64 })
+  ok(wrongType.ok !== true && String(wrongType.error).indexOf('not accepted') >= 0, '部署不接受 png → 提前拒收：' + String(wrongType.error))
+}
+
+console.log('\nclearPoints 不许把"悬空端的落点"一起删掉（独立线会整条消失）')
+{
+  // 真实事故：给一条"两端都是自由点"的独立线（画好的猫尾巴）发 setStyle{clearPoints:true}，
+  // 自由端点被删 → 这条边一个落点都不剩 → 写回按"两端都没有落点的边"整条跳过 → 线上就没了。
+  store.clear()
+  await apply(
+    [
+      { op: 'addNode', label: 'A', x: 0, y: 0 },
+      { op: 'addNode', label: 'B', x: 300, y: 0 },
+      { op: 'addEdge', fromPoint: { x: 600, y: 600 }, toPoint: { x: 700, y: 600 }, line: 'curved' },
+    ],
+    { path: 'clr.drawio' },
+  )
+  const freeId = parseMxfile(store.get(WORKSPACE + '\\clr.drawio')).doc.edges[0].id
+  const cleared = await apply([{ op: 'setStyle', id: freeId, clearPoints: true }], { path: 'clr.drawio' })
+  const afterClear = parseMxfile(store.get(WORKSPACE + '\\clr.drawio')).doc
+  ok(afterClear.edges.length === 1 && afterClear.edges[0].id === freeId, '独立线清折点之后**还在**（不再整条消失）：' + afterClear.edges.length + ' 条边')
+  ok(
+    afterClear.edges[0].sourcePoint !== undefined && afterClear.edges[0].targetPoint !== undefined,
+    '两端的自由点被保住（它们不是折点，是落点）：' + JSON.stringify([afterClear.edges[0].sourcePoint, afterClear.edges[0].targetPoint]),
+  )
+  ok(afterClear.edges[0].points === undefined, '折点（那根弓形的中点）确实清掉了')
+  ok(String(cleared.summary).indexOf('已略过') < 0, '也没有"已略过"那种损失提示')
+
+  // 有真实顶点的那一端：自由点是过期数据，照旧该删；另一端悬空的照旧保住
+  await apply([{ op: 'setEdge', id: freeId, from: 'n1' }], { path: 'clr.drawio' })
+  await apply([{ op: 'setStyle', id: freeId, clearPoints: true }], { path: 'clr.drawio' })
+  const mixed = parseMxfile(store.get(WORKSPACE + '\\clr.drawio')).doc.edges.filter((e) => e.id === freeId)[0]
+  ok(mixed !== undefined && mixed.from === 'n1' && mixed.sourcePoint === undefined, '一端接节点、一端悬空：接节点那端的自由点被清掉')
+  ok(mixed.targetPoint !== undefined, '悬空端的自由点照旧留着（否则这一端就没了）')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')

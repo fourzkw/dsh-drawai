@@ -94,6 +94,10 @@ const plain = parseMxfile(PLAIN)
   // 子单元在 drawio 里是**相对父级**的：20,30 + 容器 100,50 = 120,80
   ok(byId.child1.x === 120 && byId.child1.y === 80, '容器的子单元坐标被换算成绝对坐标（120,80）')
   ok(byId.child1.label === '子节点 & 细节', '实体（&amp;）解码正确：' + JSON.stringify(byId.child1.label))
+  // 容器父级也要读出来：AI 得知道"这东西在哪个分组里"（移动/删除容器会牵连什么）。
+  // 只读信息 —— 写回时父级由文件里的父链 + layer 决定。
+  ok(byId.child1.parent === 'cont1', '容器子单元带 parent（谁在容器里）：' + String(byId.child1.parent))
+  ok(byId.cont1.parent === undefined && byId.img1.parent === undefined, '普通单元没有 parent 字段（图层不是容器）')
   ok(byId.cont1.style.indexOf('container=1') >= 0 && byId.cont1.style.indexOf('fillColor=#EDF5FF') >= 0, 'style 串原样搬运（含我们不解释的 container=1）')
   ok(byId.img1 !== undefined && byId.img1.x === 40, '图片形状也按顶点导入（几何在）')
 
@@ -601,6 +605,17 @@ console.log('\n[10] 图层（v1：读出来、显示/隐藏、新建、新单元
   ok(applyDocToMxfile(src, read.doc).text === src, '多图层文件原样写回仍然逐字节不变')
   ok(__plan(src, read.doc).edits.length === 0, '原样写回 0 条编辑')
 
+  // 纸张尺寸：drawio 把它挂在 mxGraphModel 的属性上，AI 做布局/导出建议要看它
+  const pageSrc = src.replace('<mxGraphModel dx="0" dy="0">', '<mxGraphModel dx="0" dy="0" pageWidth="1200" pageHeight="800">')
+  ok(pageSrc !== src, '（夹具）给 mxGraphModel 补上纸张属性')
+  const pageRead = parseMxfile(pageSrc).doc
+  ok(pageRead.page !== undefined && pageRead.page.w === 1200 && pageRead.page.h === 800, '纸张尺寸读得出来：' + JSON.stringify(pageRead.page))
+  ok(parseMxfile(src).doc.page === undefined, '文件里没写纸张时不编一个出来（那只是"这份文件没说"）')
+  const rebuiltPage = buildMxfile(pageRead)
+  ok(rebuiltPage.text.indexOf('pageWidth="1200"') > 0 && rebuiltPage.text.indexOf('pageHeight="800"') > 0, '从零重建时照旧用读到的纸张（不是悄悄变回 A4）')
+  const rebuiltPlain = buildMxfile({ version: 2, meta: {}, nodes: [], edges: [] })
+  ok(rebuiltPlain.text.indexOf('pageWidth="850"') > 0 && rebuiltPlain.text.indexOf('pageHeight="1100"') > 0, '没带纸张时用 drawio 的缺省（A4 竖版）')
+
   // 显示/隐藏：改的是**文件里的属性**（可保存、drawio 也认、也进撤销历史）
   const hidden = JSON.parse(JSON.stringify(read.doc))
   hidden.layers[0].visible = false
@@ -625,6 +640,23 @@ console.log('\n[10] 图层（v1：读出来、显示/隐藏、新建、新单元
   const addedBack = parseMxfile(addedText).doc
   ok(addedBack.layers.length === 3 && addedBack.layers[2].id === 'L3', '写回去再读：三个图层都在')
   ok(addedBack.nodes.filter((n) => n.id === 'n3')[0].layer === 'L3', '再读：n3 属于 L3')
+
+  // ── 把一个**已有**单元移到别的层：必须改 parent ──
+  //
+  // 这是"移到那一层"唯一能生效的地方：不改 parent 的话文件里它还挂在老层上，
+  // 读回来 layer 照旧是旧的（AI 与界面都会以为移动没生效）。模型里每个单元都带 layer
+  // （读时沿父链得到的），所以这里最容易犯的错是**把容器层级也一起抹掉** —— 两条都要盯。
+  const moved = JSON.parse(JSON.stringify(read.doc))
+  moved.nodes.filter((n) => n.id === 'n1')[0].layer = 'L2'
+  const movedText = applyDocToMxfile(src, moved).text
+  ok(/id="n1"[^>]*parent="L2"/.test(movedText), '把单元移到另一层 → parent 改写成新层：' + (/id="n1"[^>]*parent="([^"]+)"/.exec(movedText) || [])[1])
+  ok(parseMxfile(movedText).doc.nodes.filter((n) => n.id === 'n1')[0].layer === 'L2', '写回去再读：它确实在新层里')
+  ok(applyDocToMxfile(movedText, parseMxfile(movedText).doc).text === movedText, '移层之后写回幂等')
+  const untouched = JSON.parse(JSON.stringify(read.doc))
+  ok(
+    /id="n1"[^>]*parent="1"/.test(applyDocToMxfile(src, untouched).text),
+    'layer 没变的单元 parent 一个字节都不动（模型里的 layer 不等于"要脱离原父级"）',
+  )
 
   // 从零生成（新建画布）也认图层
   const built = buildMxfile({

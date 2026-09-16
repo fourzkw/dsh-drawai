@@ -400,6 +400,52 @@ console.log('\n空画布的视口要合理（曾经是 185% 这种荒唐值）')
   ok(v.x < 0 && v.y < 0, '有内容时视口覆盖内容外接框')
 }
 
+console.log('\n内容包围盒必须把**连线的几何**算进去（否则导出/看图会把线裁掉）')
+{
+  // 真实事故：画好的猫，胡须（x=60/400）与尾巴（x=424）都在节点框（140..320）之外，
+  // 而 contentBounds 只算节点 → 导出/「看一眼」的 viewBox 把线和尾巴裁成贴边的一截，
+  // 看图的人（和 AI）都会以为"线断了"。同一处还影响「视图 → 适应内容」。
+  const nodesOnly = { nodes: [{ id: 'a', x: 100, y: 100, w: 100, h: 100 }], edges: [] }
+  const base = internals.contentBounds(nodesOnly)
+  ok(base.minX === 100 && base.maxX === 200, '（前提）只有节点时就是节点框：' + [base.minX, base.maxX].join('..'))
+
+  const freeLine = {
+    nodes: [{ id: 'a', x: 100, y: 100, w: 100, h: 100 }],
+    edges: [{ id: 'e1', sourcePoint: { x: -60, y: 120 }, targetPoint: { x: 320, y: 40 } }],
+  }
+  const withFree = internals.contentBounds(freeLine)
+  ok(withFree.minX === -60 && withFree.maxX === 320, '独立线（两端自由点）撑开包围盒：' + [withFree.minX, withFree.maxX].join('..'))
+  ok(withFree.minY === 40 && withFree.maxY === 200, '纵向也一样：' + [withFree.minY, withFree.maxY].join('..'))
+
+  const withWaypoint = {
+    nodes: [{ id: 'a', x: 100, y: 100, w: 100, h: 100 }],
+    edges: [{ id: 'e1', from: 'a', to: 'a', points: [{ x: 400, y: 260 }] }],
+  }
+  const withPoints = internals.contentBounds(withWaypoint)
+  ok(withPoints.maxX === 400 && withPoints.maxY === 260, '伸到节点外的**折点**也算内容：' + [withPoints.maxX, withPoints.maxY].join(','))
+
+  const dangling = {
+    nodes: [{ id: 'a', x: 100, y: 100, w: 100, h: 100 }],
+    edges: [{ id: 'e1', from: 'a', targetPoint: { x: 100, y: 500 } }],
+  }
+  ok(internals.contentBounds(dangling).maxY === 500, '一端悬空的自由点也算')
+
+  ok(
+    internals.contentBounds({ nodes: [], edges: [{ id: 'e1', sourcePoint: { x: 10, y: 20 }, targetPoint: { x: 30, y: 40 } }] }).minX === 10,
+    '一张**只有线、没有节点**的画布也有合理包围盒（不是退化的 0..1）',
+  )
+  ok(
+    JSON.stringify(internals.contentBounds({ nodes: [], edges: [] })) === JSON.stringify({ minX: 0, minY: 0, maxX: 1, maxY: 1 }),
+    '真的空文档仍是那个 1×1 退化值（空画布的视口兜底靠它）',
+  )
+  const junk = {
+    nodes: [{ id: 'a', x: 100, y: 100, w: 100, h: 100 }],
+    edges: [{ id: 'e1', points: [null, { x: 'x', y: 5 }, { y: 7 }], sourcePoint: null, targetPoint: {} }],
+  }
+  const safe = internals.contentBounds(junk)
+  ok(safe.minX === 100 && safe.maxX === 200 && safe.maxY === 200, '残缺/非数字的折点不炸也不污染包围盒：' + JSON.stringify(safe))
+}
+
 console.log('\n多画布标签页：同一文件不重复开')
 {
   let list = [{ key: 'tab:a.drawio', path: 'a.drawio' }]
@@ -1501,6 +1547,13 @@ console.log('\n右键菜单的"当前值"（一类一行只显示它）')
     ok(sum('text;html=1;fontColor=#b85450', 'color') === '红', '独立文字的"配色"读的是字色')
     ok(sum('text;html=1', 'color') === '默认', '文字没设字色 = 默认')
 
+    // 字色（普通节点/连线的标签）：与"配色"是两类，读的是同一个 fontColor 键
+    ok(sum('', 'fontColor') === '默认', '没设字色 = 默认（黑字）')
+    ok(sum('fontColor=#b85450', 'fontColor') === '红', '字色命中调色板 → 红（#b85450 就是调色板里红那一支的文字色）')
+    ok(sum('fontColor=#123456', 'fontColor') === '#123456', '认不出的字色显示十六进制：' + sum('fontColor=#123456', 'fontColor'))
+    ok(sum('fontColor=#d5e8d4', 'fontColor') === '#d5e8d4', '绿色不在"文字色"里（调色板的绿字用的是 stroke 那一支）→ 原样显示十六进制')
+    ok(sum('fillColor=#dae8fc;strokeColor=#6c8ebf', 'fontColor') === '默认', '只有填充描边、没设字色 → 默认（两类互不串）')
+
     // 字号：没写键 = 默认（而不是 0 或空）
     ok(sum('', 'fontSize') === '默认', '没写 fontSize = 默认')
     ok(sum('fontSize=18', 'fontSize') === '18', '写了就是那个数：' + sum('fontSize=18', 'fontSize'))
@@ -1869,6 +1922,82 @@ console.log('\n编辑数据：`key=value` 互转、穿过归一化、菜单接�
   ok(/function openDataEditor\(kind, id\)/.test(src) && /function commitDataEditor\(kind, id, text\)/.test(src), '有编辑数据的开关与提交')
   ok(/openDataEditor\('node', menu\.id\)/.test(src) && /openDataEditor\('edge', menu\.id\)/.test(src), '节点与边的右键菜单都接了「编辑数据…」')
   ok(/className: 'drawai-data'/.test(src) && /\.drawai-data\{/.test(src), '面板用 textarea，样式也在')
+}
+
+console.log('\n暗色外观不该改节点里的字色（浅底浅字 = 看不见）')
+{
+  // 真实问题：节点标签的缺省字色原来取主题的 skin.text（暗色 = #e8e8e8），而填充是文档里
+  // 写死的浅色（#ffe6cc/#dae8fc…）。切到暗色外观 → 浅底浅字，节点里的字直接看不见。
+  // 现在的规矩：缺省字色由**这块填充**算（浅底黑字、深底浅字），不跟主题走。
+  const textOf = (tree) => walk(tree, (n) => n.type === 'text', [])[0]
+  const render = (doc, mode) => renderDiagram(doc, mode, 'u1', { current: null }, { selectedIds: [] }, null)
+
+  const lightFill = { nodes: [{ id: 'a', x: 0, y: 0, w: 160, h: 60, label: '浅底节点', style: 'fillColor=#ffe6cc;strokeColor=#d79b00;' }], edges: [] }
+  const lightOnLight = textOf(render(lightFill, 'light'))
+  const darkOnLight = textOf(render(lightFill, 'dark'))
+  ok(lightOnLight !== undefined && lightOnLight.props.fill === '#000000', '浅底节点在亮色下是黑字')
+  ok(
+    darkOnLight !== undefined && darkOnLight.props.fill === '#000000',
+    '**同一个节点在暗色下还是黑字**（跟填充走，不跟主题走）：' + (darkOnLight === undefined ? '-' : darkOnLight.props.fill),
+  )
+
+  const explicit = { nodes: [{ id: 'a', x: 0, y: 0, w: 160, h: 60, label: 'x', style: 'fillColor=#dae8fc;fontColor=#b85450;' }], edges: [] }
+  ok(textOf(render(explicit, 'dark')).props.fill === '#b85450', '文档写了字色 → 暗色下也照文档画')
+
+  const bare = { nodes: [{ id: 'a', x: 0, y: 0, w: 160, h: 60, label: 'x' }], edges: [] }
+  ok(textOf(render(bare, 'light')).props.fill === '#000000', '没写填充的节点：亮色下白底黑字')
+  ok(
+    textOf(render(bare, 'dark')).props.fill === '#e8e8e8',
+    '没写填充的节点：暗色下深底浅字（这一对仍然看得清，所以这一条要跟着填充走）',
+  )
+
+  const darkFill = { nodes: [{ id: 'a', x: 0, y: 0, w: 160, h: 60, label: 'x', style: 'fillColor=#2a2a2a;' }], edges: [] }
+  ok(textOf(render(darkFill, 'light')).props.fill === '#e8e8e8', '文档自己写了深色填充 → 亮色主题下也给浅字（同一套规则）')
+
+  // 浅色填充的边界：调色板里的颜色一个都不该被判成"深底"，否则等于把上面那个问题换个颜色重演
+  for (const fill of ['#ffffff', '#ffe6cc', '#dae8fc', '#d5e8d4', '#fff2cc', '#f8cecc', '#e1d5e7', '#f5f5f5']) {
+    ok(textOf(render({ nodes: [{ id: 'a', x: 0, y: 0, w: 80, h: 40, label: 'x', style: 'fillColor=' + fill + ';' }], edges: [] }, 'dark')).props.fill === '#000000', '调色板浅色 ' + fill + ' 在暗色下仍是黑字')
+  }
+
+  // 边的文字在**页面**上（暗色页面就是深底），所以它照旧跟主题走 —— 这一条不能被上面那套带偏
+  const edgeDoc = { nodes: [{ id: 'a', x: 0, y: 0, w: 100, h: 60 }, { id: 'b', x: 400, y: 0, w: 100, h: 60 }], edges: [{ id: 'e1', from: 'a', to: 'b', label: '线上的字' }] }
+  const edgeTextOf = (tree) => walk(tree, (n) => n.type === 'text' && n.children.indexOf('线上的字') >= 0, [])[0]
+  const edgeLight = edgeTextOf(render(edgeDoc, 'light'))
+  const edgeDark = edgeTextOf(render(edgeDoc, 'dark'))
+  ok(edgeLight !== undefined && edgeLight.props.fill === '#000000', '边上的字在亮色下是黑字')
+  ok(edgeDark !== undefined && edgeDark.props.fill === '#e8e8e8', '边上的字在暗色下仍是浅字（它压在深色页面上）')
+}
+
+console.log('\n字号/字色菜单里不再有「默认」那一项')
+{
+  const srcText = readFileSync(source, 'utf8')
+  const bodyOf = (name) => {
+    const start = srcText.indexOf('function ' + name + '(')
+    if (start < 0) return ''
+    const open = srcText.indexOf('{', start)
+    let depth = 0
+    for (let i = open; i < srcText.length; i += 1) {
+      if (srcText[i] === '{') depth += 1
+      else if (srcText[i] === '}') {
+        depth -= 1
+        if (depth === 0) return srcText.slice(open, i + 1)
+      }
+    }
+    return ''
+  }
+  const fsRow = bodyOf('fontSizeRow')
+  ok(fsRow.length > 0, '源码里有 fontSizeRow')
+  // 只看**代码里的字符串字面量**（注释里当然会提到"默认"，那是在解释为什么去掉它）
+  ok(/['"]默认['"]/.test(fsRow) === false, '字号那一排里没有「默认」这个选项（它等价于选中等价档位，选了等于没选）')
+  ok(/placeholder: '字号'/.test(fsRow), '输入框的占位文字也不再写「默认」（那是状态，不是选项）')
+  ok(/FONT_SIZE_PRESETS\.map\(/.test(fsRow), '档位直接来自 FONT_SIZE_PRESETS（不再往前面塞一个 null 档）')
+  ok(/\[\[null, '默认'\]\]/.test(fsRow) === false, '没有 null 档位了')
+  ok(/it\[0\] === null/.test(fsRow) === false, '也没有"空档位"那种分支了')
+
+  const swRow = bodyOf('swatchRow')
+  ok(swRow.length > 0, '源码里有 swatchRow')
+  ok(/forFont && isPlain \? '黑' : entry\.name/.test(swRow), '字色那一行的 plain 叫「黑」（它写出去就是把字变黑）')
+  ok(/title: \(forFont \? '字色：' : ''\) \+ label/.test(swRow), '提示文字跟着这个叫法走')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')

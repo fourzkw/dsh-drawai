@@ -720,6 +720,8 @@ function normalizeDrawioDoc(raw) {
     if (isObject(data)) out.data = copyData(data)
     // 属于哪个图层（渲染时隐藏层整层不画）。
     if (typeof rawNode.layer === 'string' && rawNode.layer.length > 0) out.layer = rawNode.layer
+    // 容器父级（**只读信息**）：画布按绝对位置显示，层级在文件里保留；移动容器不会带走子单元。
+    if (typeof rawNode.parent === 'string' && rawNode.parent.length > 0) out.parent = rawNode.parent
     nodes.push(out)
   }
 
@@ -794,6 +796,11 @@ function normalizeDrawioDoc(raw) {
     edges: edges,
     labels: labels,
     layers: layers,
+    // 纸张尺寸：文件里说了才带（AI 做布局/导出建议时要看它）。
+    // 丢它的后果和 layers 那次一样 —— 一存一开尺寸就变回缺省，而且没人会发现。
+    ...(isObject(source.page) && Number(source.page.w) > 0 && Number(source.page.h) > 0
+      ? { page: { w: Number(source.page.w), h: Number(source.page.h) } }
+      : {}),
   }
 }
 

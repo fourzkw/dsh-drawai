@@ -639,7 +639,7 @@ console.log('\n右键菜单：几类只显示当前值，并排成一行')
   // 三个菜单各自**一次**menuSelectRow 调用里给出全部类 —— 这才是"并排成一行"
   const callSites = src.match(/menuSelectRow\(\[/g) || []
   ok(callSites.length === 3, '三处右键菜单各调用一次 menuSelectRow（画布 / 节点 / 连线），实际 ' + callSites.length + ' 处')
-  const categories = ['shape', 'color', 'fontSize', 'line', 'dash', 'arrow']
+  const categories = ['shape', 'color', 'fontSize', 'line', 'dash', 'arrow', 'fontColor']
   for (const key of categories) {
     ok(new RegExp("key: '" + key + "'").test(src), '「' + key + '」这一类在 menuSelectRow 的 cats 里')
   }
@@ -787,6 +787,109 @@ console.log('\n键盘归属：在别处打字时画布一个键都不许碰')
     ...[onKeyBody.indexOf('preventDefault()'), onKeyBody.indexOf('deleteSelected()'), onKeyBody.indexOf('copySelection()')].filter((i) => i >= 0),
   )
   ok(guardAt >= 0 && guardAt < firstAction, '归属判定排在 preventDefault / 删除 / 复制之前')
+}
+
+console.log('\n选区上报：客户端把"用户选中了什么"告诉宿主（AI 侧才读得到）')
+{
+  // 为什么单列一节：这一条**只在客户端成立**（宿主那一半 check-host 已经测了：selection 端点
+  // 存下来、diagram_read 带回去、按文件配对、删掉就划掉）。客户端这边最容易犯的错是
+  // "每次 setSelectedIds 就发一次请求"（框选时等于按帧打宿主）或者"藏着不发"（AI 又看不见了）。
+  const at = src.indexOf("action: 'selection'")
+  ok(at > 0, "客户端有选区上报（action: 'selection'）")
+  // 以上报点为中心取一段窗口做结构性守卫（跨到别的函数去就会假绿，所以窗口刻意收窄）。
+  const around = at > 0 ? src.slice(Math.max(0, at - 1200), at + 700) : ''
+  ok(/React\.useEffect\(/.test(around), '上报挂在 effect 里（渲染期发请求会每帧打一次）')
+  ok(/setTimeout\(/.test(around) && /clearTimeout\(handle\)/.test(around), '有防抖：setTimeout + 清理 clearTimeout（框选时选区每动一下就变）')
+  ok(around.indexOf('SELECTION_REPORT_MS') >= 0, '防抖时长走 SELECTION_REPORT_MS 常量，不是就地写个魔数')
+  ok(/\[selectedIds, target, sessionId, active, hasPath\]/.test(around), '依赖里有 selectedIds（选区变了才重发）与 target/hasPath（带路径给宿主按文件配对）')
+  ok(/path: hasPath \? target : ''/.test(around), "上报带着当前画布路径（不带路径的旧选区会串到别的文件上）")
+  ok(/client === null \|\| !active/.test(around), '隐藏标签、或根 ctx 还没绑定时不上报')
+  ok(/\.catch\(\(\) => \{\}\)/.test(around), '上报失败静默（老宿主没这条路由时不该在界面上冒错）')
+}
+
+console.log('\n导出通道：客户端接住 AI 的导出请求、渲染、回执')
+{
+  // 渲染器只在客户端，所以 AI 的 `{op:'export'}` 是"宿主挂请求 → 客户端轮询取走 → 渲染 → 回执"。
+  // 这半边最容易犯的两个错：**不去重**（每 3 秒下载一次 PNG）与**把 svg 也下载**（AI 要的是
+  // 工作区里的一个文件，不是用户下载目录里的一份）。
+  ok(src.indexOf("action: 'export-result'") > 0, "客户端会回执导出结果（action: 'export-result'）")
+  ok(/function reportExportResult\(requestId, format, payload\)/.test(src), '有 reportExportResult（唯一的上报出口）')
+  ok(/payload\.export/.test(src), '轮询回执里读 payload.export（宿主把请求挂在那儿）')
+  ok(/exportHandledRef\.current !== wantExport\.requestId/.test(src), '按 requestId 去重（不去重就是每 3 秒下载一次）')
+  ok(/format: wantExport\.format === 'png' \? 'png' : 'svg'/.test(src), 'AI 的请求走对象形态（带 requestId 与 format）')
+  const pick = src.indexOf('const wantExport = payload.export')
+  const pickBody = pick >= 0 ? src.slice(pick, pick + 900) : ''
+  ok(/setSelectedIds\(\[\]\)/.test(pickBody) && /setExportRequest\(/.test(pickBody), '导出前先清掉选中（不然手柄会被拍进产物）')
+  const effectAt = src.indexOf("reportExportResult(requestId, 'svg'")
+  ok(effectAt > 0, 'AI 的 svg 回执给宿主落盘（不是浏览器下载）')
+  ok(/reportExportResult\(requestId, 'png', \{ ok: true, downloaded: true \}\)/.test(src), 'png 走浏览器下载，只回执"已下载"')
+  ok(/reportExportResult\(requestId, format, \{ ok: false, error:/.test(src), '渲染不出来时也要回执失败（AI 才能如实告诉用户）')
+}
+
+console.log('\n字色：节点与连线的标签颜色都能改（fontColor）')
+{
+  // 以前只有「独立文字」的配色会落到 fontColor —— 普通节点/连线的**字色**在画布上根本没有入口
+  //（节点菜单里的"配色"改的是填充+描边，连线菜单里连颜色都只有 strokeColor）。
+  // 这一节盯的是"接线"：两类各有一行字色、写的是同一个键、色板预览的是文字色。
+  const labelHits = src.match(/label: '字色'/g) || []
+  ok(labelHits.length === 2, '节点菜单与连线菜单各有一类「字色」（实际 ' + labelHits.length + ' 处）')
+  const keyHits = src.match(/key: 'fontColor'/g) || []
+  ok(keyHits.length === 2, '两类的 key 都是 fontColor（实际 ' + keyHits.length + ' 处）')
+  ok(/label: isTextNode \? '字色' : '配色'/.test(src), '独立文字的那一类直接叫「字色」（它没有填充描边，配色就是字色）')
+  ok(/\.\.\.\(isTextNode\s*\n\s*\? \[\]/.test(src), '独立文字不再多出一类重复的「字色」（同一件事两个入口只会让人犹豫）')
+  // 写入路径：节点走内核的 styleWithTextColorName（'plain' = 删键回缺省字色），连线走 updateEdge 的 fontColor
+  ok(
+    /updateNode\(nodeTargets, \{ style: styleWithTextColorName\(nodeStyle, color\) \}\)/.test(src),
+    '节点字色写进 fontColor（与独立文字同一套内核函数）',
+  )
+  ok(/updateEdge\(edgeTargets, \{ fontColor: color \}\)/.test(src), '连线字色走 updateEdge 的 fontColor')
+  ok(
+    /if \(has\(patch, 'fontColor'\)\) style = styleWithTextColorName\(style, patch\.fontColor\)/.test(src),
+    'updateEdge 真的把 fontColor 落成 style 键（不是记在别处）',
+  )
+  // 色板预览：字色那一行必须显示**文字色**（调色板的 stroke 那一支），否则点"黄"得到的字色看着像点错了
+  ok(/forFont \? '字色：' : ''/.test(src), '字色色板的 title 标明是字色')
+  ok(/background: isPlain \? '#000000' : entry\.stroke/.test(src), '字色色板用 stroke 那一支预览（与 styleWithTextColorName 同源）')
+  const fontKind = src.match(/,\s*\n\s*'font',\s*\n/g) || []
+  ok(fontKind.length === 2, '两类字色都用了 kind="font" 的色板（实际 ' + fontKind.length + ' 处）')
+}
+
+console.log('\n「看一眼」：客户端渲成 PNG 回执给宿主（不下载、不落工作区）')
+{
+  // AI 的 `diagram_read {render:true}` 靠这半边把画布变成图：渲成 PNG → base64 回执 →
+  // 宿主存进附件库（工作区零文件）。最容易犯的两个错：**去下载**（那就跑到用户下载目录去了）、
+  // **不设体量上限**（base64 比原图大 1/3，超了写回路由会直接拒，模型只能看到失败）。
+  ok(src.indexOf("action: 'render-result'") > 0, "客户端会回执渲染结果（action: 'render-result'）")
+  ok(/function reportRenderResult\(requestId, payload\)/.test(src), '有 reportRenderResult（这条路上唯一的上报出口）')
+  ok(/function renderPngPayload\(node, width, height, scale\)/.test(src), '有 renderPngPayload（渲成 base64，不触发下载）')
+  const payloadAt = src.indexOf('function renderPngPayload(')
+  const payloadSrc = payloadAt >= 0 ? src.slice(payloadAt, payloadAt + 1600) : ''
+  ok(/toDataURL\('image\/png'\)/.test(payloadSrc), '用 canvas 的 toDataURL 取 PNG（不落文件）')
+  ok(/downloadBlob|downloadPng/.test(payloadSrc) === false, '这条路上**没有任何下载**（下载 = 跑到用户的下载目录里去了）')
+  ok(/context\.fillStyle = mode === 'dark'/.test(payloadSrc), '底色跟随主题（深色模式下别给模型一张纯白底图）')
+  ok(/payload\.render/.test(src), '轮询回执里读 payload.render（宿主把请求挂在那儿）')
+  ok(/lookHandledRef\.current !== wantLook\.requestId/.test(src), '按 requestId 去重（不去重就是每 3 秒渲一遍）')
+  ok(/LOOK_MAX_BASE64/.test(src), '有回执体量上限（base64 比原图大 1/3，超了会被写回路由拒掉）')
+  ok(/renderPngPayload\(built\.node, built\.width, built\.height, 1\)/.test(src), '超限时降到 1× 重渲（而不是直接失败）')
+  ok(/reportRenderResult\(requestId, \{ ok: false, error: message \}\)/.test(src), '渲染失败也要回执 ok:false（否则宿主永远 pending）')
+  ok(/function renderPngPayload/.test(src) && /function downloadPng/.test(src), '「给模型看」与「给用户导出」各走各的（但共用同一套取图路径）')
+}
+
+console.log('\n「自动路由」不许把悬空端的落点一起删掉（独立线会整条消失）')
+{
+  // 真实事故（AI 那条 op 上先踩到的）：给一条"两端都是自由点"的独立线清折点，
+  // 自由端点被无条件删掉 → 这条边一个落点都不剩 → 写回整条跳过 → 画布上那条线就没了。
+  // AI 侧已修（check-host 里盯着），这里是画布这一侧的同一处。
+  const body = bodyOf('clearEdgeWaypoints')
+  ok(body !== null, '源码里有 clearEdgeWaypoints')
+  const clearSrc = body === null ? '' : body
+  ok(/delete e\.points/.test(clearSrc), '折点照旧无条件清掉（它本来就是折点）')
+  ok(/if \(typeof e\.from === 'string'\) delete e\.sourcePoint/.test(clearSrc), '自由端点只在那一端**有真实顶点**时才删（起点）')
+  ok(/if \(typeof e\.to === 'string'\) delete e\.targetPoint/.test(clearSrc), '自由端点只在那一端**有真实顶点**时才删（终点）')
+  ok(
+    /^\s*delete e\.sourcePoint\s*$/m.test(clearSrc) === false && /^\s*delete e\.targetPoint\s*$/m.test(clearSrc) === false,
+    '没有"无条件删自由端点"那种写法（那正是上面那个事故）',
+  )
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
