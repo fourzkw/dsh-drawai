@@ -1,6 +1,9 @@
 # 本机自测用的 @deepseek-ai/* junction，机器相关，不要提交
 node_modules/
 
+# 本机 npm 缓存在 ~/.npm 只读时用的本地目录（见 README 的「开发」一节）
+.npm-cache/
+
 # 编辑器 / 系统
 .vscode/
 .idea/
