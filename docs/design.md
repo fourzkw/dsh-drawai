@@ -748,6 +748,9 @@ npm run check     # 安装前烟测（含 lib 与 src 是否同步）
 `tools/watch.mjs` 直接 `import` 构建函数而**不 spawn 子进程**：
 本机沙箱下 Node 的 piped stdio 会被拒，`spawn('node', …)` 会 EPERM。
 
+**提交信息用中文。** 沿用本仓库既有历史的写法：一行标题带前缀（`feat:` / `fix:` / `chore:` / `docs:`），
+必要时分点写正文 —— 说清"改了什么、为什么这么改"，而不是"update"。
+
 ---
 
 ## 安装
