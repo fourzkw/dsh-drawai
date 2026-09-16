@@ -4,6 +4,11 @@
   "type": "module",
   "description": "DSH 右侧栏的可编辑画布 + AI 语义绘图工具（diagram_apply / diagram_read），直接读写原生 .drawio 文件",
   "license": "MIT",
+  "author": "fourzkw",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fourzkw/dsh-drawai.git"
+  },
   "main": "lib/index.js",
   "scripts": {
     "build": "node tools/build.mjs",

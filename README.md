@@ -199,8 +199,7 @@ npm test        # 五份自测（mxfile 编解码 / 路由预览 / 宿主行为 
 ## 觉得有用？ / Like it?
 
 如果这块画布帮上了忙，欢迎在 [GitHub](https://github.com/fourzkw/dsh-drawai) 上点个 ⭐；issue 与 PR 同样欢迎。
-投稿到 [awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 的进度与待办，记在 [docs/release.md](docs/release.md)。
 
 ## License
 
-**MIT** —— 全文见 [`LICENSE`](LICENSE)。DSH 本体与官方 `@deepseek-ai/*` 包都用 MIT，跟随生态里最常见的那一个，别人拿去用、改、再分发都不会有授权问题。
+[MIT](LICENSE)

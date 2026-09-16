@@ -11,40 +11,46 @@
 
 ---
 
-## 一、现在的状态（2026-09-16 实测，对着 API 与仓库核过）
+## 一、现在的状态（2026-09-16 23:05 实测，对着 API 与仓库核过）
 
 | 项 | 状态 | 证据 |
 |---|---|---|
 | `dsh.bundle.patch` + 根 `cordis.patch.yml` | ✅ | `package.json` 的 `dsh.bundle`；patch 里 `insert: id: drawai` |
-| 真实可用的代码 | ✅ | `lib/` 已提交、没有 `prepare`/`postinstall`、`npm pack` = 8 个文件 / 244.5 kB |
-| 许可证 | ✅ MIT | `LICENSE` + `"license": "MIT"`（**还没推上去**，见下） |
+| 真实可用的代码 | ✅ | `lib/` 已提交、没有 `prepare`/`postinstall`、`npm pack` = 8 个文件 / 245.2 kB |
+| 许可证 | ✅ MIT | `LICENSE`（版权行 `fourzkw`）+ `"license": "MIT"`，都已在默认分支上 |
+| `repository` / `author` | ✅ | `git+https://github.com/fourzkw/dsh-drawai.git` / `fourzkw` —— 发 npm 时报文与条目的关联依据 |
 | `@deepseek-ai/*` 用 `peerDependencies` 且带预发布分支 | ✅ | 见第四节 |
 | 仓库公开、有内容 | ✅ | [fourzkw/dsh-drawai](https://github.com/fourzkw/dsh-drawai) |
-| **仓库创建满 1 天** | ⏳ **2026-09-17 00:30:49 (+08:00) 才满** | API `created_at = 2026-09-15T16:30:49Z`（实测 21.9 h） |
+| 默认分支 = 本地最新 | ✅ | 提交都已推送（含 LICENSE、README 重写、右侧栏菜单那几版） |
+| **仓库创建满 1 天** | ⏳ **2026-09-17 00:30:49 (+08:00) 才满**（实测 22.6 h，还差约 1.4 h） | API `created_at = 2026-09-15T16:30:49Z` |
 | **`dsh-plugin` topic** | ❌ **空** | `GET /repos/fourzkw/dsh-drawai/topics` → `{"names":[]}` |
-| **默认分支 = 本地最新** | ❌ **落后 4 个提交**，工作区还有 +5503/−438 未提交 | `git log github/master..HEAD`、`git diff --stat` |
 | **`data/plugins/fourzkw__dsh-drawai.yml`** | ❌ 还没提 | —— |
 | 描述属实 | ⚠️ 写的时候注意 | 真实工具**只有 2 个**：`diagram_read` / `diagram_apply` |
 | 与已有条目不重复 | ⚠️ 同一种文件格式，不是同一件事 | 在册的 `jean3690/dsh-drawio` 也读写 `.drawio`，见第五节 |
 
-> 当前默认分支上的 README 是旧的（还说"字号里有『默认』这一项"），LICENSE 也不在上面 ——
-> 所以**第 1 步的推送不是可选项**：维护者读的就是默认分支。
+> 工作区里还有三处**改好但没提交**：`README.md`（删掉两段 + 表述润色）、`package.json`（补 `repository` / `author`）、
+> `LICENSE`（版权行改成 `fourzkw`）。**发布 npm 之前要先把它们提交并推送** —— npm 打包打的是工作区当前内容，
+> 不提交就会出现"npm 上的 README 比 GitHub 新"的错位。
 
 ---
 
 ## 二、要做的步骤
 
-### 1. 提交 + 推送
+### 1. 提交 + 推送那三处改动
 
 ```sh
 git add -A
-git commit -m "feat: AI 侧 ops 补齐（setEdge/setLabelPos/order/duplicate/图层/export）+ README 重写"
+git commit -m "docs: README 表述润色；package.json 补 repository/author；LICENSE 版权行改为 fourzkw"
 git push github master
 ```
 
-- 推送前顺手清一下：`未命名绘图.drawio` 已删、`untitled.drawio` 是未跟踪的临时画布，要留就 `git add`，不留就删掉。
-- 推完**在网页上确认两件事**：`LICENSE` 在仓库根、`package.json` 里有 `"license": "MIT"`。
-- ⚠️ 本机 `git` 走 `127.0.0.1:7892` 代理，连不上时（`Failed to connect ... port 7892`）改用能联网的环境推。
+- 早先那批（LICENSE、README 重写、右侧栏菜单三版、中文提交约定）**已经推上去了**，只剩上面这三处。
+- ⚠️ 本机 `git` 配了 `http.proxy = 127.0.0.1:7892`，而那个端口默认是关的；去掉代理直连时 Schannel 会报
+  `SEC_E_NO_CREDENTIALS`。这组覆盖参数实测可以推：
+
+  ```sh
+  git -c http.sslBackend=openssl -c http.proxy= -c https.proxy= push github master
+  ```
 
 ### 2. 加 `dsh-plugin` topic（硬要求）
 
@@ -81,15 +87,14 @@ Invoke-RestMethod -Method Put -ContentType 'application/json' -Headers $headers 
 > （而且 JSON 的引号在 5.1 里很难转义，所以上面用 `Invoke-RestMethod`）。
 > topic 只能是小写字母 / 数字 / 连字符，一个仓库最多 20 个。
 
-### 3. 补 `repository`（推荐）
+### 3. `repository` / `author`（已补）
 
-`package.json` 现在没有 `repository` / `author`。将来发 npm 时，**包的 `repository` 必须指回被收录的那个仓库**，
-否则两者不会关联（映射自动采集，条目里手写 `npm:` 会被拒）。顺手把 `LICENSE` 的版权行从
-`dsh-drawai contributors` 换成你的名字或 handle。
+包的 `repository` 必须指回被收录的那个仓库，否则两者不会关联（映射自动采集，条目里手写 `npm:` 会被拒）。
+`package.json` 里已经补上，`LICENSE` 的版权行也已改成 `fourzkw`：
 
 ```jsonc
-"repository": { "type": "git", "url": "git+https://github.com/fourzkw/dsh-drawai.git" },
-"author": "fourzkw"
+"author": "fourzkw",
+"repository": { "type": "git", "url": "git+https://github.com/fourzkw/dsh-drawai.git" }
 ```
 
 ### 4. 等过 1 天门槛
