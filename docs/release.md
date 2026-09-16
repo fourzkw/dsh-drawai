@@ -11,41 +11,40 @@
 
 ---
 
-## 一、现在的状态（2026-09-16 23:05 实测，对着 API 与仓库核过）
+## 一、现在的状态（2026-09-16 23:26 实测，对着 API、registry 与仓库核过）
 
 | 项 | 状态 | 证据 |
 |---|---|---|
 | `dsh.bundle.patch` + 根 `cordis.patch.yml` | ✅ | `package.json` 的 `dsh.bundle`；patch 里 `insert: id: drawai` |
 | 真实可用的代码 | ✅ | `lib/` 已提交、没有 `prepare`/`postinstall`、`npm pack` = 8 个文件 / 245.2 kB |
 | 许可证 | ✅ MIT | `LICENSE`（版权行 `fourzkw`）+ `"license": "MIT"`，都已在默认分支上 |
-| `repository` / `author` | ✅ | `git+https://github.com/fourzkw/dsh-drawai.git` / `fourzkw` —— 发 npm 时报文与条目的关联依据 |
+| `repository` / `author` | ✅ | `git+https://github.com/fourzkw/dsh-drawai.git` / `fourzkw` —— npm 包与条目的关联依据 |
+| **npm 包** | ✅ **已发布** | [`dsh-drawai@0.1.0`](https://www.npmjs.com/package/dsh-drawai)（2026-09-16，`latest`）—— 市场按 `repository` 自动关联下载量，条目里不用写 `npm:` |
 | `@deepseek-ai/*` 用 `peerDependencies` 且带预发布分支 | ✅ | 见第四节 |
 | 仓库公开、有内容 | ✅ | [fourzkw/dsh-drawai](https://github.com/fourzkw/dsh-drawai) |
-| 默认分支 = 本地最新 | ✅ | 提交都已推送（含 LICENSE、README 重写、右侧栏菜单那几版） |
-| **仓库创建满 1 天** | ⏳ **2026-09-17 00:30:49 (+08:00) 才满**（实测 22.6 h，还差约 1.4 h） | API `created_at = 2026-09-15T16:30:49Z` |
+| 默认分支 = 本地最新 | ✅ | 提交都已推送，工作区干净 |
+| **仓库创建满 1 天** | ⏳ **2026-09-17 00:30:49 (+08:00) 才满**（实测 22.9 h，还差约 1.1 h） | API `created_at = 2026-09-15T16:30:49Z` |
 | **`dsh-plugin` topic** | ❌ **空** | `GET /repos/fourzkw/dsh-drawai/topics` → `{"names":[]}` |
-| **`data/plugins/fourzkw__dsh-drawai.yml`** | ❌ 还没提 | —— |
+| **`data/plugins/fourzkw__dsh-drawai.yml`** | ❌ 还没提 | 见第 7 步与第三节 |
 | 描述属实 | ⚠️ 写的时候注意 | 真实工具**只有 2 个**：`diagram_read` / `diagram_apply` |
 | 与已有条目不重复 | ⚠️ 同一种文件格式，不是同一件事 | 在册的 `jean3690/dsh-drawio` 也读写 `.drawio`，见第五节 |
 
-> 工作区里还有三处**改好但没提交**：`README.md`（删掉两段 + 表述润色）、`package.json`（补 `repository` / `author`）、
-> `LICENSE`（版权行改成 `fourzkw`）。**发布 npm 之前要先把它们提交并推送** —— npm 打包打的是工作区当前内容，
-> 不提交就会出现"npm 上的 README 比 GitHub 新"的错位。
+> 到这里**仓库侧的硬条件全部满足**，只剩两件事：加 `dsh-plugin` topic（第 2 步）、提那个 yml（第 7 步）；
+> 外加等过 00:30:49 的 1 天年龄门槛（第 4 步）。npm 已发布，第 6 步完成。
 
 ---
 
 ## 二、要做的步骤
 
-### 1. 提交 + 推送那三处改动
+### 1. 提交 + 推送（已完成）
+
+仓库与工作区当前是一致且干净的；之后每次改文档，照常提交推送即可：
 
 ```sh
-git add -A
-git commit -m "docs: README 表述润色；package.json 补 repository/author；LICENSE 版权行改为 fourzkw"
-git push github master
+git add -A && git commit -m "docs: …" && git push github master
 ```
 
-- 早先那批（LICENSE、README 重写、右侧栏菜单三版、中文提交约定）**已经推上去了**，只剩上面这三处。
-- ⚠️ 本机 `git` 配了 `http.proxy = 127.0.0.1:7892`，而那个端口默认是关的；去掉代理直连时 Schannel 会报
+- ⚠️ 本机 `git` 配了 `http.proxy = 127.0.0.1:7892`（那个端口默认是关的）；去掉代理直连时 Schannel 会报
   `SEC_E_NO_CREDENTIALS`。这组覆盖参数实测可以推：
 
   ```sh
@@ -123,14 +122,33 @@ Invoke-RestMethod -Method Put -ContentType 'application/json' -Headers $headers 
 规则：1-8 张；相对路径不能跳出插件目录（不能以 `/` 开头、不能有 `..`）；写绝对 URL 的话必须是
 **GitHub 托管的 https**（第三方图床会被拒）。不声明也能过 —— 市场会退回从 README 抽图。
 
-### 6. 发 npm（可选）
+### 6. 发到 npm（已完成）
 
-`dsh-drawai` 这个名字目前**没被占用**（`npm view dsh-drawai` → 404）。
-发了的好处只有一个：预构建安装跳过 `allowBuilds` 构建授权那一步。**发不发都不影响收录。**
+`dsh-drawai@0.1.0` 已在 registry 上（2026-09-16 发布，`npm view dsh-drawai` 可查，tarball shasum `a341ff5f…`）。
+发了的好处是预构建安装跳过 `allowBuilds` 构建授权那一步 —— **发不发都不影响收录**。后续发版：
 
 ```sh
-npm publish   # 之前确认 package.json 的 repository 已指回本仓库
+npm version patch                                  # 改版本号 + 打 tag
+git push --follow-tags
+npm publish                                        # 同版本号重复发会 E403
 ```
+
+> **发布时踩的坑（记下来省得再撞）**：`npm login`（`auth-type=web`）留下的是一枚 **session token**，
+> registry 不接受它发布，报
+> `E403 ... Two-factor authentication or granular access token with bypass 2fa enabled is required to publish packages.`
+> —— 即使账号**没有开 2FA** 也一样（[npm/cli#9268](https://github.com/npm/cli/issues/9268)，至今 open）。
+> 解法（issue 里多人验证有效）：去 <https://www.npmjs.com/settings/fourzkw/tokens> 建一枚
+> **Granular Access Token** —— 权限 `Read and write`、包选 `All packages`（新包还不存在，选不到具体包）、
+> **勾上 Bypass 2FA**、IP 范围留空 —— 然后：
+>
+> ```sh
+> npm config set //registry.npmjs.org/:_authToken=npm_…   # 写进用户级 ~/.npmrc，别写进仓库
+> npm publish
+> ```
+>
+> 关键是**显式写进 `.npmrc`**：`npm token list` 里那枚 bypass-2fa token 不会被自动使用，
+> npm 会继续用 session token（这就是为什么"建了 token 还是 403"）。发布完可以
+> `npm config delete //registry.npmjs.org/:_authToken` 收回本地，再去网页 Revoke。
 
 ### 7. 提 PR
 

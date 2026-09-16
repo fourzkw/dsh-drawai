@@ -775,10 +775,10 @@ pnpm install
 `package.json` 已声明 `dsh.bundle.patch`，用官方 CLI 安装即可自动挂载：
 
 ```sh
-# 还没发 npm 时，用 GitHub 形式（仓库里没有 prepare 脚本，不需要 allowBuilds 授权）
-dsh plugin --profile web add github:fourzkw/dsh-drawai
-# 发到 npm 之后
+# 从 npm 装（推荐：预构建，不需要 allowBuilds 授权）
 dsh plugin --profile web add dsh-drawai
+# 或者直接从 GitHub 装（仓库里没有 prepare 脚本，同样不需要构建）
+dsh plugin --profile web add github:fourzkw/dsh-drawai
 ```
 
 ### 手动挂载（两条路线的兜底）

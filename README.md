@@ -27,13 +27,16 @@ drawio 本体           ┘         ↑ 无损写回：画布读不懂的单元�
 ## 安装 / Install
 
 ```sh
+# 从 npm 安装（推荐：预构建，跳过 allowBuilds 构建授权）
+dsh plugin --profile web add dsh-drawai
+
+# 或者直接从 GitHub 装（仓库里没有 prepare 脚本，同样不需要构建）
 dsh plugin --profile web add github:fourzkw/dsh-drawai
 ```
 
 然后**重启 `dsh web`** —— 宿主侧只在启动时加载，这一步不能省。
 
-> **更新**：从 GitHub 安装的包，重新执行上面这条命令即可。等发布到 npm 之后，才会有
-> `dsh plugin --profile web update dsh-drawai@latest` 这种按版本更新的写法。
+> **更新到最新版**：`dsh plugin --profile web update dsh-drawai@latest`
 
 重启之后，你会看到：
 
@@ -43,8 +46,7 @@ dsh plugin --profile web add github:fourzkw/dsh-drawai
 | `diagram_read` / `diagram_apply` | 模型工具集 |
 | `drawai-canvas` 技能 | 会话技能目录（模型按需取全文） |
 
-- 仓库里**没有 `prepare` / `postinstall` 脚本**，`lib/` 是已提交的构建产物 —— 从 GitHub 源码安装**不需要** `allowBuilds` 构建授权。
-- **还没有发布到 npm**，所以 `dsh plugin add dsh-drawai` 这种预构建安装暂时用不了，请用上面的 GitHub 形式。
+- 两种装法都不需要 `allowBuilds` 构建授权：npm 包是预构建的；GitHub 源码包里 `lib/` 也已提交、没有 `prepare` / `postinstall` 脚本。
 - 手动挂载的兜底写法，以及本地 link 的开发做法，见[设计文档的「安装」一节](docs/design.md#安装)。
 
 ## 使用 / Usage
