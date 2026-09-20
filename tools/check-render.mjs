@@ -446,6 +446,86 @@ console.log('\n内容包围盒必须把**连线的几何**算进去（否则导�
   ok(safe.minX === 100 && safe.maxX === 200 && safe.maxY === 200, '残缺/非数字的折点不炸也不污染包围盒：' + JSON.stringify(safe))
 }
 
+console.log('\n内容包围盒必须把**标签的文字**算进去（否则导出会把字切掉）')
+{
+  // contentBounds 是导出/「适应内容」取框的那一份几何来源。它漏了文字，导出的图就会
+  // "画上有、图里没有"：nowrap 的标签天生横向溢出；文字太多把节点顶高（nodeBoxOf）时，
+  // 下半截落在盘上那个 h 之外。
+  const plain = { nodes: [{ id: 'a', x: 0, y: 0, w: 100, h: 60 }], edges: [] }
+  const pb = internals.contentBounds(plain)
+  ok(pb.minX === 0 && pb.maxX === 100 && pb.maxY === 60, '没有标签时就是节点框：' + JSON.stringify(pb))
+
+  const nowrap = { nodes: [{ id: 'a', x: 0, y: 0, w: 100, h: 60, label: '一段很长很长的不换行标签', style: 'whiteSpace=nowrap;' }], edges: [] }
+  const textBox = internals.labelPaintBounds(nowrap.nodes[0], internals.nodeBoxOf(nowrap.nodes[0]))
+  ok(textBox !== null && textBox.minX < 0 && textBox.maxX > 100, 'nowrap 标签的包围盒确实溢出节点框两侧：' + [textBox.minX.toFixed(1), textBox.maxX.toFixed(1)].join('..'))
+  const nb = internals.contentBounds(nowrap)
+  ok(nb.minX <= textBox.minX && nb.maxX >= textBox.maxX, 'contentBounds 把 nowrap 的标签算进来了：' + JSON.stringify(nb))
+
+  // 换成多行短字：横向回到框内，但文字把节点顶高 —— 高度必须跟着渲染几何走。
+  const tall = { nodes: [{ id: 'a', x: 0, y: 0, w: 100, h: 20, label: '很长很长的一串字要换很多行才放得下' }], edges: [] }
+  const geo = internals.nodeBoxOf(tall.nodes[0])
+  ok(geo.h > 20, '（前提）多行文字把节点顶高了：h=' + geo.h)
+  const tb = internals.contentBounds(tall)
+  ok(tb.maxY >= geo.y + geo.h - 1e-6, 'contentBounds 用的是渲染高度而不是盘上的 h：' + JSON.stringify(tb))
+
+  // 并集语义已经不再需要（取框不再靠"量 DOM"）—— 见下面 paintedBounds 一节。
+}
+
+console.log('\n导出取框：按"这一刻会画出来的东西"算（线绕到哪儿、文字拖到哪儿都算）')
+{
+  // 导出框的来源是 paintedBounds：它用渲染器**同一批函数**（buildGeometry + routeEdgeStyled
+  // + edgeLabelPosition/labelBox）算，所以框和画出来的东西是同一个口径。
+  // 曾经用 DOM 的 getBBox() 去量（"另一条真相"），结果量到的框变成了**当前视口**
+  // （网格纸铺满视口）→ 导出图白留一大圈。这三条就是那次的教训。
+  const doc = {
+    nodes: [
+      { id: 'a', x: 100, y: 100, w: 100, h: 60 },
+      { id: 'b', x: 400, y: 300, w: 100, h: 60 },
+    ],
+    edges: [{ id: 'e1', from: 'a', to: 'b' }],
+  }
+  const b = internals.paintedBounds(doc)
+  ok(b !== null && b.minX <= 100 && b.maxX >= 500, '覆盖所有节点：' + JSON.stringify(b))
+
+  // 1) 走线：一端是**远方的自由点**，路由会把线拉过去 —— 框必须跟着过去
+  const free = {
+    nodes: [{ id: 'a', x: 0, y: 0, w: 100, h: 60 }],
+    edges: [{ id: 'e1', from: 'a', targetPoint: { x: 900, y: 600 } }],
+  }
+  const fb = internals.paintedBounds(free)
+  ok(fb.maxX >= 900 && fb.maxY >= 600, '连到远方自由点的线也在框里：' + JSON.stringify(fb))
+
+  // 2) 线上的文字：拖出去 200px 的标签必须把框撑开 —— contentBounds 算不出这个
+  //    （labelX/labelY/labelOffsetY 是沿边相对量，得先有走线）。
+  const plainLabel = { nodes: doc.nodes, edges: [{ id: 'e1', from: 'a', to: 'b', label: '失败' }] }
+  const draggedLabel = { nodes: doc.nodes, edges: [{ id: 'e1', from: 'a', to: 'b', label: '失败', labelOffsetY: 400 }] }
+  const lb = internals.paintedBounds(plainLabel)
+  const db = internals.paintedBounds(draggedLabel)
+  ok(db.maxY >= lb.maxY + 200, '被拖远的线上文字算进框里（' + lb.maxY + ' → ' + db.maxY + '）')
+
+  // 3) 隐藏图层：画布不画它，导出也就不该为它留白 —— 那正是"留白过多"的一半来源。
+  const doc2 = {
+    layers: [{ id: '1', visible: true }, { id: 'L2', visible: false }],
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 100, h: 60, layer: '1' },
+      { id: 'ghost', x: 5000, y: 5000, w: 100, h: 60, layer: 'L2' },
+    ],
+    edges: [],
+  }
+  const hb = internals.paintedBounds(doc2)
+  ok(hb.maxX <= 200 && hb.maxY <= 200, '隐藏图层里的节点不进导出框：' + JSON.stringify(hb))
+  const hc = internals.contentBounds(doc2)
+  ok(hc.maxX <= 200 && hc.maxY <= 200, '「适应内容」同样不给隐藏图层留白：' + JSON.stringify(hc))
+
+  ok(internals.paintedBounds({ nodes: [], edges: [] }) === null, '空文档没有"画出来的东西" → null（调用方退回 contentBounds）')
+
+  // 取框那一行必须是 paintedBounds（不是 getBBox 量 DOM）—— 这是那次留白事故的回归线。
+  const srcText = readFileSync(source, 'utf8')
+  ok(/paintedBounds\(current\) \|\| contentBounds\(current\)/.test(srcText), '导出/看图按 paintedBounds 取框，算不出来才退回 contentBounds')
+  ok(srcText.indexOf('measurePaintedBounds') < 0, '不再用 getBBox() 量 DOM 取框（量到的是视口，不是内容）')
+  ok(/routeEdgeStyled\(from, to, geometry\.boxes, geometry\.bounds, edge, undefined\)/.test(srcText), '框里的走线用的是渲染器同一套路由')
+}
+
 console.log('\n多画布标签页：同一文件不重复开')
 {
   let list = [{ key: 'tab:a.drawio', path: 'a.drawio' }]
@@ -1638,6 +1718,126 @@ console.log('\n对齐辅助线 / 批量改样式 / 全选')
   ok(all.join(',') === 'n1,n2,e1', '全选 = 节点 + 连线：' + all.join(','))
   ok(internals.allIdsOf({ nodes: [], edges: [] }).length === 0, '空画布全选 → 空')
   ok(internals.allIdsOf(null).length === 0, 'null 文档不炸')
+}
+
+console.log('\n文字撑高节点 + 就地编辑框（输入时与输完后必须一致）')
+{
+  // 需求三条里的两条：
+  //   ① 节点内文字过多时纵向自动拉伸（不溢出、不截断）；
+  //   ② 输入时的效果与输入完成后一致，且输入过程中也要自动换行。
+  const fitHeight = internals.nodeTextFitHeight
+  const boxOf = internals.nodeBoxOf
+  const textBox = internals.labelTextBox
+  const editorBox = internals.nodeEditorBox
+  ok(typeof fitHeight === 'function' && typeof boxOf === 'function', '自适应高度的算法有导出（纯函数，命令行直接断言）')
+  ok(typeof textBox === 'function' && typeof editorBox === 'function', '文字区/编辑框的算法也有导出')
+
+  const long = '这是一条很长很长很长很长很长很长很长很长很长很长很长很长的标签'
+  const fits = (node) => boxOf(node).h
+  const stored = (node) => boxOf(node).stored
+
+  // ① 单行放得下 → 一个字都不动（不制造无意义的"自动长高"）
+  const shortNode = { id: 's', label: '短', style: '', x: 0, y: 0, w: 130, h: 60 }
+  ok(fitHeight(shortNode) === 0 && fits(shortNode) === 60, '一行就放得下 → 需要高度算 0、几何保持 60')
+  // ② 文字压不下 → 几何被撑高，且吸到整格（十分钟爱的"中心落在半像素"就是这么来的）
+  const tallNode = { id: 't', label: long, style: '', x: 0, y: 0, w: 120, h: 60 }
+  const need = fitHeight(tallNode)
+  ok(need > 60, '文字装不下 → 需要高度大于原来的 60：' + need)
+  ok(fits(tallNode) === internals.snapTo(need, internals.GRID), '撑出来的高度吸到整格：' + fits(tallNode))
+  ok(fits(tallNode) % internals.GRID === 0, '撑过的高度一定是整格（连线中心不会落在半像素上）')
+  // ③ **只长不缩**：用户特意拉大的空白不能被自动吃掉
+  const roomy = { id: 'r', label: long, style: '', x: 0, y: 0, w: 120, h: 400 }
+  ok(fits(roomy) === 400 && stored(roomy) === 400, '用户拉大的节点保持原高度（自适应只解决溢出）')
+  // ④ 不换行的标签不参与（拉高解决不了横向溢出）
+  const nowrap = { id: 'n', label: long, style: 'whiteSpace=nowrap;', x: 0, y: 0, w: 120, h: 60 }
+  ok(fitHeight(nowrap) === 0 && fits(nowrap) === 60, 'whiteSpace=nowrap 的标签不拉高')
+  // ⑤ 独立文字不参与（没有边框底色，拉高只是把透明命中框撑大）
+  const textNode = { id: 'x', label: long, style: 'text;html=1;', x: 0, y: 0, w: 120, h: 60 }
+  ok(fitHeight(textNode) === 0, '独立文字（drawio 的 text 形状）不拉高')
+  // ⑥ 字号越大行高越大 → 需要的高度跟着长（否则大字号标签还是会被切掉）
+  const bigFont = { id: 'b', label: long, style: 'fontSize=22;', x: 0, y: 0, w: 120, h: 60 }
+  ok(fitHeight(bigFont) > fitHeight(tallNode), '同一个标签，字号更大 → 需要的高度更大：' + fitHeight(bigFont) + ' > ' + fitHeight(tallNode))
+  // ⑦ 手写的多行标签（Shift+Enter / 文本里就有 \n）按行数算
+  const multi = { id: 'm', label: '一\n二\n三', style: '', x: 0, y: 0, w: 200, h: 40 }
+  ok(fitHeight(multi) === 56 && fits(multi) === 60, '三行标签按行数算高度（56 → 吸到 60）：' + fitHeight(multi))
+
+  // 几何层就撑高：**线接在撑开后的边框上**（不能只改渲染，否则线会插进文字里）
+  const doc = {
+    version: 2,
+    revision: '',
+    nodes: [
+      { id: 'a', x: 0, y: 0, w: 120, h: 60, label: long },
+      { id: 'b', x: 400, y: 0, w: 120, h: 60, label: '短' },
+    ],
+    edges: [{ id: 'e1', from: 'a', to: 'b', style: DEFAULT_EDGE_STYLE }],
+  }
+  const geometry = internals.buildGeometry(doc)
+  ok(geometry.byId.a.geo.h > 60, 'buildGeometry 里就已经撑高（渲染/命中/连线读的是同一份几何）')
+  ok(geometry.byId.a.geo.h === geometry.byId.a.storedH + 0 || geometry.byId.a.storedH === 60, 'box 里记着盘上的高度（storedH=60），撑开值与它分开：' + geometry.byId.a.storedH)
+  ok(geometry.byId.b.geo.h === 60, '放得下的邻居一动不动')
+  // 连线落点：a 的右边框中点应该按**撑开后**的高度算
+  const anchor = internals.anchorSidesOf(geometry.byId.a.geo)
+  ok(Math.abs(anchor.e.y - (geometry.byId.a.geo.y + geometry.byId.a.geo.h / 2)) < 0.01, '连线的端点落在撑开后的边框上：' + anchor.e.y)
+
+  // 标签画在撑开后的盒子里：文字块整体仍然居中（不会顶到上边、下面空一截）
+  const tree = renderDiagram(doc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const labelEl = walk(tree, (n) => n.props !== undefined && String(n.props.key).indexOf('label-') === 0, [])[0]
+  const spans = labelEl === undefined ? [] : (Array.isArray(labelEl.children[0]) ? labelEl.children[0] : labelEl.children)
+  const g = geometry.byId.a.geo
+  const lineHeight = internals.labelLineHeight(12)
+  const firstY = g.y + g.h / 2 - ((spans.length - 1) * lineHeight) / 2
+  ok(labelEl !== undefined && Math.abs(labelEl.props.y - firstY) < 0.01, '标签多行时整体在盒子里居中（首行 y=' + (labelEl === undefined ? '-' : labelEl.props.y) + '）')
+  ok(spans.length > 1, '长标签真的换成了多行（' + spans.length + ' 行）')
+
+  // 正在就地编辑的节点：**画出来的标签必须让位**，否则透明的编辑框底下会透出第二层字
+  // （用户实测："双击文字编辑时，原本节点的文字和可编辑文字重叠"）。
+  const labelSpansOf = (tree) => {
+    const out = []
+    for (const t of walk(tree, (n) => n.type === 'text' && typeof n.props['data-node-id'] === 'string', [])) {
+      const own = Array.isArray(t.children[0]) ? t.children[0] : t.children
+      const chars = own.map((sp) => (sp !== null && sp !== undefined && Array.isArray(sp.children) ? sp.children.join('') : '')).join('')
+      out.push({ id: t.props['data-node-id'], text: chars })
+    }
+    return out
+  }
+  const noEdit = labelSpansOf(tree)
+  ok(noEdit.length === 2 && noEdit.filter((l) => l.id === 'a' && l.text === long).length === 1, '没在编辑时：每个节点的标签都画出来了（' + noEdit.length + ' 个）')
+  const editingTree = renderDiagram(doc, 'light', 'u1', { current: null }, { selectedIds: ['a'], editingNodeId: 'a' }, null)
+  const whileEdit = labelSpansOf(editingTree)
+  ok(whileEdit.filter((l) => l.id === 'a').length === 0, '正在编辑的节点不再画自己的标签（编辑框底下不会透出第二层字）')
+  ok(whileEdit.filter((l) => l.id === 'b' && l.text === '短').length === 1, '别的节点的标签照旧画（只让位给编辑中的那一个）')
+  if (labelEl !== undefined) ok(labelEl.props['data-node-id'] === 'a', '节点标签带 data-node-id（自测与排查都靠它定位）')
+
+  // ② 就地编辑框：宽度就是文字区宽度（同一宽度 → 同一断行位置）+ 字号/字色跟着这个节点
+  const editNode = { id: 'z', label: long, style: 'fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=18;', x: 100, y: 200, w: 120, h: 60 }
+  const ctm = { a: 1, e: 0, f: 0 }
+  const geo = boxOf(editNode)
+  const tb = textBox({ node: editNode, geo: geo, fontSize: 18 })
+  const eb = editorBox(editNode, editNode.label, ctm, { left: 0, top: 0 })
+  ok(Math.abs(eb.width - tb.w) < 0.01, '编辑框宽度 = 文字区宽度（' + eb.width + ' vs ' + tb.w + '）——同一宽度才会在同一处断行')
+  ok(Math.abs(eb.left - tb.x) < 0.01 && Math.abs(eb.height - Math.max(tb.h, internals.FALLBACK_NODE_H)) < 0.01, '编辑框贴着文字区摆，高度按行数')
+  ok(eb.fontSize === 18 && eb.lineHeight === internals.labelLineHeight(18), '编辑框的字号/行高取自这个节点的 fontSize：' + eb.fontSize + '/' + eb.lineHeight)
+  ok(eb.color === '#000000', '浅底节点上编辑框是黑字（与画出来的标签同一套字色规则）：' + eb.color)
+  ok(eb.wraps === true, '缺省标签在编辑框里也是换行的')
+  ok(editorBox({ id: 'w', label: long, style: 'whiteSpace=nowrap;', x: 0, y: 0, w: 120, h: 60 }, long, ctm, { left: 0, top: 0 }).wraps === false, 'whiteSpace=nowrap 的节点在编辑框里也不换行')
+  // 换行让编辑框自己长高（打到第三行不会被裁掉）
+  const eb3 = editorBox(editNode, long + '\n' + long, ctm, { left: 0, top: 0 })
+  ok(eb3.height > eb.height, '打字打到更多行 → 编辑框跟着长高：' + eb.height + ' → ' + eb3.height)
+  // 缩放：编辑框按 CTM 缩放（滚轮缩放后仍然盖在节点上）
+  const eb2 = editorBox(editNode, editNode.label, { a: 2, e: 30, f: 10 }, { left: 5, top: 5 })
+  ok(Math.abs(eb2.width - eb.width * 2) < 0.01 && Math.abs(eb2.fontSize - 36) < 0.01, '缩放 2× 时编辑框宽/字号一起放大')
+  ok(Math.abs(eb2.left - (eb.left * 2 + 30 - 5)) < 0.01, '平移也带上（left=' + eb2.left + '）')
+  // 菱形/椭圆：文字区比节点窄 —— 编辑框必须跟着窄（否则输入时和输完后断行不同）
+  const diamond = { id: 'd', label: long, style: 'rhombus;', x: 0, y: 0, w: 200, h: 60 }
+  const db = editorBox(diamond, long, ctm, { left: 0, top: 0 })
+  ok(db.width < 200 - 12 + 0.01 && Math.abs(db.width - 120) < 0.01, '菱形节点的编辑框按 60% 宽度摆：' + db.width)
+
+  // 接线：节点用 textarea（能换行），Enter 提交、Shift+Enter 换行
+  const src = composeClientBody()
+  ok(/isNodeEditor \? React\.createElement\('textarea', editorProps\) : React\.createElement\('input', editorProps\)/.test(src), '节点编辑用 textarea、连线标签仍是一行 input')
+  ok(/event\.key === 'Enter' && event\.shiftKey !== true/.test(src), 'Enter 提交、Shift+Enter 用来换行')
+  ok(/editorStyle\.fontSize = /.test(src) && /editorStyle\.color = /.test(src), '编辑框的字号/字色按节点给（输入时与输完后一致）')
+  ok(/function autoHeightIfNeeded|'auto-height'/.test(src), '撑高的结果会被写回文档（盘上的图与屏幕上的图一致）')
 }
 
 console.log('\n框选：节点与连线都要被框到才亮')

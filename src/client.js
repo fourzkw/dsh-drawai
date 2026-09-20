@@ -241,7 +241,12 @@ const CSS = [
   '.drawai-rs-n{cursor:ns-resize}.drawai-rs-s{cursor:ns-resize}',
   '.drawai-rs-e{cursor:ew-resize}.drawai-rs-w{cursor:ew-resize}',
   // 就地编辑框是画布里唯一需要能选中文字的元素 —— 必须把 user-select 放开回来。
-  '.drawai-edit{position:absolute;z-index:5;box-sizing:border-box;border:2px solid #1a73e8;border-radius:4px;background:#fff;color:#000;font:12px Helvetica,Arial,sans-serif;text-align:center;padding:0 4px;outline:none;user-select:text;-webkit-user-select:text}',
+  //
+  // 它是 **textarea**（不是单行 input）：需求"输入过程中也要自动换行"+"输入时的效果与
+  // 输完后一致"要求它能按节点的文字区宽度换行、并按节点自己的字号字色画。
+  // 用 `outline` 而不是 `border`：边框会占掉 2px 内容宽度，断行位置就跟最终效果差一个字符。
+  // 背景透明、颜色与字号由 inline style 按**这个节点**给（见 renderDiagram 的 labelTextBox）。
+  '.drawai-edit{position:absolute;z-index:5;box-sizing:border-box;outline:2px solid #1a73e8;outline-offset:-2px;border:none;border-radius:4px;background:transparent;color:#000;font-family:Helvetica, Arial, sans-serif;font-size:12px;line-height:14px;text-align:center;padding:0;margin:0;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text}',
   '.drawai-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}',
   // 右键菜单 / 元素库
   '.drawai-menu{position:absolute;z-index:20;min-width:196px;padding:8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#555);background:var(--dsw-alias-bg-overlay,#1e1e1e);box-shadow:0 10px 28px rgba(0,0,0,.4);color:var(--dsw-alias-label-primary,#e6e6e6)}',
@@ -250,6 +255,10 @@ const CSS = [
   '.drawai-chip{display:flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:6px;background:transparent;padding:1px;cursor:pointer}',
   '.drawai-chip:hover{border-color:var(--dsw-alias-brand-primary,#4c8dff);background:rgba(76,141,255,.14)}',
   '.drawai-swatches{display:flex;gap:6px;margin-top:8px}',
+  // 形状**平铺**那一块：与下面那些「类：当前值」的行用同一条分隔线，
+  // 但里面的缩略图按原尺寸自动填充（5 列 1fr 会把 44px 的缩略图挤扁）。
+  '.drawai-pick{margin-top:8px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1,#3a3a3a)}',
+  '.drawai-pick>.drawai-grid{grid-template-columns:repeat(auto-fill,minmax(42px,1fr))}',
   '.drawai-swatch{width:18px;height:18px;border-radius:4px;border:1px solid rgba(0,0,0,.3);cursor:pointer;padding:0}',
   '.drawai-swatch.on{outline:2px solid var(--dsw-alias-brand-primary,#4c8dff);outline-offset:1px}',
   // 当前生效的选项（线型/箭头方向）—— 和色板用同一套"被选中"语言。
@@ -319,7 +328,15 @@ function textWidth(text, size) {
   return total
 }
 
-function wrapLabel(label, maxWidth) {
+/**
+ * 按宽度把标签切成若干行。
+ *
+ * `size` 是**标签真实的字号**（节点 style 里的 fontSize，缺省 FSIZE）——
+ * 不传的话大字号标签会按 12px 量宽度，断行位置跟着画出来的东西对不上
+ * （"输入时和输完后不一样"的一类来源）。
+ */
+function wrapLabel(label, maxWidth, size) {
+  const fs = numberOr(size, FSIZE)
   const lines = []
   const paras = String(label).split('\n')
   for (let p = 0; p < paras.length; p += 1) {
@@ -327,7 +344,7 @@ function wrapLabel(label, maxWidth) {
     let current = ''
     let width = 0
     for (let i = 0; i < chars.length; i += 1) {
-      const cw = charWidth(chars[i], FSIZE)
+      const cw = charWidth(chars[i], fs)
       if (width + cw > maxWidth && current.length > 0) {
         lines.push(current)
         current = ''
@@ -390,6 +407,144 @@ function colorOf(node, mode) {
 /** 形状：从 style 键推导 —— drawio 里没有 shape 字段，普通矩形就是"没有形状键"。 */
 function shapeOf(node) {
   return nodeShapeFromStyle(typeof node.style === 'string' ? node.style : '')
+}
+
+/**
+ * 一个节点里，标签**能不能按宽度换行**。与渲染那一处读的是同一个键
+ * （drawio 的语义：`whiteSpace=nowrap` 不换行，其余含缺省都换行）。
+ */
+function labelWraps(node) {
+  const style = typeof node.style === 'string' ? node.style : ''
+  return styleGet(style, 'whiteSpace', 'wrap') !== 'nowrap'
+}
+
+/**
+ * 标签能用的横向宽度 —— 就是渲染时传给 `wrapLabel` 的那个 maxWidth。
+ *
+ * 菱形/椭圆里的字要缩进来才不压到斜边，所以可用宽度比节点宽度窄。
+ * **只有这一处**：换行位置、自适应高度、就地编辑框的内边距全都读它，
+ * 三处各写一份迟早会漂移（"输入时和输完后不一样"最常见的原因）。
+ */
+function labelTextWidth(node, w) {
+  const shape = shapeOf(node)
+  if (shape === 'diamond') return w * 0.6
+  if (shape === 'ellipse') return w * 0.72
+  return w - 12
+}
+
+/** 字号 → 行高。渲染与就地编辑框共用，否则编辑时会与最终效果差几像素。 */
+function labelLineHeight(fontSize) {
+  return LHEIGHT * (numberOr(fontSize, FSIZE) / FSIZE)
+}
+
+/**
+ * 就地编辑框该摆在哪儿、多大 —— **文字区盒子 × 缩放 + 画布偏移**，纯函数。
+ *
+ * 为什么不按整个节点框铺：编辑框必须与最终文字**同一个宽度**，否则断行位置都不一样
+ * （需求"输入时的效果与输入完成后一致"）。菱形/椭圆的文字区比节点窄，这一条尤其明显。
+ * 所以左/上/宽取 `labelTextBox`，高度取"节点框高与行数所需高度的大者"——
+ * 打到第 3 行时编辑框自己长高，不会把字裁掉。
+ *
+ * `ctm` 是 SVG 的屏幕变换（只有缩放与平移，没有旋转），`origin` 是画布容器左上角的屏幕坐标。
+ */
+function nodeEditorBox(node, text, ctm, origin) {
+  const scale = numberOr(ctm.a, 1)
+  const geo = nodeBoxOf(node)
+  const label = typeof text === 'string' ? text : ''
+  const textBox = labelTextBox({ node: node, geo: geo, text: label })
+  const size = nodeEditorTextSize(node, label)
+  // 高度：行数不够时就是原来那个节点框高（编辑一个小节点不该让它看起来先跳高），
+  // 行数超过时按行数长高 —— 打到第 3 行不会把字裁掉。
+  const boxH = Math.max(textBox.h, FALLBACK_NODE_H)
+  return {
+    left: textBox.x * scale + numberOr(ctm.e, 0) - origin.left,
+    top: (geo.y - (boxH - geo.h) / 2) * scale + numberOr(ctm.f, 0) - origin.top,
+    width: textBox.w * scale,
+    height: boxH * scale,
+    fontSize: size.fontSize * scale,
+    lineHeight: size.lineHeight * scale,
+    color: colorOf(node, 'light').font,
+    // 编辑框里的换行方式与画布上的标签一致：nowrap 的标签在编辑时也不换行。
+    wraps: size.wraps,
+  }
+}
+
+/**
+ * 标签的**文字区**（不是节点框）：文字在这里居中、也在这里换行。
+ *
+ * @param {{ node: object, geo: object, fontSize?: number }} args
+ * @returns {{ x: number, y: number, w: number, h: number, fontSize: number, lineHeight: number, color: string }}
+ *
+ * 就地编辑框（`openNodeEditor` 的 textarea）就按这个盒子摆 —— 同一宽度 → 同一断行位置，
+ * 同一字色字号行高 → 同一观感。需求里"输入时的效果与输入完成后不一致"根子就在
+ * 编辑框原来是个**单行 input**（不换行、字号写死 12px、颜色写死白色）。
+ * 不过不把字体样式返回出去：那是 CSS 的事，见 `.drawai-edit`。
+ */
+function labelTextBox(box) {
+  const geo = box.geo
+  const fontSize = numberOr(box.fontSize, styleNumber(typeof box.node.style === 'string' ? box.node.style : '', 'fontSize', FSIZE))
+  const w = Math.max(12, labelTextWidth(box.node, geo.w))
+  const lineHeight = labelLineHeight(fontSize)
+  const text = typeof box.text === 'string' ? box.text : typeof box.node.label === 'string' ? box.node.label : ''
+  const cols = labelWraps(box.node) ? wrapLabel(text, w, fontSize).length : 1
+  // 文字区的**左右边界**在节点里是居中的：右栏窄，菱形/椭圆的可用宽度比节点小很多，
+  // 从节点左边起排会让编辑框里的字整体偏左。
+  const x = geo.x + (geo.w - w) / 2
+  const h = Math.max(lineHeight * cols, lineHeight)
+  return { x: x, y: geo.y + Math.max(0, (geo.h - h) / 2), w: w, h: h, fontSize: fontSize, lineHeight: lineHeight }
+}
+
+/** 标签的字号与行高（就地编辑框要按它画字，否则输入时和输完后大小不一样）。 */
+function nodeEditorTextSize(node, text) {
+  const fontSize = styleNumber(typeof node.style === 'string' ? node.style : '', 'fontSize', FSIZE)
+  const lineHeight = labelLineHeight(fontSize)
+  // 不换行的标签（whiteSpace=nowrap）在编辑框里也不该换行 —— 否则一打字就换行、
+  // 一提交又缩回一行，正是"输入时/输完后不一致"。
+  const wraps = labelWraps(node)
+  const cols = wraps ? wrapLabel(typeof text === 'string' ? text : '', Math.max(12, labelTextWidth(node, numberOr(node.w, FALLBACK_NODE_W))), fontSize).length : 1
+  return { fontSize: fontSize, lineHeight: lineHeight, lines: cols, wraps: wraps }
+}
+
+/**
+ * 这个节点"装得下自己的文字"需要多高（含上下各半行留白）。
+ *
+ * 需求："节点内文字过多时，节点要纵向自动拉伸，避免文字溢出或被截断"。
+ * 这是**纯函数**：渲染（`buildGeometry` 用它算有效高度）、就地编辑框的尺寸、
+ * 以及落盘那一次自适应写回，三处都调它 —— 于是"看到的高度"和"盘上的高度"必然一致。
+ *
+ * 不适用/不打算拉伸的情形一律返回 0（= 不用长）：
+ *   · 不换行的标签（nowrap）—— 它本来就横向溢出，纵向拉伸解决不了；
+ *   · 独立文字（drawio 的 `text` 形状）—— 没有边框底色，拉高只是把透明命中框撑大。
+ */
+function nodeTextFitHeight(node) {
+  if (node === null || node === undefined || typeof node !== 'object') return 0
+  if (!labelWraps(node)) return 0
+  const shape = shapeOf(node)
+  if (shape === 'text') return 0
+  const w = numberOr(node.w, FALLBACK_NODE_W)
+  const label = typeof node.label === 'string' ? node.label : ''
+  if (label.length === 0) return 0
+  const fontSize = styleNumber(typeof node.style === 'string' ? node.style : '', 'fontSize', FSIZE)
+  const lines = wrapLabel(label, labelTextWidth(node, w), fontSize).length
+  if (lines <= 1) return 0
+  return (lines + 1) * labelLineHeight(fontSize)
+}
+
+/**
+ * 节点几何：文档里的高度，与"装得下文字所需的高度"取大者，再吸到整格。
+ *
+ * 取大不取小：用户把节点拉大了就保持大（拉伸只解决溢出，不做"自动缩回去"——
+ * 那会把用户特意留出的空白吃掉）。`h > stored` 就是"这一帧被文字撑高了"，
+ * 盘上的高度由 autoHeightPass 写回（见那里的说明）。
+ */
+function nodeBoxOf(node) {
+  const w = numberOr(node.w, FALLBACK_NODE_W)
+  const stored = numberOr(node.h, FALLBACK_NODE_H)
+  const x = numberOr(node.x, 0)
+  const y = numberOr(node.y, 0)
+  const need = nodeTextFitHeight(node)
+  if (need > stored) return { x: x, y: y, w: w, h: snapTo(need, GRID), stored: stored }
+  return { x: x, y: y, w: w, h: stored, stored: stored }
 }
 
 // ---- 正交折线路由：6 个候选 + 包围盒避让 ----
@@ -1483,30 +1638,83 @@ function clampNumber(value, lo, hi) {
 }
 
 /**
- * 文档内容的包围盒（不含留白）：节点框 **∪ 连线的几何**。
+ * 标签**画出来**的包围盒（用户单位）—— 与 `renderDiagram` 同一套文字区、断行与行高。
+ *
+ * 为什么标签要单独算：**节点框装不下文字是常态** ——
+ *   · `whiteSpace=nowrap` 的标签**天生横向溢出**（drawio 的语义就是不换行）；
+ *   · 字号调大、或单个宽字（一个汉字就是 12px 宽）比 `labelTextWidth` 还宽；
+ *   · 独立文字（`shape=text`）没有边框底色，既不换行也**不会**自动长高。
+ * 只算节点框的话，这些字会顶在导出图外面被切掉。
+ *
+ * 竖向按**行盒**算（行数 × 行高，首行基线上下各半行）：比字形实际高度略大一点，这是有意的 ——
+ * 宁可多留几像素，也不要"以为够了、其实切了半个字"。
+ *
+ * @returns {{minX:number,minY:number,maxX:number,maxY:number}|null} 没有文字就是 null
+ */
+function labelPaintBounds(node, geo) {
+  const label = typeof node.label === 'string' ? node.label : ''
+  if (label.length === 0) return null
+  const style = typeof node.style === 'string' ? node.style : ''
+  const fontSize = styleNumber(style, 'fontSize', FSIZE)
+  const lineHeight = labelLineHeight(fontSize)
+  const box = labelTextBox({ node: node, geo: geo, fontSize: fontSize })
+  // 与渲染同一处断行：maxWidth 就是那一个 labelTextWidth（nowrap = 一行到底）。
+  const lines = labelWraps(node) ? wrapLabel(label, box.w, fontSize) : [label]
+  let widest = 0
+  for (let i = 0; i < lines.length; i += 1) {
+    const w = textWidth(lines[i], fontSize)
+    if (w > widest) widest = w
+  }
+  // 渲染是"以节点中心为锚、多行整体居中"：首行基线 = 中心 - (行数-1)*行高/2。
+  const cx = geo.x + geo.w / 2
+  const first = geo.y + geo.h / 2 - ((lines.length - 1) * lineHeight) / 2
+  return {
+    minX: cx - widest / 2,
+    maxX: cx + widest / 2,
+    minY: first - lineHeight / 2,
+    maxY: first + (lines.length - 1) * lineHeight + lineHeight / 2,
+  }
+}
+
+/**
+ * 文档内容的包围盒（不含留白）：**节点框（渲染几何） ∪ 标签文字 ∪ 连线的几何**。
  *
  * 连线必须算进来：**独立线**（两端都是自由点）、**伸出节点外的折点**、悬空端的自由点，
  * 都属于"内容"。只算节点框的话，导出/看图会按节点框把线裁掉（实测：画好的猫，胡须与尾巴
  * 被切成贴着画框的两截，看图的人/AI 都会以为"线断了"），「视图 → 适应内容」也会看不全。
  *
- * 边自己的文字位置（labelX/labelY 是**沿边相对量**）算不出来 —— 它得先有走线。所以这一层
- * 只保证"线的几何"进来；标签由那 24px 的留白兜着。
+ * 文字同样算进来（见 `labelPaintBounds`），节点高度用**渲染几何** `nodeBoxOf`
+ * （被多行文字撑高的那一份）而不是盘上的 `h` —— 否则多行标签的下半截就在框外。
+ *
+ * 边自己的文字位置（labelX/labelY 是**沿边相对量**）这里仍算不出来 —— 它得先有走线；
+ * 导出那一路由 `paintedBounds` 兜住：它把渲染器**这一刻真会算出来的走线**也算进去
+ * （见 `buildExportSvg`）。
  */
 function contentBounds(doc) {
   let minX = Infinity
   let minY = Infinity
   let maxX = -Infinity
   let maxY = -Infinity
-  for (let i = 0; i < doc.nodes.length; i += 1) {
-    const n = doc.nodes[i]
-    const x = numberOr(n.x, 0)
-    const y = numberOr(n.y, 0)
-    const w = numberOr(n.w, FALLBACK_NODE_W)
-    const h = numberOr(n.h, FALLBACK_NODE_H)
-    if (x < minX) minX = x
-    if (y < minY) minY = y
-    if (x + w > maxX) maxX = x + w
-    if (y + h > maxY) maxY = y + h
+  const hidden = hiddenLayerIds(doc)
+  const nodes = Array.isArray(doc.nodes) ? doc.nodes : []
+  for (let i = 0; i < nodes.length; i += 1) {
+    const n = nodes[i]
+    if (n === null || n === undefined || typeof n !== 'object') continue
+    // 隐藏图层里的单元**不画**：框里也就不该为它留白（否则「适应内容」会缩得很小、
+    // 导出会白留一圈 —— 与 `paintedBounds` 同一个口径）。
+    if (isHiddenCell(hidden, n)) continue
+    const geo = nodeBoxOf(n)
+    if (geo.x < minX) minX = geo.x
+    if (geo.y < minY) minY = geo.y
+    if (geo.x + geo.w > maxX) maxX = geo.x + geo.w
+    if (geo.y + geo.h > maxY) maxY = geo.y + geo.h
+    const text = labelPaintBounds(n, geo)
+    if (text !== null) {
+      if (text.minX < minX) minX = text.minX
+      if (text.minY < minY) minY = text.minY
+      if (text.maxX > maxX) maxX = text.maxX
+      if (text.maxY > maxY) maxY = text.maxY
+    }
   }
   const edges = Array.isArray(doc.edges) ? doc.edges : []
   const grow = (point) => {
@@ -1522,12 +1730,96 @@ function contentBounds(doc) {
   for (let i = 0; i < edges.length; i += 1) {
     const e = edges[i]
     if (e === null || typeof e !== 'object') continue
+    if (isHiddenCell(hidden, e)) continue
     const points = Array.isArray(e.points) ? e.points : []
     for (let k = 0; k < points.length; k += 1) grow(points[k])
     grow(e.sourcePoint)
     grow(e.targetPoint)
   }
   if (!Number.isFinite(minX)) return { minX: 0, minY: 0, maxX: 1, maxY: 1 }
+  return { minX: minX, minY: minY, maxX: maxX, maxY: maxY }
+}
+
+/**
+ * **这一刻真会画出来**的东西的包围盒：节点框 ∪ 节点标签 ∪ 每条边的**实际走线** ∪ 线上的文字。
+ *
+ * 与 `contentBounds` 的分工：
+ *   · `contentBounds` 便宜、只认文档（盘上的折点、自由端点），用于「适应内容」与兜底；
+ *   · 这一份把渲染器**同一批函数**跑一遍（`buildGeometry` + `routeEdgeStyled`），
+ *     于是自动路由怎么绕、线上的文字被拖到了哪儿（`labelX/labelY` 是沿边相对量，
+ *     得先有走线才算得出）都算得出来 —— 导出的框和画出来的东西**同一个口径**。
+ *
+ * 为什么不用 `getBBox()` 量 DOM：那是"另一条真相"。实测过一次教训 —— 量出来的框
+ * 变成了**当前视口**（网格纸铺满视口，比内容大得多），导出图于是白留一大圈。
+ * 几何从同一份文档算，就不存在"量到的"和"画出来的"两套口径。
+ *
+ * 隐藏图层的内容**不算**（画布不画它，导出也就不该为它留白）；算不出来（空文档）返回 null。
+ */
+function paintedBounds(doc) {
+  if (doc === null || doc === undefined || typeof doc !== 'object') return null
+  const geometry = buildGeometry(doc)
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  const put = (x, y) => {
+    const px = Number(x)
+    const py = Number(y)
+    if (Number.isFinite(px) === false || Number.isFinite(py) === false) return
+    if (px < minX) minX = px
+    if (py < minY) minY = py
+    if (px > maxX) maxX = px
+    if (py > maxY) maxY = py
+  }
+  // 两种盒子形状别混：`labelPaintBounds` 给 minX/maxX/minY/maxY，`labelBox` 给 x/y/w/h。
+  const putBounds = (box) => {
+    if (box === null || box === undefined) return
+    put(box.minX, box.minY)
+    put(box.maxX, box.maxY)
+  }
+  const putRect = (rect) => {
+    if (rect === null || rect === undefined) return
+    put(rect.x, rect.y)
+    put(rect.x + rect.w, rect.y + rect.h)
+  }
+  for (let i = 0; i < geometry.boxes.length; i += 1) {
+    const box = geometry.boxes[i]
+    put(box.geo.x, box.geo.y)
+    put(box.geo.x + box.geo.w, box.geo.y + box.geo.h)
+    putBounds(labelPaintBounds(box.node, box.geo))
+  }
+  const hidden = hiddenLayerIds(doc)
+  const edges = Array.isArray(doc.edges) ? doc.edges : []
+  for (let i = 0; i < edges.length; i += 1) {
+    const edge = edges[i]
+    if (edge === null || edge === undefined || typeof edge !== 'object') continue
+    if (isHiddenCell(hidden, edge)) continue
+    const from = endpointBoxOf(geometry.byId, edge, 'source')
+    const to = endpointBoxOf(geometry.byId, edge, 'target')
+    if (from === null || to === null) continue
+    const pts = routeEdgeStyled(from, to, geometry.boxes, geometry.bounds, edge, undefined)
+    if (Array.isArray(pts) === false || pts.length === 0) continue
+    for (let k = 0; k < pts.length; k += 1) put(pts[k].x, pts[k].y)
+    // 线上的文字：位置与渲染**同一套**（edgeLabelPosition + labelBox），字号也取同一个缺省。
+    const edgeStyle = typeof edge.style === 'string' ? edge.style : ''
+    if (typeof edge.label === 'string' && edge.label.length > 0) {
+      const at = edgeLabelPosition(pts, edge)
+      const pos = at === null ? { x: pts[0].x, y: pts[0].y } : at
+      putRect(labelBox(pos, edge.label, styleNumber(edgeStyle, 'fontSize', 10)))
+    }
+    // drawio 的独立边标签单元（画布只读显示，但导出会画出来）。
+    const attached = Array.isArray(doc.labels) ? doc.labels : []
+    for (let L = 0; L < attached.length; L += 1) {
+      const item = attached[L]
+      if (item === null || item === undefined || item.edgeId !== edge.id) continue
+      const text = typeof item.text === 'string' ? item.text : ''
+      if (text.length === 0) continue
+      const pos = edgeLabelPointAt(pts, item.x, item.y, item.offsetX, item.offsetY)
+      if (pos === null) continue
+      putRect(labelBox(pos, text, styleNumber(item.style, 'fontSize', 10)))
+    }
+  }
+  if (Number.isFinite(minX) === false || Number.isFinite(minY) === false) return null
   return { minX: minX, minY: minY, maxX: maxX, maxY: maxY }
 }
 
@@ -1661,7 +1953,12 @@ function styleSummary(style, kind) {
  *
  * **隐藏图层的节点不进来** —— 这里是"什么可见"的唯一咽喉：渲染、命中（`hitNodeAt`）、
  * 框选、路由障碍全都读它，于是"隐藏一层"在这些地方自动一致（不会出现
- * "看不见却能点到/线还绕着它走"）。 */
+ * "看不见却能点到/线还绕着它走"）。
+ *
+ * 高度走 `nodeBoxOf`：**文字多的节点在这一层就被撑高**。放在这里而不是只在渲染里加高，
+ * 是因为渲染、命中、连线落点、框选读的都是这一份几何 —— 只改渲染会出现
+ * "线接在文字溢出前的旧边框上"，那正是要修掉的不一致。
+ */
 function buildGeometry(doc) {
   const hidden = hiddenLayerIds(doc)
   const boxes = []
@@ -1673,8 +1970,8 @@ function buildGeometry(doc) {
   for (let i = 0; i < doc.nodes.length; i += 1) {
     const n = doc.nodes[i]
     if (isHiddenCell(hidden, n)) continue
-    const geo = { x: numberOr(n.x, 0), y: numberOr(n.y, 0), w: numberOr(n.w, FALLBACK_NODE_W), h: numberOr(n.h, FALLBACK_NODE_H) }
-    const box = { id: n.id, node: n, geo: geo, label: typeof n.label === 'string' ? n.label : n.id }
+    const geo = nodeBoxOf(n)
+    const box = { id: n.id, node: n, geo: geo, label: typeof n.label === 'string' ? n.label : n.id, storedH: geo.stored }
     boxes.push(box)
     byId[n.id] = box
     if (geo.x < minX) minX = geo.x
@@ -3084,7 +3381,6 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     const box = boxes[i]
     const geo = box.geo
     const node = box.node
-    const shape = shapeOf(node)
     const selected = ui !== undefined && ui !== null && Array.isArray(ui.selectedIds) && ui.selectedIds.indexOf(node.id) >= 0
     // 形状 + 标签放在同一个 <g> 里承载指针事件 —— 让浏览器做命中测试，
     // 比自己算"点是否落在菱形内"可靠得多。
@@ -3151,39 +3447,46 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     }
     // 标签的画法也在文档里：fontSize / fontColor / whiteSpace。
     // whiteSpace=nowrap 不换行（drawio 的语义就是这个），其余（含缺省）按宽度换行。
+    //
+    // **正在就地编辑的节点不画标签**：编辑框是透明的（这样才能"输入时看到的就是输完后的样子"），
+    // 画出来的标签会从它底下透出来，两层字叠在一起。以前没这问题只是因为那个单行 input
+    // 带白底、把标签盖住了 —— 换成透明 textarea 之后必须显式让位。
+    const editingHere = ui !== undefined && ui !== null && ui.editingNodeId === node.id
     const labelStyle = typeof node.style === 'string' ? node.style : ''
     const labelFontSize = styleNumber(labelStyle, 'fontSize', FSIZE)
     const labelFill = colorOf(node, mode).font
-    const wrap = styleGet(labelStyle, 'whiteSpace', 'wrap') !== 'nowrap'
-    let maxText = geo.w - 12
-    if (shape === 'diamond') maxText = geo.w * 0.6
-    if (shape === 'ellipse') maxText = geo.w * 0.72
-    const lines = wrap ? wrapLabel(box.label, maxText) : [String(box.label)]
+    const boxText = labelTextBox({ node: node, geo: geo, fontSize: labelFontSize })
+    const lines = labelWraps(node) ? wrapLabel(box.label, boxText.w, labelFontSize) : [String(box.label)]
     const cx = geo.x + geo.w / 2
-    const lineHeight = LHEIGHT * (labelFontSize / FSIZE)
+    const lineHeight = labelLineHeight(labelFontSize)
     const first = geo.y + geo.h / 2 - ((lines.length - 1) * lineHeight) / 2
     const spans = []
     for (let li = 0; li < lines.length; li += 1) {
       spans.push(React.createElement('tspan', { key: 'l' + li, x: cx, dy: li === 0 ? 0 : lineHeight }, lines[li]))
     }
-    groupChildren.push(
-      React.createElement(
-        'text',
-        {
-          key: 'label-' + i,
-          x: cx,
-          y: first,
-          textAnchor: 'middle',
-          dominantBaseline: 'middle',
-          fontSize: labelFontSize,
-          fontFamily: FONT,
-          fill: labelFill,
-          pointerEvents: 'none',
-          style: { fill: labelFill, fontFamily: FONT, fontSize: labelFontSize + 'px', dominantBaseline: 'middle' },
-        },
-        spans,
-      ),
-    )
+    if (!editingHere) {
+      groupChildren.push(
+        React.createElement(
+          'text',
+          {
+            key: 'label-' + i,
+            x: cx,
+            y: first,
+            textAnchor: 'middle',
+            dominantBaseline: 'middle',
+            // 渲染出来的标签带上节点 id：一是自测能精确定位"哪个节点的标签在不在"，
+            // 二是排查"文字重叠 / 没画出来"时一眼能看出是哪一格。
+            'data-node-id': node.id,
+            fontSize: labelFontSize,
+            fontFamily: FONT,
+            fill: labelFill,
+            pointerEvents: 'none',
+            style: { fill: labelFill, fontFamily: FONT, fontSize: labelFontSize + 'px', lineHeight: lineHeight + 'px', dominantBaseline: 'middle' },
+          },
+          spans,
+        ),
+      )
+    }
     // 四面引出端点：上下左右各一个，从这里拖到另一个节点 = 连一条边，
     // 并且**记住是从哪一边引出的**（拖出来的线从那一边出来，不会按算法另挑一边）。
     // 位置推在边框外 16px —— 边框上有 8 个缩放手柄，挤在一起会点错。
@@ -3363,6 +3666,86 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
   }
 
   return React.createElement('svg', { ref: svgRef, viewBox: viewBox, width: '100%', height: '100%', preserveAspectRatio: 'none', style: { display: 'block', background: skin.page } }, children)
+}
+
+/**
+ * 选区锚点所属的那个 **DrawAI 面板根**（`.drawai-root`）；不在面板里就返回 null。
+ *
+ * 用它判断"这段选中的文字是不是画布自己的"。为什么一路往上找到面板根而不是看某个具体元素：
+ * 画布里的文字（节点标签、线上的字）各式各样，但都长在这一个面板下面。
+ *
+ * 注意 SVG 元素**没有 `closest`**，所以不能一遇到没有 closest 的节点就放弃 ——
+ * 节点标签的选区锚点正是一个 `<text>`，那会把"画布里的文字"误判成"外面的文字"。
+ */
+function drawaiPaneOf(node) {
+  let el = node
+  while (el !== null && el !== undefined) {
+    if (typeof el.closest === 'function') {
+      const found = el.closest('.drawai-root')
+      if (found !== null && found !== undefined) return found
+    }
+    el = el.parentNode
+  }
+  return null
+}
+
+/**
+ * 用户此刻选中的文字，是不是**画布面板之外**的（比如他自己在对话里划了一段准备复制）。
+ *
+ * 为什么需要这一条：画布的快捷键挂在 `window` 上，而 owner 判定只看"焦点在谁那儿"。
+ * 用户点过画布之后焦点就落在 body（`activeElement === null`）→ 判定为"画布拥有键盘"
+ * → Ctrl+C 被 `preventDefault()` 掉，**对话里的文字就复制不出来**（实测报过）。
+ * 所以在动手之前多问一句：你手里现在有没有一段"不属于画布"的选中文字？
+ */
+function hasTextSelectionOutside(root) {
+  if (root === null || root === undefined) return false
+  if (typeof window === 'undefined' || window === null || typeof window.getSelection !== 'function') return false
+  let selection = null
+  try {
+    selection = window.getSelection()
+  } catch (error) {
+    return false
+  }
+  if (selection === null || selection === undefined) return false
+  const text = typeof selection.toString === 'function' ? selection.toString() : ''
+  if (text.length === 0) return false
+  const anchor = selection.anchorNode
+  if (anchor === null || anchor === undefined) {
+    // 拿不到锚点（老浏览器/被清过）但确实有选中文字：**倾向放手** ——
+    // 让浏览器复制一次远比"按住 Ctrl+C 没反应"好。
+    return true
+  }
+  const pane = drawaiPaneOf(anchor)
+  return pane !== root
+}
+
+/**
+ * 清掉"残留在别处"的浏览器文字选区。
+ *
+ * 为什么需要：用户先在对话里划了一段字（选区留在那边），然后**点画布上的一个元素**。
+ * 点 SVG 不会清掉别处的选区 —— 于是接下来按 Ctrl+C 时，
+ * `hasTextSelectionOutside` 判定"你手里有画布外的选中文字"而放手，
+ * 结果**画布里的元素也复制不了**（实测报过："又无法复制画布中的元素了"）。
+ *
+ * 反过来看，这也正是用户期望的语义：我开始在画布上选东西了，
+ * 上一次那点文字高亮就该消失（drawio / Figma 都一样）。
+ *
+ * 护栏：
+ *   · 目标在**就地编辑框**里 → 不动（那是他自己在框里选字）；
+ *   · 只有左键才清（右键要留给"复制这段文字"的右键菜单）；
+ *   · 拿不到 selection 一律静默返回（老浏览器、测试环境）。
+ */
+function clearStaleTextSelection(target, button) {
+  if (button !== 0) return
+  if (target !== null && target !== undefined && typeof target.closest === 'function' && target.closest('.drawai-edit') !== null) return
+  if (typeof window === 'undefined' || window === null || typeof window.getSelection !== 'function') return
+  let selection = null
+  try {
+    selection = window.getSelection()
+  } catch (error) {
+    return
+  }
+  if (selection !== null && selection !== undefined && typeof selection.removeAllRanges === 'function') selection.removeAllRanges()
 }
 
 /**
@@ -4530,7 +4913,13 @@ function CanvasView(props) {
     })
   }
 
-  /** 打开节点的就地编辑框。双击与右键菜单共用同一套定位。 */
+  /**
+   * 打开节点的就地编辑框。双击与右键菜单共用同一套定位。
+   *
+   * 位置/尺寸/字号全部由 `nodeEditorBox` 算 —— 它按**这个节点的文字区**摆，
+   * 于是编辑框里的断行与字号跟提交后画出来的标签一模一样（需求"输入时的效果与
+   * 输入完成后统一"）。定位仍然换算到**画布容器**的坐标系（画布是定位上下文）。
+   */
   function openNodeEditor(id) {
     const node = nodeById(id)
     const svg = svgRef.current
@@ -4538,20 +4927,14 @@ function CanvasView(props) {
     if (node === null || svg === null || canvas === null) return
     const ctm = svg.getScreenCTM()
     if (ctm === null) return
-    // CTM 只有缩放与平移（没有旋转），屏幕位置 = 用户坐标 × scale + 平移。
     const rect = canvas.getBoundingClientRect()
-    const scale = ctm.a
     setSelectedIds([id])
     setMenu(null)
-    setEditing({
-      kind: 'node',
-      id: id,
-      text: typeof node.label === 'string' ? node.label : '',
-      left: numberOr(node.x, 0) * scale + ctm.e - rect.left,
-      top: numberOr(node.y, 0) * scale + ctm.f - rect.top,
-      width: numberOr(node.w, FALLBACK_NODE_W) * scale,
-      height: numberOr(node.h, FALLBACK_NODE_H) * scale,
-    })
+    const text = typeof node.label === 'string' ? node.label : ''
+    const box = nodeEditorBox(node, text, ctm, { left: rect.left, top: rect.top })
+    setEditing(
+      Object.assign({ kind: 'node', id: id, text: text }, box),
+    )
   }
 
   function onNodeDoubleClick(id, event) {
@@ -4937,7 +5320,12 @@ function CanvasView(props) {
     for (let i = 0; i < junk.length; i += 1) {
       if (junk[i].parentNode !== null) junk[i].parentNode.removeChild(junk[i])
     }
-    const bounds = contentBounds(current)
+    // 框按**这一刻会画出来的东西**取：`paintedBounds` 用渲染器同一批函数算出
+    // 节点框、标签、每条边的实际走线与线上的文字（与 `renderDiagram` 同一个口径）。
+    // 少了任何一样，导出图都会"画上有、图里没有"；而如果按 DOM 的 getBBox 去量，
+    // 铺满视口的网格纸会把框撑成整个视口 —— 那正是"导出图白留一大圈"的来源。
+    const bounds = paintedBounds(current) || contentBounds(current)
+    // 24px 留白兜住几何**算不到**的东西：描边宽度与箭头（marker）。
     const pad = 24
     const w = Math.max(1, bounds.maxX - bounds.minX + pad * 2)
     const h = Math.max(1, bounds.maxY - bounds.minY + pad * 2)
@@ -5186,25 +5574,36 @@ function CanvasView(props) {
     return 'e' + (max + 1)
   }
 
+  /** 新节点：形状与配色都落成 drawio 的 style 键，高度**一开始就装得下自己的标签**。 */
+  function freshNode(id, shape, styleName, userX, userY, label) {
+    const isText = shape === 'text'
+    const text = typeof label === 'string' ? label : isText ? '文字' : '新节点'
+    const node = {
+      id: id,
+      label: text,
+      // 形状与配色都落成 drawio 的 style 键：rect/plain 落成空串（= drawio 的 defaultVertexStyle）。
+      // 文字**不吃配色**：它的样式就是 drawio 的 defaultTextStyle（无边框无底色），
+      // 往上盖 fillColor/strokeColor 只会让文件与 drawio 不一致，画面上也什么都看不出来。
+      style: isText ? styleWithNodeShape('', shape) : styleWithColorName(styleWithNodeShape('', shape), styleName),
+      x: snap(userX - NEW_NODE_W / 2),
+      y: snap(userY - NEW_NODE_H / 2),
+      w: NEW_NODE_W,
+      h: NEW_NODE_H,
+    }
+    // 与 autoHeightPass 同一套规则：新建时就落成撑开后的高度，
+    // 免得"新节点先按原样画一帧、再被自动长高"多出一步莫名其妙的撤销历史。
+    const fit = nodeTextFitHeight(node)
+    if (fit > node.h) node.h = snapTo(fit, GRID)
+    return node
+  }
+
   function createNodeAt(shape, styleName, userX, userY) {
     const current = docRef.current
     if (current === null) return
     const id = nextNodeId(current)
     const isText = shape === 'text'
-    // 形状与配色都落成 drawio 的 style 键：rect/plain 落成空串（= drawio 的 defaultVertexStyle）。
-    // 文字**不吃配色**：它的样式就是 drawio 的 defaultTextStyle（无边框无底色），
-    // 往上盖 fillColor/strokeColor 只会让文件与 drawio 不一致，画面上也什么都看不出来。
-    const style = isText ? styleWithNodeShape('', shape) : styleWithColorName(styleWithNodeShape('', shape), styleName)
     applyLocal((next) => {
-      const node = {
-        id: id,
-        label: isText ? '文字' : '新节点',
-        style: style,
-        x: snap(userX - NEW_NODE_W / 2),
-        y: snap(userY - NEW_NODE_H / 2),
-        w: NEW_NODE_W,
-        h: NEW_NODE_H,
-      }
+      const node = freshNode(id, shape, styleName, userX, userY)
       // 新节点进**当前图层**（没设过就是第一层）—— drawio 的"当前图层"就是这个意思。
       if (activeLayerId !== null) node.layer = activeLayerId
       next.nodes.push(node)
@@ -5681,7 +6080,9 @@ function CanvasView(props) {
     const ctm = svg.getScreenCTM()
     if (ctm === null) return
     const rect = canvas.getBoundingClientRect()
+    // 只有连线标签那一支用这两个（节点那一支整份交给 nodeEditorBox 算）。
     const scale = ctm.a
+    const toCanvas = { left: rect.left, top: rect.top }
     let next = null
     if (editing.kind === 'node') {
       const node = nodeById(editing.id)
@@ -5689,12 +6090,8 @@ function CanvasView(props) {
         setEditing(null)
         return
       }
-      next = {
-        left: numberOr(node.x, 0) * scale + ctm.e - rect.left,
-        top: numberOr(node.y, 0) * scale + ctm.f - rect.top,
-        width: numberOr(node.w, FALLBACK_NODE_W) * scale,
-        height: numberOr(node.h, FALLBACK_NODE_H) * scale,
-      }
+      // 连**打字的内容**一起交给纯函数：行数变了编辑框就长高，断行位置也与画出来的标签一致。
+      next = nodeEditorBox(node, editing.text, ctm, toCanvas)
     } else {
       const edge = edgeById(editing.id)
       if (edge === null) {
@@ -5713,6 +6110,42 @@ function CanvasView(props) {
       Math.abs(next.height - editing.height) > 0.5
     if (moved) setEditing(Object.assign({}, editing, next))
   })
+
+  /**
+   * 文字撑高的节点：把"有效高度"写回文档。
+   *
+   * 为什么需要这一步：`buildGeometry` 已经让**看到**的高度随机长，但文件里的 `h` 还是旧的。
+   * 不写回去的话，"盘上的图"与"屏幕上的图"不一致 —— 导出/别人用 drawio 打开、
+   * 以及 AI 读回来的坐标都会是溢出前的高度。
+   *
+   * 四个约定：
+   *   · **只长不缩**：`nodeTextFitHeight` 比现在矮时一个字都不动（不把用户拉大的空白吃掉）；
+   *   · 走 `applyLocal` 但用**同一个 coalesceKey**：一次加载里多个节点需要调整只压一步撤销历史；
+   *   · 高度取整格（`snapTo(…, GRID)`）—— 与"新建节点的尺寸都整格"同一条理由：
+   *     中心落在半像素上，连线的自动路由会多出"差一像素"的台阶；
+   *   · 没打开文件的空舞台不写（`hasPath`），否则"新建画布"会在用户还没命名时就把文件落盘。
+   */
+  React.useEffect(() => {
+    if (hasPath !== true) return
+    const current = docRef.current
+    if (current === null || Array.isArray(current.nodes) === false) return
+    let changed = false
+    for (let i = 0; i < current.nodes.length; i += 1) {
+      const n = current.nodes[i]
+      if (nodeTextFitHeight(n) > numberOr(n.h, FALLBACK_NODE_H)) {
+        changed = true
+        break
+      }
+    }
+    if (changed === false) return
+    applyLocal((next) => {
+      for (let i = 0; i < next.nodes.length; i += 1) {
+        const n = next.nodes[i]
+        const fit = nodeTextFitHeight(n)
+        if (fit > numberOr(n.h, FALLBACK_NODE_H)) n.h = snapTo(fit, GRID)
+      }
+    }, 'auto-height')
+  }, [doc, hasPath])
 
   function onEdgeDoubleClick(edgeId, event) {
     event.preventDefault()
@@ -5901,6 +6334,19 @@ function CanvasView(props) {
       // 于是输入框里按退格会删掉画布里的选中内容、Ctrl+C/V 也被吞掉。
       if (!canvasOwnsKeyboard(event, rootRef.current, document.activeElement)) return
       const accel = event.ctrlKey === true || event.metaKey === true
+      // **用户手里有"画布之外"的选中文字时，Ctrl+C/X/A 交给浏览器**。
+      //
+      // 为什么：焦点在 body（点过画布之后就是这样）也算"画布拥有键盘"，于是
+      // 用户在对话里划了一段字按 Ctrl+C，被这里 preventDefault 掉 —— 复制不出任何东西
+      // （实测报过）。只放开这三个"浏览器本来就能做对"的组合：复制 / 剪切 / 全选；
+      // 撤销、粘贴、删除仍然归画布（那些在对话里由 DSH 自己处理，不靠我们的窗口监听）。
+      //
+      // 半路踩过的坑：**画布里有选中元素时不能放手**。用户先在对话里划了字、再点画布上的
+      // 元素，那次点击不会清掉别处的选区，于是"外部有选区"成立、Ctrl+C 被让给浏览器，
+      // 画布里的元素就**复制不了**了。所以判据是两条同时成立：画布空着 **且** 外面有选中的字。
+      if (accel && (event.key === 'c' || event.key === 'C' || event.key === 'x' || event.key === 'X' || event.key === 'a' || event.key === 'A')) {
+        if (selectedIds.length === 0 && hasTextSelectionOutside(rootRef.current)) return
+      }
       if (accel && (event.key === 'z' || event.key === 'Z')) {
         event.preventDefault()
         if (event.shiftKey === true) redo()
@@ -6315,6 +6761,8 @@ function CanvasView(props) {
   const zoomPercent = view === null || size.w <= 0 ? 100 : Math.round((size.w / view.w) * 100)
 
   const singleSelectedNodeId = selectedIds.length === 1 && nodeById(selectedIds[0]) !== null ? selectedIds[0] : null
+  // 正在就地编辑的那个节点：渲染时要把它的标签**让位**给编辑框（否则两层字叠在一起）。
+  const editingNodeId = editing !== null && editing.kind === 'node' ? editing.id : null
 
   const ui = {
     selectedIds: selectedIds,
@@ -6322,6 +6770,7 @@ function CanvasView(props) {
     routeMemory: routeMemoryRef.current,
     marquee: marquee,
     singleSelectedNodeId: singleSelectedNodeId,
+    editingNodeId: editingNodeId,
     connectFrom: connectFrom,
     connectTo: connectTo,
     connectSide: connectSide,
@@ -6381,19 +6830,41 @@ function CanvasView(props) {
     return React.createElement('div', { className: 'drawai-swatches' }, buttons)
   }
 
-  /** 元素库用 shapeElement 自己画缩略图 —— 库里的预览和画布上的形状永远一致。 */
-  function shapeGrid(onPick) {
+  /**
+   * 元素库：**全部形状直接平铺**（不再收进下拉列表）。
+   *
+   * 需求："去掉形状的下拉列表选择方式，把形状直接排开、平铺展示"。点一个形状就是**动作本身**：
+   *  · 空白处右键（`picker` 为 null）→ 直接在那个位置新增一个该形状的节点；
+   *  · 节点右键（传了 `picker`）→ 直接把选中的节点换成那个形状。
+   * 两种菜单都调用同一个 onPick，「＋ 新增节点」那个按钮因此不需要了。
+   *
+   * 缩略图仍然由 `shapeElement` 自己画 —— 库里的预览与画布上的形状永远一致。
+   *
+   * @param {(shape: string) => void} onPick
+   * @param {{ color?: string, current?: string }} opts
+   *        color：缩略图用的配色（节点菜单按这个节点现在的配色画，空白处按当前选中的配色画）；
+   *        current：当前形状，给它加一圈"选中"的高亮。
+   */
+  function shapeGrid(onPick, opts) {
+    const options = opts === undefined || opts === null ? {} : opts
+    const color = typeof options.color === 'string' ? options.color : menuStyle
+    const current = typeof options.current === 'string' ? options.current : ''
     const buttons = []
     for (let i = 0; i < SHAPE_LIBRARY.length; i += 1) {
       const entry = SHAPE_LIBRARY[i]
       // node 与 palette 必须来自同一个 colorOf —— shapeElement 的描边取自 style，填充取自 palette，
       // 只传 palette 不传 style 的话，缩略图会变成"默认填充 + 主题描边"。
-      const chipNode = { style: styleWithColorName(styleWithNodeShape('', entry.shape), menuStyle) }
+      const chipNode = { style: styleWithColorName(styleWithNodeShape('', entry.shape), color) }
       const palette = colorOf(chipNode, 'light')
       buttons.push(
         React.createElement(
           'button',
-          { key: 'shape-' + entry.shape, className: 'drawai-chip', title: entry.label, onClick: () => onPick(entry.shape) },
+          {
+            key: 'shape-' + entry.shape,
+            className: current === entry.shape ? 'drawai-chip on' : 'drawai-chip',
+            title: entry.label,
+            onClick: () => onPick(entry.shape),
+          },
           React.createElement(
             'svg',
             { width: 44, height: 30, viewBox: '0 0 44 30' },
@@ -6477,11 +6948,14 @@ function CanvasView(props) {
   /**
    * 把若干"类"渲染成**一行横排的当前值按钮** + （打开的那一类的）选项体。
    *
-   * 一类只占一个按钮：`形状：矩形 ▾`，几个类并排在同一行里（放不下就换行 —— 右栏窄，
+   * 一类只占一个按钮：`配色：蓝 ▾`，几个类并排在同一行里（放不下就换行 —— 右栏窄，
    * 连线的四类会折成两行）。点某一类才把它的选项铺在下面**整行**里。
    *
    * 以前两类做法都试过：全部选项铺在菜单里（一屏都是按钮、看不出现在是什么）、
    * 一类占一整行（菜单太矮太长的竖条）。现在这样菜单更矮，一眼能看到每一类的当前值。
+   *
+   * **形状不再走这里**：需求要的是"把形状直接排开、平铺展示"，所以形状用 `shapeGrid`
+   * 常驻平铺（见 drawai-pick），点一下就生效。这里剩下的是配色/字色/字号/线型/箭头。
    *
    * 展开状态记在 menu 对象上（`menu.openKey`）—— 换一个元素右键时 menu 是新对象，下拉自然收起；
    * 同一个菜单里点另一类会把上一类收起来。
@@ -6557,22 +7031,19 @@ function CanvasView(props) {
     }
 
     if (menu.kind === 'canvas') {
-      rows.push(menuTitle('元素库 —— 选一个放到这里'))
-      // 形状/配色也只显示"当前值"（并排一行），选项在下拉里；
-      // 「＋ 新增节点」放的就是当前形状 + 当前配色。
+      rows.push(menuTitle('元素库 —— 点一个形状，就在这里放一个'))
+      // 形状**平铺**（需求：去掉下拉、直接排开），点某个形状 = 直接在这里新增该形状的节点。
+      // 原来的「＋ 新增节点」按钮因此没有了：它做的事（用"当前形状"放一个）现在就是
+      // "点那个形状自己"，少一步"先在下拉里选中、再点新增"。
+      rows.push(React.createElement('div', { key: 'shape-pick', className: 'drawai-pick' }, menuTitle('形状（点一下直接新建）'), shapeGrid((shape) => {
+        setMenuShape(shape)
+        createNodeAt(shape, menuStyle, menu.userX, menu.userY)
+      }, { color: menuStyle, current: menuShape })))
+      // 配色仍然只显示当前值：8 个色块 + 10 个形状缩略图都平铺会把菜单撑成一屏。
+      // 它与形状是**两件事**（形状决定放什么，配色决定放出来的颜色），所以留在这一行里。
       rows.push.apply(
         rows,
         menuSelectRow([
-          {
-            key: 'shape',
-            label: '形状',
-            value: styleSummary(styleWithNodeShape('', menuShape), 'shape'),
-            hint: '换一个形状（「＋ 新增节点」用的就是它）',
-            body: shapeGrid((shape) => {
-              setMenuShape(shape)
-              closeSelect()
-            }),
-          },
           {
             key: 'color',
             label: '配色',
@@ -6585,21 +7056,13 @@ function CanvasView(props) {
           },
         ]),
       )
-      // 工具条的「＋ 节点」去掉之后，这里补一格"不挑形状、就放一个"的快捷入口：
-      // 和上面点某个形状等价（同一个 createNodeAt、同一套新 id 规则），
-      // 但不是每个人都记得九宫格里哪个是自己要的方框。
+      // 这一排只剩下**独立连线**两种：文字已经在上面那片形状里了
+      // （「文字」就是其中一个缩略图，点它一样是 `createNodeAt('text', …)`）——
+      // 同一件事摆两个入口只会让人猜"这两个是不是不一样"。
       rows.push(
         React.createElement(
           'div',
           { className: 'drawai-menu-row' },
-          React.createElement('button', { className: 'drawai-btn', onClick: () => createNodeAt(menuShape, menuStyle, menu.userX, menu.userY) }, '＋ 新增节点'),
-          // 独立文字：一个只有文字、没有边框底色的元素（drawio 的 text 形状）。
-          // 放在这里的原因是"要在哪就放哪"：它不接节点、也不接边，位置就是点的地方。
-          React.createElement(
-            'button',
-            { className: 'drawai-btn', onClick: () => createNodeAt('text', menuStyle, menu.userX, menu.userY), title: '放一段独立文字（无边框无底色，可拖动/改字/改字色）' },
-            'T 文字',
-          ),
           // 独立线：两端都不接节点（drawio 里的自由形态），之后拖端点就能接到节点上。
           React.createElement(
             'button',
@@ -6647,22 +7110,18 @@ function CanvasView(props) {
       rows.push(menuTitle('节点：' + label + (nodeTargets.length > 1 ? '（共 ' + nodeTargets.length + ' 个）' : '')))
       // 形状与配色都改成**键级改写**：不再往文档里写 shape 字段，也不再用颜色名当 style。
       // 整组改色时以**点中的那个**的当前样式为基准（把它的配色推广给其它成员）。
-      // 三个类并排成一行、各自只显示当前值（形状：矩形 ▾ / 配色：蓝 ▾ / 字号：默认 ▾），
-      // 点开的那一类把选项铺在下面整行里。
+      // 形状**平铺**（需求：去掉下拉）：点一个缩略图就把选中的节点换成那个形状。
+      // 配色/字色/字号仍然走「类：当前值 ▾」那一排（它们的选项是与形状并列的另一回事）。
       // 配色对独立文字换的是**字色**（它没有填充与描边）—— 否则点了一圈颜色屏幕上毫无变化。
       const isTextNode = nodeShapeFromStyle(nodeStyle) === 'text'
+      const currentShape = nodeShapeFromStyle(nodeStyle)
+      // 缩略图用的配色：认得出的调色板名照用；认不出的（drawio 文件里本来就只有十六进制）
+      // 退回缺省色画缩略图 —— 这里只是预览，不写文档。
+      const chipColor = colorNameFromStyle(nodeStyle)
+      rows.push(React.createElement('div', { key: 'shape-pick', className: 'drawai-pick' }, shapeGrid((shape) => updateNode(nodeTargets, { style: styleWithNodeShape(nodeStyle, shape) }), { color: chipColor === null ? 'plain' : chipColor, current: currentShape })))
       rows.push.apply(
         rows,
         menuSelectRow([
-          {
-            key: 'shape',
-            label: '形状',
-            value: styleSummary(nodeStyle, 'shape'),
-            body: shapeGrid((shape) => {
-              updateNode(nodeTargets, { style: styleWithNodeShape(nodeStyle, shape) })
-              closeSelect()
-            }),
-          },
           {
             key: 'color',
             label: isTextNode ? '字色' : '配色',
@@ -7238,6 +7697,9 @@ function CanvasView(props) {
   function onRootPointerDown(event) {
     const target = event === null || event === undefined ? null : event.target
     const closest = target !== null && target !== undefined && typeof target.closest === 'function' ? target.closest.bind(target) : null
+    // ③ 在画布上按下 = "我要操作画布了"：把残留在别处（比如对话里）的文字选区清掉。
+    //    不清的话，画布的新元素会因为"外面还有选中文字"而复制不了（见 clearStaleTextSelection）。
+    clearStaleTextSelection(target, event === null || event === undefined ? undefined : event.button)
     if (editing !== null && (closest === null || closest('.drawai-edit') === null)) commitEdit()
     if (docMenu === null) return
     if (closest !== null && closest('.drawai-menu') !== null) return
@@ -7448,34 +7910,54 @@ function CanvasView(props) {
     const menuNode = renderMenu()
     if (menuNode !== null) canvasChildren.push(menuNode)
     if (editing !== null) {
-      // 就地改标签：用 HTML input 绝对定位盖在节点上。
+      // 就地改标签：用**绝对定位的元素盖在节点的文字区上**。
       // 不用 SVG foreignObject —— React 会把 <svg> 后代一律建成 SVG 命名空间元素，
-      // 里面的 <input> 不会按 HTML 渲染。
+      // 里面的输入控件不会按 HTML 渲染。
+      //
+      // 节点用 textarea（能换行、能长高），连线标签仍然是一行 input：
+      // 需求"输入过程中也要自动换行"针对的是节点里的长文字。
+      const isNodeEditor = editing.kind === 'node'
+      const editorStyle = {
+        left: editing.left + 'px',
+        top: editing.top + 'px',
+        width: Math.max(isNodeEditor ? 24 : 60, editing.width) + 'px',
+        height: Math.max(isNodeEditor ? 24 : 24, editing.height) + 'px',
+      }
+      if (isNodeEditor) {
+        // 字号/行高/字色按这个节点给：编辑时看到的字，就是提交后画出来的字。
+        editorStyle.fontSize = Math.max(1, numberOr(editing.fontSize, FSIZE)) + 'px'
+        editorStyle.lineHeight = Math.max(1, numberOr(editing.lineHeight, LHEIGHT)) + 'px'
+        editorStyle.color = editing.color === undefined || editing.color === null ? '#000000' : editing.color
+        // whiteSpace=nowrap 的标签在编辑框里也不换行（否则一打字就换行、一提交又缩回一行）。
+        if (editing.wraps === false) {
+          editorStyle.whiteSpace = 'pre'
+          editorStyle.wordBreak = 'normal'
+          editorStyle.overflowX = 'auto'
+        }
+      }
+      const editorProps = {
+        key: 'label-editor',
+        className: 'drawai-edit',
+        autoFocus: true,
+        value: editing.text,
+        style: editorStyle,
+        // 保留 kind 等全部字段：这里曾经重建对象时漏了 kind，于是"编辑过再平移"会走错分支。
+        onChange: (event) => setEditing(Object.assign({}, editing, { text: event.target.value })),
+        onBlur: commitEdit,
+        onKeyDown: (event) => {
+          // Enter 提交、Esc 取消；**Shift+Enter 换行**（多行标签的入口 ——
+          // 原来它是个单行 input，连手写多行标签都做不到）。
+          if (event.key === 'Enter' && event.shiftKey !== true) {
+            event.preventDefault()
+            commitEdit()
+          } else if (event.key === 'Escape') {
+            event.preventDefault()
+            setEditing(null)
+          }
+        },
+      }
       canvasChildren.push(
-        React.createElement('input', {
-          key: 'label-editor',
-          className: 'drawai-edit',
-          autoFocus: true,
-          value: editing.text,
-          style: {
-            left: editing.left + 'px',
-            top: editing.top + 'px',
-            width: Math.max(60, editing.width) + 'px',
-            height: Math.max(24, editing.height) + 'px',
-          },
-          // 保留 kind 等全部字段：这里曾经重建对象时漏了 kind，于是"编辑过再平移"会走错分支。
-          onChange: (event) => setEditing(Object.assign({}, editing, { text: event.target.value })),
-          onBlur: commitEdit,
-          onKeyDown: (event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              commitEdit()
-            } else if (event.key === 'Escape') {
-              event.preventDefault()
-              setEditing(null)
-            }
-          },
-        }),
+        isNodeEditor ? React.createElement('textarea', editorProps) : React.createElement('input', editorProps),
       )
     }
     body = React.createElement(
@@ -7833,11 +8315,23 @@ exports.__routeInternals = {
   defaultLayer: defaultLayer,
   styleSummary: styleSummary,
   clampFontSize: clampFontSize,
+  // 文字自适应高度：纯函数，自测直接喂节点夹具断言高度
+  //（也断言编辑框的定位/宽度与最终标签用的是同一套文字区）。
+  nodeTextFitHeight: nodeTextFitHeight,
+  nodeBoxOf: nodeBoxOf,
+  labelTextBox: labelTextBox,
+  labelTextWidth: labelTextWidth,
+  labelWraps: labelWraps,
+  labelLineHeight: labelLineHeight,
+  nodeEditorBox: nodeEditorBox,
+  wrapLabel: wrapLabel,
   pathFromAddress: pathFromAddress,
   computeFitView: computeFitView,
   resizeViewFor: resizeViewFor,
   zoomViewAt: zoomViewAt,
   contentBounds: contentBounds,
+  labelPaintBounds: labelPaintBounds,
+  paintedBounds: paintedBounds,
   edgeLabelPointAt: edgeLabelPointAt,
   edgeLabelPosition: edgeLabelPosition,
   relativePointOnPath: relativePointOnPath,
@@ -7897,6 +8391,10 @@ exports.__routeInternals = {
   // 按键归属：谁在打字、这次按键算不算画布的 —— 纯函数，自测直接喂假 DOM 节点。
   isTextEntry: isTextEntry,
   canvasOwnsKeyboard: canvasOwnsKeyboard,
+  // 「你有没有选中画布之外的文字」——决定 Ctrl+C/X/A 放不放手让浏览器去复制。
+  hasTextSelectionOutside: hasTextSelectionOutside,
+  drawaiPaneOf: drawaiPaneOf,
+  clearStaleTextSelection: clearStaleTextSelection,
   ensurePinned: ensurePinned,
   SIDES: SIDES,
   HOT_PAD: HOT_PAD,

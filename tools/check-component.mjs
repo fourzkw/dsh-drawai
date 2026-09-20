@@ -495,6 +495,9 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
       'setDocMenuPos',
       'editing',
       'commitEdit',
+      // 这个函数体里调用的每一个自由变量都得从那五个参数里来，否则孤立求值时
+      // 直接 ReferenceError —— 这本身就是一种"接线检查"（新加依赖必须显式登记）。
+      'clearStaleTextSelection',
       'return function onRootPointerDown(event) ' + body,
     )(
       docMenuValue,
@@ -502,8 +505,9 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
       (v) => calls.push('pos:' + String(v)),
       editingValue === undefined ? null : editingValue,
       () => calls.push('commit'),
+      (target, button) => calls.push('clear-sel:' + String(button)),
     )
-    fn({ target: target })
+    fn({ target: target, button: 0 })
     return calls
   }
 
@@ -511,21 +515,29 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
   const targetInside = (sel) => ({ closest: (s) => (s === sel ? { className: sel } : null) })
   const targetOutside = { closest: () => null }
 
-  ok(runPointer(null, targetOutside).length === 0, '菜单没开、也没在编辑时什么都不做')
-  ok(runPointer('file', targetOutside).join(',') === 'menu:null,pos:null', '点画布/标签条（外面）→ 关掉菜单与位置：' + runPointer('file', targetOutside).join(','))
-  ok(runPointer('file', targetInside('.drawai-menu')).length === 0, '点菜单自己（选项/输入框/按钮）→ 不关')
-  ok(runPointer('file', targetInside('.drawai-menu-trigger')).length === 0, '点开菜单的那个按钮 → 不在这里关（交给它自己的 toggle：点同一个是关、点另一个是换）')
-  ok(runPointer('file', targetInside('.drawai-tools')).join(',') === 'menu:null,pos:null', '只放过"开菜单的按钮"，不是整个工作栏（点按钮之间的缝 = 外面 → 关）')
-  ok(runPointer('open', targetOutside).join(',') === 'menu:null,pos:null', '「打开/新建/另存为」面板同样点外面就关')
+  // `clearStaleTextSelection` 每次按下都会被调一次（它在最前面），下面这些断言看的是
+  // **它之后**发生了什么 —— 所以统一先摘掉那一格。
+  const CLEAR = 'clear-sel:0'
+  const rest = (calls) => (calls[0] === CLEAR ? calls.slice(1) : calls)
+
+  ok(rest(runPointer(null, targetOutside)).length === 0, '菜单没开、也没在编辑时什么都不做')
+  ok(rest(runPointer('file', targetOutside)).join(',') === 'menu:null,pos:null', '点画布/标签条（外面）→ 关掉菜单与位置：' + rest(runPointer('file', targetOutside)).join(','))
+  ok(rest(runPointer('file', targetInside('.drawai-menu'))).length === 0, '点菜单自己（选项/输入框/按钮）→ 不关')
+  ok(rest(runPointer('file', targetInside('.drawai-menu-trigger'))).length === 0, '点开菜单的那个按钮 → 不在这里关（交给它自己的 toggle：点同一个是关、点另一个是换）')
+  ok(rest(runPointer('file', targetInside('.drawai-tools'))).join(',') === 'menu:null,pos:null', '只放过"开菜单的按钮"，不是整个工作栏（点按钮之间的缝 = 外面 → 关）')
+  ok(rest(runPointer('open', targetOutside)).join(',') === 'menu:null,pos:null', '「打开/新建/另存为」面板同样点外面就关')
   // 目标没有 closest（例如事件落在 document 上）时，它一定不在菜单里 → 该关
-  ok(runPointer('file', {}).join(',') === 'menu:null,pos:null', '事件目标没有 closest（document 之类）→ 关掉')
+  ok(rest(runPointer('file', {})).join(',') === 'menu:null,pos:null', '事件目标没有 closest（document 之类）→ 关掉')
+  // 新加的那一步：每次按下都先把"残留在别处的文字选区"清掉（否则会挡住画布的复制）
+  ok(runPointer(null, targetOutside)[0] === CLEAR, '在画布上按下时先清一次别处的文字选区（clearStaleTextSelection 真的被调了）')
+  ok(runPointer('file', targetInside('.drawai-menu')).indexOf(CLEAR) === 0, '点菜单里的按钮同样先清（菜单也是画布的一部分）')
 
   // 文字输入框：外面按一下 → 提交（画布的 preventDefault 挡掉了 blur，只能自己判）
   const EDIT = { kind: 'node', id: 'n1', text: 'x' }
-  ok(runPointer(null, targetOutside, EDIT).join(',') === 'commit', '编辑中点到画布空白 → 提交并退出：' + runPointer(null, targetOutside, EDIT).join(','))
-  ok(runPointer(null, targetInside('.drawai-edit'), EDIT).length === 0, '点输入框自己（选字/移动光标）→ 不提交')
-  ok(runPointer(null, targetOutside, null).length === 0, '没在编辑时不会平白提交一次')
-  ok(runPointer('file', targetOutside, EDIT).join(',') === 'commit,menu:null,pos:null', '两件事可以同时发生：提交文字 + 收掉菜单')
+  ok(rest(runPointer(null, targetOutside, EDIT)).join(',') === 'commit', '编辑中点到画布空白 → 提交并退出：' + rest(runPointer(null, targetOutside, EDIT)).join(','))
+  ok(rest(runPointer(null, targetInside('.drawai-edit'), EDIT)).length === 0, '点输入框自己（选字/移动光标）→ 不提交')
+  ok(rest(runPointer(null, targetOutside, null)).length === 0, '没在编辑时不会平白提交一次')
+  ok(rest(runPointer('file', targetOutside, EDIT)).join(',') === 'commit,menu:null,pos:null', '两件事可以同时发生：提交文字 + 收掉菜单')
   // 输入框的 blur 仍然是兜底（点浏览器外、Tab 走焦都会走它）
   ok(/onBlur: commitEdit/.test(src), '输入框保留 onBlur 兜底（点击浏览器外/Tab 走焦也要提交）')
 
@@ -636,14 +648,15 @@ console.log('\n右键菜单：几类只显示当前值，并排成一行')
   ok(/if \(menu\.openKey !== cats\[i\]\.key\) continue/.test(src), '选项体只在展开的那一类下面渲染（收起时一个按钮都不多）')
   ok(/function closeSelect\(\)/.test(src), '选完一个值就收起来')
 
-  // 三个菜单各自**一次**menuSelectRow 调用里给出全部类 —— 这才是"并排成一行"
+  // 三个菜单各自**一次**menuSelectRow 调用里给出全部类 —— 这才是"并排成一行"。
+  // （形状**不在**里面：需求要的是"把形状直接排开、平铺展示"，它走 shapeGrid 常驻平铺。）
   const callSites = src.match(/menuSelectRow\(\[/g) || []
   ok(callSites.length === 3, '三处右键菜单各调用一次 menuSelectRow（画布 / 节点 / 连线），实际 ' + callSites.length + ' 处')
-  const categories = ['shape', 'color', 'fontSize', 'line', 'dash', 'arrow', 'fontColor']
+  const categories = ['color', 'fontSize', 'line', 'dash', 'arrow', 'fontColor']
   for (const key of categories) {
     ok(new RegExp("key: '" + key + "'").test(src), '「' + key + '」这一类在 menuSelectRow 的 cats 里')
   }
-  ok(!/rows\.push\(shapeGrid\(/.test(src), '形状不再把 10 个缩略图直接铺在菜单里')
+  ok(!/key: 'shape',\s*\n\s*label: '形状',\s*\n\s*value:/.test(src), '形状不再是一类"当前值 ▾"（它已经平铺出来了）')
   ok(!/rows\.push\(swatchRow\(/.test(src), '配色不再把 8 个色块直接铺在菜单里')
   ok(!/rows\.push\(fontSizeRow\(/.test(src), '字号不再把 6 个档位直接铺在菜单里')
   ok(
@@ -660,7 +673,13 @@ console.log('\n右键菜单：几类只显示当前值，并排成一行')
   // 当前值必须来自纯函数（能被命令行自测直接断言），而不是在 JSX 里现拼
   ok(/styleSummary: styleSummary,/.test(src), 'styleSummary 挂进 internals（自测能直接调）')
   ok(/PALETTE_LABELS\[menuStyle\] === undefined \? styleSummary\(menuStyle, 'color'\)/.test(src), '空白处右键的「配色」显示当前选中的那个（而不是颜色名表里查不到就空着）')
-  ok(/createNodeAt\(menuShape, menuStyle, menu\.userX, menu\.userY\)/.test(src), '「＋ 新增节点」放的就是下拉里选中的形状（当前值语义）')
+  // 形状：平铺 + **点一下就新建**（需求"去掉下拉列表，点某个形状即直接新增该形状的节点"）。
+  // 「＋ 新增节点」按钮已经删掉 —— 它做的事就是"点那个形状自己"。
+  ok(/rows\.push\(React\.createElement\('div', \{ key: 'shape-pick'/.test(src), '形状平铺成一块（drawai-pick），不再收进下拉')
+  ok(/shapeGrid\(\(shape\) => \{\s*\n\s*setMenuShape\(shape\)\s*\n\s*createNodeAt\(shape, menuStyle, menu\.userX, menu\.userY\)/.test(src), '画布菜单里点一个形状 = 直接在那个位置新建该形状的节点')
+  ok(!/'＋ 新增节点'/.test(src), '「＋ 新增节点」按钮已移除')
+  ok(/updateNode\(nodeTargets, \{ style: styleWithNodeShape\(nodeStyle, shape\) \}\)/.test(src), '节点菜单里点一个形状 = 直接把选中的节点换成该形状')
+  ok(!/rows\.push\(shapeGrid\(/.test(src) && !/body: shapeGrid\(/.test(src), '形状不再挂在任何下拉的 body 里')
   // 动作类（改标签/删除/顺序…）仍然是一排按钮：它们没有"当前值"，收进下拉反而多一次点击
   ok(/reorderItem\('node', menu\.id, 'front'\)/.test(src) && /openNodeEditor\(menu\.id\)/.test(src), '动作类仍然是按钮（顺序 / 改标签 / 删除…）')
   // 展开体的样式：缩进 + 左侧竖线，看起来是那排 chips 的下拉面板
@@ -697,17 +716,18 @@ console.log('\n独立文字：右键空白处能放一段字（不接节点、�
 {
   // 需求："添加可独立放置的文字"。实现上它是**一个节点**，只是形状是 drawio 的 text
   // （没有边框、没有底色），于是拖动/缩放/改字/进图层/复制粘贴全都免费复用节点那一套。
-  ok(/'T 文字'/.test(src), '空白处的右键菜单里有「T 文字」入口')
-  ok(/createNodeAt\('text', menuStyle, menu\.userX, menu\.userY\)/.test(src), "它调用 createNodeAt('text', …) —— 位置就是点的地方")
-  ok(/label: isText \? '文字' : '新节点'/.test(src), '文字元素的默认文字是「文字」')
+  // 入口是形状平铺里那个「文字」缩略图 —— 点它走的是画布菜单那条
+  // `createNodeAt(shape, menuStyle, menu.userX, menu.userY)`，位置就是点的地方。
+  ok(/createNodeAt\(shape, menuStyle, menu\.userX, menu\.userY\)/.test(src), '点形状 = createNodeAt(形状, 配色, 点的位置)（「文字」也走这一条）')
+  ok(/\{ shape: 'text', label: '文字' \}/.test(src), '形状面板里有「文字」（点它就是放一段独立文字）')
+  ok(/const text = typeof label === 'string' \? label : isText \? '文字' : '新节点'/.test(src), '文字元素的默认文字是「文字」')
   // 文字不吃配色：它的样式就是 drawio 的 defaultTextStyle，盖上 fillColor/strokeColor
   // 只会让文件与 drawio 不一致，屏幕上还什么都看不出来。
   ok(
     /isText \? styleWithNodeShape\('', shape\) : styleWithColorName/.test(src),
-    'createNodeAt 对文字不套配色（保持 drawio 的 defaultTextStyle）',
+    '新建节点对文字不套配色（保持 drawio 的 defaultTextStyle）',
   )
   ok(/if \(isText\) openNodeEditor\(id\)/.test(src), '放下来直接进编辑态（drawio 的 insertText 也是这样）')
-  ok(/\{ shape: 'text', label: '文字' \}/.test(src), '形状面板里有「文字」（普通节点也能换成文字）')
   ok(
     /isTextNode \? styleWithTextColorName\(nodeStyle, color\) : styleWithColorName/.test(src),
     '文字元素的调色板改 fontColor 而不是填充/描边（否则点一圈颜色毫无变化）',
@@ -743,6 +763,10 @@ console.log('\n键盘归属：在别处打字时画布一个键都不许碰')
   //
   // 这一节喂假 DOM 节点给那个纯函数，把判据钉住。
   const mod = { exports: {} }
+  // 这个 window 桩要能被下面 `withSelection` 改（模块里的 hasTextSelectionOutside
+  // 读的就是**传进去的这个对象**，不是 globalThis.window）—— 所以留一个引用出来。
+  const testWindow = { addEventListener() {}, removeEventListener() {} }
+  globalThis.__drawaiTestWindow = testWindow
   new Function('module', 'exports', 'require', 'window', 'document', src)(
     mod,
     mod.exports,
@@ -750,7 +774,7 @@ console.log('\n键盘归属：在别处打字时画布一个键都不许碰')
       if (s === 'react') return makeReact()
       throw new Error('unexpected require ' + s)
     },
-    { addEventListener() {}, removeEventListener() {} },
+    testWindow,
     fakeDocument,
   )
   const internals = mod.exports.__routeInternals
@@ -760,7 +784,9 @@ console.log('\n键盘归属：在别处打字时画布一个键都不许碰')
   const el = (tag, extra) => Object.assign({ tagName: tag, closest: () => null }, extra || {})
   /** 输入框**里面**的 span：closest 能找到外面的 contenteditable。 */
   const innerOf = (host) => el('SPAN', { closest: (sel) => (String(sel).indexOf('contenteditable') >= 0 ? host : null) })
-  const root = { contains: (node) => node === root || node.inRoot === true }
+  // 面板根就是 rootRef.current 那一个元素（CanvasView 的 .drawai-root），
+  // 所以假 DOM 里 `pane` 必须**就是 root 本身**（按身份比较）。
+  const root = { name: 'drawai-root', contains: (node) => node === root || node.inRoot === true }
   const key = (target, active) => owns({ target: target }, root, active)
 
   ok(isText(el('TEXTAREA')) && isText(el('INPUT')) && isText(el('SELECT')), 'isTextEntry：input / textarea / select 都算')
@@ -778,6 +804,51 @@ console.log('\n键盘归属：在别处打字时画布一个键都不许碰')
   ok(key(el('BUTTON'), el('BUTTON')) === false, '焦点在别的面板的按钮上 → 画布放手')
   ok(key(el('BODY'), null) === true, '焦点是 null → 画布处理')
 
+  // ---- Ctrl+C/X/A：用户手里有"画布之外"的选中文字时必须放手，否则对话里的字复制不出来 ----
+  //
+  // 实测场景：点过画布之后焦点落在 body → canvasOwnsKeyboard 判定"画布拥有键盘" →
+  // Ctrl+C 被 preventDefault，用户在对话里划好的一段文字复制不出任何东西。
+  // 判据是"这段选中的文字属于哪个面板"，所以这里喂假 Selection + 假 DOM 树。
+  const outside = internals.hasTextSelectionOutside
+  ok(typeof outside === 'function', 'hasTextSelectionOutside 有导出（能直接断言）')
+
+  /** 假元素：带 closest、能靠 parentNode 往上走。 */
+  const node = (opts) => {
+    const el = {
+      parentNode: (opts && opts.parent) || null,
+      closest: (sel) =>
+        opts !== undefined && opts.pane !== undefined && opts.pane !== null && String(sel).indexOf('drawai-root') >= 0 ? opts.pane : null,
+    }
+    return el
+  }
+  const inPane = node({ pane: root })
+  const inConv = node({ pane: null, parent: node({ pane: null }) })
+  /**
+   * 喂一个假 Selection 再问一次。
+   *
+   * 模块里的 `window` 用的是 `new Function(...)` 传进去的那个桩，所以这里换**全局**
+   * `globalThis.window` 没用 —— 要换的是本节那个桩对象自己（它就在上面建好了）。
+   */
+  const withSelection = (text, anchor, fn) => {
+    const w = globalThis.__drawaiTestWindow
+    const saved = w.getSelection
+    w.getSelection = () => ({ toString: () => text, anchorNode: anchor })
+    try {
+      return fn()
+    } finally {
+      if (saved === undefined) delete w.getSelection
+      else w.getSelection = saved
+    }
+  }
+
+  ok(withSelection('', null, () => outside(root)) === false, '没有选中任何文字 → 不算外部选区（画布照常处理 Ctrl+C）')
+  ok(withSelection('对话里的一段话', inConv, () => outside(root)) === true, '选中了对话里的文字（锚点不在面板里）→ 是外部选区（Ctrl+C 交给浏览器）')
+  ok(withSelection('节点标签', inPane, () => outside(root)) === false, '选中了画布面板里的文字 → 不算外部选区（Ctrl+C 仍然复制画布选区）')
+  ok(withSelection('有字但拿不到锚点', null, () => outside(root)) === true, '有选中文字但拿不到锚点 → 倾向放手（宁可让浏览器复制一次）')
+  // SVG 标签没有 closest：锚点是 <text> 时必须继续往上找，不能一遇到没有 closest 就放弃
+  const svgText = { closest: undefined, parentNode: node({ pane: root }) }
+  ok(withSelection('节点标签', svgText, () => outside(root)) === false, 'SVG <text>（没有 closest）里选中的文字，仍然被认成"画布自己的"')
+
   // 接线：window 上的那个 keydown 必须**先问归属**再动任何东西（否则上面这些判据白搭）。
   const onKeyStart = src.indexOf('function onKey(event) {')
   const onKeyBody = onKeyStart >= 0 ? src.slice(onKeyStart, src.indexOf('window.addEventListener(', onKeyStart)) : ''
@@ -787,6 +858,52 @@ console.log('\n键盘归属：在别处打字时画布一个键都不许碰')
     ...[onKeyBody.indexOf('preventDefault()'), onKeyBody.indexOf('deleteSelected()'), onKeyBody.indexOf('copySelection()')].filter((i) => i >= 0),
   )
   ok(guardAt >= 0 && guardAt < firstAction, '归属判定排在 preventDefault / 删除 / 复制之前')
+
+  // 接线：Ctrl+C/X/A 之前必须先问"外面有没有选中的文字"
+  ok(
+    /hasTextSelectionOutside\(rootRef\.current\)/.test(onKeyBody),
+    'onKey 里问了 hasTextSelectionOutside（否则对话里选中的文字按 Ctrl+C 没反应）',
+  )
+  ok(
+    onKeyBody.indexOf('hasTextSelectionOutside(') < onKeyBody.indexOf('copySelection()'),
+    '这一问排在 copySelection() 之前',
+  )
+  ok(
+    /event\.key === 'a' \|\| event\.key === 'A'/.test(onKeyBody) && onKeyBody.indexOf('selectAll()') > onKeyBody.indexOf('hasTextSelectionOutside('),
+    'Ctrl+A 同样受这一条保护（在对话里按 Ctrl+A 不该变成"全选画布"）',
+  )
+  // **画布里有选中元素时不能放手** —— 否则"先在对话里划字、再点画布元素"之后
+  // Ctrl+C 复制不出画布里的东西（实测报过："又无法复制画布中的元素了"）。
+  ok(
+    /selectedIds\.length === 0 && hasTextSelectionOutside\(rootRef\.current\)/.test(onKeyBody),
+    '放手的前提是"画布空着"（画布里有选中元素时，Ctrl+C 仍然归画布）',
+  )
+
+  // ---- 在画布上按下 = 清掉残留在别处的文字选区（否则会一直挡住画布的复制）----
+  const clearSel = internals.clearStaleTextSelection
+  ok(typeof clearSel === 'function', 'clearStaleTextSelection 有导出')
+  const runClear = (button, targetClosest) => {
+    const calls = []
+    const saved = testWindow.getSelection
+    testWindow.getSelection = () => ({ removeAllRanges: () => calls.push('cleared') })
+    try {
+      clearSel({ closest: targetClosest === undefined ? () => null : targetClosest }, button)
+    } finally {
+      if (saved === undefined) delete testWindow.getSelection
+      else testWindow.getSelection = saved
+    }
+    return calls
+  }
+  ok(runClear(0).length === 1, '左键按在画布上 → 清掉别处的文字选区')
+  ok(runClear(2).length === 0, '右键不清（要留给"复制这段文字"的右键菜单）')
+  ok(
+    runClear(0, (sel) => (String(sel).indexOf('drawai-edit') >= 0 ? { className: 'drawai-edit' } : null)).length === 0,
+    '按在就地编辑框里 → 不动（那是用户自己在框里选字）',
+  )
+  // 接线：canvas 的按下处理必须真的调它
+  const rootDownAt = src.indexOf('function onRootPointerDown(event) {')
+  const rootDownBody = rootDownAt >= 0 ? src.slice(rootDownAt, src.indexOf('setDocMenu(null)', rootDownAt)) : ''
+  ok(/clearStaleTextSelection\(target,/.test(rootDownBody), 'onRootPointerDown 里调了 clearStaleTextSelection（画布上的按下都会走到这里）')
 }
 
 console.log('\n选区上报：客户端把"用户选中了什么"告诉宿主（AI 侧才读得到）')

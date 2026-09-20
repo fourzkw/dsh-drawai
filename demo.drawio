@@ -25,20 +25,10 @@
         
         
         
-        <mxCell id="n4" value="新节点" style="fontSize=10;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="-190" y="-450" width="130" height="60" as="geometry" />
-        </mxCell>
         
-        <mxCell id="e2" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;exitX=0.5;exitY=1;entryX=0.5;entryY=0;endArrow=classic;" edge="1" parent="1" source="n4" target="n3">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e3" style="rounded=1;html=1;fontSize=18;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;exitX=0;exitY=0.5;entryX=0;entryY=0.5;endArrow=classic;" edge="1" parent="1" source="n4" target="n3" value="111">
-          <mxGeometry relative="1" as="geometry" x="0" y="0">
-  <Array as="points">
-    <mxPoint x="-255" y="-160" />
-  </Array>
-</mxGeometry>
-        </mxCell>
+        
+        
+        
         
         
         
@@ -47,24 +37,39 @@
         <mxCell id="n5" value="新节点" style="fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="L2">
           <mxGeometry x="-80" y="-280" width="130" height="60" as="geometry" />
         </mxCell>
+        
+        
+        
+        
+        
+        
+        <mxCell id="n4" value="新节点1111111111111111111111111111111111111111" style="fontSize=10;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="-190" y="-450" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;exitX=0.5;exitY=1;entryX=0.5;entryY=0;endArrow=classic;" edge="1" parent="1" source="n4" target="n3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="111" style="rounded=1;html=1;fontSize=18;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;exitX=0;exitY=0.5;entryX=0;entryY=0.5;endArrow=classic;" edge="1" parent="1" source="n4" target="n3">
+          <mxGeometry x="0" y="0" relative="1" as="geometry">
+          <Array as="points">
+            <mxPoint x="-255" y="-160" />
+          </Array>
+        </mxGeometry>
+        </mxCell>
         <mxCell id="e4" style="rounded=1;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;exitX=0.5;exitY=0;entryX=1;entryY=0.5;endArrow=classic;" edge="1" parent="L2" source="n5" target="n4">
-          <mxGeometry relative="1" as="geometry" >
-  <Array as="points">
-    <mxPoint x="-15" y="-420" />
-  </Array>
-</mxGeometry>
+          <mxGeometry relative="1" as="geometry">
+          <Array as="points">
+            <mxPoint x="-15" y="-420" />
+          </Array>
+        </mxGeometry>
         </mxCell>
-        
-        
-        
         <mxCell id="e5" style="rounded=1;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;exitX=1;exitY=0.5;entryX=1;entryY=0.5;endArrow=classic;" edge="1" parent="1" source="n4" target="n3">
-          <mxGeometry relative="1" as="geometry" >
-  <Array as="points">
-    <mxPoint x="80" y="-160" />
-  </Array>
-</mxGeometry>
+          <mxGeometry relative="1" as="geometry">
+          <Array as="points">
+            <mxPoint x="80" y="-160" />
+          </Array>
+        </mxGeometry>
         </mxCell>
-        
       </root>
     </mxGraphModel>
   </diagram>
