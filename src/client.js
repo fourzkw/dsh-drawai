@@ -34,11 +34,14 @@ const {
   dashPatternFromStyle,
   edgeFreePoint,
   formatStyle,
+  imageValueFromStyle,
+  isSvgMarkup,
   isOrthogonalEdgeStyle,
   jettyFromStyle,
   lineKindFromStyle,
   nodeShapeFromStyle,
   normalizeDrawioDoc,
+  normalizeSvgMarkup,
   snapDocGeometry,
   parseStyle,
   sideFromStyle,
@@ -47,7 +50,10 @@ const {
   stylePatch,
   styleWithArrow,
   styleWithColorName,
+  styleWithSvgMarkup,
   styleWithTextColorName,
+  styleWithoutSvgMarkup,
+  svgMarkupFromStyle,
   textColorNameFromStyle,
   styleWithDash,
   styleWithLineKind,
@@ -1578,6 +1584,72 @@ function shapeElement(node, geo, palette, mode) {
   if (shape === 'text') {
     return React.createElement('rect', { x: x, y: y, width: w, height: h, fill: 'transparent', stroke: 'none', pointerEvents: 'all' })
   }
+  // SVG 内容节点：节点框里画的**就是文档里那段标记**（shape=image;image= 一段 SVG data URI）。
+  //
+  // 为什么用 <image href="data:..."> 而不是把标记内联进画布 DOM：
+  //   · <image> 里的 SVG 是**独立文档**：脚本不执行、外部资源不加载，等于天然的沙箱；
+  //     内联（dangerouslySetInnerHTML / DOMParser）则会把任意标记塞进页面 DOM。
+  //   · 导出的 SVG 里它同样是自包含的（data URI 就写在属性上），PNG 那条路（序列化 → Image
+  //     → canvas）也走得通 —— 内部图片是内嵌的，不涉及任何外部请求。
+  // imageAspect=1 = 等比缩放居中（drawio 的缺省语义），0/缺省 = 拉伸铺满节点框。
+  if (shape === 'svg') {
+    const href = imageValueFromStyle(style)
+    // 正常情况下 href 一定有（shape 为 svg 的前提就是 image 是一段 SVG data URI）。
+    // 会掉进占位分支的是**写坏的那种**：百分号编码被截断/写坏（%ZZ 之类）时 decodeURIComponent
+    // 会失败 —— 那种 data URI 浏览器同样解不开，画出来就是一片空白，还不如给个能选中、
+    // 能右键换内容的占位框。（base64 形态我们不解码，直接交给浏览器画。）
+    const usable = href !== null && (svgMarkupFromStyle(style) !== null || href.indexOf(';base64,') > 0)
+    if (usable === false) {
+      return React.createElement(
+        'g',
+        null,
+        React.createElement('rect', { x: x, y: y, width: w, height: h, fill: 'transparent', stroke: 'none', pointerEvents: 'all' }),
+        React.createElement('rect', {
+          x: x + 0.5,
+          y: y + 0.5,
+          width: Math.max(1, w - 1),
+          height: Math.max(1, h - 1),
+          fill: 'none',
+          stroke: stroke,
+          strokeWidth: 1,
+          strokeDasharray: '3 3',
+          pointerEvents: 'none',
+        }),
+        React.createElement(
+          'text',
+          {
+            x: x + w / 2,
+            y: y + h / 2,
+            textAnchor: 'middle',
+            dominantBaseline: 'middle',
+            fontSize: Math.max(8, Math.min(12, h / 4)),
+            fill: stroke,
+            pointerEvents: 'none',
+          },
+          'SVG',
+        ),
+      )
+    }
+    const fit = styleGet(style, 'imageAspect', '0') === '1'
+    return React.createElement(
+      'g',
+      null,
+      // 透明命中框垫在下面：图形自己有透明区域时，整块节点框仍然是可点/可拖的。
+      React.createElement('rect', { x: x, y: y, width: w, height: h, fill: 'transparent', stroke: 'none', pointerEvents: 'all' }),
+      React.createElement('image', {
+        x: x,
+        y: y,
+        width: w,
+        height: h,
+        href: href,
+        // 两个都写：现代浏览器认 SVG2 的 href，老一点的 SVG 渲染器（以及某些导出工具）
+        // 只认 xlink:href。少写一个的代价是"导出的 SVG 在别处打开时图没了"。
+        xlinkHref: href,
+        preserveAspectRatio: fit ? 'xMidYMid meet' : 'none',
+        pointerEvents: 'none',
+      }),
+    )
+  }
   if (shape === 'ellipse') {
     return React.createElement('ellipse', Object.assign({}, common, { cx: x + w / 2, cy: y + h / 2, rx: w / 2, ry: h / 2 }))
   }
@@ -1891,7 +1963,39 @@ const SHAPE_LIBRARY = [
   { shape: 'cylinder', label: '数据库' },
   { shape: 'document', label: '文档' },
   { shape: 'hexagon', label: '六边形' },
+  // 内容是一段**内嵌 SVG 标记**的节点（不是标签文字）：图标/logo/示意图这类
+  // 流程图词汇表里没有的东西用它画。落盘是 drawio 原生的图片形状，桌面版也看得见。
+  { shape: 'svg', label: 'SVG 图形' },
 ]
+
+/** 新放的 SVG 节点边长（正方形：图形多半是方的）。 */
+const NEW_SVG_SIZE = 80
+
+/**
+ * 点「SVG 图形」时，一个**还没有内容**的节点该画什么 —— 给一张现成的占位图。
+ *
+ * 为什么要给：svg 节点的内容是"文档里那段标记"，形状本身决定不了画什么。
+ * 不给的话用户拿到的是一个看不见的空框（点了形状却什么都没出现，像是坏了）。
+ * 这张图刻意画成"一张照片"的样子：一眼能看出"这里是个图形，双击/右键可以换内容"。
+ */
+const DEFAULT_SVG_MARKUP =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">' +
+  '<rect x="6" y="16" width="84" height="64" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="4"/>' +
+  '<circle cx="31" cy="38" r="8" fill="#f8cecc" stroke="#b85450" stroke-width="3"/>' +
+  '<path d="M12 72 L36 48 L52 64 L66 50 L84 72 Z" fill="#d5e8d4" stroke="#82b366" stroke-width="4" stroke-linejoin="round"/>' +
+  '</svg>'
+
+/**
+ * 换形状时用的样式（右键里的形状格、与「改成某个形状」共用）。
+ *
+ * svg 是唯一一个"形状决定不了内容"的形状：手上没有内容就先塞一张占位图，
+ * 否则换过去只会得到一个空框。
+ */
+function styleForShapePick(style, shape) {
+  const next = styleWithNodeShape(style, shape)
+  if (shape === 'svg' && svgMarkupFromStyle(next) === null) return styleWithSvgMarkup(next, DEFAULT_SVG_MARKUP)
+  return next
+}
 
 // 调色板（8 个经典色）由样式内核的 PALETTE 提供，见文件顶部从 styleKernel 的解构 ——
 // 这里不再留第二份"颜色名 → 十六进制"的表，否则两边迟早会漂移。
@@ -5333,6 +5437,10 @@ function CanvasView(props) {
     clone.setAttribute('width', String(Math.round(w)))
     clone.setAttribute('height', String(Math.round(h)))
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    // SVG 内容节点用的是 <image>，它带 xlink:href 这个**带命名空间的属性** ——
+    // 序列化出来的文档必须声明 xmlns:xlink，否则严格 XML 解析器（浏览器把 SVG 当图片加载时
+    // 就是严格模式）会因为"用了未声明的前缀"整份丢弃：导出的 SVG/PNG 里那张图凭空消失。
+    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
     clone.removeAttribute('style')
     // 网格纸在实时视图里只铺满"当前视口"；导出要铺满整图，否则缩放状态下网格会断掉。
     const grid = clone.querySelector('rect[fill^="url(#drawai-grid-major"]')
@@ -5577,18 +5685,26 @@ function CanvasView(props) {
   /** 新节点：形状与配色都落成 drawio 的 style 键，高度**一开始就装得下自己的标签**。 */
   function freshNode(id, shape, styleName, userX, userY, label) {
     const isText = shape === 'text'
-    const text = typeof label === 'string' ? label : isText ? '文字' : '新节点'
+    const isSvg = shape === 'svg'
+    // svg 节点的内容是一张图、标签通常是空的 —— 不给它塞"新节点"三个字（那会压在图上）。
+    const text = typeof label === 'string' ? label : isText ? '文字' : isSvg ? '' : '新节点'
+    // 形状与配色都落成 drawio 的 style 键：rect/plain 落成空串（= drawio 的 defaultVertexStyle）。
+    // 文字**不吃配色**：它的样式就是 drawio 的 defaultTextStyle（无边框无底色），
+    // 往上盖 fillColor/strokeColor 只会让文件与 drawio 不一致，画面上也什么都看不出来。
+    // svg 同理：图片不受 fillColor/strokeColor 影响，颜色要写在标记自己身上。
+    const base = isText || isSvg ? styleWithNodeShape('', shape) : styleWithColorName(styleWithNodeShape('', shape), styleName)
+    const style = isSvg ? styleWithSvgMarkup(base, DEFAULT_SVG_MARKUP) : base
+    // svg 节点放下来是**正方形**：图形多半是方的，用文字尺寸（130×60）会把图标压扁。
+    const w = isSvg ? NEW_SVG_SIZE : NEW_NODE_W
+    const h = isSvg ? NEW_SVG_SIZE : NEW_NODE_H
     const node = {
       id: id,
       label: text,
-      // 形状与配色都落成 drawio 的 style 键：rect/plain 落成空串（= drawio 的 defaultVertexStyle）。
-      // 文字**不吃配色**：它的样式就是 drawio 的 defaultTextStyle（无边框无底色），
-      // 往上盖 fillColor/strokeColor 只会让文件与 drawio 不一致，画面上也什么都看不出来。
-      style: isText ? styleWithNodeShape('', shape) : styleWithColorName(styleWithNodeShape('', shape), styleName),
-      x: snap(userX - NEW_NODE_W / 2),
-      y: snap(userY - NEW_NODE_H / 2),
-      w: NEW_NODE_W,
-      h: NEW_NODE_H,
+      style: style,
+      x: snap(userX - w / 2),
+      y: snap(userY - h / 2),
+      w: w,
+      h: h,
     }
     // 与 autoHeightPass 同一套规则：新建时就落成撑开后的高度，
     // 免得"新节点先按原样画一帧、再被自动长高"多出一步莫名其妙的撤销历史。
@@ -6263,6 +6379,50 @@ function CanvasView(props) {
     setSaveNote(count === 0 ? '已清空这条单元的数据' : '已保存 ' + count + ' 项数据（写在 <object> 上，drawio 也认）')
   }
 
+  /**
+   * 「SVG 内容…」：直接编辑节点的**图形标记**（与「编辑数据…」同一套面板节奏）。
+   *
+   * svg 节点的内容不是标签文字，改不了"就地双击那套"（那改的是图上的字）—— 它需要一个
+   * 能贴一大段标记的地方，所以复用数据面板的多行输入。
+   * 节点还不是 svg 形状时，草稿框里先放那张占位图（保存即把它变成 SVG 图形节点）。
+   */
+  function openSvgEditor(id) {
+    const node = nodeById(id)
+    if (node === null) return
+    const style = typeof node.style === 'string' ? node.style : ''
+    const current = svgMarkupFromStyle(style)
+    setSelectedIds([id])
+    setMenu(Object.assign({}, menu, { kind: 'svg', id: id, text: current === null ? DEFAULT_SVG_MARKUP : current }))
+  }
+
+  /**
+   * 保存 SVG 内容：**整段替换**（没有"改某一根线"这种事）。
+   *
+   * 空文本 = 清掉内容、回到矩形 —— 与宿主 `{op:"setStyle", svg:null}` 是同一件事，
+   * 也是这个界面里唯一"把图形删掉"的入口。
+   */
+  function commitSvgEditor(id, text) {
+    const raw = typeof text === 'string' ? text.trim() : ''
+    const current = nodeById(id)
+    if (current === null) return
+    if (raw.length > 0 && isSvgMarkup(raw) === false) {
+      // 拦在这里比写进文档再"看不见"好：画布上什么都没有、也不报错，用户只会以为坏了。
+      setSaveNote('这段文本里没有 <svg …>：SVG 内容必须以 <svg> 根元素开头')
+      return
+    }
+    const style = typeof current.style === 'string' ? current.style : ''
+    const nextStyle = raw.length === 0 ? styleWithoutSvgMarkup(style) : styleWithSvgMarkup(style, raw)
+    applyLocal((next) => {
+      for (let i = 0; i < next.nodes.length; i += 1) {
+        if (next.nodes[i].id !== id) continue
+        next.nodes[i].style = nextStyle
+        break
+      }
+    })
+    setMenu(null)
+    setSaveNote(raw.length === 0 ? '已清空 SVG 内容（这个节点回到矩形）' : '已保存 SVG 内容（' + normalizeSvgMarkup(raw).length + ' 字符，drawio 也认）')
+  }
+
   function deleteSelected() {
     const ids = selectedIds
     if (ids.length === 0) return
@@ -6854,7 +7014,8 @@ function CanvasView(props) {
       const entry = SHAPE_LIBRARY[i]
       // node 与 palette 必须来自同一个 colorOf —— shapeElement 的描边取自 style，填充取自 palette，
       // 只传 palette 不传 style 的话，缩略图会变成"默认填充 + 主题描边"。
-      const chipNode = { style: styleWithColorName(styleWithNodeShape('', entry.shape), color) }
+      // svg 缩略图用**放下来会得到的那张占位图**（所见即所得）；它的颜色写在标记自己身上。
+      const chipNode = { style: styleForShapePick(styleWithColorName(styleWithNodeShape('', entry.shape), color), entry.shape) }
       const palette = colorOf(chipNode, 'light')
       buttons.push(
         React.createElement(
@@ -7030,6 +7191,48 @@ function CanvasView(props) {
       return React.createElement('div', { className: 'drawai-menu', style: { left: leftD + 'px', top: topD + 'px' } }, rows)
     }
 
+    // 「SVG 内容…」面板：svg 节点的图形标记就是一段文本，摊在多行框里改（与「编辑数据…」同一套）。
+    if (menu.kind === 'svg') {
+      rows.push(menuTitle('SVG 图形内容'))
+      rows.push(
+        React.createElement('textarea', {
+          key: 'svg-text',
+          className: 'drawai-data',
+          autoFocus: true,
+          // 8 行 + 可拖高（resize:vertical）：右栏窄，行数再大一点这个面板就会顶到画布下沿。
+          rows: 8,
+          value: typeof menu.text === 'string' ? menu.text : '',
+          placeholder: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">\n  <circle cx="12" cy="12" r="9"/>\n</svg>',
+          onChange: (event) => setMenu(Object.assign({}, menu, { text: event.target.value })),
+          onKeyDown: (event) => {
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              setMenu(null)
+            }
+          },
+        }),
+      )
+      rows.push(
+        React.createElement(
+          'div',
+          { className: 'drawai-note' },
+          '整段替换（没有"只改某一根线"）。要带 viewBox（否则放大缩小时图形不跟着变）；' +
+            '颜色写在标记自己身上（fill/stroke）。留空保存 = 清掉内容、这个节点回到矩形。',
+        ),
+      )
+      rows.push(
+        React.createElement(
+          'div',
+          { className: 'drawai-menu-row' },
+          React.createElement('button', { className: 'drawai-btn', onClick: () => commitSvgEditor(menu.id, menu.text) }, '保存'),
+          React.createElement('button', { className: 'drawai-btn', onClick: () => setMenu(null) }, '取消'),
+        ),
+      )
+      const leftS = Math.max(0, Math.min(menu.left, size.w - 214))
+      const topS = Math.max(0, Math.min(menu.top, size.h - 8))
+      return React.createElement('div', { className: 'drawai-menu', style: { left: leftS + 'px', top: topS + 'px' } }, rows)
+    }
+
     if (menu.kind === 'canvas') {
       rows.push(menuTitle('元素库 —— 点一个形状，就在这里放一个'))
       // 形状**平铺**（需求：去掉下拉、直接排开），点某个形状 = 直接在这里新增该形状的节点。
@@ -7118,7 +7321,7 @@ function CanvasView(props) {
       // 缩略图用的配色：认得出的调色板名照用；认不出的（drawio 文件里本来就只有十六进制）
       // 退回缺省色画缩略图 —— 这里只是预览，不写文档。
       const chipColor = colorNameFromStyle(nodeStyle)
-      rows.push(React.createElement('div', { key: 'shape-pick', className: 'drawai-pick' }, shapeGrid((shape) => updateNode(nodeTargets, { style: styleWithNodeShape(nodeStyle, shape) }), { color: chipColor === null ? 'plain' : chipColor, current: currentShape })))
+      rows.push(React.createElement('div', { key: 'shape-pick', className: 'drawai-pick' }, shapeGrid((shape) => updateNode(nodeTargets, { style: styleForShapePick(nodeStyle, shape) }), { color: chipColor === null ? 'plain' : chipColor, current: currentShape })))
       rows.push.apply(
         rows,
         menuSelectRow([
@@ -7170,6 +7373,17 @@ function CanvasView(props) {
           'div',
           { className: 'drawai-menu-row' },
           React.createElement('button', { className: 'drawai-btn', onClick: () => openNodeEditor(menu.id) }, '改标签'),
+          // 图形内容（svg 节点画的到底是什么）—— 它不是标签文字，改不了就地双击那套，
+          // 所以给它一个能贴一大段标记的入口。还不是 svg 的节点，这一步就是"变成 SVG 图形"。
+          React.createElement(
+            'button',
+            {
+              className: 'drawai-btn',
+              onClick: () => openSvgEditor(menu.id),
+              title: '编辑这个节点的 SVG 图形标记（内容整段替换）',
+            },
+            currentShape === 'svg' ? 'SVG 内容…' : '改成 SVG 图形…',
+          ),
           React.createElement('button', { className: 'drawai-btn', onClick: copySelection, title: 'Ctrl+C' }, '复制'),
           React.createElement('button', { className: 'drawai-btn', onClick: cutSelection, title: 'Ctrl+X' }, '剪切'),
           React.createElement('button', { className: 'drawai-btn', onClick: () => deleteById(menu.id) }, '删除'),
@@ -8371,6 +8585,10 @@ exports.__routeInternals = {
   MIN_NODE_H: MIN_NODE_H,
   NEW_NODE_W: NEW_NODE_W,
   NEW_NODE_H: NEW_NODE_H,
+  // SVG 内容节点：形状格里的占位图 + "换形状时要不要补内容"这条规则（纯函数，自测直接断言）。
+  NEW_SVG_SIZE: NEW_SVG_SIZE,
+  DEFAULT_SVG_MARKUP: DEFAULT_SVG_MARKUP,
+  styleForShapePick: styleForShapePick,
   FALLBACK_NODE_W: FALLBACK_NODE_W,
   FALLBACK_NODE_H: FALLBACK_NODE_H,
   routeThroughWaypoints: routeThroughWaypoints,

@@ -678,7 +678,7 @@ console.log('\n右键菜单：几类只显示当前值，并排成一行')
   ok(/rows\.push\(React\.createElement\('div', \{ key: 'shape-pick'/.test(src), '形状平铺成一块（drawai-pick），不再收进下拉')
   ok(/shapeGrid\(\(shape\) => \{\s*\n\s*setMenuShape\(shape\)\s*\n\s*createNodeAt\(shape, menuStyle, menu\.userX, menu\.userY\)/.test(src), '画布菜单里点一个形状 = 直接在那个位置新建该形状的节点')
   ok(!/'＋ 新增节点'/.test(src), '「＋ 新增节点」按钮已移除')
-  ok(/updateNode\(nodeTargets, \{ style: styleWithNodeShape\(nodeStyle, shape\) \}\)/.test(src), '节点菜单里点一个形状 = 直接把选中的节点换成该形状')
+  ok(/updateNode\(nodeTargets, \{ style: styleForShapePick\(nodeStyle, shape\) \}\)/.test(src), '节点菜单里点一个形状 = 直接把选中的节点换成该形状（svg 会补一张占位图）')
   ok(!/rows\.push\(shapeGrid\(/.test(src) && !/body: shapeGrid\(/.test(src), '形状不再挂在任何下拉的 body 里')
   // 动作类（改标签/删除/顺序…）仍然是一排按钮：它们没有"当前值"，收进下拉反而多一次点击
   ok(/reorderItem\('node', menu\.id, 'front'\)/.test(src) && /openNodeEditor\(menu\.id\)/.test(src), '动作类仍然是按钮（顺序 / 改标签 / 删除…）')
@@ -720,18 +720,63 @@ console.log('\n独立文字：右键空白处能放一段字（不接节点、�
   // `createNodeAt(shape, menuStyle, menu.userX, menu.userY)`，位置就是点的地方。
   ok(/createNodeAt\(shape, menuStyle, menu\.userX, menu\.userY\)/.test(src), '点形状 = createNodeAt(形状, 配色, 点的位置)（「文字」也走这一条）')
   ok(/\{ shape: 'text', label: '文字' \}/.test(src), '形状面板里有「文字」（点它就是放一段独立文字）')
-  ok(/const text = typeof label === 'string' \? label : isText \? '文字' : '新节点'/.test(src), '文字元素的默认文字是「文字」')
+  ok(/const text = typeof label === 'string' \? label : isText \? '文字' : isSvg \? '' : '新节点'/.test(src), '文字元素的默认文字是「文字」（svg 节点不给默认文字，免得压在图上）')
   // 文字不吃配色：它的样式就是 drawio 的 defaultTextStyle，盖上 fillColor/strokeColor
-  // 只会让文件与 drawio 不一致，屏幕上还什么都看不出来。
+  // 只会让文件与 drawio 不一致，屏幕上还什么都看不出来。svg 同理（图片不吃填充/描边）。
   ok(
-    /isText \? styleWithNodeShape\('', shape\) : styleWithColorName/.test(src),
+    /const base = isText \|\| isSvg \? styleWithNodeShape\('', shape\) : styleWithColorName/.test(src),
     '新建节点对文字不套配色（保持 drawio 的 defaultTextStyle）',
   )
+  ok(/const style = isSvg \? styleWithSvgMarkup\(base, DEFAULT_SVG_MARKUP\) : base/.test(src), '放 svg 节点时带上一张占位图（否则拿到的是看不见的空框）')
   ok(/if \(isText\) openNodeEditor\(id\)/.test(src), '放下来直接进编辑态（drawio 的 insertText 也是这样）')
   ok(
     /isTextNode \? styleWithTextColorName\(nodeStyle, color\) : styleWithColorName/.test(src),
     '文字元素的调色板改 fontColor 而不是填充/描边（否则点一圈颜色毫无变化）',
   )
+}
+
+console.log('\nSVG 内容节点：形状格里有入口、右键里能改内容')
+{
+  // 需求："添加一种节点，该节点内容可以直接使用 SVG 绘制"。
+  // 这条链路上有三个必须接上的点：① 元素库/形状格里有这一格；② 右键能把内容贴进去；
+  // ③ 贴进去之后要真的写进 style（不是只在界面上画个框）。
+  ok(/\{ shape: 'svg', label: 'SVG 图形' \}/.test(src), '形状格里有「SVG 图形」（点它就在那个位置放一个）')
+  ok(/const DEFAULT_SVG_MARKUP =/.test(src), '有默认占位图（否则点下去得到的是看不见的空框）')
+  ok(/function styleForShapePick\(style, shape\)/.test(src), '换形状走 styleForShapePick（唯一"形状决定不了内容"的那一个）')
+  ok(/shape === 'svg' && svgMarkupFromStyle\(next\) === null/.test(src), '只给空节点补占位图（已有内容的不覆盖）')
+  // 右键入口：非 svg 节点上是「改成 SVG 图形…」，已经是 svg 就是「SVG 内容…」——同一件事两种说法
+  ok(/'SVG 内容…' : '改成 SVG 图形…'/.test(src), '右键里有编辑图形内容的入口（不是 svg 节点就是"改成 SVG 图形"）')
+  ok(/onClick: \(\) => openSvgEditor\(menu\.id\)/.test(src), '那个按钮接的是 openSvgEditor')
+  ok(/function openSvgEditor\(id\)/.test(src) && /kind: 'svg'/.test(src), 'openSvgEditor 打开 svg 面板')
+  ok(/function commitSvgEditor\(id, text\)/.test(src), '有保存函数（内容整段替换）')
+  // 保存时必须**校验 + 写文档**：贴一段不是 SVG 的文本进来，不能悄悄写进去（那会变成一个空框）
+  const commitBody = (() => {
+    const start = src.indexOf('function commitSvgEditor(')
+    const open = src.indexOf('{', start)
+    let depth = 0
+    for (let i = open; i < src.length; i += 1) {
+      if (src[i] === '{') depth += 1
+      else if (src[i] === '}') {
+        depth -= 1
+        if (depth === 0) return src.slice(open, i + 1)
+      }
+    }
+    return ''
+  })()
+  ok(/isSvgMarkup\(raw\) === false/.test(commitBody), '保存前先判"这段文本里有没有 <svg"')
+  ok(/styleWithSvgMarkup\(style, raw\)/.test(commitBody), '合法内容 → styleWithSvgMarkup（内容与形状一起落盘）')
+  ok(/styleWithoutSvgMarkup\(style\)/.test(commitBody), '留空保存 = 清掉内容、回到矩形（与宿主 svg:null 同一件事）')
+  ok(/applyLocal\(/.test(commitBody), '改动走 applyLocal（进撤销历史、也会写盘）')
+  // 安全边界：标记只喂给 <image href>（那里的 SVG 是独立文档，脚本不执行、也不碰页面 DOM）。
+  // 内联进页面 DOM 的另一条路（dangerouslySetInnerHTML）在这份代码里必须**一处都没有**
+  //（注释里提到它是解释"为什么不那么做"，不算）。
+  const inlineHits = src.split('\n').filter((line) => {
+    if (line.indexOf('dangerouslySetInnerHTML') < 0) return false
+    const t = line.trim()
+    return t.indexOf('//') !== 0 && t.indexOf('*') !== 0 && t.indexOf('/*') !== 0
+  })
+  ok(inlineHits.length === 0, '**没有任何地方把标记内联进页面 DOM**（<image> 里的 SVG 是独立文档、脚本不执行）')
+  ok(/React\.createElement\('image', \{/.test(src), '画的是 <image>（不是把标记拼成 DOM）')
 }
 
 console.log('\n自环与复制粘贴的接线（手势与快捷键必须真的连上）')

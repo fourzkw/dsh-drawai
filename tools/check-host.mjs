@@ -316,7 +316,7 @@ console.log('\ndiagram_read 的输出 schema 必须声明返回体里所有字�
       ok(edgeProps[field] !== undefined, 'edges schema 声明了 ' + field)
     }
     const nodeProps = readSchema.properties.nodes.items.properties
-    for (const field of ['id', 'label', 'shape', 'style', 'layer']) {
+    for (const field of ['id', 'label', 'shape', 'style', 'layer', 'svg']) {
       ok(nodeProps[field] !== undefined, 'nodes schema 声明了 ' + field)
     }
     const layerProps = readSchema.properties.layers.items.properties
@@ -1967,6 +1967,140 @@ console.log('\nclearPoints 不许把"悬空端的落点"一起删掉（独立线
   const mixed = parseMxfile(store.get(WORKSPACE + '\\clr.drawio')).doc.edges.filter((e) => e.id === freeId)[0]
   ok(mixed !== undefined && mixed.from === 'n1' && mixed.sourcePoint === undefined, '一端接节点、一端悬空：接节点那端的自由点被清掉')
   ok(mixed.targetPoint !== undefined, '悬空端的自由点照旧留着（否则这一端就没了）')
+}
+
+console.log('\nSVG 内容节点：节点内容就是一段 SVG 标记（drawio 原生图片形状）')
+{
+  // 需求："添加一种节点，该节点内容可以直接使用 SVG 绘制"。
+  // 落盘形态刻意用 drawio 自己那一套（shape=image + data:image/svg+xml,<百分号编码>），
+  // 于是同一份文件在 drawio 桌面版里也画得出来 —— 不是本画布私有的写法。
+  const ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#dae8fc" stroke="#6c8ebf"/></svg>'
+  store.clear()
+  const created = await apply([
+    { op: 'addNode', shape: 'svg', svg: ICON, as: 'icon', x: 100, y: 100 },
+    { op: 'addNode', label: '普通节点', x: 300, y: 100 },
+  ])
+  const iconId = created.created.filter((c) => c.id !== undefined)[0].id
+  const icon = current().nodes.filter((n) => n.id === iconId)[0]
+  ok(icon !== undefined, 'svg 节点建出来了（' + iconId + '）')
+  ok(icon.label === '', '不带 label 也可以（值就是空的 —— drawio 里这是合法的单元）')
+  ok(nodeShapeFromStyle(icon.style) === 'svg', '形状读回来是 svg：' + icon.style.slice(0, 48) + '…')
+  ok(styleGet(icon.style, 'shape', null) === 'image', 'style 落成 drawio 的 shape=image')
+  ok(styleGet(icon.style, 'imageAspect', null) === '0', 'imageAspect=0（拉伸铺满；drawio 插入图片时也是 0）')
+  const stored = styleGet(icon.style, 'image', null)
+  ok(typeof stored === 'string' && stored.indexOf('data:image/svg+xml,') === 0, '内容是内嵌 data URI')
+  ok(stored.indexOf('data:image/svg+xml,%3Csvg') === 0, '百分号编码形态与 drawio 自己写的一致（以 %3Csvg 开头）：' + stored.slice(0, 32))
+  ok(stored.indexOf(';') < 0, '编码后的串里没有分号（style 是按分号分段的，这是 base64 踩过的雷）')
+  ok(icon.w === 80 && icon.h === 80, '缺省尺寸是正方形 80×80（按标签文字估宽会把图标压扁）：' + icon.w + '×' + icon.h)
+  ok(icon.x === 100 && icon.y === 100, '给了 x/y 就用给的（自带几何 → 不重排）')
+
+  // 写进文件的形态：drawio 那边也要认（这就是"同一份文件两边都能打开"的判据）
+  const fileText = store.get(WORKSPACE + '\\doc.drawio')
+  ok(fileText.indexOf('shape=image;imageAspect=0;image=data:image/svg+xml,') >= 0, '文件里就是 drawio 认的那种写法')
+  ok(fileText.indexOf('<svg') < 0, '标记本身是编码过的（不往 XML 里塞裸尖括号）')
+  ok(parseMxfile(fileText).notes.filter((n) => n.indexOf('位图') >= 0).length === 0, '内嵌 SVG 不再被列进"图片按矩形显示"的 notes 里')
+
+  // 读回来：内容以 svg 字段给模型，style 里的 data URI 被省略（否则一次读取能被它撑爆）
+  const out = await readTool.execute({ path: 'doc.drawio' }, exec)
+  const readIcon = out.nodes.filter((n) => n.id === iconId)[0]
+  ok(readIcon !== undefined && readIcon.shape === 'svg', 'diagram_read 报 shape:svg')
+  ok(readIcon.svg === ICON, 'svg 字段 = 那段标记原文')
+  ok(readIcon.style.indexOf('«svg ') >= 0 && readIcon.style.indexOf('data:image/svg+xml') < 0, 'style 里的 image= 被省略成标记：' + readIcon.style)
+  ok(readIcon.style.indexOf('shape=image;imageAspect=0;') === 0, '其它键一个字节没动（只替换 image= 那一段）')
+
+  // 护栏：省略过的 style 不许原样写回（照抄回来会把那一格变成"什么都没有"）
+  const beforeGuard = store.get(WORKSPACE + '\\doc.drawio')
+  let guardRejected = false
+  try {
+    await apply([{ op: 'setStyle', id: iconId, style: readIcon.style }])
+  } catch (error) {
+    guardRejected = /省略过/.test(String(error.message))
+  }
+  ok(guardRejected, '把「省略过的 style」写回来会被拦下（并说明该用 svg 参数）')
+  ok(store.get(WORKSPACE + '\\doc.drawio') === beforeGuard, '被拦下时一个字节都没写盘')
+
+  // 换图 / 清图
+  const ICON2 = '<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="#d5e8d4"/></svg>'
+  await apply([{ op: 'setStyle', id: iconId, svg: ICON2 }])
+  const swapped = current().nodes.filter((n) => n.id === iconId)[0]
+  ok(nodeShapeFromStyle(swapped.style) === 'svg', 'setStyle{svg:…} 换图后仍是 svg 节点')
+  const swappedOut = await readTool.execute({ path: 'doc.drawio', ids: [iconId] }, exec)
+  ok(swappedOut.nodes[0].svg.indexOf('xmlns="http://www.w3.org/2000/svg"') >= 0, '缺 xmlns 的标记被自动补上（不补的话浏览器会整份丢弃）')
+  ok(swappedOut.nodes[0].svg.indexOf('<rect') >= 0, '新内容生效（旧的那段圆没了）')
+
+  await apply([{ op: 'setStyle', id: iconId, svg: null }])
+  const cleared = current().nodes.filter((n) => n.id === iconId)[0]
+  ok(nodeShapeFromStyle(cleared.style) === 'rect', 'svg:null 清掉内容 → 回到矩形')
+  ok(styleGet(cleared.style, 'image', null) === null && styleGet(cleared.style, 'imageAspect', null) === null, 'image/imageAspect 也一起清掉（不留看不见的一大段）')
+  ok(cleared.style.indexOf('shape=') < 0, 'shape=image 键也没了')
+
+  // 只给形状不给内容：必须报错，而不是留下一个"看不见的空框"
+  const beforeShapeOnly = store.get(WORKSPACE + '\\doc.drawio')
+  let shapeOnlyRejected = false
+  try {
+    await apply([{ op: 'addNode', label: '空框', shape: 'svg' }])
+  } catch (error) {
+    shapeOnlyRejected = /还要一起给内容/.test(String(error.message))
+  }
+  ok(shapeOnlyRejected, 'shape:"svg" 不带内容 → 报错说清楚要什么')
+  ok(store.get(WORKSPACE + '\\doc.drawio') === beforeShapeOnly, '报错发生在写盘之前')
+
+  // 太长的标记：拦住（一个单元格几十万字符会把文件与上下文一起撑爆）
+  let tooLongRejected = false
+  try {
+    await apply([{ op: 'addNode', shape: 'svg', svg: '<svg viewBox="0 0 1 1">' + 'x'.repeat(60001) + '</svg>' }])
+  } catch (error) {
+    tooLongRejected = /太长/.test(String(error.message))
+  }
+  ok(tooLongRejected, '超长 svg（>60000 字符）被拒')
+  let notSvgRejected = false
+  try {
+    await apply([{ op: 'addNode', shape: 'svg', svg: '这不是 SVG' }])
+  } catch (error) {
+    notSvgRejected = /SVG 标记/.test(String(error.message))
+  }
+  ok(notSvgRejected, '不像 SVG 的文本被拒（写进去只会是个空框）')
+
+  // imageAspect=1（等比缩放）要能显式设、并且在后续改样式时不被冲掉
+  const fitId = (await apply([{ op: 'addNode', shape: 'svg', svg: ICON, keys: { imageAspect: '1' } }])).created[0].id
+  const fitNode = current().nodes.filter((n) => n.id === fitId)[0]
+  ok(styleGet(fitNode.style, 'imageAspect', null) === '1', 'keys:{imageAspect:1} 生效（等比缩放居中）')
+  await apply([{ op: 'setStyle', id: fitId, style: 'blue' }])
+  ok(styleGet(current().nodes.filter((n) => n.id === fitId)[0].style, 'imageAspect', null) === '1', '改配色不会把 imageAspect 冲回 0')
+  await apply([{ op: 'setStyle', id: fitId, svg: ICON2 }])
+  ok(styleGet(current().nodes.filter((n) => n.id === fitId)[0].style, 'imageAspect', null) === '1', '换图也保留 imageAspect（画法不该被内容覆盖）')
+
+  // 别家工具写的 base64 形态：同样读得出来、画得出来（宿主用 Buffer 解）
+  const b64 = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><path d="M0 0h8v8H0z"/></svg>'
+  seed({
+    version: 2,
+    meta: { pinned: true },
+    nodes: [
+      { id: 'b64', label: '', style: 'shape=image;imageAspect=0;image=data:image/svg+xml;base64,' + Buffer.from(b64, 'utf8').toString('base64') + ';', x: 0, y: 0, w: 60, h: 60 },
+      { id: 'png', label: '', style: 'shape=image;imageAspect=0;image=data:image/png;base64,iVBORw0KGgo=;', x: 200, y: 0, w: 60, h: 60 },
+    ],
+    edges: [],
+  })
+  const mixedOut = await readTool.execute({ path: 'doc.drawio' }, exec)
+  const b64Node = mixedOut.nodes.filter((n) => n.id === 'b64')[0]
+  ok(b64Node.shape === 'svg' && b64Node.svg === b64, 'base64 形态的内嵌 SVG 也读得出来（别的工具/drawio 会这么写）')
+  ok(b64Node.style.indexOf('«svg ') >= 0, '它的 style 同样省略（不管哪种编码，报告里都不重复回显）')
+  const pngNode = mixedOut.nodes.filter((n) => n.id === 'png')[0]
+  ok(pngNode.shape === 'rect' && pngNode.svg === undefined, '位图仍按矩形处理（本画布只画内嵌 SVG）')
+  ok(mixedOut.notes.filter((n) => n.indexOf('位图') >= 0).length === 1, '位图那条 notes 照旧给出来（用户得知道它画不出来）')
+  // **关键**：base64 里那个 `;base64,` 不能被 style 解析器当成两个键 —— 否则任何一次
+  // 改样式都会把它写成 `…;base64,iVBOR…=1;`，那张图就没了（这是本轮顺带修掉的老坑）。
+  await apply([{ op: 'setStyle', ids: ['b64', 'png'], style: 'grey' }])
+  const keptB64 = current().nodes.filter((n) => n.id === 'b64')[0]
+  const keptPng = current().nodes.filter((n) => n.id === 'png')[0]
+  ok(styleGet(keptB64.style, 'image', null) === 'data:image/svg+xml;base64,' + Buffer.from(b64, 'utf8').toString('base64'), '改样式不动 base64 的 SVG 内容')
+  ok(styleGet(keptPng.style, 'image', null) === 'data:image/png;base64,iVBORw0KGgo=', '改样式也不把 PNG 的 base64 写坏：' + styleGet(keptPng.style, 'image', null))
+  ok(keptPng.style.indexOf('base64,iVBORw0KGgo==1') < 0, '没有多出 "=1" 那种解析残渣')
+  ok(nodeShapeFromStyle(keptB64.style) === 'svg', '改完样式仍然是 svg 节点')
+
+  // 文档里要有这条能力（模型只读得到工具描述，描述里不写就等于没有）
+  ok(/svg/.test(applyTool.description) && /viewBox/.test(applyTool.description), 'diagram_apply 的描述里写了 svg 用法（含 viewBox 这条坑）')
+  ok(/svg/.test(readTool.description), 'diagram_read 的描述里说明了 svg 字段与被省略的 style')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')

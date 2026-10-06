@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { composeClientBody } from './build.mjs'
 // 造 style 键夹具时直接用内核（与宿主/客户端同一份），免得把键名再抄一遍。
-import { DEFAULT_EDGE_STYLE, NODE_SHAPES, curvedFromStyle, lineKindFromStyle, nodeShapeFromStyle, normalizeDrawioDoc, styleGet, stylePatch, styleWithLineKind, styleWithNodeShape, styleWithTextColorName, textColorNameFromStyle } from '../src/style-kernel.js'
+import { DEFAULT_EDGE_STYLE, NODE_SHAPES, curvedFromStyle, lineKindFromStyle, nodeShapeFromStyle, normalizeDrawioDoc, styleGet, stylePatch, styleWithLineKind, styleWithNodeShape, styleWithSvgMarkup, svgMarkupFromStyle, styleWithTextColorName, textColorNameFromStyle } from '../src/style-kernel.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 /** 源码文本断言用（CSS 串、函数名这些在 src/client.js 里就有）。 */
@@ -1435,6 +1435,100 @@ console.log('\n双击节点 = 就地改标签（这条接线曾经被 pointer ca
     ok(typeof group.props.onPointerDown === 'function' && hits.indexOf('down') < 0, '按下不会顺便开编辑框（改标签只由双击触发）')
     ok(group.props.onDoubleClick !== group.props.onPointerDown, '两者不是同一个处理器')
   }
+}
+
+console.log('\nSVG 内容节点：节点框里画的就是文档里那段标记')
+{
+  // 需求："添加一种节点，内容可以直接用 SVG 绘制"。
+  // 关键三条：① 落盘是 drawio 原生的图片形状（桌面版也看得见）；
+  // ② 画布把它画出来（<image href=data:…>，不是"按矩形显示"）；
+  // ③ 内容缺失时有个能选中、能右键的占位框（不能是一片空白）。
+  ok(NODE_SHAPES.indexOf('svg') >= 0, 'svg 在形状枚举里（AI 的 shape:"svg" 与右键形状面板都能用）')
+
+  const markup = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg>'
+  const svgStyle = styleWithSvgMarkup('', markup)
+  ok(styleGet(svgStyle, 'shape', null) === 'image', '落成 drawio 的图片形状（shape=image）：' + svgStyle.slice(0, 60))
+  ok(styleGet(svgStyle, 'imageAspect', null) === '0', '缺省 imageAspect=0（拉伸铺满，与 drawio 插入图片时一致）')
+  const imageValue = styleGet(svgStyle, 'image', null)
+  ok(typeof imageValue === 'string' && imageValue.indexOf('data:image/svg+xml,') === 0, '内容是百分号编码的 data URI（drawio 的 postProcessCellStyle 认这一种）')
+  ok(imageValue.indexOf(';') < 0, '**编码后的串里没有分号**（style 是按 ; 分段的，base64 的 ;base64, 会踩这个雷）')
+  ok(nodeShapeFromStyle(svgStyle) === 'svg', '从样式反推得回 svg')
+  ok(svgMarkupFromStyle(svgStyle) === markup, '标记能原样解回来')
+  ok(styleWithSvgMarkup('', markup, '1').indexOf('imageAspect=1;') >= 0, 'imageAspect=1 = 等比缩放（键位稳定，不会被排到别处）')
+
+  // 缺 xmlns 必须补上：SVG 当图片加载时按 XML 解析，没有 xmlns 的根元素会被整份丢弃
+  //（表现就是"框里什么都没有"，而且不报错）。
+  const bare = '  <svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>  '
+  const bareStyle = styleWithSvgMarkup('', bare)
+  const bareBack = svgMarkupFromStyle(bareStyle)
+  ok(bareBack.indexOf('xmlns="http://www.w3.org/2000/svg"') >= 0, '缺 xmlns 时自动补上：' + bareBack.slice(0, 60))
+  ok(bareBack.charAt(0) === '<' && bareBack.indexOf('  <svg') < 0, '首尾空白也去掉了')
+
+  // 换形状：svg → 矩形 必须把那段标记一起清掉（否则文件里留着一大段看不见的 data URI）
+  const asRect = styleWithNodeShape(svgStyle, 'rect')
+  ok(styleGet(asRect, 'image', null) === null && styleGet(asRect, 'imageAspect', null) === null, '换成矩形后 image/imageAspect 一起清掉')
+  ok(nodeShapeFromStyle(asRect) === 'rect', '清干净之后就是普通矩形')
+  // 反过来：矩形 → svg 只落形状键（内容得由 op/界面给 —— 形状本身决定不了画什么）
+  const toSvg = styleWithNodeShape('', 'svg')
+  ok(styleGet(toSvg, 'shape', null) === 'image' && styleGet(toSvg, 'imageAspect', null) === '0', '矩形换到 svg：形状键落成 image 形态（内容另给）')
+  ok(nodeShapeFromStyle(toSvg) === 'rect', '只给形状不给内容时仍算矩形（宿主那边会拦下并要内容，不会留下一个空框）')
+  // 别的形状不受影响
+  ok(nodeShapeFromStyle('shape=image;image=img/lib/clip_art/computers/Monitor.png;') === 'rect', '外链/相对路径的图片仍然按矩形显示（画布读不到那个文件）')
+  ok(nodeShapeFromStyle('shape=image;image=data:image/png;base64,iVBORw0KGgo=;') === 'rect', '位图 data URI 也仍是矩形（只画内嵌 SVG）')
+
+  // 画面：<image> 的 href 指向那段 data URI；节点框是透明命中区
+  const sdoc = { nodes: [{ id: 's1', label: '', style: svgStyle, x: 100, y: 50, w: 80, h: 80 }], edges: [] }
+  const tree = renderDiagram(sdoc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const group = walk(tree, (n) => n.type === 'g' && n.props['data-node-id'] === 's1', [])[0]
+  ok(group !== undefined, 'svg 节点照常进渲染（不是被当成不认识的形状丢掉）')
+  if (group !== undefined) {
+    const images = walk(group.children, (n) => n.type === 'image', [])
+    ok(images.length === 1, '画了一个 <image>')
+    if (images.length === 1) {
+      ok(images[0].props.href === imageValue, 'href 就是文档里那段 data URI（不是去别处取图）')
+      ok(images[0].props.xlinkHref === imageValue, 'xlink:href 也写了（导出的 SVG 在别的渲染器里也看得见图）')
+      ok(images[0].props.preserveAspectRatio === 'none', 'imageAspect=0 → preserveAspectRatio=none（拉伸铺满）')
+      ok(images[0].props.x === 100 && images[0].props.y === 50 && images[0].props.width === 80 && images[0].props.height === 80, '图片铺满节点框')
+    }
+    const hits = walk(group.children, (n) => n.type === 'rect' && n.props.fill === 'transparent', [])
+    ok(hits.length === 1, '透明命中框垫在下面（图形自己有透明区域时也点得到）')
+    const texts = walk(group.children, (n) => n.type === 'text', [])
+    const flatten = (node) => {
+      if (typeof node === 'string' || typeof node === 'number') return String(node)
+      if (Array.isArray(node)) return node.map(flatten).join('')
+      if (node === null || node === undefined || typeof node !== 'object') return ''
+      return flatten(node.children)
+    }
+    ok(texts.every((t) => flatten(t).trim().length === 0), 'label 为空时不画字（图上不会盖一层"新节点"）')
+  }
+  const fitDoc = { nodes: [{ id: 's1', label: '', style: styleWithSvgMarkup('', markup, '1'), x: 0, y: 0, w: 80, h: 80 }], edges: [] }
+  const fitImage = walk(renderDiagram(fitDoc, 'light', 'u1', { current: null }, { selectedIds: [] }, null), (n) => n.type === 'image', [])[0]
+  ok(fitImage !== undefined && fitImage.props.preserveAspectRatio === 'xMidYMid meet', 'imageAspect=1 → 等比缩放居中')
+
+  // 写坏的 data URI（百分号编码被截断）：仍然算 svg 节点，但画不出来 —— 给占位框，
+  // 别给一片空白（空白既不报错也点不到，用户只会以为画布坏了）。
+  const brokenDoc = { nodes: [{ id: 's2', label: '', style: 'shape=image;imageAspect=0;image=data:image/svg+xml,%ZZbroken;', x: 0, y: 0, w: 80, h: 80 }], edges: [] }
+  ok(nodeShapeFromStyle('shape=image;imageAspect=0;image=data:image/svg+xml,%ZZbroken;') === 'svg', '写坏的百分号编码仍认成 svg（形状键是对的）')
+  const emptyTree = renderDiagram(brokenDoc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const emptyGroup = walk(emptyTree, (n) => n.type === 'g' && n.props['data-node-id'] === 's2', [])[0]
+  ok(emptyGroup !== undefined, '空内容的 svg 节点也进渲染')
+  if (emptyGroup !== undefined) {
+    ok(walk(emptyGroup.children, (n) => n.type === 'image', []).length === 0, '没有内容就不画 <image>（画了也是一片空白）')
+    const dashed = walk(emptyGroup.children, (n) => n.type === 'rect' && n.props.strokeDasharray !== undefined, [])
+    ok(dashed.length === 1, '给了虚线占位框（用户得看得出"这里有个图形节点"）')
+    ok(
+      walk(emptyGroup.children, (n) => n.type === 'text' && n.children.indexOf('SVG') >= 0, []).length === 1,
+      '占位框里写着 SVG',
+    )
+  }
+
+  // 形状面板里那一格缩略图 = 放下来会得到的那张图（所见即所得）
+  const picked = internals.styleForShapePick('', 'svg')
+  ok(nodeShapeFromStyle(picked) === 'svg', 'shapeForShapePick("svg") 会补上占位图：' + nodeShapeFromStyle(picked))
+  ok(svgMarkupFromStyle(picked).indexOf('<svg') === 0, '占位图本身就是一段合法标记')
+  const keep = internals.styleForShapePick(svgStyle, 'svg')
+  ok(svgMarkupFromStyle(keep) === markup, '已经有内容的节点不会被占位图覆盖（只补空的那种）')
+  ok(internals.DEFAULT_SVG_MARKUP.indexOf('xmlns="http://www.w3.org/2000/svg"') >= 0, '默认占位图自带 xmlns（不靠自动补）')
 }
 
 console.log('\n独立文字：一段没有边框底色的字（drawio 的 text 形状）')

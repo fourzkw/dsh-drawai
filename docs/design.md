@@ -42,7 +42,8 @@
 | 客户端 | **下拉栏点外面就收**：工作栏那五个下拉菜单与「打开 / 新建画布 / 另存为」面板，在**外面**按一下（画布、标签条、工作栏的空白处）就关掉，`Esc` 同样收掉 —— 菜单是"看一眼、点一下就完事"的东西，不收会一直挂在画布上方挡着，而且下次点同一个按钮会变成"关掉"而不是"打开"。两类地方**不算外面**：菜单自己（否则点选项会先把自己关掉），以及**开菜单的那个按钮**（它自己有 toggle 语义：点同一个是关、点另一个是换）。判定挂在 `.drawai-root` 的**捕获阶段**，所以在画布自己的按下处理（框选、拖动、右键菜单）之前就判完 |
 | 客户端 | **打开后为空**：进入面板时不预先开任何画布（没有"未绑定画布"这种中间态），用「文件 → 新建画布…」或「文件 → 打开…」开始；关掉最后一个标签就回到这个空舞台 |
 | 客户端 | 「打开…」列出的每一个 `.drawio` 都能直接打开；文件里"画布表示不了、但会原样保留"的东西（多页、分组层级、图片、HTML 标签）在工作栏上一句句说明；**图层**已经能显示（见下面的图层一节），所以它单独报一句"这个文件有几个层" |
-| 客户端 | draw.io 经典外观：9 种形状（由 `shape=`/`ellipse`/`rhombus`/`rounded=`/`arcSize=` 驱动）、8 色 mxGraph 调色板（`fillColor`/`strokeColor`）、白纸 + 网格、正交折线 + 障碍避让、边标签衬底、自动换行、明暗切换 |
+| 客户端 | draw.io 经典外观：11 种形状（由 `shape=`/`ellipse`/`rhombus`/`rounded=`/`arcSize=`/`image=` 驱动）、8 色 mxGraph 调色板（`fillColor`/`strokeColor`）、白纸 + 网格、正交折线 + 障碍避让、边标签衬底、自动换行、明暗切换 |
+| 双方 | **SVG 图形节点**（形状枚举里的 `svg`）：节点的**内容是一段 SVG 标记**，用来画形状词汇表里没有的东西（图标 / logo / 示意图）。落盘刻意用 drawio 自己那一套 —— `shape=image;imageAspect=0;image=data:image/svg+xml,<encodeURIComponent(标记)>`（依据：`mxGraph.postProcessCellStyle` 认的就是 `data:image/svg+xml,%3C…` 这种百分号编码形态，`mxImageShape.apply` 的 `preserveImageAspect = getNumber(style, STYLE_IMAGE_ASPECT, 1) == 1`，而 drawio 插入图片时写的是 `imageAspect=0`）—— 所以**同一份文件在 drawio 桌面版里也画得出来**，不是本画布私有的写法。选百分号编码而不是 base64 是因为编码后的串里**一个分号都没有**，而 style 解析按 `;` 分段（`;base64,` 会踩这个雷；反过来，本轮也顺手把解析器修成能正确合并 `…;base64,…` 续行 —— 以前任何一次 `setStyle` 都会把内嵌 PNG 写成 `…;base64,iVBOR…=1;`，那张图就没了）。画布把标记喂给 `<image href>`（`xlink:href` 也写一份，导出到别处也看得见）；`<image>` 里的 SVG 是**独立文档**：脚本不执行、外部资源不加载，所以不存在"把任意标记内联进页面 DOM"的风险（代码里没有任何 `dangerouslySetInnerHTML`）。`imageAspect=0`（缺省）= 拉伸铺满节点框、`=1` = 等比缩放居中（`preserveAspectRatio` 跟着走）。缺 `xmlns` 时宿主动手补上 —— 不补的话浏览器按 XML 解析会**整份丢弃**那份图（屏幕上什么都没有，且不报错）。AI 侧是 `addNode {shape:"svg", svg:"<svg viewBox…>…</svg>"}`（不带字时可以省 `label`，缺省尺寸 80×80 正方形）、`setStyle {id, svg:"…"}` 换图、`{id, svg:null}` 清掉回到矩形；`diagram_read` 把标记放在节点的 `svg` 字段里，而 style 串里的 `image=` 省略成 `image=«svg N 字符»`（否则一次读取会被 data URI 撑爆）—— 带这个标记的 style 写回来会被**拦下**（照抄回来会让那一格变成"什么都没有"） |
 | 客户端 | **拖拽连线预览**：从四面的引出端点拖出线时，实时显示**与落盘同一套路由**算出的正交折线（不是直线）；靠近目标节点时列出它的**四个端点**并高亮将连接的那个（可挪指针改选），折线终点贴到该端点 |
 | 客户端 | **多选对齐 / 分布**：Shift 加选后右键 → 左/中/右、顶/中/底对齐，水平/垂直等距 |
 | 客户端 | **空白左键拖框选**：框到节点**或线段**都算选中（连线按**段**判定，不是拿整条边的外接框）；Shift 框选是加选。选中的连线变蓝加粗并长出端点/段把手，可以直接 Delete 或整体复制 |
@@ -171,7 +172,7 @@ UserObject 自定义属性、旋转翻转、页面设置…），而本画布只
 
 由此得到一条可断言的性质：**打开后原样保存，文件逐字节不变**（`check-mxfile` 里 30 多条断言盯着它）。
 
-**有损的地方一律如实报。** 多页只显示第 1 页、分组按绝对位置显示、图片按矩形显示、HTML 标签
+**有损的地方一律如实报。** 多页只显示第 1 页、分组按绝对位置显示、位图/外链图片按矩形显示（内嵌 SVG 会真的画出来）、HTML 标签
 按纯文本显示 —— 这些都会作为 `notes` 出现在工作栏和 `diagram_read` 的返回里，
 因为用户会拿这份文件继续在 drawio 里编辑，不说明就等于骗人。
 
@@ -276,7 +277,7 @@ drawio 源码核实过（`mxConstants.js`、`Graph.js`、`mxConnector.js`、`doc
 
 | 用途 | 键（drawio 名） |
 |---|---|
-| 形状 | `shape=`、`ellipse`、`rhombus`、`rounded=`、`arcSize=`、**`text`（独立文字，drawio 的裸键）** |
+| 形状 | `shape=`、`ellipse`、`rhombus`、`rounded=`、`arcSize=`、**`text`（独立文字，drawio 的裸键）**、**`shape=image` + `image=data:image/svg+xml,…`（内嵌 SVG 图形，`imageAspect` 管拉伸/等比）** |
 | 配色 | `fillColor`、`strokeColor`、`fontColor`、`strokeWidth` |
 | 线型 | `dashed=1`、`dashPattern`（画布缺省 `3 3`） |
 | 箭头 | `endArrow`、`startArrow`（`classic` / `none` / …） |

@@ -38,7 +38,7 @@ import { createHash } from 'node:crypto'
 import { deflateRawSync, inflateRawSync, inflateSync } from 'node:zlib'
 // style 的"真相"只有一份（内核）：这里只借它做**语义比较**，
 // 免得"文档层规范化过的 style 串"和"文件里原样的串"逐字不同，就把没动过的单元重写一遍。
-import { DEFAULT_EDGE_STYLE, formatStyle } from './style-kernel.js'
+import { DEFAULT_EDGE_STYLE, formatStyle, isSvgDataUri, styleGet } from './style-kernel.js'
 
 /** 画布默认页尺寸（新建文件时写进 mxGraphModel，drawio 缺省与此一致：A4 竖版 × 100 dpi）。 */
 const PAGE_W = 850
@@ -745,7 +745,11 @@ export function parseMxfile(text, options) {
     if (cell.vertex !== true || owned.owned.has(String(cell.id)) === false) continue
     const isContainer = info.cells.some((c) => c.parent === cell.id && c !== cell)
     if (isContainer) containers += 1
-    if (typeof cell.style === 'string' && /(^|;)image[;=]/.test(cell.style)) imageShapes += 1
+    // **内嵌 SVG 的 image 形状不算"画不出来"**：那是本画布的 svg 节点（真画得出图，
+    // 见 style-kernel 的 SVG 一节）。剩下的（位图 data URI、外链、相对路径）才是矩形占位。
+    if (typeof cell.style === 'string' && /(^|;)image[;=]/.test(cell.style) && isSvgDataUri(styleGet(cell.style, 'image', null)) === false) {
+      imageShapes += 1
+    }
     if (hasMarkup(cell.label)) markupLabels += 1
     const offset = parentOffsetOf(info, cell)
     const geo = cell.geometry
@@ -822,7 +826,7 @@ export function parseMxfile(text, options) {
 
   if (pageCount > 1) notes.push('这个文件有 ' + pageCount + ' 页，画布只显示/编辑第 1 页（其余页保存时原样保留）')
   if (containers > 0) notes.push(containers + ' 个分组/容器：画布按绝对位置显示，文件里的父子层级照旧保留')
-  if (imageShapes > 0) notes.push(imageShapes + ' 个图片/自定义形状按矩形显示（本画布不画图片，单元原样保留）')
+  if (imageShapes > 0) notes.push(imageShapes + ' 个位图/外链图片按矩形显示（本画布只画内嵌 SVG 内容的图，单元原样保留）')
   if (markupLabels > 0) notes.push(markupLabels + ' 个 HTML 标签按纯文本显示（改标签会写成纯文本）')
   if (dangling > 0) notes.push(dangling + ' 条边是悬空端（用 sourcePoint/targetPoint 保留）')
   if (kept > 0) notes.push(kept + ' 条边的两端都找不到落点：不显示，但原样保留在文件里')
