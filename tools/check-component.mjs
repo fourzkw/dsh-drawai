@@ -302,8 +302,15 @@ console.log('\n工具条：按类型合并为下拉菜单')
       activeLayerId: '1',
       layerLabelOf: (layer, i) => (typeof layer.name === 'string' && layer.name.length > 0 ? layer.name : '第 ' + (i + 1) + ' 层'),
       toggleLayerVisible: () => {},
+      toggleLayerLocked: () => {},
+      openRenameLayer: () => {},
+      removeLayer: () => {},
+      moveSelectionToLayer: () => {},
       setCurrentLayerId: () => {},
       createLayer: () => {},
+      openFindPanel: () => {},
+      openPrefsPanel: () => {},
+      dissolveSection: () => {},
       openNewCanvasPanel: () => {},
       openFilePicker: () => {},
       copySelection: () => {},
@@ -323,6 +330,9 @@ console.log('\n工具条：按类型合并为下拉菜单')
       setNonce: () => {},
       setSelectedIds: () => {},
       setExportRequest: () => {},
+      switchPage: () => {},
+      pageCount: 1,
+      pageIndex: 0,
       hasPath: true,
       canSave: true,
       canUndo: true,
@@ -332,6 +342,7 @@ console.log('\n工具条：按类型合并为下拉菜单')
       modeTag: 'draw.io 外观',
       // 空舞台（一张画布都没打开）时菜单项要禁用 —— 它也是 toolbarMenus 的自由变量。
       empty: false,
+      showGrid: true,
     }
     Object.assign(sandbox, over === undefined ? {} : over)
     const names = Object.keys(sandbox)
@@ -351,34 +362,40 @@ console.log('\n工具条：按类型合并为下拉菜单')
   const layerItems = ran.error === undefined ? ran.items : null
 
   if (layerItems !== null) {
-    ok(layerItems.length === 5, '两层的图层菜单 = 2 显示项 + 2 当前项 + 1 新建（实际 ' + layerItems.length + '）')
-    ok(layerItems[0].label === '👁 主流程' && layerItems[1].label === '🚫 草稿', '显示/隐藏项：眼睛 + 层名（隐藏的画 🚫）')
-    ok(layerItems[2].label === '● 当前：主流程' && layerItems[3].label === '○ 当前：草稿', '当前图层项标出哪一层是当前层（没设过就第一层）')
-    ok(layerItems[4].label === '＋ 新建图层', '有「新建图层」入口')
-    ok(layerItems[0].keepOpen === true && layerItems[2].keepOpen === true, '层内的两项都 keepOpen（连点几层不用重开菜单）')
-    ok(layerItems[4].keepOpen !== true, '「新建图层」点完收起菜单')
+    // 每层 5 项（显示/锁定/当前/重命名/删除）× 2 + 新建 + 选中移层 × 2 = 13
+    ok(layerItems.length === 13, '两层的图层菜单 = 每层 5 项 ×2 + 新建 + 选中移层 ×2（实际 ' + layerItems.length + '）')
+    ok(layerItems[0].label === '👁 主流程' && layerItems[5].label === '🚫 草稿', '显示/隐藏项：眼睛 + 层名（隐藏的画 🚫）')
+    ok(layerItems[1].label.indexOf('锁定：主流程') >= 0, '锁定项在显示项后面')
+    ok(layerItems[2].label === '● 当前：主流程' && layerItems[7].label === '○ 当前：草稿', '当前图层项标出哪一层是当前层')
+    ok(layerItems[10].label === '＋ 新建图层', '有「新建图层」入口')
+    ok(layerItems[0].keepOpen === true && layerItems[2].keepOpen === true, '显示/当前都 keepOpen（连点几层不用重开菜单）')
+    ok(layerItems[10].keepOpen !== true, '「新建图层」点完收起菜单')
+    ok(layerItems[11].label === '选中 → 主流程' && layerItems[12].label === '选中 → 草稿', '有选区时列出「选中 → 层」')
 
     // 点下去要打给**对的**函数、带上**对的**层 id（只断言"有 onClick"是不够的）
     const hits = []
     const clicked = evalMenus({
       toggleLayerVisible: (id) => hits.push('显示:' + id),
+      toggleLayerLocked: (id) => hits.push('锁:' + id),
       setCurrentLayerId: (id) => hits.push('当前:' + id),
       createLayer: () => hits.push('新建'),
+      moveSelectionToLayer: (id) => hits.push('移:' + id),
     })
     ok(clicked.error === undefined, '带记录桩求值成功')
     if (clicked.error === undefined) {
       clicked.items[0].onClick()
-      clicked.items[1].onClick()
-      clicked.items[3].onClick()
-      clicked.items[4].onClick()
+      clicked.items[5].onClick()
+      clicked.items[7].onClick()
+      clicked.items[10].onClick()
+      clicked.items[12].onClick()
       ok(
-        hits.join('|') === '显示:1|显示:L2|当前:L2|新建',
+        hits.join('|') === '显示:1|显示:L2|当前:L2|新建|移:L2',
         '点每一项都打给对的函数与层 id（实际 ' + hits.join('|') + '）',
       )
     }
 
     // 空舞台（还没有图层）= 一句禁用说明，不能炸、也不能给出点了没用的项
-    const blank = evalMenus({ layerList: [], activeLayerId: null })
+    const blank = evalMenus({ layerList: [], activeLayerId: null, selectedIds: [] })
     ok(blank.error === undefined, '没有图层列表（空舞台）时图层菜单照样算得出来')
     if (blank.error === undefined) {
       ok(blank.items.length === 1 && blank.items[0].disabled === true, '没有图层信息时只给一项禁用的说明')
@@ -388,15 +405,14 @@ console.log('\n工具条：按类型合并为下拉菜单')
   if (menus !== null) {
     ok(menus.map((m) => m.key).join(',') === 'file,edit,layers,view,export', '恰好 5 类：文件 / 编辑 / 图层 / 视图 / 导出（实际 ' + menus.map((m) => m.key).join(',') + '）')
     const total = menus.reduce((n, m) => n + m.items.length, 0)
-    ok(
-      total === 18 + (layerItems === null ? 0 : layerItems.length),
-      '所有操作都有归处（实际 ' + total + ' 项 = 18 个固定项 + ' + (layerItems === null ? 0 : layerItems.length) + ' 个图层项）',
-    )
+    // 固定项会随功能增减；只断言「图层」菜单就是 layerMenuItems，且总数 = 非图层固定项 + 图层项
     const layersMenu = menus.filter((m) => m.key === 'layers')[0]
     ok(
       layersMenu !== undefined && layersMenu.items.length === (layerItems === null ? -1 : layerItems.length),
       '「图层」菜单里就是 layerMenuItems() 那几项（实际 ' + (layersMenu === undefined ? '没有这个菜单' : layersMenu.items.length) + '）',
     )
+    const fixed = total - (layerItems === null ? 0 : layerItems.length)
+    ok(fixed >= 18, '非图层固定项至少 18 个（实际 ' + fixed + '，总 ' + total + '）')
     ok(menus.every((m) => typeof m.title === 'string' && m.title.length > 0), '每个菜单都有悬停说明（title）')
     ok(menus.every((m) => m.items.every((i) => typeof i.label === 'string' && i.label.length > 0)), '每一项都有 label')
     ok(menus.every((m) => m.items.every((i) => typeof i.onClick === 'function')), '每一项都有 onClick')
@@ -405,6 +421,8 @@ console.log('\n工具条：按类型合并为下拉菜单')
       ok(labels.indexOf(gone) >= 0, '旧按钮「' + gone + '」已收进菜单')
     }
     ok(labels.indexOf('全选') >= 0, '「全选」在编辑菜单里（Ctrl+A 之外的入口）')
+    ok(labels.indexOf('查找…') >= 0, '「查找…」在编辑菜单里（Ctrl+F）')
+    ok(labels.some((l) => l.indexOf('导出选中') >= 0), '导出菜单有「导出选中」')
     // 工具条本身只应渲染菜单入口
     const headStart = src.indexOf('const head = React.createElement(')
     const headEnd = src.indexOf('  let body', headStart)
@@ -422,7 +440,7 @@ console.log('\n工具条：按类型合并为下拉菜单')
     ok(/setDocMenuPos\(null\)/.test(toggle), '收起菜单时清掉位置')
     const styleFn = bodyOf('panelStyle') || ''
     ok(/Math\.min/.test(styleFn) && /maxLeft/.test(styleFn), 'panelStyle 把面板夹在画布范围内（右栏窄，不夹会跑到看不见）')
-    ok((src.match(/panelStyle\(docMenuPos\)/g) || []).length === 2, '两个面板（菜单 / 打开面板）都用同一套定位')
+    ok((src.match(/panelStyle\(docMenuPos\)/g) || []).length >= 2, '面板都用同一套定位')
   }
 }
 
@@ -720,13 +738,17 @@ console.log('\n独立文字：右键空白处能放一段字（不接节点、�
   // `createNodeAt(shape, menuStyle, menu.userX, menu.userY)`，位置就是点的地方。
   ok(/createNodeAt\(shape, menuStyle, menu\.userX, menu\.userY\)/.test(src), '点形状 = createNodeAt(形状, 配色, 点的位置)（「文字」也走这一条）')
   ok(/\{ shape: 'text', label: '文字' \}/.test(src), '形状面板里有「文字」（点它就是放一段独立文字）')
-  ok(/const text = typeof label === 'string' \? label : isText \? '文字' : isSvg \? '' : '新节点'/.test(src), '文字元素的默认文字是「文字」（svg 节点不给默认文字，免得压在图上）')
+  ok(/const text = typeof label === 'string' \? label : isText \? '文字' : isSvg \? '' : isSection \? '分区' : '新节点'/.test(src), '文字元素的默认文字是「文字」（svg 节点不给默认文字，免得压在图上）')
   // 文字不吃配色：它的样式就是 drawio 的 defaultTextStyle，盖上 fillColor/strokeColor
   // 只会让文件与 drawio 不一致，屏幕上还什么都看不出来。svg 同理（图片不吃填充/描边）。
+  // 分区自带淡底虚线，也不盖调色板。
   ok(
-    /const base = isText \|\| isSvg \? styleWithNodeShape\('', shape\) : styleWithColorName/.test(src),
+    /const base =\s*isText \|\| isSvg \|\| isSection \? styleWithNodeShape\('', shape\) : styleWithColorName/.test(src),
     '新建节点对文字不套配色（保持 drawio 的 defaultTextStyle）',
   )
+  ok(/\{ shape: 'section', label: '分区' \}/.test(src), '形状面板里有「分区」（可插入的区块元素）')
+  ok(!/成为一组/.test(src) && !/取消组合/.test(src), '不再用编辑菜单「成为一组/取消组合」')
+  ok(/解散分区/.test(src), '分区右键可解散（删框留内容）')
   ok(/const style = isSvg \? styleWithSvgMarkup\(base, DEFAULT_SVG_MARKUP\) : base/.test(src), '放 svg 节点时带上一张占位图（否则拿到的是看不见的空框）')
   ok(/if \(isText\) openNodeEditor\(id\)/.test(src), '放下来直接进编辑态（drawio 的 insertText 也是这样）')
   ok(

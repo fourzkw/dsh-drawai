@@ -428,10 +428,17 @@ function scanCells(source, from, to) {
  * 全文分析。**解析与写回共用同一份结构** —— 两边对"哪些单元属于我们"必须完全一致，
  * 否则写回会把我们不认识的单元当成"用户删掉的"删掉。
  */
-function analyzeMxfile(source) {
+function analyzeMxfile(source, pageIndex) {
   const diagrams = [...source.matchAll(/<diagram\b([^>]*?)(\/>|>)([\s\S]*?)(?:<\/diagram>|$)/g)]
   if (diagrams.length === 0) throw new Error('这不是 mxfile：找不到 <diagram> 元素')
-  const first = diagrams[0]
+  const pageNames = diagrams.map((d, i) => {
+    const name = attr(d[1], 'name')
+    return typeof name === 'string' && name.length > 0 ? name : '第 ' + (i + 1) + ' 页'
+  })
+  let idx = Number(pageIndex)
+  if (Number.isFinite(idx) === false || idx < 0) idx = 0
+  if (idx >= diagrams.length) idx = diagrams.length - 1
+  const first = diagrams[idx]
   const closed = first[0].endsWith('</diagram>')
   const bodyEnd = first.index + first[0].length - (closed ? '</diagram>'.length : 0)
   const bodyStart = bodyEnd - first[3].length
@@ -476,6 +483,8 @@ function analyzeMxfile(source) {
   return {
     source: source,
     pageCount: diagrams.length,
+    pageIndex: idx,
+    pageNames: pageNames,
     // 纸张尺寸（drawio 挂在 `mxGraphModel` 上的属性）：AI 做布局/导出建议时要看它 ——
     // 850×1100 是 drawio 的 A4 竖版缺省，但不代表用户这份文件就是那个尺寸。
     pageSize: readPageSize(modelXml),
@@ -597,7 +606,12 @@ function layerOfParent(info, cellOrId) {
  *
  * 返回的 offset 是"沿父链累加的相对坐标总量"，于是写入值 = 绝对坐标 − offset。
  */
-function writeChainOf(info, modelAbs, deletedIds, cell, wantLayer, knownLayers) {
+function writeChainOf(info, modelAbs, deletedIds, cell, wantLayer, knownLayers, modelParent) {
+  // ⓪ 模型显式写了容器 parent（成组）：优先用它，相对坐标 = 绝对 − 容器绝对。
+  if (typeof modelParent === 'string' && modelParent.length > 0 && modelAbs.has(modelParent) && deletedIds.has(modelParent) === false) {
+    const abs = modelAbs.get(modelParent)
+    return { parentId: modelParent, offset: { x: abs.x, y: abs.y } }
+  }
   // ① 先按文件里的父链算出"本来要写到哪个父级、偏移多少"（容器层级靠这一步保住）。
   let parentId = cell.parent
   let offset = { x: 0, y: 0 }
@@ -622,6 +636,11 @@ function writeChainOf(info, modelAbs, deletedIds, cell, wantLayer, knownLayers) 
   if (typeof parentId !== 'string') {
     parentId = layerOrRoot(info)
     offset = { x: 0, y: 0 }
+  }
+  // 模型要求清掉容器 parent（取消组合）：挂回图层。
+  if (modelParent === null && info.layerIds.has(parentId) === false && parentId !== info.rootId) {
+    const layer = typeof wantLayer === 'string' && knownLayers.has(wantLayer) ? wantLayer : layerOrRoot(info)
+    return { parentId: layer, offset: { x: 0, y: 0 } }
   }
   // ② 模型显式要求的层与文件这一支的层不一致 → 换父级（单元被显式移层时它离开原容器）。
   const want = typeof wantLayer === 'string' && wantLayer.length > 0 && knownLayers.has(wantLayer) ? wantLayer : null
@@ -726,7 +745,8 @@ export function parseMxfile(text, options) {
   }
   if (source.trim().length === 0) throw new Error('.drawio 文件是空的')
 
-  const info = analyzeMxfile(source)
+  const pageIndex = options !== undefined && options !== null ? options.page : 0
+  const info = analyzeMxfile(source, pageIndex)
   const owned = ownershipOf(info)
   const nodeIds = owned.nodeIds
   const pageCount = info.pageCount
@@ -824,8 +844,18 @@ export function parseMxfile(text, options) {
     edges.push(edge)
   }
 
-  if (pageCount > 1) notes.push('这个文件有 ' + pageCount + ' 页，画布只显示/编辑第 1 页（其余页保存时原样保留）')
-  if (containers > 0) notes.push(containers + ' 个分组/容器：画布按绝对位置显示，文件里的父子层级照旧保留')
+  if (pageCount > 1) {
+    notes.push(
+      '这个文件有 ' +
+        pageCount +
+        ' 页，当前编辑第 ' +
+        (info.pageIndex + 1) +
+        ' 页「' +
+        info.pageNames[info.pageIndex] +
+        '」（其它页保存时原样保留；视图菜单可切换）',
+    )
+  }
+  if (containers > 0) notes.push(containers + ' 个分组/容器：拖动容器会带走子节点；文件里的父子层级照旧保留')
   if (imageShapes > 0) notes.push(imageShapes + ' 个位图/外链图片按矩形显示（本画布只画内嵌 SVG 内容的图，单元原样保留）')
   if (markupLabels > 0) notes.push(markupLabels + ' 个 HTML 标签按纯文本显示（改标签会写成纯文本）')
   if (dangling > 0) notes.push(dangling + ' 条边是悬空端（用 sourcePoint/targetPoint 保留）')
@@ -888,10 +918,13 @@ export function parseMxfile(text, options) {
   }
   // 纸张尺寸：文件里写了才带（不写就是"这份文件没说"，不是 850×1100）。
   if (info.pageSize !== null) doc.page = { w: info.pageSize.w, h: info.pageSize.h }
+  doc.meta.pageIndex = info.pageIndex
+  doc.meta.pageCount = pageCount
+  doc.meta.pageNames = info.pageNames
   if (existing !== null && existing.meta !== undefined && existing.meta !== null && existing.meta.pinned === true) {
     doc.meta.pinned = true
   }
-  return { doc: doc, notes: notes, pageCount: pageCount }
+  return { doc: doc, notes: notes, pageCount: pageCount, pageIndex: info.pageIndex, pageNames: info.pageNames }
 }
 
 // ---- 单元的 XML 生成（新单元、以及从零生成一份文件时共用）--------------------
@@ -1245,9 +1278,15 @@ function rebuildEdgeCell(info, cell, edge, chain) {
  *
  * @returns { info, edits, dropped }
  */
-function planDocEdits(originalText, doc) {
+function planDocEdits(originalText, doc, options) {
   const source = String(originalText === undefined || originalText === null ? '' : originalText)
-  const info = analyzeMxfile(source)
+  const page =
+    options !== undefined && options !== null && Number.isFinite(Number(options.page))
+      ? Number(options.page)
+      : doc !== null && doc.meta !== undefined && doc.meta !== null && Number.isFinite(Number(doc.meta.pageIndex))
+        ? Number(doc.meta.pageIndex)
+        : 0
+  const info = analyzeMxfile(source, page)
   const owned = ownershipOf(info).owned
   const nodes = Array.isArray(doc.nodes) ? doc.nodes : []
   const edges = Array.isArray(doc.edges) ? doc.edges : []
@@ -1296,7 +1335,15 @@ function planDocEdits(originalText, doc) {
       if (owned.has(id)) edits.push({ start: cell.start, end: cell.end, text: '' })
       continue
     }
-    const chain = writeChainOf(info, modelAbs, deletedIds, cell, want.item.layer, knownLayers)
+    const chain = writeChainOf(
+      info,
+      modelAbs,
+      deletedIds,
+      cell,
+      want.item.layer,
+      knownLayers,
+      want.kind === 'node' ? (want.item.parent === undefined ? undefined : want.item.parent) : undefined,
+    )
     if (want.kind === 'edge') {
       const anchors = anchorsOf(want.item)
       if (anchors === null) {
@@ -1492,7 +1539,7 @@ function planReorder(info, edits, nodes, edges, owned) {
  */
 export function applyDocToMxfile(originalText, doc, options) {
   const source = String(originalText === undefined || originalText === null ? '' : originalText)
-  const plan = planDocEdits(source, doc)
+  const plan = planDocEdits(source, doc, options)
   const model = spliceEdits(plan.info.modelXml, plan.edits)
   const bodyText = plan.info.compressed ? compressModel(model) : model
   return {
@@ -1614,15 +1661,35 @@ export function buildMxfile(doc, options) {
   }
   if (layers.length === 0) lines.push('        <mxCell id="1" parent="0" />')
   const firstLayerId = layers.length > 0 ? String(layers[0].id) : '1'
+  const nodeById = new Map()
+  for (const node of nodes) {
+    if (node !== null && typeof node === 'object' && typeof node.id === 'string') nodeById.set(String(node.id), node)
+  }
+  /** 新建文件时的 parent：有容器 parent 就挂容器（几何写相对坐标），否则挂图层。 */
   const parentOf = (cell) => {
+    if (cell !== null && typeof cell === 'object' && typeof cell.parent === 'string' && cell.parent.length > 0 && nodeById.has(cell.parent)) {
+      return cell.parent
+    }
     const want = cell !== null && typeof cell === 'object' && typeof cell.layer === 'string' ? cell.layer : null
     if (want !== null && layers.some((l) => String(l.id) === want)) return want
     return firstLayerId
   }
+  /** 容器子节点：画布存绝对坐标，写出时减掉父级绝对坐标。 */
+  const relGeom = (node, parentId) => {
+    const x = Number.isFinite(Number(node.x)) ? Number(node.x) : 0
+    const y = Number.isFinite(Number(node.y)) ? Number(node.y) : 0
+    const parent = nodeById.get(parentId)
+    if (parent === undefined) return { x: x, y: y }
+    const px = Number.isFinite(Number(parent.x)) ? Number(parent.x) : 0
+    const py = Number.isFinite(Number(parent.y)) ? Number(parent.y) : 0
+    return { x: x - px, y: y - py }
+  }
   if (doc.meta !== undefined && doc.meta !== null && doc.meta.pinned === true) lines.push(metaCellXml(parentOf(doc.meta), '        ', doc.meta))
   for (const node of nodes) {
     if (node === null || typeof node !== 'object') continue
-    lines.push(nodeCellXml(node, parentOf(node), '        '))
+    const pid = parentOf(node)
+    const rel = relGeom(node, pid)
+    lines.push(nodeCellXml(Object.assign({}, node, { x: rel.x, y: rel.y }), pid, '        '))
   }
   for (const edge of edges) {
     if (edge === null || typeof edge !== 'object') continue

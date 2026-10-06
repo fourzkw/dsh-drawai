@@ -521,7 +521,7 @@ console.log('\n导出取框：按"这一刻会画出来的东西"算（线绕到
 
   // 取框那一行必须是 paintedBounds（不是 getBBox 量 DOM）—— 这是那次留白事故的回归线。
   const srcText = readFileSync(source, 'utf8')
-  ok(/paintedBounds\(current\) \|\| contentBounds\(current\)/.test(srcText), '导出/看图按 paintedBounds 取框，算不出来才退回 contentBounds')
+  ok(/paintedBounds\((?:boundsDoc|current)\) \|\| contentBounds\((?:boundsDoc|current)\)/.test(srcText), '导出/看图按 paintedBounds 取框，算不出来才退回 contentBounds')
   ok(srcText.indexOf('measurePaintedBounds') < 0, '不再用 getBBox() 量 DOM 取框（量到的是视口，不是内容）')
   ok(/routeEdgeStyled\(from, to, geometry\.boxes, geometry\.bounds, edge, undefined\)/.test(srcText), '框里的走线用的是渲染器同一套路由')
 }
@@ -1286,6 +1286,73 @@ console.log('\n整体拖动：相对位置一点都不能变')
   const edgeOnly = { originX: 0, originY: 0, ref: null, hasNodes: false, starts: [], edgeStarts: drag.edgeStarts }
   const onlyMove = internals.dragMoveOf(edgeOnly, { x: 13, y: -7 })
   ok(onlyMove.x === 15 && onlyMove.y === -5, '只拖连线时按半格吸附：' + JSON.stringify(onlyMove))
+}
+
+console.log('\n图层：锁定层不可编；查找 / 微移 / 导出选中 / 分组拖带子 / drawOrder')
+{
+  const lockedDoc = {
+    version: 2,
+    revision: '',
+    layers: [
+      { id: '1', name: '开', visible: true, locked: false },
+      { id: 'L2', name: '锁', visible: true, locked: true },
+    ],
+    nodes: [
+      { id: 'a', label: 'free', x: 0, y: 0, w: 80, h: 40, layer: '1' },
+      { id: 'b', label: 'locked', x: 100, y: 0, w: 80, h: 40, layer: 'L2' },
+    ],
+    edges: [],
+    labels: [],
+  }
+  ok(internals.layerIsLocked(lockedDoc, 'L2') === true, '锁定层可判')
+  ok(internals.filterEditableIds(lockedDoc, ['a', 'b']).join(',') === 'a', '锁定层单元被滤掉')
+  const nudged = internals.cloneDoc(lockedDoc)
+  const nCount = internals.nudgeSelectionInDoc(nudged, ['a', 'b'], 10, 0)
+  ok(nCount === 1 && nudged.nodes[0].x === 10 && nudged.nodes[1].x === 100, '微移跳过锁定层：' + nCount)
+
+  const hits = internals.findInDoc(lockedDoc, 'lock')
+  ok(hits.length === 1 && hits[0].id === 'b', '查找按标签子串：' + JSON.stringify(hits))
+
+  const filtered = internals.docFilteredToIds(lockedDoc, ['a'])
+  ok(filtered !== null && filtered.nodes.length === 1 && filtered.nodes[0].id === 'a', '导出选中只留 ids')
+
+  const groupDoc = {
+    version: 2,
+    revision: '',
+    layers: [{ id: '1', name: '', visible: true }],
+    nodes: [
+      { id: 'g', label: '', style: 'group;container=1', x: 0, y: 0, w: 200, h: 120 },
+      { id: 'c1', label: '子', x: 20, y: 20, w: 60, h: 40, parent: 'g' },
+    ],
+    edges: [{ id: 'e1', from: 'c1', to: 'c1' }],
+    labels: [],
+  }
+  ok(internals.isContainerNode(groupDoc, groupDoc.nodes[0]) === true, '认出 group 容器')
+  const dragIds = internals.expandDragIds(groupDoc, ['g'])
+  ok(dragIds.indexOf('c1') >= 0 && dragIds.indexOf('g') >= 0, '拖容器带走子：' + dragIds.join(','))
+
+  const sectionStyle = styleWithNodeShape('', 'section')
+  ok(nodeShapeFromStyle(sectionStyle) === 'section', '分区形状可识别')
+  ok(/group/.test(sectionStyle) && /container=1/.test(sectionStyle), '分区落盘是 drawio group 容器')
+  const secDoc = {
+    version: 2,
+    revision: '',
+    layers: [{ id: '1', name: '', visible: true }],
+    nodes: [
+      { id: 's1', label: '分区', style: sectionStyle, x: 0, y: 0, w: 280, h: 180 },
+      { id: 'n1', label: '内', x: 40, y: 40, w: 80, h: 40 },
+    ],
+    edges: [],
+    labels: [],
+  }
+  ok(internals.sectionAtPoint(secDoc, 100, 100, null) !== null && internals.sectionAtPoint(secDoc, 100, 100, null).id === 's1', '点落在分区内能命中')
+  ok(internals.sectionAtPoint(secDoc, 400, 400, null) === null, '点在分区外不命中')
+
+  const zDoc = internals.cloneDoc(groupDoc)
+  internals.ensureDrawOrder(zDoc)
+  ok(Array.isArray(zDoc.drawOrder) && zDoc.drawOrder.indexOf('e1') >= 0, 'ensureDrawOrder 覆盖边与节点')
+  internals.reorderDrawOrder(zDoc, 'e1', 'front')
+  ok(zDoc.drawOrder[zDoc.drawOrder.length - 1] === 'e1', '边可置顶到 drawOrder 末尾')
 }
 
 console.log('\n图层 v1：隐藏层整层不画、也点不到；新单元进当前层')
