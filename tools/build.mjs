@@ -35,6 +35,16 @@ const KERNEL_PATH = 'src/style-kernel.js'
 const MXFILE_PATH = 'src/mxfile.js'
 
 /**
+ * 其余**只给宿主半边**的模块：原样拷贝 + 生成横幅。
+ *
+ * 为什么要有这张表而不是逐个手写：宿主 `lib/index.js` 是**直接 import 相对路径**的
+ * （`./raster.js`、`./trace-image.js`），构建器漏拷一个，宿主就会在加载时
+ * 抛 MODULE_NOT_FOUND —— 而那一刻插件已经"装好了"，报错在启动期，很难联想到构建。
+ * 所以新增这类模块时：源文件放 src/、在这里登记一行，构建器同时做存在性校验。
+ */
+const HOST_ONLY_MODULES = ['src/raster.js', 'src/trace-image.js']
+
+/**
  * 客户端 bundle body 的起点：**内核的第一行**（哨兵）。
  * 内联之后 body 不再是"从 React 那行开始"，校验必须按同一个起点取回。
  */
@@ -171,6 +181,16 @@ export function buildAll() {
   // 宿主半边的 mxfile 编解码（读/写 .drawio）：同样原样拷。
   // 只有宿主半边用它（浏览器没有 zlib，解不开 drawio 压过的 diagram），所以不进客户端 bundle。
   writeFileSync('lib/mxfile.js', GENERATED + readFileSync(MXFILE_PATH, 'utf8'), 'utf8')
+
+  // 其余宿主专用模块（逐像素矢量化那套）：原样拷贝。
+  // 顺手对每份源做一次语法体检（反引号配平）——这几份都进不了客户端 bundle，
+  // 客户端那条校验管不到它们，等宿主 import 才发现就太晚了。
+  for (const source of HOST_ONLY_MODULES) {
+    const text = readFileSync(source, 'utf8')
+    assertBackticksBalanced(source, text)
+    const out = source.replace(/^src\//, 'lib/')
+    writeFileSync(out, GENERATED + text, 'utf8')
+  }
 
   const body = composeClientBody()
   for (const [index, line] of body.split('\n').entries()) {

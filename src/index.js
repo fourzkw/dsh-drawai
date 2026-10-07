@@ -17,6 +17,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { readdir } from 'node:fs/promises'
 import { isAbsolute, resolve as resolvePath, join as joinPath } from 'node:path'
 import { applyDocToMxfile, buildMxfile, contentHash, parseMxfile } from './mxfile.js'
+import { decodeRaster } from './raster.js'
+import { TRACE_DEFAULTS, traceRasterToSvg } from './trace-image.js'
 import {
   ARROW_KINDS,
   DASH_KINDS,
@@ -407,7 +409,8 @@ const DEFAULT_SVG_H = 80
 
 /** 一段内嵌 SVG 标记的长度上限。超了直接拒：一个单元格几十万字符会把文件和上下文一起撑爆。 */
 const SVG_MARKUP_LIMIT = 60000
-
+/** traceImage 能读的图片字节上限（够任何截图，又不至于让一次调用把宿主内存吃干）。 */
+const TRACE_IMAGE_MAX_BYTES = 32 * 1024 * 1024
 /** diagram_read 里回显 svg 的长度上限（超了截断并注明总长）。 */
 const SVG_REPORT_LIMIT = 4000
 
@@ -625,7 +628,7 @@ function styleNote(style) {
  * 施加 ops。语义校验在这里：任何指向不存在节点的边、任何未知 id，都直接抛错并列出已知节点，
  * 于是失败发生在写盘之前 —— 不会画出半张烂图。
  */
-function applyOps(doc, ops, out) {
+async function applyOps(doc, ops, out, opctx) {
   const notes = []
   /**
    * 本次调用里的**别名**（`addNode`/`addEdge` 的 `as`）。
@@ -752,6 +755,68 @@ function applyOps(doc, ops, out) {
       throw new Error('ops[' + i + '] must be an object like { op: "addNode", label: "..." }')
     }
     const kind = op.op
+
+    if (kind === 'traceImage') {
+      // 在画布上"照着一张位图描一张矢量图"：把工作区里的图片逐像素矢量化，建成 svg 内容节点。
+      //
+      // 这一步要读像素（I/O），所以整条 applyOps 是 async 的 —— 别把它当成同步 op 来加。
+      const where = 'ops[' + i + '] traceImage'
+      if (opctx === undefined || opctx === null) throw new Error(where + ': 这个上下文不支持读图片（内部错误）')
+      const rawImage = typeof op.image === 'string' && op.image.length > 0 ? op.image : undefined
+      if (rawImage === undefined) {
+        throw new Error(where + ' needs a non-empty string "image"（工作区里那张位图的路径，png/jpg/webp/gif）')
+      }
+      const bytes = await opctx.readBytes(rawImage, where)
+      let raster
+      try {
+        raster = await decodeRaster(bytes)
+      } catch (error) {
+        throw new Error(where + ': ' + messageOf(error))
+      }
+      const traced = traceRasterToSvg(raster, {
+        colors: numberOr(op.colors, TRACE_DEFAULTS.colors),
+        grid: numberOr(op.grid, TRACE_DEFAULTS.grid),
+        scale: numberOr(op.scale, TRACE_DEFAULTS.scale),
+        epsilon: numberOr(op.epsilon, TRACE_DEFAULTS.epsilon),
+        precision: numberOr(op.precision, TRACE_DEFAULTS.precision),
+        minArea: numberOr(op.minArea, TRACE_DEFAULTS.minArea),
+        bgBright: numberOr(op.bgBright, TRACE_DEFAULTS.bgBright),
+        bgTol: numberOr(op.bgTol, TRACE_DEFAULTS.bgTol),
+        seeds: numberOr(op.seeds, TRACE_DEFAULTS.seeds),
+        maxBytes: Math.min(numberOr(op.maxBytes, TRACE_DEFAULTS.maxBytes), SVG_MARKUP_LIMIT - 2000),
+      })
+      const metrics = traced.metrics
+      if (traced.svg.length > SVG_MARKUP_LIMIT) {
+        throw new Error(
+          where + ': 描出来的 SVG 太长（' + traced.svg.length + ' 字符，上限 ' + SVG_MARKUP_LIMIT +
+            '）。调小 grid（当前 ' + metrics.work.width + '）、调大 epsilon（当前 ' + op.epsilon + '）、或减少 colors。',
+        )
+      }
+      // 尺寸：默认 1:1（画布坐标 = 原图像素坐标），w/h 显式给了就用给的
+      const w = numberOr(op.w, raster.width)
+      const h = numberOr(op.h, raster.height)
+      const synthetic = {
+        op: 'addNode',
+        svg: traced.svg,
+        w: w,
+        h: h,
+        keys: { imageAspect: 0 }, // 拉伸铺满：viewBox 就是原图像素系，节点框按它 1:1 画
+      }
+      if (typeof op.id === 'string') synthetic.id = op.id
+      if (typeof op.as === 'string') synthetic.as = op.as
+      if (typeof op.layer === 'string') synthetic.layer = op.layer
+      if (typeof op.label === 'string') synthetic.label = op.label
+      if (has(op, 'x')) synthetic.x = op.x
+      if (has(op, 'y')) synthetic.y = op.y
+      ops.splice(i + 1, 0, synthetic)
+      notes.push(
+        '🖼 ' + rawImage + ' → 逐像素矢量化：' + metrics.palette.length + ' 色 / ' + metrics.paths + ' 条 path / ' +
+          metrics.loopsKept + ' 个轮廓环 / ' + metrics.svgChars + ' 字符' +
+          '（工作图 ' + metrics.work.width + '×' + metrics.work.height + '，像素覆盖' +
+          (metrics.exactPixelCoverage === true ? '精确' : '不精确 ' + metrics.drawnPixels + '/' + metrics.totalPixels) + '）',
+      )
+      continue
+    }
 
     if (kind === 'addNode') {
       // `svg` 给了（非 null）= 这个节点的内容是一张图，标签可以省。
@@ -1779,6 +1844,7 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
     {op:"setLayer", id|ids, layer}
     {op:"setLayerProps", layer, name?, visible?, locked?}
     {op:"export", format?:"svg"|"png", name?}
+    {op:"traceImage", image, w?, h?, x?, y?, colors?, grid?, scale?, epsilon?, minArea?, as?, layer?}
     {op:"move", id|ids, dx?, dy?, x?, y?}
     {op:"remove", id|ids}
     {op:"highlight", ids:["n1","n2"]}
@@ -1803,6 +1869,18 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
   渲染在画布那一半做，所以这一步是"请求"：返回值/下一次 read 里的 export 状态
   pending → done（带文件路径）/ downloaded / failed。看到 pending 说明画布还没刷新 ——
   别反复请求，等下一次 read 再看（或提醒用户打开那张画布）。
+- **把一张位图"描"成矢量图用 traceImage**：{op:"traceImage", image:"ref.png", x:40, y:40}。
+  它**真的读那张图的像素**（宿主里跑的管线：四边泛洪去背景 → k-means 定调色板 →
+  3× 超采样归类 + 众数滤波 → 按颜色分连通域、沿像素格边取闭合轮廓 → RDP 简化 →
+  每色一条 nonzero path，按面积降序铺），建成一个 svg 内容节点。
+  **不要用"手写一段近似的 svg"冒充复刻** —— 形状词汇表表达不了的照片/插画就直接用这个 op。
+  · 默认 **w/h = 原图像素尺寸**、viewBox = 原图像素坐标系，所以画布坐标就是图片坐标（1:1 铺满）。
+  · 要更简洁：colors 调小（默认 12）、scale:2 或 3（先降采样）、grid 调小（工作宽度）。
+    要更保真：epsilon 调小（默认 2px）、minArea 调小（默认 10px²）。
+  · 输出会告诉你要点：色数 / 路径数 / 轮廓环数 / SVG 字符数 / **像素覆盖是否精确**
+    （精确 = 每色轮廓面积之和等于图像总像素，没有像素丢失或重复）。
+  · 单次上限：SVG 标记 60000 字符（超了会自己收紧 epsilon 与碎块阈值，仍超就报错让你调参）。
+  · 输入支持 PNG（自带解码器，零依赖）与 JPEG/GIF/WebP（需要宿主装了 sharp）。
 
 - **改一组用 ids**：{op:"setStyle", ids:["n1","n2","n5"], style:"green"} —— setStyle / setLabel /
   move / remove 都收 ids，不要为了"把这几个改成绿色"发 12 个 op。批量 move 只收 dx/dy
@@ -2686,6 +2764,7 @@ export function apply(ctx) {
       '{op:"setEdge", id, from?, to?, fromPoint?, toPoint?} / {op:"order", id|ids, to:"front"|"back"|"up"|"down"} / ' +
       '{op:"duplicate", id|ids, dx?, dy?, withEdges?, layer?, as?} / {op:"addLayer", name?, as?} / {op:"setLayer", id|ids, layer} / {op:"setLayerProps", layer, name?, visible?, locked?} / ' +
       '{op:"export", format?:"svg"|"png", name?} / ' +
+      '{op:"traceImage", image, w?, h?, x?, y?, colors?, grid?, scale?, epsilon?, minArea?, as?, layer?} / ' +
       '{op:"move", id|ids, dx?, dy?, x?, y?} / {op:"remove", id|ids} / {op:"highlight", ids:[...]}；节点 id 省略时自动分配。' +
       '**改接一条边**用 setEdge（换 from/to 或某一端改成自由点）—— id、标签、标签位置、折点、端点约束全都留着；' +
       '不要 remove + addEdge 重画（那会把这些丢掉）。' +
@@ -2696,6 +2775,12 @@ export function apply(ctx) {
       '**图层**用 addLayer/setLayer/setLayerProps（加层、把单元移到别的层、改名/显示/隐藏/锁定；隐藏≠删除）。' +
       '**导出**用 export：format:"svg" 会让画布渲染一张 SVG 落在 .drawio 旁边、format:"png" 是浏览器下载；' +
       '这一步由画布执行，返回值里的 export.status 是 pending/done/downloaded/failed（pending = 画布还没刷新）。' +
+      '**照着一张位图描矢量图**用 traceImage：{op:"traceImage", image:"ref.png", x, y} 会真的去读那张图的像素' +
+      '（泛洪去背景 → k-means 定调色板 → 3× 超采样归类 → 按颜色取像素级闭合轮廓 → 每色一条 nonzero path），' +
+      '建成一个 svg 内容节点，**不是让模型凭印象重画**。默认 w/h = 原图像素尺寸、viewBox = 原图像素坐标系（1:1）。' +
+      '可调：colors（默认 12，少=更简洁）、grid（工作宽度，调小=更粗更快）、scale（先降采样几倍）、' +
+      'epsilon（轮廓简化容差 px，默认 2，调大=更省字符）、minArea（小于这个面积的碎块并进最相似邻色）。' +
+      '返回的 summary 里带"色数/路径数/轮廓环/像素覆盖是否精确"，据此判断质量。' +
       '**一次改一组**就写 ids:[...]（setStyle/setLabel/move/remove 都收，move 的批量只收 dx/dy 相对位移）—— 用户说"把这几个换成绿色"时不要逐个发 op。' +
       '**引用刚建的那个**用 as:"名字"：{op:"addNode", label:"开始", as:"start"} 之后同一个 ops 数组里 from/to/id 可以直接写 "start"，不必猜自动分配的 n7。' +
       '**画图形（图标/logo/示意图）用 svg**：addNode {shape:"svg", svg:"<svg viewBox=…>…</svg>", w, h} 让节点的内容就是那段 SVG 标记' +
@@ -2862,7 +2947,31 @@ export function apply(ctx) {
       if (LAYOUTS.indexOf(mode) < 0) throw new Error('unknown layout "' + mode + '"; use one of ' + LAYOUTS.join(', '))
 
       const out = {}
-      const notes = applyOps(doc, ops, out)
+      const notes = await applyOps(doc, ops, out, {
+        /**
+         * traceImage 的图片读取：走**同一个工作区解析器**（相对路径按会话根解析），
+         * 于是"AI 能描哪张图"和"画布能打开哪些文件"是同一套围栏。
+         * 上限给得比 SVG 上限宽：一张 499×847 的 PNG 才 0.4MB，32MB 足够任何贴进来的截图，
+         * 又不至于让一次调用把宿主内存吃干。
+         */
+        readBytes: async function (imagePath, where) {
+          let target
+          try {
+            target = await resolveTarget(imagePath, sessionId)
+          } catch (error) {
+            throw new Error(where + ': 读不到 "' + imagePath + '"（' + messageOf(error) + '）')
+          }
+          const info = await ctx.fs.stat(target)
+          if (info === undefined) {
+            throw new Error(where + ': 工作区里没有 "' + imagePath + '"（路径相对会话工作区，或用绝对路径）')
+          }
+          try {
+            return await ctx.fs.readBytes(target, undefined, TRACE_IMAGE_MAX_BYTES)
+          } catch (error) {
+            throw new Error(where + ': 读 "' + imagePath + '" 失败（' + messageOf(error) + '）')
+          }
+        },
+      })
       if (Array.isArray(out.highlight)) highlightFor.set(sessionId, out.highlight)
       // 删掉的东西不该还挂在"用户选中"里（id 会被复用，见 forgetSelection）。
       if (Array.isArray(out.removed) && out.removed.length > 0) forgetSelection(sessionId, loaded.absolute, out.removed)
