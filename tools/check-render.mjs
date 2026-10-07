@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { composeClientBody } from './build.mjs'
 // 造 style 键夹具时直接用内核（与宿主/客户端同一份），免得把键名再抄一遍。
-import { DEFAULT_EDGE_STYLE, NODE_SHAPES, curvedFromStyle, lineKindFromStyle, nodeShapeFromStyle, normalizeDrawioDoc, styleGet, stylePatch, styleWithLineKind, styleWithNodeShape, styleWithSvgMarkup, svgMarkupFromStyle, styleWithTextColorName, textColorNameFromStyle } from '../src/style-kernel.js'
+import { DEFAULT_EDGE_STYLE, NODE_SHAPES, curvedFromStyle, lineKindFromStyle, nodeShapeFromStyle, normalizeDrawioDoc, styleGet, stylePatch, styleWithImageDataUri, styleWithLineKind, styleWithNodeShape, styleWithSvgMarkup, svgMarkupFromStyle, styleWithTextColorName, textColorNameFromStyle } from '../src/style-kernel.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 /** 源码文本断言用（CSS 串、函数名这些在 src/client.js 里就有）。 */
@@ -1541,7 +1541,8 @@ console.log('\nSVG 内容节点：节点框里画的就是文档里那段标记'
   ok(nodeShapeFromStyle(toSvg) === 'rect', '只给形状不给内容时仍算矩形（宿主那边会拦下并要内容，不会留下一个空框）')
   // 别的形状不受影响
   ok(nodeShapeFromStyle('shape=image;image=img/lib/clip_art/computers/Monitor.png;') === 'rect', '外链/相对路径的图片仍然按矩形显示（画布读不到那个文件）')
-  ok(nodeShapeFromStyle('shape=image;image=data:image/png;base64,iVBORw0KGgo=;') === 'rect', '位图 data URI 也仍是矩形（只画内嵌 SVG）')
+  ok(nodeShapeFromStyle('shape=image;image=data:image/png;base64,iVBORw0KGgo=;') === 'image', '位图 data URI 认作 image 形状（画布用 <image> 画出来）')
+  ok(NODE_SHAPES.indexOf('image') >= 0, 'image 在形状枚举里')
 
   // 画面：<image> 的 href 指向那段 data URI；节点框是透明命中区
   const sdoc = { nodes: [{ id: 's1', label: '', style: svgStyle, x: 100, y: 50, w: 80, h: 80 }], edges: [] }
@@ -1596,6 +1597,28 @@ console.log('\nSVG 内容节点：节点框里画的就是文档里那段标记'
   const keep = internals.styleForShapePick(svgStyle, 'svg')
   ok(svgMarkupFromStyle(keep) === markup, '已经有内容的节点不会被占位图覆盖（只补空的那种）')
   ok(internals.DEFAULT_SVG_MARKUP.indexOf('xmlns="http://www.w3.org/2000/svg"') >= 0, '默认占位图自带 xmlns（不靠自动补）')
+
+  // 内嵌位图：同样走 <image href=data:…>，缺省等比（imageAspect=1）
+  const pngUri = 'data:image/png;base64,iVBORw0KGgo='
+  const pngStyle = styleWithImageDataUri('', pngUri)
+  ok(nodeShapeFromStyle(pngStyle) === 'image', 'styleWithImageDataUri → shape image')
+  ok(styleGet(pngStyle, 'imageAspect', null) === '1', '位图缺省 imageAspect=1（等比，截图不变形）')
+  const pngDoc = { nodes: [{ id: 'p1', label: '', style: pngStyle, x: 10, y: 20, w: 120, h: 80 }], edges: [] }
+  const pngGroup = walk(renderDiagram(pngDoc, 'light', 'u1', { current: null }, { selectedIds: [] }, null), (n) => n.type === 'g' && n.props['data-node-id'] === 'p1', [])[0]
+  ok(pngGroup !== undefined, '位图节点进渲染')
+  if (pngGroup !== undefined) {
+    const imgs = walk(pngGroup.children, (n) => n.type === 'image', [])
+    ok(imgs.length === 1 && imgs[0].props.href === pngUri, '位图画成 <image href=data:image/png…>')
+    ok(imgs[0].props.preserveAspectRatio === 'xMidYMid meet', '位图缺省等比居中')
+  }
+  // 粘贴尺寸：长边压到上限、比例保留
+  const sized = internals.fitImageNodeSize(2000, 1000, 480)
+  ok(sized.w === 480 && sized.h === 240, 'fitImageNodeSize 按长边压到上限：' + JSON.stringify(sized))
+  const files = internals.imageFilesFromDataTransfer({
+    items: [{ kind: 'file', type: 'image/png', getAsFile: () => ({ type: 'image/png', size: 12 }) }],
+    files: [],
+  })
+  ok(files.length === 1 && files[0].type === 'image/png', 'imageFilesFromDataTransfer 从 items 抽出 png')
 }
 
 console.log('\n独立文字：一段没有边框底色的字（drawio 的 text 形状）')

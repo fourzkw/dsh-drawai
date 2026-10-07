@@ -90,6 +90,9 @@ var NODE_SHAPE_STYLE = {
   // imageAspect=0 = 拉伸铺满节点框（drawio 插入图片时写的也是 0，见 Actions.js:1848）；
   // 想等比缩放居中就显式写 imageAspect=1。
   svg: 'shape=image;imageAspect=0',
+  // image：内嵌位图（png/jpeg/gif/webp 的 data URI）。落盘同样是 drawio 的图片形状；
+  // 缺省 imageAspect=1（等比居中）—— 截图/照片拉伸会变形，和 svg 图标的缺省相反。
+  image: 'shape=image;imageAspect=1',
   // 分区（飞书式区块 / drawio 的 group 容器）：可插入的容器元素，不是"选中后成组"。
   // verticalAlign=top + align=left：标题贴在框顶部左侧（区块名），里面再放其它节点。
   section:
@@ -97,13 +100,14 @@ var NODE_SHAPE_STYLE = {
 }
 
 /** 形状枚举的顺序（UI 菜单、read 输出的稳定顺序）。顺序对齐 drawio 的形状面板。 */
-var NODE_SHAPES = ['rect', 'rounded', 'text', 'section', 'stadium', 'ellipse', 'diamond', 'parallelogram', 'cylinder', 'document', 'hexagon', 'svg']
+var NODE_SHAPES = ['rect', 'rounded', 'text', 'section', 'stadium', 'ellipse', 'diamond', 'parallelogram', 'cylinder', 'document', 'hexagon', 'svg', 'image']
 
 /** 文字形状独有的"隐形"设置：离开文字形状时要清掉（它们不该跟着变成别的形状）。 */
 var TEXT_SHAPE_ONLY_KEYS = { strokeColor: 'none', fillColor: 'none' }
 
-/** SVG 形状独有的键：离开 svg 形状时要清掉（否则文件里留着一大段看不见的 data URI）。 */
+/** SVG / 位图形状独有的键：离开这类形状时要清掉（否则文件里留着一大段看不见的 data URI）。 */
 var SVG_SHAPE_ONLY_KEYS = ['image', 'imageAspect']
+var IMAGE_SHAPE_ONLY_KEYS = SVG_SHAPE_ONLY_KEYS
 
 /** 分区形状独有的键：离开 section 时要清掉（否则普通矩形仍带着 container=1）。 */
 var SECTION_SHAPE_ONLY_KEYS = ['group', 'container', 'collapsible', 'recursiveResize', 'spacingLeft', 'spacingTop', 'fontStyle']
@@ -292,10 +296,17 @@ function nodeShapeFromStyle(style) {
   if (styleGet(style, 'group', null) !== null) return 'section'
   if (styleGet(style, 'container', null) === '1' && styleGet(style, 'swimlane', null) === null) return 'section'
   var shape = styleGet(style, 'shape', null)
-  // 内嵌 SVG 的图片形状：`shape=image` + `image=` 是一段 **SVG 的 data URI**。
-  // 只有 SVG 才算 svg 形状 —— 位图（data:image/png…）与外链/相对路径图片（image=img/x.svg）
-  // 本画布画不出来，照旧落回矩形（notes 里会说明"按矩形显示、单元原样保留"）。
-  if (shape === 'image' && isSvgDataUri(styleGet(style, 'image', null))) return 'svg'
+  // 图片形状：`shape=image`（或 drawio 的裸键写法留下的 `image=` data URI）。
+  //   · SVG data URI → 工具形状 `svg`（可编辑标记）
+  //   · 位图 data URI（png/jpeg/gif/webp）→ 工具形状 `image`（画布用 <image> 画出来）
+  //   · 外链/相对路径 → 仍落回 rect（文件读不到，notes 里说明按矩形显示）
+  var imageVal = styleGet(style, 'image', null)
+  var looksLikeImageShape =
+    shape === 'image' || (typeof imageVal === 'string' && imageVal.indexOf('data:image/') === 0)
+  if (looksLikeImageShape) {
+    if (isSvgDataUri(imageVal)) return 'svg'
+    if (isRasterDataUri(imageVal)) return 'image'
+  }
   if (shape === 'parallelogram') return 'parallelogram'
   if (shape === 'cylinder3' || shape === 'cylinder') return 'cylinder'
   if (shape === 'document') return 'document'
@@ -321,6 +332,7 @@ function styleWithNodeShape(style, shape) {
   var map = parseStyle(style)
   var wasText = nodeShapeFromStyle(style) === 'text'
   var wasSvg = nodeShapeFromStyle(style) === 'svg'
+  var wasImage = nodeShapeFromStyle(style) === 'image'
   var wasSection = nodeShapeFromStyle(style) === 'section'
   var shapeKeys = ['shape', 'ellipse', 'rhombus', 'rounded', 'arcSize', 'text']
   for (var i = 0; i < shapeKeys.length; i += 1) delete map[shapeKeys[i]]
@@ -332,10 +344,15 @@ function styleWithNodeShape(style, shape) {
       if (String(map[noneKeys[n]]).toLowerCase() === TEXT_SHAPE_ONLY_KEYS[noneKeys[n]]) delete map[noneKeys[n]]
     }
   }
-  // 同理：从"SVG 图形"换成别的形状时，把那段内嵌标记一起清掉 —— 留着它没人看得见，
-  // 却会让文件白白胖一大截（而且下次换回 svg 会突然冒出一张旧图）。
-  if (wasSvg && shape !== 'svg') {
+  // 同理：从"SVG 图形 / 位图"换成别的形状时，把那段内嵌 data URI 一起清掉 —— 留着它
+  // 没人看得见，却会让文件白白胖一大截（而且下次换回会突然冒出一张旧图）。
+  // svg ↔ image 互切也要清：一个是标记、一个是位图，不能共用同一段 image=。
+  if ((wasSvg || wasImage) && shape !== 'svg' && shape !== 'image') {
     for (var s = 0; s < SVG_SHAPE_ONLY_KEYS.length; s += 1) delete map[SVG_SHAPE_ONLY_KEYS[s]]
+  } else if (wasSvg && shape === 'image') {
+    for (var s2 = 0; s2 < SVG_SHAPE_ONLY_KEYS.length; s2 += 1) delete map[SVG_SHAPE_ONLY_KEYS[s2]]
+  } else if (wasImage && shape === 'svg') {
+    for (var s3 = 0; s3 < IMAGE_SHAPE_ONLY_KEYS.length; s3 += 1) delete map[IMAGE_SHAPE_ONLY_KEYS[s3]]
   }
   // 离开分区：清掉容器键，否则普通矩形还会带着 container=1，被当成分区。
   if (wasSection && shape !== 'section') {
@@ -399,6 +416,17 @@ function isSvgDataUri(value) {
 }
 
 /**
+ * 是不是本画布能画的**位图** data URI（png / jpeg / gif / webp）。
+ *
+ * 外链、相对路径、以及画布解不开的格式（bmp/tiff/svg 以外的……）都不算 ——
+ * 那些仍按矩形占位，notes 里会说明。
+ */
+function isRasterDataUri(value) {
+  if (typeof value !== 'string') return false
+  return /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(value)
+}
+
+/**
  * SVG data URI → 标记文本；**只解百分号编码那一种**，base64 返回 null。
  *
  * 为什么不做 base64：解 base64 要用 atob（浏览器）或 Buffer（Node），
@@ -444,12 +472,33 @@ function styleWithSvgMarkup(style, markup, aspect) {
   })
 }
 
-/** 清掉内嵌 SVG 内容（回到矩形）：image / imageAspect / shape 一起删。 */
+/**
+ * 写内嵌位图：`image=` 必须是 `data:image/(png|jpeg|gif|webp);base64,…`。
+ * 缺省 imageAspect=1（等比）；显式传 0 则拉伸铺满。
+ */
+function styleWithImageDataUri(style, dataUri, aspect) {
+  if (isRasterDataUri(dataUri) === false) {
+    throw new Error('styleWithImageDataUri: dataUri 必须是 data:image/(png|jpeg|gif|webp);base64,…')
+  }
+  var fit = aspect === undefined || aspect === null ? true : String(aspect) === '1'
+  return stylePatch(style, {
+    shape: 'image',
+    imageAspect: fit ? '1' : '0',
+    image: dataUri,
+  })
+}
+
+/** 清掉内嵌 SVG / 位图内容（回到矩形）：image / imageAspect / shape 一起删。 */
 function styleWithoutSvgMarkup(style) {
   var map = parseStyle(style)
   for (var i = 0; i < SVG_SHAPE_ONLY_KEYS.length; i += 1) delete map[SVG_SHAPE_ONLY_KEYS[i]]
   if (map.shape === 'image') delete map.shape
   return formatStyle(map)
+}
+
+/** 与 styleWithoutSvgMarkup 同义：位图与 SVG 共用同一组 image 键。 */
+function styleWithoutImageDataUri(style) {
+  return styleWithoutSvgMarkup(style)
 }
 
 // ── 配色 ─────────────────────────────────────────────────────────────────────
@@ -964,8 +1013,9 @@ export {
   DEFAULT_FILL, DEFAULT_STROKE, DEFAULT_FONT, DEFAULT_NODE_STYLE, DEFAULT_EDGE_STYLE,
   parseStyle, formatStyle, styleGet, styleSet, stylePatch, styleIsEmpty, styleNumber,
   nodeShapeFromStyle, styleFromNodeShape, styleWithNodeShape,
-  isSvgMarkup, normalizeSvgMarkup, isSvgDataUri, svgMarkupFromImageValue, imageValueFromSvgMarkup,
+  isSvgMarkup, normalizeSvgMarkup, isSvgDataUri, isRasterDataUri, svgMarkupFromImageValue, imageValueFromSvgMarkup,
   imageValueFromStyle, svgMarkupFromStyle, styleWithSvgMarkup, styleWithoutSvgMarkup,
+  styleWithImageDataUri, styleWithoutImageDataUri,
   SVG_IMAGE_VALUE_PREFIX, SVG_IMAGE_VALUE_PREFIX_B64,
   colorsFromStyle, colorNameFromStyle, styleWithColorName, styleWithColors,
   textColorNameFromStyle, styleWithTextColorName,

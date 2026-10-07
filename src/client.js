@@ -35,6 +35,7 @@ const {
   edgeFreePoint,
   formatStyle,
   imageValueFromStyle,
+  isRasterDataUri,
   isSvgMarkup,
   isOrthogonalEdgeStyle,
   jettyFromStyle,
@@ -50,6 +51,7 @@ const {
   stylePatch,
   styleWithArrow,
   styleWithColorName,
+  styleWithImageDataUri,
   styleWithSvgMarkup,
   styleWithTextColorName,
   styleWithoutSvgMarkup,
@@ -64,6 +66,35 @@ const {
 const ID = 'drawai:diagram'
 const KIND = 'diagram'
 const DEFAULT_PATH = 'demo.drawio'
+
+/**
+ * 从剪贴板 / 拖放的 DataTransfer 里抽出图片文件（png/jpeg/gif/webp）。
+ * 纯函数：自测可喂假 { items, files }，不碰 DOM。
+ */
+function imageFilesFromDataTransfer(data) {
+  if (data === null || data === undefined || typeof data !== 'object') return []
+  const out = []
+  const seen = new Set()
+  const push = (file) => {
+    if (file === null || file === undefined) return
+    if (typeof file.type !== 'string' || /^image\/(png|jpe?g|gif|webp)$/i.test(file.type) === false) return
+    if (seen.has(file)) return
+    seen.add(file)
+    out.push(file)
+  }
+  if (data.files && typeof data.files.length === 'number') {
+    for (let i = 0; i < data.files.length; i += 1) push(data.files[i])
+  }
+  if (out.length > 0) return out
+  if (data.items && typeof data.items.length === 'number') {
+    for (let i = 0; i < data.items.length; i += 1) {
+      const item = data.items[i]
+      if (item === null || item === undefined) continue
+      if (item.kind === 'file' && typeof item.getAsFile === 'function') push(item.getAsFile())
+    }
+  }
+  return out
+}
 
 /**
  * 标签列表的**纯逻辑**：算"打开 path 之后，标签列表与活动标签变成什么"。
@@ -211,13 +242,36 @@ const CSS = [
   '.drawai-empty-title{font-size:13px;color:var(--dsw-alias-label-primary,#e6e6e6)}',
   '.drawai-empty-hint{font-size:12px;color:var(--dsw-alias-label-secondary,#9aa0a6)}',
   '.drawai-pane{position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;min-height:0}',
+  // 画布 + 右侧常驻元素条：横排，条不挤工具栏宽度（飞书侧栏在左，我们放右边）。
+  '.drawai-body{display:flex;flex:1;min-height:0;min-width:0;position:relative}',
   '.drawai-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,Consolas,monospace;color:var(--dsw-alias-label-secondary,#9aa0a6)}',
   '.drawai-btn{border:1px solid var(--dsw-alias-border-l2,#444);background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.06));color:inherit;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer;white-space:nowrap}',
   '.drawai-btn:hover{border-color:var(--dsw-alias-brand-primary,#4c8dff)}',
   // 视口由我们自己管（viewBox），所以不再让容器滚动 —— 否则滚轮会同时滚动和缩放。
   // user-select:none —— 拖动平移时不能把图里的文字一起选中（观感很差）。
   // touch-action:none —— 我们自己处理 pointer 事件，别让浏览器再做触摸滚动/缩放。
-  '.drawai-canvas{flex:1;min-height:0;overflow:hidden;position:relative;user-select:none;-webkit-user-select:none;touch-action:none}',  '.drawai-note{padding:4px 8px;color:var(--dsw-alias-label-secondary,#9aa0a6);border-top:1px solid var(--dsw-alias-border-l1,#333)}',
+  '.drawai-canvas{flex:1;min-height:0;min-width:0;overflow:hidden;position:relative;user-select:none;-webkit-user-select:none;touch-action:none}',
+  '.drawai-note{padding:4px 8px;color:var(--dsw-alias-label-secondary,#9aa0a6);border-top:1px solid var(--dsw-alias-border-l1,#333)}',
+  // 右侧元素条（飞书侧栏观感）：浅底 + 线稿图标 + 宽松间距；同族变体进侧面板。
+  '.drawai-rail{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px;border-left:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08));background:var(--dsw-alias-bg-base,#ffffff);overflow-y:auto;overflow-x:hidden}',
+  '.drawai-rail-cap{width:20px;height:1px;margin:0 0 4px;background:var(--dsw-alias-border-l1,rgba(0,0,0,.12));flex:0 0 auto}',
+  '.drawai-rail-chip{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border:none;border-radius:8px;background:transparent;padding:0;cursor:pointer;color:var(--dsw-alias-label-primary,#333333);flex:0 0 auto}',
+  '.drawai-rail-chip:hover{background:rgba(0,0,0,.06)}',
+  '.drawai-rail-chip.on{background:rgba(0,0,0,.08);color:var(--dsw-alias-brand-primary,#3370ff)}',
+  '.drawai-rail-chip.dim{opacity:.35}',
+  '.drawai-rail-chip svg{display:block}',
+  '.drawai-rail-sep{width:20px;height:1px;margin:4px 0;background:var(--dsw-alias-border-l1,rgba(0,0,0,.12));flex:0 0 auto}',
+  // 同族变体：悬停族入口时在左侧弹出白色气泡（不铺满侧栏高度）。
+  '.drawai-rail-wrap{position:relative;flex:0 0 48px;display:flex;flex-direction:row-reverse;align-items:stretch;min-height:0}',
+  '.drawai-rail-wrap>.drawai-rail{flex:0 0 48px}',
+  '.drawai-rail-panel{position:absolute;right:54px;z-index:12;display:grid;grid-template-columns:repeat(3,44px);gap:6px;padding:10px;border:1px solid rgba(0,0,0,.08);border-radius:14px;background:#ffffff;box-shadow:0 8px 28px rgba(0,0,0,.12),0 0 0 1px rgba(0,0,0,.02);max-height:min(320px,70%);overflow-y:auto}',
+  '.drawai-rail-panel-title{grid-column:1/-1;font-size:11px;color:#8f959e;padding:0 2px 2px;user-select:none;white-space:nowrap}',
+  '.drawai-rail-panel .drawai-rail-chip{width:44px;height:34px;color:#333}',
+  '.drawai-rail-panel .drawai-rail-chip:hover{background:rgba(0,0,0,.06)}',
+  '.drawai-rail-panel .drawai-rail-chip.on{background:rgba(51,112,255,.1);color:#3370ff}',
+  // 最后一级（文字/分区/SVG/图片/独立线…）：悬停只浮名称气泡，不铺同族形状格。
+  '.drawai-rail-tip{position:absolute;right:54px;z-index:12;padding:6px 10px;border:1px solid rgba(0,0,0,.08);border-radius:8px;background:#ffffff;box-shadow:0 4px 16px rgba(0,0,0,.12),0 0 0 1px rgba(0,0,0,.02);font-size:12px;line-height:1.3;color:#333;white-space:nowrap;pointer-events:none;user-select:none}',
+  '.drawai-canvas.placing{cursor:crosshair}',
   '.drawai-err{padding:8px;color:var(--dsw-alias-state-error-primary,#ff6b6b);white-space:pre-wrap}',
   // 交互态
   '.drawai-node{cursor:move}',
@@ -526,7 +580,7 @@ function nodeTextFitHeight(node) {
   if (node === null || node === undefined || typeof node !== 'object') return 0
   if (!labelWraps(node)) return 0
   const shape = shapeOf(node)
-  if (shape === 'text' || shape === 'section') return 0
+  if (shape === 'text' || shape === 'section' || shape === 'image' || shape === 'svg') return 0
   const w = numberOr(node.w, FALLBACK_NODE_W)
   const label = typeof node.label === 'string' ? node.label : ''
   if (label.length === 0) return 0
@@ -1599,7 +1653,7 @@ function shapeElement(node, geo, palette, mode) {
       strokeDasharray: pattern !== null ? pattern : '6 3',
     })
   }
-  // SVG 内容节点：节点框里画的**就是文档里那段标记**（shape=image;image= 一段 SVG data URI）。
+  // 图片内容节点（svg 标记 / 位图 data URI）：节点框里画的就是 `image=` 那一段。
   //
   // 为什么用 <image href="data:..."> 而不是把标记内联进画布 DOM：
   //   · <image> 里的 SVG 是**独立文档**：脚本不执行、外部资源不加载，等于天然的沙箱；
@@ -1607,13 +1661,16 @@ function shapeElement(node, geo, palette, mode) {
   //   · 导出的 SVG 里它同样是自包含的（data URI 就写在属性上），PNG 那条路（序列化 → Image
   //     → canvas）也走得通 —— 内部图片是内嵌的，不涉及任何外部请求。
   // imageAspect=1 = 等比缩放居中（drawio 的缺省语义），0/缺省 = 拉伸铺满节点框。
-  if (shape === 'svg') {
+  // 位图缺省写 imageAspect=1；svg 缺省写 0 —— 见 style-kernel。
+  if (shape === 'svg' || shape === 'image') {
     const href = imageValueFromStyle(style)
-    // 正常情况下 href 一定有（shape 为 svg 的前提就是 image 是一段 SVG data URI）。
-    // 会掉进占位分支的是**写坏的那种**：百分号编码被截断/写坏（%ZZ 之类）时 decodeURIComponent
-    // 会失败 —— 那种 data URI 浏览器同样解不开，画出来就是一片空白，还不如给个能选中、
-    // 能右键换内容的占位框。（base64 形态我们不解码，直接交给浏览器画。）
-    const usable = href !== null && (svgMarkupFromStyle(style) !== null || href.indexOf(';base64,') > 0)
+    // svg：百分号编码解得开、或 base64 交给浏览器；image：必须是认得出的位图 data URI。
+    // 会掉进占位分支的是**写坏的那种**：编码截断 / 空 image= —— 空白不如给个可点占位框。
+    const usable =
+      href !== null &&
+      (shape === 'image'
+        ? isRasterDataUri(href)
+        : svgMarkupFromStyle(style) !== null || href.indexOf(';base64,') > 0)
     if (usable === false) {
       return React.createElement(
         'g',
@@ -1641,11 +1698,11 @@ function shapeElement(node, geo, palette, mode) {
             fill: stroke,
             pointerEvents: 'none',
           },
-          'SVG',
+          shape === 'image' ? '图片' : 'SVG',
         ),
       )
     }
-    const fit = styleGet(style, 'imageAspect', '0') === '1'
+    const fit = styleGet(style, 'imageAspect', shape === 'image' ? '1' : '0') === '1'
     return React.createElement(
       'g',
       null,
@@ -1982,10 +2039,236 @@ const SHAPE_LIBRARY = [
   // 内容是一段**内嵌 SVG 标记**的节点（不是标签文字）：图标/logo/示意图这类
   // 流程图词汇表里没有的东西用它画。落盘是 drawio 原生的图片形状，桌面版也看得见。
   { shape: 'svg', label: 'SVG 图形' },
+  // 内嵌位图（png/jpeg/gif/webp）：复制粘贴 / 拖放进画布；落盘同样是 shape=image + data URI。
+  { shape: 'image', label: '图片' },
 ]
+
+/**
+ * 形状族：飞书侧栏"悬停/选中后只换同类型"。
+ * 基础图形（矩形/圆角/菱形…）互相对换，算一族；文字 / 分区 / SVG / 图片 / 线条各自成族。
+ * 注意：线条的 kind（rounded/sharp…）与节点 shape 名会撞车，线条族只用 EDGE_LINE_LIBRARY，
+ * 不要靠 shapeFamilyOf('rounded') 判断（那永远是图形族）。
+ */
+function shapeFamilyOf(shape) {
+  if (shape === 'text') return 'text'
+  if (shape === 'section') return 'section'
+  if (shape === 'svg') return 'svg'
+  if (shape === 'image') return 'image'
+  return 'shape'
+}
+
+function shapesInFamily(family) {
+  if (family === 'edge') {
+    const out = []
+    for (let i = 0; i < EDGE_LINE_LIBRARY.length; i += 1) {
+      out.push({ shape: EDGE_LINE_LIBRARY[i].kind, label: EDGE_LINE_LIBRARY[i].label })
+    }
+    return out
+  }
+  const out = []
+  for (let i = 0; i < SHAPE_LIBRARY.length; i += 1) {
+    if (shapeFamilyOf(SHAPE_LIBRARY[i].shape) === family) out.push(SHAPE_LIBRARY[i])
+  }
+  return out
+}
+
+function shapeLabelOf(shape) {
+  for (let i = 0; i < SHAPE_LIBRARY.length; i += 1) {
+    if (SHAPE_LIBRARY[i].shape === shape) return SHAPE_LIBRARY[i].label
+  }
+  return String(shape)
+}
+
+/**
+ * 线条族的四种线型（与内核 styleWithLineKind 的 kind 对齐）。
+ * 落成独立线时两端都不接节点；选中已有连线时换这一族 = 改线型。
+ */
+const EDGE_LINE_LIBRARY = [
+  { kind: 'rounded', label: '折线' },
+  { kind: 'sharp', label: '直角折线' },
+  { kind: 'straight', label: '直线' },
+  { kind: 'curved', label: '曲线' },
+]
+
+function isEdgeLineKind(kind) {
+  for (let i = 0; i < EDGE_LINE_LIBRARY.length; i += 1) {
+    if (EDGE_LINE_LIBRARY[i].kind === kind) return true
+  }
+  return false
+}
+
+function edgeLineLabelOf(kind) {
+  for (let i = 0; i < EDGE_LINE_LIBRARY.length; i += 1) {
+    if (EDGE_LINE_LIBRARY[i].kind === kind) return EDGE_LINE_LIBRARY[i].label
+  }
+  return String(kind)
+}
+
+/**
+ * 右侧元素条只放**族入口**（图形 / 文字 / 分区 / SVG / 图片 / 线条），同族变体进侧面板。
+ * `shape` 是该族落下时的缺省子形状（线条族里是缺省线型）；`icon` 见 railIcon。
+ */
+const RAIL_FAMILIES = [
+  { family: 'shape', shape: 'rounded', label: '图形', icon: 'shape' },
+  { family: 'text', shape: 'text', label: '文字', icon: 'text' },
+  { family: 'section', shape: 'section', label: '分区', icon: 'section' },
+  { family: 'svg', shape: 'svg', label: 'SVG 图形', icon: 'image' },
+  { family: 'image', shape: 'image', label: '图片', icon: 'photo' },
+  { family: 'edge', shape: 'rounded', label: '线条', icon: 'edge' },
+]
+
+/**
+ * 元素条线稿图标（描边 currentColor，与飞书侧栏同一套观感）。
+ * @param {'shape'|'text'|'section'|'image'|'photo'|'edge'|'line-rounded'|'line-sharp'|'line-straight'|'line-curved'} kind
+ */
+function railIcon(kind) {
+  const svg = (children) =>
+    React.createElement(
+      'svg',
+      {
+        width: 22,
+        height: 22,
+        viewBox: '0 0 24 24',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1.75,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+        'aria-hidden': true,
+      },
+      children,
+    )
+  if (kind === 'shape') {
+    return svg(React.createElement('rect', { x: 4, y: 6, width: 16, height: 12, rx: 3 }))
+  }
+  if (kind === 'text') {
+    return svg(React.createElement('path', { d: 'M6 6.5h12M12 6.5V18' }))
+  }
+  if (kind === 'section') {
+    // 叠框：分区 / 容器（对应飞书侧栏的重叠矩形）。
+    return svg([
+      React.createElement('rect', { key: 'a', x: 3.5, y: 4.5, width: 12, height: 10, rx: 1.5 }),
+      React.createElement('rect', { key: 'b', x: 8.5, y: 9.5, width: 12, height: 10, rx: 1.5 }),
+    ])
+  }
+  if (kind === 'image') {
+    // SVG 图形族：矢量笔迹 + 锚点（别做成风景相框，免得和「图片」撞车）。
+    return svg([
+      React.createElement('path', { key: 'p', d: 'M5 16.5C8 10 11 7.5 14.5 7.5c2.2 0 4 .8 5.5 2.2' }),
+      React.createElement('circle', { key: 'a', cx: 5, cy: 16.5, r: 1.5 }),
+      React.createElement('circle', { key: 'b', cx: 14.5, cy: 7.5, r: 1.5 }),
+      React.createElement('path', { key: 'pen', d: 'M16.2 4.2l3.6 3.6-1.1 1.1-3.6-3.6z' }),
+    ])
+  }
+  if (kind === 'photo') {
+    // 位图/粘贴图片：相框 + 山峦（侧栏「图片」入口）。
+    return svg([
+      React.createElement('rect', { key: 'f', x: 4, y: 4, width: 16, height: 16, rx: 2 }),
+      React.createElement('circle', { key: 's', cx: 9.5, cy: 9, r: 1.6 }),
+      React.createElement('path', { key: 'm', d: 'M5 17l4.5-5 3 3.5 2-2.5L19 17' }),
+    ])
+  }
+  if (kind === 'edge') {
+    // 线条族入口：对齐参考图的直角折线 + 开叉箭头。
+    return svg([
+      React.createElement('path', { key: 'p', d: 'M3.5 16.5 H9.5 V7.5 H16' }),
+      React.createElement('path', { key: 'a', d: 'M13.2 5.2 L17.2 7.5 L13.2 9.8' }),
+    ])
+  }
+  return svg(React.createElement('circle', { cx: 12, cy: 12, r: 6 }))
+}
+
+/**
+ * 线条族气泡里的线型缩略图（44×30 视口）。
+ * 画法对齐参考图：等宽描边、开叉 V 箭头（不是实心三角）。
+ */
+function railLineKindIcon(kind) {
+  const common = {
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.75,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+  }
+  // 开叉箭头朝右（尖在 tip）。
+  const arrowRight = (tipX, tipY) =>
+    React.createElement('path', Object.assign({ key: 'a' }, common, {
+      d: 'M' + (tipX - 5) + ' ' + (tipY - 3.2) + ' L' + tipX + ' ' + tipY + ' L' + (tipX - 5) + ' ' + (tipY + 3.2),
+    }))
+  // 开叉箭头朝右上（直线用）。
+  const arrowNE = (tipX, tipY) =>
+    React.createElement('path', Object.assign({ key: 'a' }, common, {
+      d: 'M' + (tipX - 5.2) + ' ' + (tipY + 1) + ' L' + tipX + ' ' + tipY + ' L' + (tipX - 1) + ' ' + (tipY + 5.2),
+    }))
+  if (kind === 'straight') {
+    // 参考图上：左下 → 右上对角线 + 箭头
+    return [
+      React.createElement('path', Object.assign({ key: 'p' }, common, { d: 'M7 24 L33.5 10.5' })),
+      arrowNE(36, 9),
+    ]
+  }
+  if (kind === 'sharp') {
+    // 参考图中：右 → 上 → 右，直角折 + 箭头
+    return [
+      React.createElement('path', Object.assign({ key: 'p' }, common, { d: 'M5 21 H15 V10 H32' })),
+      arrowRight(36, 10),
+    ]
+  }
+  if (kind === 'curved') {
+    // 参考图下：上走再平滑拐到右 + 箭头
+    return [
+      React.createElement('path', Object.assign({ key: 'p' }, common, { d: 'M11 25 V15 Q11 10 16 10 H32' })),
+      arrowRight(36, 10),
+    ]
+  }
+  // rounded / 折线：正交折线，拐角更圆（与直角折线区分）
+  return [
+    React.createElement('path', Object.assign({ key: 'p' }, common, { d: 'M5 21 H13 Q18 21 18 16 V13 Q18 10 23 10 H32' })),
+    arrowRight(36, 10),
+  ]
+}
+
+function defaultShapeOfFamily(family, preferred) {
+  const pref = typeof preferred === 'string' ? preferred : ''
+  if (pref.length > 0 && shapeFamilyOf(pref) === family) return pref
+  for (let i = 0; i < RAIL_FAMILIES.length; i += 1) {
+    if (RAIL_FAMILIES[i].family === family) return RAIL_FAMILIES[i].shape
+  }
+  return 'rounded'
+}
+
+function familyLabelOf(family) {
+  for (let i = 0; i < RAIL_FAMILIES.length; i += 1) {
+    if (RAIL_FAMILIES[i].family === family) return RAIL_FAMILIES[i].label
+  }
+  return String(family)
+}
 
 /** 新放的 SVG 节点边长（正方形：图形多半是方的）。 */
 const NEW_SVG_SIZE = 80
+/** 粘贴/拖入位图时，较长边最多压到这么大（用户单位）；再大拖动手感差、文件也胖。 */
+const IMAGE_PASTE_MAX_SIDE = 480
+/** 单张粘贴图片的体积上限（原始字节）；超了就拒，避免一次 Ctrl+V 把 .drawio 撑爆。 */
+const IMAGE_PASTE_MAX_BYTES = 8 * 1024 * 1024
+
+/**
+ * 按原图比例缩到 IMAGE_PASTE_MAX_SIDE 以内，再吸到网格。
+ * 纯函数：粘贴 / 拖入 / 侧栏选文件三处共用，尺寸口径一致。
+ * （定义在常量之后：依赖 NEW_SVG_SIZE / IMAGE_PASTE_MAX_SIDE；MIN_NODE_* 在下方，
+ *  调用时才读 —— 函数体延迟求值，不踩 TDZ。）
+ */
+function fitImageNodeSize(naturalW, naturalH, maxSide) {
+  const cap = Number.isFinite(Number(maxSide)) && Number(maxSide) > 0 ? Number(maxSide) : IMAGE_PASTE_MAX_SIDE
+  const nw = Number.isFinite(Number(naturalW)) && Number(naturalW) > 0 ? Number(naturalW) : NEW_SVG_SIZE
+  const nh = Number.isFinite(Number(naturalH)) && Number(naturalH) > 0 ? Number(naturalH) : NEW_SVG_SIZE
+  const scale = Math.min(1, cap / Math.max(nw, nh))
+  const minW = typeof MIN_NODE_W === 'number' ? MIN_NODE_W : GRID * 6
+  const minH = typeof MIN_NODE_H === 'number' ? MIN_NODE_H : GRID * 4
+  const w = Math.max(minW, Math.round(nw * scale))
+  const h = Math.max(minH, Math.round(nh * scale))
+  return { w: snapTo(w, GRID), h: snapTo(h, GRID) }
+}
+
 /** 新放的分区默认尺寸（要能一眼看出是区块，而不是普通小节点）。 */
 const NEW_SECTION_W = 280
 const NEW_SECTION_H = 180
@@ -3947,6 +4230,13 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
       if (typeof ui.onNodeContextMenu === 'function') {
         groupProps.onContextMenu = (event) => ui.onNodeContextMenu(node.id, event)
       }
+      // 悬停：右侧条据此高亮同族形状、点一下即可换形（不必先点选）。
+      if (typeof ui.onNodePointerEnter === 'function') {
+        groupProps.onPointerEnter = () => ui.onNodePointerEnter(node.id)
+      }
+      if (typeof ui.onNodePointerLeave === 'function') {
+        groupProps.onPointerLeave = () => ui.onNodePointerLeave(node.id)
+      }
     }
     const groupChildren = [shapeElement(node, geo, colorOf(node, mode), mode)]
     // 单选一个节点时给 8 个方向的缩放手柄。
@@ -4191,27 +4481,81 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
   }
   for (let L = 0; L < pendingLabels.length; L += 1) children.push(pendingLabels[L])
 
-  // 框选矩形：铺在所有元素之上。
+  // 框选矩形 / 放置线条预览：铺在所有元素之上。
   const box = ui === undefined || ui === null ? null : ui.marquee
   if (box !== null && box !== undefined) {
-    const bx = Math.min(box.x0, box.x1)
-    const by = Math.min(box.y0, box.y1)
-    const bw = Math.abs(box.x1 - box.x0)
-    const bh = Math.abs(box.y1 - box.y0)
-    children.push(
-      React.createElement('rect', {
-        key: 'marquee',
-        x: bx,
-        y: by,
-        width: bw,
-        height: bh,
-        fill: 'rgba(26,115,232,0.12)',
-        stroke: '#1a73e8',
-        strokeWidth: 1,
-        strokeDasharray: '4 3',
-        pointerEvents: 'none',
-      }),
-    )
+    // 武装线条拖拽：画起→终点预览（与落盘同一套 routeEdgeStyled），不要框选矩形。
+    if (typeof box.placeEdge === 'string' && box.placeEdge.length > 0) {
+      const lineKind = isEdgeLineKind(box.placeEdge) ? box.placeEdge : 'rounded'
+      const style = styleWithLineKind(DEFAULT_EDGE_STYLE, lineKind)
+      const fromPt = { x: box.x0, y: box.y0 }
+      const toPt = { x: box.x1, y: box.y1 }
+      const tempEdge = { style: style, sourcePoint: fromPt, targetPoint: toPt }
+      if (lineKind === 'curved') {
+        const dx = toPt.x - fromPt.x
+        const dy = toPt.y - fromPt.y
+        const len = Math.sqrt(dx * dx + dy * dy)
+        if (len >= 1) {
+          const bow = Math.max(20, Math.round((len * 0.12) / EDGE_GRID) * EDGE_GRID)
+          tempEdge.points = [{ x: fromPt.x + dx / 2 - (dy / len) * bow, y: fromPt.y + dy / 2 + (dx / len) * bow }]
+        }
+      }
+      const fromBox = { id: '__place-from', geo: { x: fromPt.x, y: fromPt.y, w: 0, h: 0 } }
+      const toBox = { id: '__place-to', geo: { x: toPt.x, y: toPt.y, w: 0, h: 0 } }
+      const geometry = buildGeometry(doc)
+      let previewPts = routeEdgeStyled(fromBox, toBox, geometry.boxes, geometry.bounds, tempEdge)
+      if (previewPts === null || previewPts.length < 2) previewPts = [fromPt, toPt]
+      const previewCurved = curvedFromStyle(style)
+      const d = pathOf(previewPts, 6, previewCurved)
+      if (d.length > 0) {
+        children.push(
+          React.createElement('path', {
+            key: 'place-edge-preview',
+            className: 'drawai-preview',
+            d: d,
+            fill: 'none',
+            stroke: '#1a73e8',
+            strokeWidth: 2,
+            strokeDasharray: '6 4',
+            pointerEvents: 'none',
+          }),
+        )
+      } else {
+        children.push(
+          React.createElement('line', {
+            key: 'place-edge-preview',
+            className: 'drawai-preview',
+            x1: fromPt.x,
+            y1: fromPt.y,
+            x2: toPt.x,
+            y2: toPt.y,
+            stroke: '#1a73e8',
+            strokeWidth: 2,
+            strokeDasharray: '6 4',
+            pointerEvents: 'none',
+          }),
+        )
+      }
+    } else {
+      const bx = Math.min(box.x0, box.x1)
+      const by = Math.min(box.y0, box.y1)
+      const bw = Math.abs(box.x1 - box.x0)
+      const bh = Math.abs(box.y1 - box.y0)
+      children.push(
+        React.createElement('rect', {
+          key: 'marquee',
+          x: bx,
+          y: by,
+          width: bw,
+          height: bh,
+          fill: 'rgba(26,115,232,0.12)',
+          stroke: '#1a73e8',
+          strokeWidth: 1,
+          strokeDasharray: '4 3',
+          pointerEvents: 'none',
+        }),
+      )
+    }
   }
 
   // 对齐辅助线画在**最上面**（drawio 的 guides 也压在单元之上）：拖动时那几条蓝虚线。
@@ -4798,13 +5142,30 @@ function CanvasView(props) {
   })
   const menuStyle = menuStyleState[0]
   const setMenuStyle = menuStyleState[1]
-  // 空白处右键"元素库"里选中的形状：菜单只显示它的名字，选中的那个就是「＋ 新增节点」放的东西。
+  // 右侧元素条 / 偏好里记的"默认形状"：新建时用；放置工具高亮也读它。
   const menuShapeState = React.useState(() => {
     const p = loadDrawaiPrefs()
     return typeof p.defaultShape === 'string' && p.defaultShape.length > 0 ? p.defaultShape : 'rounded'
   })
   const menuShape = menuShapeState[0]
   const setMenuShape = menuShapeState[1]
+  // 放置工具：点了右侧条某个形状后，再在画布空白处点一下落下（Esc 取消）。
+  const placeToolState = React.useState(null)
+  const placeTool = placeToolState[0]
+  const setPlaceTool = placeToolState[1]
+  // 线条族放置：线型 kind（rounded/sharp/straight/curved）；与 placeTool 互斥。
+  const placeEdgeKindState = React.useState(null)
+  const placeEdgeKind = placeEdgeKindState[0]
+  const setPlaceEdgeKind = placeEdgeKindState[1]
+  // 悬停节点：指针停在某个节点上时，可打开同族变体气泡换形（不必先点选）。
+  const hoverNodeIdState = React.useState(null)
+  const hoverNodeId = hoverNodeIdState[0]
+  const setHoverNodeId = hoverNodeIdState[1]
+  // 同族变体白色气泡：悬停族入口（或多变体节点）时打开，离开后短暂延迟关闭。
+  const railOpenFamilyState = React.useState(null)
+  const railOpenFamily = railOpenFamilyState[0]
+  const setRailOpenFamily = railOpenFamilyState[1]
+  const railPanelTimerRef = React.useRef(null)
   const edgeDragRef = React.useRef(null) // { edgeId, kind: 'segment'|'from'|'to', ... }
   const labelDragRef = React.useRef(null) // 拖边标签 { edgeId, originX, originY, moved }
   const guidesState = React.useState([]) // 拖动时的对齐辅助线 [{axis,at,from,to}]
@@ -4863,13 +5224,6 @@ function CanvasView(props) {
   const setLookRequest = lookState[1]
   /** 同一个请求只处理一次（轮询每 3 秒一次，不去重会反复渲染）。 */
   const lookHandledRef = React.useRef(null)
-  /**
-   * 回执的体量上限（base64 字符数）。
-   *
-   * 回执走的是写回路由，body 上限 4MB（宿主 SAVE_MAX_BYTES）；base64 比原图大 1/3，
-   * 所以客户端先自己收着点：超了就先降到 1× 重渲，再超就如实回失败（而不是发出去被拒）。
-   */
-  const LOOK_MAX_BASE64 = 2800000
   // 文档三件套的弹出面板：null | 'new' | 'open' | 'saveAs' | 'renameLayer' | 'find'
   const docMenuState = React.useState(null)
   const docMenu = docMenuState[0]
@@ -5599,9 +5953,84 @@ function CanvasView(props) {
     }
   }
 
+  /**
+   * 侧栏悬停：打开同族形状面板，或最后一级的名称气泡。
+   * `key` 可以是族名（shape/text/…），也可以是独立工具键（edge / edge-straight）。
+   */
+  function openRailHover(key) {
+    if (typeof key !== 'string' || key.length === 0) return
+    if (railPanelTimerRef.current !== null) {
+      clearTimeout(railPanelTimerRef.current)
+      railPanelTimerRef.current = null
+    }
+    setRailOpenFamily(key)
+  }
+
+  /** 画布上悬停节点时：只有多变体族才打开同族面板（最后一级不弹名称，避免干扰画布）。 */
+  function openRailFamilyPanel(family) {
+    if (shapesInFamily(family).length <= 1) return
+    openRailHover(family)
+  }
+
+  function scheduleCloseRailFamilyPanel() {
+    if (railPanelTimerRef.current !== null) clearTimeout(railPanelTimerRef.current)
+    railPanelTimerRef.current = setTimeout(() => {
+      railPanelTimerRef.current = null
+      setRailOpenFamily(null)
+    }, 160)
+  }
+
+  /** 侧栏悬停气泡要显示的名字；多变体族返回 null（那走形状/线型面板）。 */
+  function railHoverTipLabel(key) {
+    if (typeof key !== 'string' || key.length === 0) return null
+    if (shapesInFamily(key).length > 1) return null
+    for (let i = 0; i < RAIL_FAMILIES.length; i += 1) {
+      if (RAIL_FAMILIES[i].family === key) return RAIL_FAMILIES[i].label
+    }
+    return null
+  }
+
+  /** 悬停气泡相对侧栏顶部的偏移（与族 chip 对齐）。 */
+  function railHoverTopPx(key) {
+    const chip = 36
+    const gap = 6
+    const cap = 12 + 5
+    for (let i = 0; i < RAIL_FAMILIES.length; i += 1) {
+      if (RAIL_FAMILIES[i].family === key) return cap + i * (chip + gap)
+    }
+    return cap
+  }
+
+  /** 选区里的连线 id（线条族换线型用）。 */
+  function railReplaceEdgeTargets() {
+    const current = docRef.current
+    if (current === null) return []
+    const out = []
+    for (let i = 0; i < selectedIds.length; i += 1) {
+      if (edgeById(selectedIds[i]) !== null) out.push(selectedIds[i])
+    }
+    return out
+  }
+
+  function onNodePointerEnter(id) {
+    setHoverNodeId(id)
+    const n = nodeById(id)
+    if (n === null) return
+    const family = shapeFamilyOf(nodeShapeFromStyle(typeof n.style === 'string' ? n.style : ''))
+    openRailFamilyPanel(family)
+  }
+
+  function onNodePointerLeave(id) {
+    setHoverNodeId((cur) => (cur === id ? null : cur))
+    scheduleCloseRailFamilyPanel()
+  }
+
   function onNodePointerDown(id, event) {
     if (event.button !== 0) return
     setMenu(null)
+    // 点在节点上：取消"放置工具"（否则拖完还以为下一刀会落形状）。
+    if (placeTool !== null) setPlaceTool(null)
+    if (placeEdgeKind !== null) setPlaceEdgeKind(null)
     event.preventDefault()
     event.stopPropagation()
     if (editing !== null && editing.id !== id) setEditing(null)
@@ -5870,8 +6299,19 @@ function CanvasView(props) {
     event.preventDefault()
     const point = toUserSpace(event)
     if (point === null) return
-    marqueeRef.current = { x0: point.x, y0: point.y, x1: point.x, y1: point.y, additive: event.shiftKey === true, moved: false }
-    setMarquee({ x0: point.x, y0: point.y, x1: point.x, y1: point.y })
+    const placeEdge = typeof placeEdgeKind === 'string' && placeEdgeKind.length > 0 ? placeEdgeKind : null
+    marqueeRef.current = {
+      x0: point.x,
+      y0: point.y,
+      x1: point.x,
+      y1: point.y,
+      additive: event.shiftKey === true,
+      moved: false,
+      // 武装了放置工具时：形状是松手且没拖才落下；线条则单击或拖拽定起终点都行（见 finishMarquee）。
+      placeShape: typeof placeTool === 'string' && placeTool.length > 0 ? placeTool : null,
+      placeEdge: placeEdge,
+    }
+    setMarquee({ x0: point.x, y0: point.y, x1: point.x, y1: point.y, placeEdge: placeEdge })
     requestCapture(event)
   }
 
@@ -5991,7 +6431,13 @@ function CanvasView(props) {
       if (Math.abs(point.x - marqueeDrag.x0) > 2 || Math.abs(point.y - marqueeDrag.y0) > 2) marqueeDrag.moved = true
       marqueeDrag.x1 = point.x
       marqueeDrag.y1 = point.y
-      setMarquee({ x0: marqueeDrag.x0, y0: marqueeDrag.y0, x1: point.x, y1: point.y })
+      setMarquee({
+        x0: marqueeDrag.x0,
+        y0: marqueeDrag.y0,
+        x1: point.x,
+        y1: point.y,
+        placeEdge: typeof marqueeDrag.placeEdge === 'string' ? marqueeDrag.placeEdge : null,
+      })
       return
     }
     if (linkRef.current !== null) {
@@ -6360,7 +6806,23 @@ function CanvasView(props) {
     if (drag === null) return
     marqueeRef.current = null
     setMarquee(null)
+    // 武装线条：单击落缺省长度；拖拽用起终点定独立线 —— 都不走框选。
+    if (typeof drag.placeEdge === 'string' && drag.placeEdge.length > 0) {
+      if (drag.moved === true) createFreeEdgeAt(drag.x0, drag.y0, drag.placeEdge, drag.x1, drag.y1)
+      else createFreeEdgeAt(drag.x0, drag.y0, drag.placeEdge)
+      setRailOpenFamily(null)
+      return
+    }
     if (drag.moved !== true) {
+      // 放置工具武装时：点空白 = 落下**一个**节点（单次；放完卸工具）。
+      if (typeof drag.placeShape === 'string' && drag.placeShape.length > 0) {
+        createNodeAt(drag.placeShape, menuStyle, drag.x0, drag.y0)
+        setPlaceTool(null)
+        setPlaceEdgeKind(null)
+        setRailOpenFamily(null)
+        setSaveNote('')
+        return
+      }
       if (drag.additive !== true) setSelectedIds([])
       return
     }
@@ -6494,6 +6956,12 @@ function CanvasView(props) {
       setMenu(null)
       return
     }
+    // 图片不能空手落下（没有 data URI 就是空框）—— 点落点后弹文件选择。
+    if (shape === 'image') {
+      setPlaceTool(null)
+      openImageFilePicker({ at: { x: userX, y: userY } })
+      return
+    }
     const id = nextNodeId(current)
     const isText = shape === 'text'
     const isSection = shape === 'section'
@@ -6522,8 +6990,10 @@ function CanvasView(props) {
    * `edgeFreePoint` / `endpointBoxOf` 早就按这套语义实现了（两端各给一个零尺寸虚拟盒去路由）。
    * 缺的只是"从零画一条"的入口 —— 原来只能从节点手柄拖出来，于是至少有一端是节点。
    * 画完之后照样能拖端点接到节点上（改接端点那套手势对自由端点同样有效）。
+   *
+   * `endX`/`endY` 可选：拖拽定终点时传入；缺省则从起点水平伸出 200px（单击落下）。
    */
-  function createFreeEdgeAt(userX, userY, kind) {
+  function createFreeEdgeAt(userX, userY, kind, endX, endY) {
     const current = docRef.current
     if (current === null) return
     if (activeLayerLocked()) {
@@ -6531,18 +7001,47 @@ function CanvasView(props) {
       setMenu(null)
       return
     }
+    const lineKind = isEdgeLineKind(kind) ? kind : 'rounded'
     const id = nextEdgeId(current)
     const from = { x: snap(userX, EDGE_GRID), y: snap(userY, EDGE_GRID) }
-    const to = { x: from.x + 200, y: from.y }
-    const straight = kind === 'straight'
+    let to =
+      typeof endX === 'number' && Number.isFinite(endX) && typeof endY === 'number' && Number.isFinite(endY)
+        ? { x: snap(endX, EDGE_GRID), y: snap(endY, EDGE_GRID) }
+        : { x: from.x + 200, y: from.y }
+    // 吸附后起终点重合：退回缺省长度，避免落成看不见的零长边。
+    if (Math.abs(to.x - from.x) < EDGE_GRID && Math.abs(to.y - from.y) < EDGE_GRID) {
+      to = { x: from.x + 200, y: from.y }
+    }
     applyLocal((next) => {
-      const edge = { id: id, style: straight ? styleWithLineKind(DEFAULT_EDGE_STYLE, 'straight') : DEFAULT_EDGE_STYLE, sourcePoint: from, targetPoint: to }
+      const edge = {
+        id: id,
+        style: styleWithLineKind(DEFAULT_EDGE_STYLE, lineKind),
+        sourcePoint: from,
+        targetPoint: to,
+      }
+      // 曲线两点会退化成直线：补一个垂直弓形中点（与 applyLineKind 同一口径）。
+      if (lineKind === 'curved') {
+        const dx = to.x - from.x
+        const dy = to.y - from.y
+        const len = Math.sqrt(dx * dx + dy * dy)
+        if (len >= 1) {
+          const bow = Math.max(20, Math.round((len * 0.12) / EDGE_GRID) * EDGE_GRID)
+          edge.points = [
+            {
+              x: snap(from.x + dx / 2 - (dy / len) * bow, EDGE_GRID),
+              y: snap(from.y + dy / 2 + (dx / len) * bow, EDGE_GRID),
+            },
+          ]
+        }
+      }
       if (activeLayerId !== null) edge.layer = activeLayerId
       next.edges.push(edge)
     })
     setSelectedIds([id])
     setMenu(null)
-    setSaveNote(straight ? '已放一条直线（两端都没接节点、没有折点）' : '已放一条独立连线（两端都没接节点）—— 拖它的端点即可接到节点上')
+    setPlaceEdgeKind(null)
+    setPlaceTool(null)
+    setSaveNote('已放一条「' + edgeLineLabelOf(lineKind) + '」（两端都没接节点）—— 拖端点即可接到节点上')
   }
 
   /**
@@ -7292,6 +7791,150 @@ function CanvasView(props) {
     }
   }
 
+  /** 当前视口中心（用户坐标）—— 粘贴/侧栏选图没给落点时落在这儿。 */
+  function viewportCenterUser() {
+    const v = viewRef.current
+    if (v === null || v === undefined) return { x: 0, y: 0 }
+    return { x: v.x + v.w / 2, y: v.y + v.h / 2 }
+  }
+
+  /** File → data URI + 自然尺寸（超 IMAGE_PASTE_MAX_BYTES 直接拒）。 */
+  function readImageFile(file) {
+    return new Promise((resolve, reject) => {
+      if (file === null || file === undefined) {
+        reject(new Error('没有图片'))
+        return
+      }
+      if (typeof file.size === 'number' && file.size > IMAGE_PASTE_MAX_BYTES) {
+        reject(
+          new Error(
+            '图片太大（' +
+              Math.round(file.size / 1024) +
+              'KB），上限 ' +
+              Math.round(IMAGE_PASTE_MAX_BYTES / 1024) +
+              'KB',
+          ),
+        )
+        return
+      }
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUri = reader.result
+        if (typeof dataUri !== 'string' || isRasterDataUri(dataUri) === false) {
+          reject(new Error('读不出这张图片（只支持 png / jpeg / gif / webp）'))
+          return
+        }
+        const img = new Image()
+        img.onload = () =>
+          resolve({
+            dataUri: dataUri,
+            w: img.naturalWidth > 0 ? img.naturalWidth : NEW_SVG_SIZE,
+            h: img.naturalHeight > 0 ? img.naturalHeight : NEW_SVG_SIZE,
+          })
+        img.onerror = () => resolve({ dataUri: dataUri, w: NEW_SVG_SIZE, h: NEW_SVG_SIZE })
+        img.src = dataUri
+      }
+      reader.onerror = () => reject(new Error('读图片失败'))
+      reader.readAsDataURL(file)
+    })
+  }
+
+  /**
+   * 把一张（或多张）图片落成 image 节点。
+   * @param {File[]} files
+   * @param {number} userX
+   * @param {number} userY
+   * @param {{ replaceIds?: string[] }} [opts] 有 replaceIds 时用第一张图换掉选中节点的内容（尺寸保留）。
+   */
+  function insertImageFiles(files, userX, userY, opts) {
+    const list = Array.isArray(files) ? files : []
+    if (list.length === 0) return
+    const current = docRef.current
+    if (current === null) return
+    if (activeLayerLocked()) {
+      setSaveNote('当前图层已锁定：先解锁或换一层再贴图')
+      return
+    }
+    const replaceIds =
+      opts !== undefined && opts !== null && Array.isArray(opts.replaceIds) ? opts.replaceIds.filter((id) => typeof id === 'string') : []
+    setSaveNote('正在把图片放进画布…')
+    Promise.all(list.map((f) => readImageFile(f)))
+      .then((loaded) => {
+        if (docRef.current === null) return
+        const ids = []
+        applyLocal((next) => {
+          if (replaceIds.length > 0 && loaded.length > 0) {
+            const dataUri = loaded[0].dataUri
+            for (let r = 0; r < replaceIds.length; r += 1) {
+              for (let i = 0; i < next.nodes.length; i += 1) {
+                if (next.nodes[i].id !== replaceIds[r]) continue
+                const prev = typeof next.nodes[i].style === 'string' ? next.nodes[i].style : ''
+                next.nodes[i].style = styleWithImageDataUri(prev, dataUri, '1')
+                ids.push(next.nodes[i].id)
+                break
+              }
+            }
+            return
+          }
+          for (let i = 0; i < loaded.length; i += 1) {
+            const size = fitImageNodeSize(loaded[i].w, loaded[i].h)
+            const id = nextNodeId(next)
+            const ox = userX + i * (GRID * 2)
+            const oy = userY + i * (GRID * 2)
+            const node = {
+              id: id,
+              label: '',
+              style: styleWithImageDataUri('', loaded[i].dataUri, '1'),
+              x: snap(ox - size.w / 2),
+              y: snap(oy - size.h / 2),
+              w: size.w,
+              h: size.h,
+            }
+            if (activeLayerId !== null) node.layer = activeLayerId
+            const host = sectionAtPoint(next, ox, oy, null)
+            if (host !== null) node.parent = host.id
+            next.nodes.push(node)
+            ensureDrawOrder(next)
+            ids.push(id)
+          }
+        })
+        setSelectedIds(ids)
+        setMenu(null)
+        setPlaceTool(null)
+        setSaveNote(
+          replaceIds.length > 0
+            ? '已换成新图片'
+            : '已放入 ' + ids.length + ' 张图片（可拖动/缩放；Ctrl+V 也可直接粘贴截图）',
+        )
+      })
+      .catch((error) => {
+        const message = error && error.message ? error.message : String(error)
+        setSaveNote('贴图失败：' + message)
+      })
+  }
+
+  /** 隐藏的 `<input type=file accept=image/*>`：侧栏「图片」与放置工具共用。 */
+  function openImageFilePicker(opts) {
+    const options = opts === undefined || opts === null ? {} : opts
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/png,image/jpeg,image/gif,image/webp'
+    input.multiple = options.replaceIds === undefined || options.replaceIds === null || options.replaceIds.length === 0
+    input.style.display = 'none'
+    document.body.appendChild(input)
+    input.onchange = () => {
+      const files = input.files === null ? [] : Array.prototype.slice.call(input.files)
+      document.body.removeChild(input)
+      if (files.length === 0) return
+      const at =
+        options.at !== undefined && options.at !== null
+          ? options.at
+          : viewportCenterUser()
+      insertImageFiles(files, at.x, at.y, { replaceIds: options.replaceIds })
+    }
+    input.click()
+  }
+
   /** 方向键微移：默认一格（10px），Shift = 1px；连续按合并进同一次撤销。 */
   function nudgeSelectionByKey(key, shift) {
     const step = shift === true ? 1 : GRID
@@ -7353,9 +7996,9 @@ function CanvasView(props) {
         cutSelection()
         return
       }
+      // Ctrl+V：**不要**在 keydown 里 preventDefault —— 否则 paste 事件带不进系统剪贴板里的图片。
+      // 画布内节点粘贴与系统图片粘贴都在下面的 paste 监听里处理。
       if (accel && (event.key === 'v' || event.key === 'V')) {
-        event.preventDefault()
-        pasteClipboard()
         return
       }
       // 全选：与框选同一套语义（节点与连线都选上），于是能整体拖动/换样式/一把删掉。
@@ -7383,6 +8026,10 @@ function CanvasView(props) {
         setSelectedIds([])
         setEditing(null)
         setMenu(null)
+        setPlaceTool(null)
+        setPlaceEdgeKind(null)
+        setHoverNodeId(null)
+        setRailOpenFamily(null)
         // 下拉菜单与「打开/新建/另存为」面板也一起收掉：Esc 是"退出当前这层"，
         // 菜单开着却按 Esc 没反应会让人以为键盘坏了（与外面点一下同一个语义）。
         setDocMenu(null)
@@ -7391,7 +8038,29 @@ function CanvasView(props) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedIds, editing, menu])
+  }, [selectedIds, editing, menu, placeTool, placeEdgeKind])
+
+  // 系统剪贴板粘贴：有图片就落成 image 节点；否则回落到画布内剪贴板（节点/边）。
+  React.useEffect(() => {
+    function onPaste(event) {
+      if (!canvasOwnsKeyboard(event, rootRef.current, document.activeElement)) return
+      if (editing !== null) return
+      if (isTextEntry(document.activeElement)) return
+      const files = imageFilesFromDataTransfer(event.clipboardData)
+      if (files.length > 0) {
+        event.preventDefault()
+        const at = viewportCenterUser()
+        insertImageFiles(files, at.x, at.y)
+        return
+      }
+      if (clipboard !== null) {
+        event.preventDefault()
+        pasteClipboard()
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [editing, selectedIds, activeLayerId])
 
   React.useEffect(() => {
     return () => {
@@ -7537,20 +8206,9 @@ function CanvasView(props) {
       return
     }
     setSaveNote('正在把画布渲成图片给 AI 看…')
-    // 先按 2× 渲（与手动导出同一档）；超过回执上限就降到 1× 再试一次。
+    // 与手动导出同一档 2×；体量不再由客户端预检截断（宿主对 render-result 放开了 body 上限）。
+    // 部署附件服务若自带 maxImageBytes，仍会在那一侧拒收。
     renderPngPayload(built.node, built.width, built.height, 2)
-      .catch(() => renderPngPayload(built.node, built.width, built.height, 1))
-      .then((payload) => {
-        if (payload.base64.length > LOOK_MAX_BASE64) {
-          return renderPngPayload(built.node, built.width, built.height, 1).then((small) => {
-            if (small.base64.length > LOOK_MAX_BASE64) {
-              throw new Error('这张图渲染出来太大（' + Math.round(small.base64.length / 1000) + 'KB 的 PNG），超过了能交给 AI 的上限；可以先缩小画布范围或减少单元')
-            }
-            return small
-          })
-        }
-        return payload
-      })
       .then((payload) => {
         reportRenderResult(requestId, { ok: true, png: payload.base64, width: payload.width, height: payload.height })
         setSaveNote('已把画布交给 AI 看（图片存在宿主那边，你的工作区不会多出文件）')
@@ -7782,6 +8440,8 @@ function CanvasView(props) {
     edgePreview: edgePreview,
     onNodePointerDown: onNodePointerDown,
     onNodePointerUp: onNodePointerUp,
+    onNodePointerEnter: onNodePointerEnter,
+    onNodePointerLeave: onNodePointerLeave,
     onNodeDoubleClick: onNodeDoubleClick,
     onNodeContextMenu: onNodeContextMenu,
     onHandlePointerDown: onHandlePointerDown,
@@ -7834,19 +8494,11 @@ function CanvasView(props) {
   }
 
   /**
-   * 元素库：**全部形状直接平铺**（不再收进下拉列表）。
-   *
-   * 需求："去掉形状的下拉列表选择方式，把形状直接排开、平铺展示"。点一个形状就是**动作本身**：
-   *  · 空白处右键（`picker` 为 null）→ 直接在那个位置新增一个该形状的节点；
-   *  · 节点右键（传了 `picker`）→ 直接把选中的节点换成那个形状。
-   * 两种菜单都调用同一个 onPick，「＋ 新增节点」那个按钮因此不需要了。
-   *
-   * 缩略图仍然由 `shapeElement` 自己画 —— 库里的预览与画布上的形状永远一致。
+   * 元素库缩略图格（偏好面板等仍用）。
+   * 主放置入口已迁到右侧常驻条 `renderShapeRail`；这里留给偏好"默认形状"挑选。
    *
    * @param {(shape: string) => void} onPick
    * @param {{ color?: string, current?: string }} opts
-   *        color：缩略图用的配色（节点菜单按这个节点现在的配色画，空白处按当前选中的配色画）；
-   *        current：当前形状，给它加一圈"选中"的高亮。
    */
   function shapeGrid(onPick, opts) {
     const options = opts === undefined || opts === null ? {} : opts
@@ -7855,6 +8507,8 @@ function CanvasView(props) {
     const buttons = []
     for (let i = 0; i < SHAPE_LIBRARY.length; i += 1) {
       const entry = SHAPE_LIBRARY[i]
+      // 位图不能空手换形（没有 data URI = 空框）；粘贴 / 拖入 / 侧栏选文件才是入口。
+      if (entry.shape === 'image') continue
       // node 与 palette 必须来自同一个 colorOf —— shapeElement 的描边取自 style，填充取自 palette，
       // 只传 palette 不传 style 的话，缩略图会变成"默认填充 + 主题描边"。
       // svg 缩略图用**放下来会得到的那张占位图**（所见即所得）；它的颜色写在标记自己身上。
@@ -7878,6 +8532,387 @@ function CanvasView(props) {
       )
     }
     return React.createElement('div', { className: 'drawai-grid' }, buttons)
+  }
+
+  /** 选区节点，否则悬停节点 —— 换形目标用这一份。 */
+  function railReplaceTargets() {
+    const selectedNodes = []
+    for (let i = 0; i < selectedIds.length; i += 1) {
+      if (nodeById(selectedIds[i]) !== null) selectedNodes.push(selectedIds[i])
+    }
+    if (selectedNodes.length > 0) return selectedNodes
+    if (typeof hoverNodeId === 'string' && hoverNodeId.length > 0 && nodeById(hoverNodeId) !== null) {
+      return [hoverNodeId]
+    }
+    return []
+  }
+
+  /**
+   * 右侧条点某个**族**入口：
+   *  · 目标已是同族 → 多变体族靠侧面板换形（单变体族无需动作）；
+   *  · 否则武装该族的放置工具（再点画布落下**一次**）。
+   */
+  function pickFamilyFromRail(family) {
+    if (doc === null) return
+    const shape = defaultShapeOfFamily(family, menuShape)
+    const targets = railReplaceTargets()
+    // 线条族：悬停出四种线型；点击武装放置（空白单击或拖拽定起终点）；选中连线时打开气泡换线型。
+    if (family === 'edge') {
+      const edgeTargets = railReplaceEdgeTargets()
+      if (edgeTargets.length > 0) {
+        openRailHover('edge')
+        setSaveNote('在气泡里选线型，应用到选中的 ' + edgeTargets.length + ' 条连线')
+        return
+      }
+      if (placeEdgeKind !== null) {
+        setPlaceEdgeKind(null)
+        setRailOpenFamily(null)
+        setSaveNote('')
+        return
+      }
+      setPlaceTool(null)
+      setPlaceEdgeKind(typeof shape === 'string' && isEdgeLineKind(shape) ? shape : 'rounded')
+      openRailHover('edge')
+      setSaveNote('放置线条：可在气泡里选线型，再在空白处单击落下或拖拽定起终点（单次，Esc 取消）')
+      return
+    }
+    // 图片族：直接选文件（或换掉当前选中/悬停节点的图），不走"点空白落下"——
+    // 空手落下没有 data URI，只会得到占位空框。
+    if (family === 'image') {
+      if (targets.length > 0) {
+        const first = nodeById(targets[0])
+        const currentShape = first === null ? '' : nodeShapeFromStyle(typeof first.style === 'string' ? first.style : '')
+        if (shapeFamilyOf(currentShape) === 'image') {
+          openImageFilePicker({ replaceIds: targets })
+          return
+        }
+        setSelectedIds([])
+        setHoverNodeId(null)
+      }
+      openImageFilePicker({})
+      setSaveNote('选一张图片放进画布（也可直接 Ctrl+V 粘贴截图，或把图片拖进画布）')
+      return
+    }
+    if (targets.length > 0) {
+      const first = nodeById(targets[0])
+      const currentShape = first === null ? '' : nodeShapeFromStyle(typeof first.style === 'string' ? first.style : '')
+      if (shapeFamilyOf(currentShape) === family) {
+        // 同族：悬停/点开气泡换形；单变体族已经是对的类型。
+        if (shapesInFamily(family).length <= 1) setSaveNote('已是「' + familyLabelOf(family) + '」')
+        else openRailFamilyPanel(family)
+        return
+      }
+      setSelectedIds([])
+      setHoverNodeId(null)
+    }
+    if (placeTool !== null && shapeFamilyOf(placeTool) === family) {
+      setPlaceTool(null)
+      setPlaceEdgeKind(null)
+      setRailOpenFamily(null)
+      setSaveNote('')
+      return
+    }
+    setMenuShape(shape)
+    setPlaceEdgeKind(null)
+    setPlaceTool(shape)
+    if (shapesInFamily(family).length > 1) openRailFamilyPanel(family)
+    setSaveNote(
+      '放置「' +
+        familyLabelOf(family) +
+        '」：' +
+        (shapesInFamily(family).length > 1 ? '可在气泡里选具体形状，' : '') +
+        '在画布空白处点一下（单次，Esc 取消）',
+    )
+  }
+
+  /**
+   * 气泡里点某个**同族变体**：有换形/换线型目标就换；否则只改即将落下的子类型（仍等画布点一下）。
+   */
+  function pickVariantFromRail(shape) {
+    if (doc === null) return
+    // 线条族：kind 与节点 shape 名可能撞车（都有 rounded），以当前打开的族为准。
+    if (railOpenFamily === 'edge' || (placeEdgeKind !== null && isEdgeLineKind(shape))) {
+      if (!isEdgeLineKind(shape)) return
+      const edgeTargets = railReplaceEdgeTargets()
+      if (edgeTargets.length > 0) {
+        applyLineKind(edgeTargets, shape)
+        setPlaceEdgeKind(null)
+        setPlaceTool(null)
+        setRailOpenFamily(null)
+        setSaveNote('已换成「' + edgeLineLabelOf(shape) + '」')
+        return
+      }
+      setPlaceTool(null)
+      setPlaceEdgeKind(shape)
+      setSaveNote('放置「' + edgeLineLabelOf(shape) + '」：空白处单击落下，或拖拽定起终点（单次，Esc 取消）')
+      return
+    }
+    setMenuShape(shape)
+    const targets = railReplaceTargets()
+    if (targets.length > 0) {
+      const first = nodeById(targets[0])
+      const currentShape = first === null ? '' : nodeShapeFromStyle(typeof first.style === 'string' ? first.style : '')
+      if (shapeFamilyOf(currentShape) !== shapeFamilyOf(shape)) return
+      const baseStyle = first === null || typeof first.style !== 'string' ? '' : first.style
+      updateNode(targets, { style: styleForShapePick(baseStyle, shape) })
+      setPlaceTool(null)
+      setPlaceEdgeKind(null)
+      setRailOpenFamily(null)
+      return
+    }
+    setPlaceEdgeKind(null)
+    setPlaceTool(shape)
+    setSaveNote('放置「' + shapeLabelOf(shape) + '」：在画布空白处点一下（单次，Esc 取消）')
+  }
+
+  /**
+   * 主条线稿按钮。`face` 有值时用它当图标（选中/放置的子类型），否则用族缺省 `iconKind`。
+   * 悬停气泡用自定义 tip 时不要再挂原生 title（会叠两层）。
+   */
+  function railIconButton(key, iconKind, on, title, onClick, hover, face) {
+    const props = {
+      key: key,
+      type: 'button',
+      className: 'drawai-rail-chip' + (on ? ' on' : ''),
+      onClick: onClick,
+      'aria-label': title,
+    }
+    if (hover !== undefined && hover !== null) {
+      if (typeof hover.onEnter === 'function') props.onPointerEnter = hover.onEnter
+      if (typeof hover.onLeave === 'function') props.onPointerLeave = hover.onLeave
+    } else if (typeof title === 'string' && title.length > 0) {
+      props.title = title
+    }
+    return React.createElement('button', props, face !== undefined && face !== null ? face : railIcon(iconKind))
+  }
+
+  /** 图形族母图标：跟当前子形状走（选中菱形 → 母图标也是菱形）。 */
+  function railShapeFace(shape) {
+    const name = typeof shape === 'string' && shape.length > 0 ? shape : 'rounded'
+    const chipNode = {
+      style: styleForShapePick(styleWithColorName(styleWithNodeShape('', name), menuStyle), name),
+    }
+    const palette = colorOf(chipNode, 'light')
+    return React.createElement(
+      'svg',
+      { width: 22, height: 22, viewBox: '0 0 24 24', 'aria-hidden': true },
+      shapeElement(chipNode, { x: 3, y: 4, w: 18, h: 16 }, palette, 'light'),
+    )
+  }
+
+  /** 线条族母图标：跟当前线型走（选中直线 → 母图标也是直线）。 */
+  function railEdgeFace(kind) {
+    const lineKind = isEdgeLineKind(kind) ? kind : 'rounded'
+    return React.createElement(
+      'svg',
+      { width: 22, height: 22, viewBox: '0 0 44 30', 'aria-hidden': true },
+      railLineKindIcon(lineKind),
+    )
+  }
+
+  /** 侧面板形状缩略图（要辨认矩形/菱形等，仍用真实形状预览）。 */
+  function railShapeButton(key, shape, on, title, onClick) {
+    const chipNode = {
+      style: styleForShapePick(styleWithColorName(styleWithNodeShape('', shape), menuStyle), shape),
+    }
+    const palette = colorOf(chipNode, 'light')
+    return React.createElement(
+      'button',
+      {
+        key: key,
+        type: 'button',
+        className: 'drawai-rail-chip' + (on ? ' on' : ''),
+        title: title,
+        onClick: onClick,
+      },
+      React.createElement(
+        'svg',
+        { width: 40, height: 28, viewBox: '0 0 44 30', 'aria-hidden': true },
+        shapeElement(chipNode, { x: 3, y: 3, w: 38, h: 24 }, palette, 'light'),
+      ),
+    )
+  }
+
+  /** 线条族气泡里的线型按钮。 */
+  function railLineButton(key, kind, on, title, onClick) {
+    return React.createElement(
+      'button',
+      {
+        key: key,
+        type: 'button',
+        className: 'drawai-rail-chip' + (on ? ' on' : ''),
+        title: title,
+        onClick: onClick,
+      },
+      React.createElement(
+        'svg',
+        { width: 40, height: 28, viewBox: '0 0 44 30', 'aria-hidden': true },
+        railLineKindIcon(kind),
+      ),
+    )
+  }
+
+  /** 右侧常驻元素条：多变体族悬停出同族；最后一级悬停只出名称气泡。 */
+  function renderShapeRail() {
+    if (doc === null) return null
+    const targets = railReplaceTargets()
+    const edgeTargets = railReplaceEdgeTargets()
+    let focusShape = ''
+    let focusFamily = null
+    if (targets.length > 0) {
+      const n = nodeById(targets[0])
+      focusShape = nodeShapeFromStyle(n === null || typeof n.style !== 'string' ? '' : n.style)
+      focusFamily = shapeFamilyOf(focusShape)
+    }
+    let focusEdgeKind = ''
+    if (edgeTargets.length > 0) {
+      const e = edgeById(edgeTargets[0])
+      focusEdgeKind = lineKindFromStyle(e === null || typeof e.style !== 'string' ? DEFAULT_EDGE_STYLE : e.style)
+      focusFamily = 'edge'
+    }
+    const placeFamily =
+      typeof placeEdgeKind === 'string' && placeEdgeKind.length > 0
+        ? 'edge'
+        : typeof placeTool === 'string' && placeTool.length > 0
+          ? shapeFamilyOf(placeTool)
+          : null
+    // 气泡只在悬停打开（railOpenFamily）；选中/放置本身不自动铺开。
+    const panelFamily =
+      typeof railOpenFamily === 'string' && shapesInFamily(railOpenFamily).length > 1 ? railOpenFamily : null
+    const tipLabel = panelFamily === null ? railHoverTipLabel(railOpenFamily) : null
+    const panelCurrent =
+      panelFamily === null
+        ? ''
+        : panelFamily === 'edge'
+          ? typeof placeEdgeKind === 'string' && placeEdgeKind.length > 0
+            ? placeEdgeKind
+            : focusEdgeKind || defaultShapeOfFamily('edge', 'rounded')
+          : placeFamily === panelFamily && typeof placeTool === 'string'
+            ? placeTool
+            : focusFamily === panelFamily
+              ? focusShape
+              : defaultShapeOfFamily(panelFamily, menuShape)
+
+    const hoverHandlers = (key) => ({
+      onEnter: () => openRailHover(key),
+      onLeave: () => scheduleCloseRailFamilyPanel(),
+    })
+
+    const chips = [React.createElement('div', { key: 'rail-cap', className: 'drawai-rail-cap' })]
+    for (let i = 0; i < RAIL_FAMILIES.length; i += 1) {
+      const entry = RAIL_FAMILIES[i]
+      const on = placeFamily === entry.family || railOpenFamily === entry.family || focusFamily === entry.family
+      const multi = shapesInFamily(entry.family).length > 1
+      const armed = entry.family === 'edge' ? placeEdgeKind !== null : placeFamily === entry.family
+      // 母图标跟当前子类型走：放置中 > 选中/悬停 > 族缺省。
+      let face = null
+      if (entry.family === 'edge') {
+        const kind =
+          typeof placeEdgeKind === 'string' && placeEdgeKind.length > 0
+            ? placeEdgeKind
+            : focusFamily === 'edge' && focusEdgeKind.length > 0
+              ? focusEdgeKind
+              : defaultShapeOfFamily('edge', 'rounded')
+        face = railEdgeFace(kind)
+      } else if (entry.family === 'shape') {
+        const shape =
+          placeFamily === 'shape' && typeof placeTool === 'string'
+            ? placeTool
+            : focusFamily === 'shape' && focusShape.length > 0
+              ? focusShape
+              : defaultShapeOfFamily('shape', menuShape)
+        face = railShapeFace(shape)
+      }
+      chips.push(
+        railIconButton(
+          'rail-fam-' + entry.family,
+          entry.icon,
+          on,
+          multi
+            ? entry.family === 'edge'
+              ? '悬停选择线型；点击后在画布点一下放置独立线'
+              : '悬停选择「' + entry.label + '」同族形状；点击后在画布点一下放置'
+            : armed
+              ? '取消放置'
+              : '放置「' + entry.label + '」（点画布一次）',
+          () => pickFamilyFromRail(entry.family),
+          hoverHandlers(entry.family),
+          face,
+        ),
+      )
+    }
+
+    const rail = React.createElement(
+      'div',
+      { className: 'drawai-rail', title: '元素条：悬停看名称或同族；点击后在画布点一下放置（单次）' },
+      chips,
+    )
+
+    let panel = null
+    if (panelFamily !== null) {
+      const variants = shapesInFamily(panelFamily)
+      const replacing = panelFamily === 'edge' ? edgeTargets.length > 0 : focusFamily === panelFamily
+      const topPx = railHoverTopPx(panelFamily)
+      const panelChips = [
+        React.createElement(
+          'div',
+          { key: 'panel-title', className: 'drawai-rail-panel-title' },
+          panelFamily === 'edge'
+            ? replacing
+              ? '换成线型'
+              : '选择线型'
+            : replacing
+              ? '换成同族形状'
+              : '选择形状',
+        ),
+      ]
+      for (let i = 0; i < variants.length; i += 1) {
+        const entry = variants[i]
+        if (panelFamily === 'edge') {
+          panelChips.push(
+            railLineButton(
+              'rail-line-' + entry.shape,
+              entry.shape,
+              panelCurrent === entry.shape,
+              replacing ? '换成「' + entry.label + '」' : '将放置「' + entry.label + '」',
+              () => pickVariantFromRail(entry.shape),
+            ),
+          )
+        } else {
+          panelChips.push(
+            railShapeButton(
+              'rail-var-' + entry.shape,
+              entry.shape,
+              panelCurrent === entry.shape,
+              replacing ? '换成「' + entry.label + '」' : '将放置「' + entry.label + '」',
+              () => pickVariantFromRail(entry.shape),
+            ),
+          )
+        }
+      }
+      panel = React.createElement(
+        'div',
+        {
+          className: 'drawai-rail-panel',
+          style: { top: topPx + 'px' },
+          onPointerEnter: () => openRailHover(panelFamily),
+          onPointerLeave: () => scheduleCloseRailFamilyPanel(),
+        },
+        panelChips,
+      )
+    } else if (typeof tipLabel === 'string' && tipLabel.length > 0) {
+      panel = React.createElement(
+        'div',
+        {
+          className: 'drawai-rail-tip',
+          style: { top: railHoverTopPx(railOpenFamily) + 6 + 'px' },
+          role: 'tooltip',
+        },
+        tipLabel,
+      )
+    }
+
+    return React.createElement('div', { className: 'drawai-rail-wrap' }, rail, panel)
   }
 
   /**
@@ -7958,8 +8993,7 @@ function CanvasView(props) {
    * 以前两类做法都试过：全部选项铺在菜单里（一屏都是按钮、看不出现在是什么）、
    * 一类占一整行（菜单太矮太长的竖条）。现在这样菜单更矮，一眼能看到每一类的当前值。
    *
-   * **形状不再走这里**：需求要的是"把形状直接排开、平铺展示"，所以形状用 `shapeGrid`
-   * 常驻平铺（见 drawai-pick），点一下就生效。这里剩下的是配色/字色/字号/线型/箭头。
+   * **形状不走这里**：入口是右侧常驻元素条（`renderShapeRail`）。这里剩下的是配色/字色/字号/线型/箭头。
    *
    * 展开状态记在 menu 对象上（`menu.openKey`）—— 换一个元素右键时 menu 是新对象，下拉自然收起；
    * 同一个菜单里点另一类会把上一类收起来。
@@ -8077,16 +9111,8 @@ function CanvasView(props) {
     }
 
     if (menu.kind === 'canvas') {
-      rows.push(menuTitle('元素库 —— 点一个形状，就在这里放一个'))
-      // 形状**平铺**（需求：去掉下拉、直接排开），点某个形状 = 直接在这里新增该形状的节点。
-      // 原来的「＋ 新增节点」按钮因此没有了：它做的事（用"当前形状"放一个）现在就是
-      // "点那个形状自己"，少一步"先在下拉里选中、再点新增"。
-      rows.push(React.createElement('div', { key: 'shape-pick', className: 'drawai-pick' }, menuTitle('形状（点一下直接新建）'), shapeGrid((shape) => {
-        setMenuShape(shape)
-        createNodeAt(shape, menuStyle, menu.userX, menu.userY)
-      }, { color: menuStyle, current: menuShape })))
-      // 配色仍然只显示当前值：8 个色块 + 10 个形状缩略图都平铺会把菜单撑成一屏。
-      // 它与形状是**两件事**（形状决定放什么，配色决定放出来的颜色），所以留在这一行里。
+      // 形状入口在右侧常驻元素条；空白右键只留配色偏好、独立连线与粘贴。
+      rows.push(menuTitle('画布 —— 形状请用右侧元素条'))
       rows.push.apply(
         rows,
         menuSelectRow([
@@ -8102,21 +9128,15 @@ function CanvasView(props) {
           },
         ]),
       )
-      // 这一排只剩下**独立连线**两种：文字已经在上面那片形状里了
-      // （「文字」就是其中一个缩略图，点它一样是 `createNodeAt('text', …)`）——
-      // 同一件事摆两个入口只会让人猜"这两个是不是不一样"。
       rows.push(
         React.createElement(
           'div',
           { className: 'drawai-menu-row' },
-          // 独立线：两端都不接节点（drawio 里的自由形态），之后拖端点就能接到节点上。
           React.createElement(
             'button',
             { className: 'drawai-btn', onClick: () => createFreeEdgeAt(menu.userX, menu.userY), title: '画一条两端都没接节点的线，之后拖它的端点可以接到节点上' },
             '／ 独立连线',
           ),
-          // 同一条独立线，但**线型是直线**（`edgeStyle=none`，不带折点）：斜着量一段距离、
-          // 拉一条指示线时用得上。之后在连线的右键菜单里可以随时换成折线/曲线。
           React.createElement(
             'button',
             { className: 'drawai-btn', onClick: () => createFreeEdgeAt(menu.userX, menu.userY, 'straight'), title: '画一条两端都不接节点、也不带折点的直线' },
@@ -8154,17 +9174,9 @@ function CanvasView(props) {
       // 点中的节点在选区里 → 形状/配色对**整组节点**生效（与删除/拖动/对齐一致）。
       const nodeTargets = styleTargets(selectedIds, menu.id, (id) => nodeById(id) !== null)
       rows.push(menuTitle('节点：' + label + (nodeTargets.length > 1 ? '（共 ' + nodeTargets.length + ' 个）' : '')))
-      // 形状与配色都改成**键级改写**：不再往文档里写 shape 字段，也不再用颜色名当 style。
-      // 整组改色时以**点中的那个**的当前样式为基准（把它的配色推广给其它成员）。
-      // 形状**平铺**（需求：去掉下拉）：点一个缩略图就把选中的节点换成那个形状。
-      // 配色/字色/字号仍然走「类：当前值 ▾」那一排（它们的选项是与形状并列的另一回事）。
-      // 配色对独立文字换的是**字色**（它没有填充与描边）—— 否则点了一圈颜色屏幕上毫无变化。
+      // 换形走右侧常驻元素条（悬停/选中后点同族形状）；右键只留配色/字色/字号与动作。
       const isTextNode = nodeShapeFromStyle(nodeStyle) === 'text'
       const currentShape = nodeShapeFromStyle(nodeStyle)
-      // 缩略图用的配色：认得出的调色板名照用；认不出的（drawio 文件里本来就只有十六进制）
-      // 退回缺省色画缩略图 —— 这里只是预览，不写文档。
-      const chipColor = colorNameFromStyle(nodeStyle)
-      rows.push(React.createElement('div', { key: 'shape-pick', className: 'drawai-pick' }, shapeGrid((shape) => updateNode(nodeTargets, { style: styleForShapePick(nodeStyle, shape) }), { color: chipColor === null ? 'plain' : chipColor, current: currentShape })))
       rows.push.apply(
         rows,
         menuSelectRow([
@@ -8671,7 +9683,7 @@ function CanvasView(props) {
           { className: 'drawai-pick' },
           shapeGrid(
             (shape) => {
-              if (shape === 'text' || shape === 'svg') return
+              if (shape === 'text' || shape === 'svg' || shape === 'image') return
               patchPrefs({ defaultShape: shape })
             },
             { color: prefs.defaultColor || menuStyle, current: prefs.defaultShape || menuShape },
@@ -9225,12 +10237,12 @@ function CanvasView(props) {
         isNodeEditor ? React.createElement('textarea', editorProps) : React.createElement('input', editorProps),
       )
     }
-    body = React.createElement(
+    const canvasEl = React.createElement(
       'div',
       {
-        className: 'drawai-canvas',
+        className: 'drawai-canvas' + (placeTool !== null || placeEdgeKind !== null ? ' placing' : ''),
         ref: canvasRef,
-        title: '滚轮缩放 · 中键拖动平移 · 空白左键拖框选 · 双击改标签 · 右键元素库\n连线：点选后 绿/红端点拖到别的节点=改接，橙色空心点=段把手（拖=整段平移，撤销用 Ctrl+Z）',
+        // 空白处不挂 title：悬停整块画布会反复冒浏览器提示，很吵；操作说明在状态栏 / 放置时的 saveNote。
         onContextMenu: onCanvasContextMenu,
         onPointerDown: onCanvasPointerDown,
         onPointerMove: onCanvasPointerMove,
@@ -9244,9 +10256,23 @@ function CanvasView(props) {
         onAuxClick: (event) => {
           if (event.button === 1) event.preventDefault()
         },
+        onDragOver: (event) => {
+          if (imageFilesFromDataTransfer(event.dataTransfer).length === 0) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+        },
+        onDrop: (event) => {
+          const files = imageFilesFromDataTransfer(event.dataTransfer)
+          if (files.length === 0) return
+          event.preventDefault()
+          const point = toUserSpace(event)
+          const at = point === null ? viewportCenterUser() : point
+          insertImageFiles(files, at.x, at.y)
+        },
       },
       canvasChildren,
     )
+    body = React.createElement('div', { className: 'drawai-body' }, canvasEl, renderShapeRail())
   }
 
   const note =
@@ -9654,6 +10680,17 @@ exports.__routeInternals = {
   NEW_SVG_SIZE: NEW_SVG_SIZE,
   DEFAULT_SVG_MARKUP: DEFAULT_SVG_MARKUP,
   styleForShapePick: styleForShapePick,
+  SHAPE_LIBRARY: SHAPE_LIBRARY,
+  EDGE_LINE_LIBRARY: EDGE_LINE_LIBRARY,
+  isEdgeLineKind: isEdgeLineKind,
+  edgeLineLabelOf: edgeLineLabelOf,
+  RAIL_FAMILIES: RAIL_FAMILIES,
+  railIcon: railIcon,
+  shapeFamilyOf: shapeFamilyOf,
+  shapesInFamily: shapesInFamily,
+  shapeLabelOf: shapeLabelOf,
+  defaultShapeOfFamily: defaultShapeOfFamily,
+  familyLabelOf: familyLabelOf,
   FALLBACK_NODE_W: FALLBACK_NODE_W,
   FALLBACK_NODE_H: FALLBACK_NODE_H,
   routeThroughWaypoints: routeThroughWaypoints,
@@ -9671,6 +10708,10 @@ exports.__routeInternals = {
   nextSideOf: nextSideOf,
   collectClipboard: collectClipboard,
   pasteInto: pasteInto,
+  imageFilesFromDataTransfer: imageFilesFromDataTransfer,
+  fitImageNodeSize: fitImageNodeSize,
+  IMAGE_PASTE_MAX_SIDE: IMAGE_PASTE_MAX_SIDE,
+  IMAGE_PASTE_MAX_BYTES: IMAGE_PASTE_MAX_BYTES,
   // 按键归属：谁在打字、这次按键算不算画布的 —— 纯函数，自测直接喂假 DOM 节点。
   isTextEntry: isTextEntry,
   canvasOwnsKeyboard: canvasOwnsKeyboard,

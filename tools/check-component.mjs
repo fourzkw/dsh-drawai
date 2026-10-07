@@ -645,7 +645,8 @@ console.log('\n线型与字号的手工入口')
   // 空白处右键：一条**直线**（无折点）
   ok(/'╱ 直线'/.test(src), '空白处右键有「╱ 直线」入口')
   ok(/createFreeEdgeAt\(menu\.userX, menu\.userY, 'straight'\)/.test(src), '它建的是直线（createFreeEdgeAt 的第三个参数）')
-  ok(/straight \? styleWithLineKind\(DEFAULT_EDGE_STYLE, 'straight'\) : DEFAULT_EDGE_STYLE/.test(src), '那条线的样式真的是直线')
+  ok(/styleWithLineKind\(DEFAULT_EDGE_STYLE, lineKind\)/.test(src), '独立线按线型落 style（styleWithLineKind）')
+  ok(/isEdgeLineKind\(kind\) \? kind : 'rounded'/.test(src), '缺省/未知线型回落到折线（rounded）')
   // 字号：节点/文字与连线共用同一个控件
   ok(/function fontSizeRow\(/.test(src), '有 fontSizeRow（三个地方共用）')
   ok(/const FONT_SIZE_PRESETS = \[/.test(src), '字号有档位表（不写死在 UI 里）')
@@ -667,14 +668,14 @@ console.log('\n右键菜单：几类只显示当前值，并排成一行')
   ok(/function closeSelect\(\)/.test(src), '选完一个值就收起来')
 
   // 三个菜单各自**一次**menuSelectRow 调用里给出全部类 —— 这才是"并排成一行"。
-  // （形状**不在**里面：需求要的是"把形状直接排开、平铺展示"，它走 shapeGrid 常驻平铺。）
+  // （形状**不在**右键里：入口是右侧常驻元素条 — 族入口 + 同族变体侧面板。）
   const callSites = src.match(/menuSelectRow\(\[/g) || []
   ok(callSites.length === 3, '三处右键菜单各调用一次 menuSelectRow（画布 / 节点 / 连线），实际 ' + callSites.length + ' 处')
   const categories = ['color', 'fontSize', 'line', 'dash', 'arrow', 'fontColor']
   for (const key of categories) {
     ok(new RegExp("key: '" + key + "'").test(src), '「' + key + '」这一类在 menuSelectRow 的 cats 里')
   }
-  ok(!/key: 'shape',\s*\n\s*label: '形状',\s*\n\s*value:/.test(src), '形状不再是一类"当前值 ▾"（它已经平铺出来了）')
+  ok(!/key: 'shape',\s*\n\s*label: '形状',\s*\n\s*value:/.test(src), '形状不再是一类"当前值 ▾"（它在右侧元素条）')
   ok(!/rows\.push\(swatchRow\(/.test(src), '配色不再把 8 个色块直接铺在菜单里')
   ok(!/rows\.push\(fontSizeRow\(/.test(src), '字号不再把 6 个档位直接铺在菜单里')
   ok(
@@ -691,12 +692,47 @@ console.log('\n右键菜单：几类只显示当前值，并排成一行')
   // 当前值必须来自纯函数（能被命令行自测直接断言），而不是在 JSX 里现拼
   ok(/styleSummary: styleSummary,/.test(src), 'styleSummary 挂进 internals（自测能直接调）')
   ok(/PALETTE_LABELS\[menuStyle\] === undefined \? styleSummary\(menuStyle, 'color'\)/.test(src), '空白处右键的「配色」显示当前选中的那个（而不是颜色名表里查不到就空着）')
-  // 形状：平铺 + **点一下就新建**（需求"去掉下拉列表，点某个形状即直接新增该形状的节点"）。
-  // 「＋ 新增节点」按钮已经删掉 —— 它做的事就是"点那个形状自己"。
-  ok(/rows\.push\(React\.createElement\('div', \{ key: 'shape-pick'/.test(src), '形状平铺成一块（drawai-pick），不再收进下拉')
-  ok(/shapeGrid\(\(shape\) => \{\s*\n\s*setMenuShape\(shape\)\s*\n\s*createNodeAt\(shape, menuStyle, menu\.userX, menu\.userY\)/.test(src), '画布菜单里点一个形状 = 直接在那个位置新建该形状的节点')
+  // 右侧条：主条只放族入口；同族变体进侧面板；放置单次。
+  ok(/function renderShapeRail\(/.test(src), '有右侧常驻元素条 renderShapeRail')
+  ok(/function pickFamilyFromRail\(/.test(src), '有 pickFamilyFromRail（按族放置）')
+  ok(/function pickVariantFromRail\(/.test(src), '有 pickVariantFromRail（同族变体）')
+  ok(/const RAIL_FAMILIES = \[/.test(src), '有 RAIL_FAMILIES（主条只列族，不铺全部形状）')
+  ok(/function railIcon\(/.test(src), '主条用 railIcon 线稿图标（飞书侧栏观感）')
+  ok(/function railIconButton\(/.test(src), '主条入口走 railIconButton，不用彩色形状预览')
+  ok(/function railShapeButton\(/.test(src), '侧面板变体仍用真实形状缩略图')
+  ok(/className: 'drawai-rail-panel'/.test(src), '同族变体走白色气泡面板，不铺在主条')
+  ok(/function openRailFamilyPanel\(/.test(src), '悬停打开同族气泡（openRailFamilyPanel）')
+  ok(/function openRailHover\(/.test(src), '侧栏悬停统一走 openRailHover（多变体面板 / 末级名称）')
+  ok(/function railHoverTipLabel\(/.test(src), '最后一级用 railHoverTipLabel 出名称')
+  ok(/drawai-rail-tip/.test(src), '最后一级名称气泡有 .drawai-rail-tip 样式')
+  ok(/scheduleCloseRailFamilyPanel/.test(src), '离开后延迟关闭气泡')
+  ok(/background:#ffffff/.test(src) && /border-radius:14px/.test(src), '元素选择气泡是白色圆角浮层')
+  ok(/railOpenFamily/.test(src), '气泡开关由悬停状态 railOpenFamily 控制（不靠选中/放置自动铺开）')
+  ok(/hoverHandlers\(entry\.family\)/.test(src), '各族入口都挂悬停（末级出名称、多变体出同族）')
+  ok(/family: 'edge'/.test(src) && /EDGE_LINE_LIBRARY/.test(src), '线条收成一族（EDGE_LINE_LIBRARY）')
+  ok(/kind: 'rounded'/.test(src) && /kind: 'sharp'/.test(src) && /kind: 'straight'/.test(src) && /kind: 'curved'/.test(src), '线条族含折线/直角折线/直线/曲线')
+  ok(/placeEdgeKind/.test(src), '线条放置走 placeEdgeKind（与形状 placeTool 分开，避免 rounded 撞名）')
+  ok(/createFreeEdgeAt\(drag\.x0, drag\.y0, drag\.placeEdge, drag\.x1, drag\.y1\)/.test(src), '武装线条后空白拖拽用起终点建独立线')
+  ok(/placeEdge: placeEdge/.test(src) && /key: 'place-edge-preview'/.test(src), '拖拽放置线条时画预览（不走框选矩形）')
+  ok(/rail-edge-straight/.test(src) === false, '不再单独挂「独立直线」入口（已并进线条族）')
+  ok(/function railShapeFace\(/.test(src) && /function railEdgeFace\(/.test(src), '母图标随选中子类型变（railShapeFace / railEdgeFace）')
+  ok(/face = railEdgeFace\(kind\)/.test(src) && /face = railShapeFace\(shape\)/.test(src), '图形/线条族入口把 face 传给 railIconButton')
+  ok(/className: 'drawai-body'/.test(src), '画布与元素条包在 drawai-body 横排里')
+  ok(/\.drawai-rail\{/.test(src), '有 .drawai-rail 样式（右侧竖条）')
+  ok(/\.drawai-rail-cap\{/.test(src), '条顶有细分隔线（飞书侧栏顶部细线）')
+  ok(/placeShape: typeof placeTool === 'string'/.test(src), '空白按下会记下 placeTool，松手落下')
+  ok(/createNodeAt\(drag\.placeShape, menuStyle, drag\.x0, drag\.y0\)/.test(src), '放置工具武装时点空白 = createNodeAt')
+  ok(/setPlaceTool\(null\)/.test(src) && /落下\*\*一个\*\*节点/.test(src), '放置是单次（放完卸工具）')
+  ok(/function shapeFamilyOf\(/.test(src), '有 shapeFamilyOf（同族换形）')
+  ok(/shape === 'text'/.test(src) && /shape === 'svg'/.test(src), '文字与 SVG 各自成族（不算图形同族）')
+  ok(/shape === 'image'/.test(src) && /family: 'image'/.test(src), '图片也自成一族（侧栏入口 + 粘贴/拖入）')
+  ok(/function imageFilesFromDataTransfer\(/.test(src), '有 imageFilesFromDataTransfer（从剪贴板/拖放抽图片）')
+  ok(/function insertImageFiles\(/.test(src), '有 insertImageFiles（落成 image 节点）')
+  ok(/addEventListener\('paste'/.test(src), '挂了 paste 监听（系统剪贴板图片 → 节点）')
+  ok(/onDrop:/.test(src) && /imageFilesFromDataTransfer\(event\.dataTransfer\)/.test(src), '画布支持拖入图片文件')
+  ok(/styleWithImageDataUri/.test(src), '贴图走 styleWithImageDataUri（drawio 的 shape=image + data URI）')
   ok(!/'＋ 新增节点'/.test(src), '「＋ 新增节点」按钮已移除')
-  ok(/updateNode\(nodeTargets, \{ style: styleForShapePick\(nodeStyle, shape\) \}\)/.test(src), '节点菜单里点一个形状 = 直接把选中的节点换成该形状（svg 会补一张占位图）')
+  ok(!/key: 'shape-pick'/.test(src), '右键菜单不再内嵌形状平铺块')
   ok(!/rows\.push\(shapeGrid\(/.test(src) && !/body: shapeGrid\(/.test(src), '形状不再挂在任何下拉的 body 里')
   // 动作类（改标签/删除/顺序…）仍然是一排按钮：它们没有"当前值"，收进下拉反而多一次点击
   ok(/reorderItem\('node', menu\.id, 'front'\)/.test(src) && /openNodeEditor\(menu\.id\)/.test(src), '动作类仍然是按钮（顺序 / 改标签 / 删除…）')
@@ -730,13 +766,12 @@ console.log('\n下拉里的选项横着排 + 字号可手动调节')
   ok(/key: 'fs-input-' \+ String\(current\)/.test(body), '输入框非受控但随当前值重挂（步进之后显示的仍是新值）')
 }
 
-console.log('\n独立文字：右键空白处能放一段字（不接节点、也不接边）')
+console.log('\n独立文字：右侧元素条能放一段字（不接节点、也不接边）')
 {
   // 需求："添加可独立放置的文字"。实现上它是**一个节点**，只是形状是 drawio 的 text
   // （没有边框、没有底色），于是拖动/缩放/改字/进图层/复制粘贴全都免费复用节点那一套。
-  // 入口是形状平铺里那个「文字」缩略图 —— 点它走的是画布菜单那条
-  // `createNodeAt(shape, menuStyle, menu.userX, menu.userY)`，位置就是点的地方。
-  ok(/createNodeAt\(shape, menuStyle, menu\.userX, menu\.userY\)/.test(src), '点形状 = createNodeAt(形状, 配色, 点的位置)（「文字」也走这一条）')
+  // 入口是右侧元素条的「文字」—— 点它武装放置，再点画布走 createNodeAt。
+  ok(/createNodeAt\(drag\.placeShape, menuStyle, drag\.x0, drag\.y0\)/.test(src), '放置工具点空白 = createNodeAt(形状, 配色, 点的位置)（「文字」也走这一条）')
   ok(/\{ shape: 'text', label: '文字' \}/.test(src), '形状面板里有「文字」（点它就是放一段独立文字）')
   ok(/const text = typeof label === 'string' \? label : isText \? '文字' : isSvg \? '' : isSection \? '分区' : '新节点'/.test(src), '文字元素的默认文字是「文字」（svg 节点不给默认文字，免得压在图上）')
   // 文字不吃配色：它的样式就是 drawio 的 defaultTextStyle，盖上 fillColor/strokeColor
@@ -757,12 +792,12 @@ console.log('\n独立文字：右键空白处能放一段字（不接节点、�
   )
 }
 
-console.log('\nSVG 内容节点：形状格里有入口、右键里能改内容')
+console.log('\nSVG 内容节点：元素条里有入口、右键里能改内容')
 {
   // 需求："添加一种节点，该节点内容可以直接使用 SVG 绘制"。
-  // 这条链路上有三个必须接上的点：① 元素库/形状格里有这一格；② 右键能把内容贴进去；
+  // 这条链路上有三个必须接上的点：① 元素条里有这一格；② 右键能把内容贴进去；
   // ③ 贴进去之后要真的写进 style（不是只在界面上画个框）。
-  ok(/\{ shape: 'svg', label: 'SVG 图形' \}/.test(src), '形状格里有「SVG 图形」（点它就在那个位置放一个）')
+  ok(/\{ shape: 'svg', label: 'SVG 图形' \}/.test(src), '元素条里有「SVG 图形」（点它武装放置）')
   ok(/const DEFAULT_SVG_MARKUP =/.test(src), '有默认占位图（否则点下去得到的是看不见的空框）')
   ok(/function styleForShapePick\(style, shape\)/.test(src), '换形状走 styleForShapePick（唯一"形状决定不了内容"的那一个）')
   ok(/shape === 'svg' && svgMarkupFromStyle\(next\) === null/.test(src), '只给空节点补占位图（已有内容的不覆盖）')
@@ -1041,8 +1076,8 @@ console.log('\n字色：节点与连线的标签颜色都能改（fontColor）')
 console.log('\n「看一眼」：客户端渲成 PNG 回执给宿主（不下载、不落工作区）')
 {
   // AI 的 `diagram_read {render:true}` 靠这半边把画布变成图：渲成 PNG → base64 回执 →
-  // 宿主存进附件库（工作区零文件）。最容易犯的两个错：**去下载**（那就跑到用户下载目录去了）、
-  // **不设体量上限**（base64 比原图大 1/3，超了写回路由会直接拒，模型只能看到失败）。
+  // 宿主存进附件库（工作区零文件）。最容易犯的错是**去下载**（那就跑到用户下载目录去了）。
+  // 体量不再由客户端预检截断：宿主对 render-result 单独放开了 body 上限。
   ok(src.indexOf("action: 'render-result'") > 0, "客户端会回执渲染结果（action: 'render-result'）")
   ok(/function reportRenderResult\(requestId, payload\)/.test(src), '有 reportRenderResult（这条路上唯一的上报出口）')
   ok(/function renderPngPayload\(node, width, height, scale\)/.test(src), '有 renderPngPayload（渲成 base64，不触发下载）')
@@ -1053,8 +1088,8 @@ console.log('\n「看一眼」：客户端渲成 PNG 回执给宿主（不下载
   ok(/context\.fillStyle = mode === 'dark'/.test(payloadSrc), '底色跟随主题（深色模式下别给模型一张纯白底图）')
   ok(/payload\.render/.test(src), '轮询回执里读 payload.render（宿主把请求挂在那儿）')
   ok(/lookHandledRef\.current !== wantLook\.requestId/.test(src), '按 requestId 去重（不去重就是每 3 秒渲一遍）')
-  ok(/LOOK_MAX_BASE64/.test(src), '有回执体量上限（base64 比原图大 1/3，超了会被写回路由拒掉）')
-  ok(/renderPngPayload\(built\.node, built\.width, built\.height, 1\)/.test(src), '超限时降到 1× 重渲（而不是直接失败）')
+  ok(/LOOK_MAX_BASE64/.test(src) === false, '客户端不再预检 PNG 体量（LOOK_MAX_BASE64 已去掉）')
+  ok(/renderPngPayload\(built\.node, built\.width, built\.height, 2\)/.test(src), '看一眼按 2× 渲（与手动导出同一档）')
   ok(/reportRenderResult\(requestId, \{ ok: false, error: message \}\)/.test(src), '渲染失败也要回执 ok:false（否则宿主永远 pending）')
   ok(/function renderPngPayload/.test(src) && /function downloadPng/.test(src), '「给模型看」与「给用户导出」各走各的（但共用同一套取图路径）')
 }

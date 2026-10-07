@@ -2086,8 +2086,9 @@ console.log('\nSVG 内容节点：节点内容就是一段 SVG 标记（drawio �
   ok(b64Node.shape === 'svg' && b64Node.svg === b64, 'base64 形态的内嵌 SVG 也读得出来（别的工具/drawio 会这么写）')
   ok(b64Node.style.indexOf('«svg ') >= 0, '它的 style 同样省略（不管哪种编码，报告里都不重复回显）')
   const pngNode = mixedOut.nodes.filter((n) => n.id === 'png')[0]
-  ok(pngNode.shape === 'rect' && pngNode.svg === undefined, '位图仍按矩形处理（本画布只画内嵌 SVG）')
-  ok(mixedOut.notes.filter((n) => n.indexOf('位图') >= 0).length === 1, '位图那条 notes 照旧给出来（用户得知道它画不出来）')
+  ok(pngNode.shape === 'image' && pngNode.image === true && pngNode.svg === undefined, '内嵌位图报 shape:image + image:true（不回显 base64）')
+  ok(pngNode.style.indexOf('«image ') >= 0, '位图 style 里的 image= 也被省略（别把几 MB 的 base64 塞进上下文）')
+  ok(mixedOut.notes.filter((n) => n.indexOf('外链') >= 0 || n.indexOf('按矩形') >= 0).length === 0, '内嵌位图不再进"按矩形显示"的 notes')
   // **关键**：base64 里那个 `;base64,` 不能被 style 解析器当成两个键 —— 否则任何一次
   // 改样式都会把它写成 `…;base64,iVBOR…=1;`，那张图就没了（这是本轮顺带修掉的老坑）。
   await apply([{ op: 'setStyle', ids: ['b64', 'png'], style: 'grey' }])
