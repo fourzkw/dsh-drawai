@@ -513,9 +513,11 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
       'setDocMenuPos',
       'editing',
       'commitEdit',
-      // 这个函数体里调用的每一个自由变量都得从那五个参数里来，否则孤立求值时
+      // 这个函数体里调用的每一个自由变量都得从参数里来，否则孤立求值时
       // 直接 ReferenceError —— 这本身就是一种"接线检查"（新加依赖必须显式登记）。
       'clearStaleTextSelection',
+      'claimCanvasKeyboard',
+      'rootRef',
       'return function onRootPointerDown(event) ' + body,
     )(
       docMenuValue,
@@ -524,6 +526,8 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
       editingValue === undefined ? null : editingValue,
       () => calls.push('commit'),
       (target, button) => calls.push('clear-sel:' + String(button)),
+      (root, target) => calls.push('claim-kb'),
+      { current: {} },
     )
     fn({ target: target, button: 0 })
     return calls
@@ -533,10 +537,16 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
   const targetInside = (sel) => ({ closest: (s) => (s === sel ? { className: sel } : null) })
   const targetOutside = { closest: () => null }
 
-  // `clearStaleTextSelection` 每次按下都会被调一次（它在最前面），下面这些断言看的是
-  // **它之后**发生了什么 —— 所以统一先摘掉那一格。
+  // `clearStaleTextSelection` + `claimCanvasKeyboard` 每次按下都会被调（在最前面），
+  // 下面这些断言看的是**它们之后**发生了什么 —— 所以统一先摘掉那两格。
   const CLEAR = 'clear-sel:0'
-  const rest = (calls) => (calls[0] === CLEAR ? calls.slice(1) : calls)
+  const CLAIM = 'claim-kb'
+  const rest = (calls) => {
+    let out = calls
+    if (out[0] === CLEAR) out = out.slice(1)
+    if (out[0] === CLAIM) out = out.slice(1)
+    return out
+  }
 
   ok(rest(runPointer(null, targetOutside)).length === 0, '菜单没开、也没在编辑时什么都不做')
   ok(rest(runPointer('file', targetOutside)).join(',') === 'menu:null,pos:null', '点画布/标签条（外面）→ 关掉菜单与位置：' + rest(runPointer('file', targetOutside)).join(','))
@@ -548,6 +558,7 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
   ok(rest(runPointer('file', {})).join(',') === 'menu:null,pos:null', '事件目标没有 closest（document 之类）→ 关掉')
   // 新加的那一步：每次按下都先把"残留在别处的文字选区"清掉（否则会挡住画布的复制）
   ok(runPointer(null, targetOutside)[0] === CLEAR, '在画布上按下时先清一次别处的文字选区（clearStaleTextSelection 真的被调了）')
+  ok(runPointer(null, targetOutside)[1] === CLAIM, '紧接着收回键盘焦点（claimCanvasKeyboard 真的被调了）')
   ok(runPointer('file', targetInside('.drawai-menu')).indexOf(CLEAR) === 0, '点菜单里的按钮同样先清（菜单也是画布的一部分）')
 
   // 文字输入框：外面按一下 → 提交（画布的 preventDefault 挡掉了 blur，只能自己判）
@@ -561,8 +572,11 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
 
   // 接线：root 上必须真的挂了这个捕获处理器，否则函数写得再对也没人调
   ok(/onPointerDownCapture: onRootPointerDown/.test(src), 'root 上挂了 onPointerDownCapture（捕获阶段，早于画布自己的按下处理）')
-  const rootStart = src.indexOf("{ className: 'drawai-root'")
-  ok(rootStart >= 0 && src.slice(rootStart, rootStart + 160).indexOf('onPointerDownCapture') >= 0, '挂的就是 root（画布、标签条、工作栏都在它里面）')
+  const rootStart = src.indexOf("className: 'drawai-root'")
+  ok(
+    rootStart >= 0 && src.slice(rootStart, rootStart + 280).indexOf('onPointerDownCapture') >= 0 && src.slice(rootStart, rootStart + 280).indexOf('tabIndex') >= 0,
+    '挂的就是 root（画布、标签条、工作栏都在它里面；含 tabIndex 以便收回键盘）',
+  )
   // 放过的那一类按钮必须真的带这个类名，否则"点同一个按钮关不掉"
   ok(/className: 'drawai-btn drawai-menu-trigger'/.test(src), '开菜单的按钮带 drawai-menu-trigger 类（与处理器里的选择器对得上）')
   // 编辑框也要真的带那个类名（否则"点输入框自己"会被判成外面）
@@ -728,7 +742,7 @@ console.log('\n右键菜单：几类只显示当前值，并排成一行')
   ok(/shape === 'image'/.test(src) && /family: 'image'/.test(src), '图片也自成一族（侧栏入口 + 粘贴/拖入）')
   ok(/function imageFilesFromDataTransfer\(/.test(src), '有 imageFilesFromDataTransfer（从剪贴板/拖放抽图片）')
   ok(/function insertImageFiles\(/.test(src), '有 insertImageFiles（落成 image 节点）')
-  ok(/addEventListener\('paste'/.test(src), '挂了 paste 监听（系统剪贴板图片 → 节点）')
+  ok(/addEventListener\('paste', onPaste, true\)/.test(src), '挂了 paste 捕获监听（系统剪贴板图片 → 节点）')
   ok(/onDrop:/.test(src) && /imageFilesFromDataTransfer\(event\.dataTransfer\)/.test(src), '画布支持拖入图片文件')
   ok(/styleWithImageDataUri/.test(src), '贴图走 styleWithImageDataUri（drawio 的 shape=image + data URI）')
   ok(!/'＋ 新增节点'/.test(src), '「＋ 新增节点」按钮已移除')
@@ -844,10 +858,12 @@ console.log('\n自环与复制粘贴的接线（手势与快捷键必须真的�
   ok(!/if \(linking\.from === id\) return/.test(source), '连线拖回起点不再被直接 return 掉（自环手势通了）')
   ok(/selfLoopPath/.test(source) && /nextSideOf/.test(source), '自环路由与"换一个侧"的纠正都在')
   ok(/toSide === seedSide\) toSide = nextSideOf/.test(source), '预览里也做同侧纠正（预览即结果）')
-  // 剪贴板：快捷键与菜单项都接上了。
-  ok(/event\.key === 'c'/.test(source) && /copySelection\(\)/.test(source), 'Ctrl+C → copySelection')
-  ok(/event\.key === 'x'/.test(source) && /cutSelection\(\)/.test(source), 'Ctrl+X → cutSelection')
-  ok(/event\.key === 'v'/.test(source) && /pasteClipboard\(\)/.test(source), 'Ctrl+V → pasteClipboard')
+  // 剪贴板：快捷键与菜单项都接上了（字母匹配走 accelLetter，兼容 event.code）。
+  ok(/function accelLetter\(event, letter\)/.test(source) && /copySelection\(\)/.test(source), 'Ctrl+C → copySelection（accelLetter）')
+  ok(/accelLetter\(event, 'x'\)/.test(source) && /cutSelection\(\)/.test(source), 'Ctrl+X → cutSelection')
+  ok(/accelLetter\(event, 'v'\)/.test(source) && /pasteClipboard\(\)/.test(source), 'Ctrl+V → pasteClipboard')
+  ok(/addEventListener\('copy', onCopy, true\)/.test(source) && /addEventListener\('cut', onCut, true\)/.test(source), 'copy/cut 捕获监听（主通道，防 DSH 截走 Ctrl+C）')
+  ok(/addEventListener\('keydown', onKey, true\)/.test(source), 'keydown 挂在捕获阶段')
   ok(
     /item\('复制', copySelection/.test(source) && /item\('剪切', cutSelection/.test(source) && /item\('粘贴', pasteClipboard/.test(source),
     '编辑菜单里有复制 / 剪切 / 粘贴',
@@ -971,7 +987,7 @@ console.log('\n键盘归属：在别处打字时画布一个键都不许碰')
     '这一问排在 copySelection() 之前',
   )
   ok(
-    /event\.key === 'a' \|\| event\.key === 'A'/.test(onKeyBody) && onKeyBody.indexOf('selectAll()') > onKeyBody.indexOf('hasTextSelectionOutside('),
+    /accelLetter\(event, 'a'\)/.test(onKeyBody) && onKeyBody.indexOf('selectAll()') > onKeyBody.indexOf('hasTextSelectionOutside('),
     'Ctrl+A 同样受这一条保护（在对话里按 Ctrl+A 不该变成"全选画布"）',
   )
   // **画布里有选中元素时不能放手** —— 否则"先在对话里划字、再点画布元素"之后
@@ -1006,6 +1022,31 @@ console.log('\n键盘归属：在别处打字时画布一个键都不许碰')
   const rootDownAt = src.indexOf('function onRootPointerDown(event) {')
   const rootDownBody = rootDownAt >= 0 ? src.slice(rootDownAt, src.indexOf('setDocMenu(null)', rootDownAt)) : ''
   ok(/clearStaleTextSelection\(target,/.test(rootDownBody), 'onRootPointerDown 里调了 clearStaleTextSelection（画布上的按下都会走到这里）')
+  // DSH 0.2：点画布后焦点常仍停在对话 contenteditable → 必须主动 claim 焦点，否则 Delete/复制粘贴全死。
+  ok(/claimCanvasKeyboard\(rootRef\.current, target\)/.test(rootDownBody), 'onRootPointerDown 里调了 claimCanvasKeyboard（收回键盘焦点）')
+  ok(/tabIndex:\s*-1/.test(src), '面板根可聚焦（tabIndex=-1），claimCanvasKeyboard 才收得住焦点')
+  const claim = internals.claimCanvasKeyboard
+  ok(typeof claim === 'function', 'claimCanvasKeyboard 有导出')
+  {
+    const calls = []
+    const root = {
+      focus(opts) {
+        calls.push(opts === undefined ? 'focus' : opts)
+      },
+    }
+    claim(root, { tagName: 'DIV', closest: () => null, isContentEditable: false })
+    ok(calls.length === 1 && calls[0] !== undefined && calls[0].preventScroll === true, '普通目标 → focus({preventScroll:true})')
+    calls.length = 0
+    claim(root, { tagName: 'TEXTAREA', isContentEditable: false, closest: () => null })
+    ok(calls.length === 0, '按在 textarea 上 → 不抢焦点')
+    calls.length = 0
+    claim(root, {
+      tagName: 'DIV',
+      isContentEditable: false,
+      closest: (sel) => (String(sel).indexOf('drawai-edit') >= 0 ? { className: 'drawai-edit' } : null),
+    })
+    ok(calls.length === 0, '按在就地编辑框里 → 不抢焦点')
+  }
 }
 
 console.log('\n选区上报：客户端把"用户选中了什么"告诉宿主（AI 侧才读得到）')

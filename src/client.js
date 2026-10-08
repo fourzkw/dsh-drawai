@@ -251,7 +251,7 @@ const CSS = [
   // `height:100%` 要求父级有**确定高度**，而宿主给的容器不保证这一点。
   // inset:0 只要求父级是定位元素，而 .drawai-pane 已经是（我们自己的 CSS），
   // 所以这条链子只依赖我们自己，不再依赖宿主怎么排。
-  '.drawai-root{display:flex;flex-direction:column;position:absolute;top:0;left:0;right:0;bottom:0;min-height:0;font-size:12px;color:var(--dsw-alias-label-primary,#e6e6e6)}',
+  '.drawai-root{display:flex;flex-direction:column;position:absolute;top:0;left:0;right:0;bottom:0;min-height:0;font-size:12px;color:var(--dsw-alias-label-primary,#e6e6e6);outline:none}',
   '.drawai-head{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--dsw-alias-border-l1,#333)}',
   // 多画布标签条。放在工具条**下面**一行：工具条是"对这张画布做什么"，
   // 标签条是"现在看哪张画布"，两者职责不同，混在一行会挤成一团（右栏本来就窄）。
@@ -4825,15 +4825,16 @@ function isTextEntry(node) {
 /**
  * 画布该不该处理这次按键。
  *
- * 画布的快捷键挂在 `window` 上（这样"点过画布之后"不用先把焦点放进某个元素里），
- * 代价是**别的面板里的按键也会经过这里** —— 而 DSH 的输入框就在同一个页面里。
- * 两条判据，任何一条成立就放手：
+ * 画布的快捷键挂在 `window` 上，代价是**别的面板里的按键也会经过这里** ——
+ * 而 DSH 的输入框就在同一个页面里。两条判据，任何一条成立就放手：
  *
  *   1. 事件目标或当前焦点是**输入宿主**（见 isTextEntry）→ 那是人家在打字；
  *   2. 焦点已经落在**别的控件**上（另一个面板的按钮、链接、树节点…）→ 也不抢。
- *      只有"焦点没了"（刚点过画布空白，焦点回到 body）或"焦点就在本面板里"才算画布的。
+ *      只有"焦点没了"（焦点回到 body）或"焦点就在本面板里"才算画布的。
  *
- * 第 2 条是为了防同类毛病：焦点在侧边栏某个按钮上时按退格，同样不该删画布里的东西。
+ * **DSH 0.2 起不能再假设"点过画布焦点就回 body"**：对话是 Lexical contenteditable，
+ * 点 SVG/画布空白常常**抢不走它的焦点**，于是这里一直判 false —— Delete / Ctrl+C/V
+ * 全无反应。所以 `onRootPointerDown` 会主动把焦点收到 `.drawai-root`（tabIndex=-1）。
  */
 function canvasOwnsKeyboard(event, root, active) {
   const target = event === null || event === undefined ? null : event.target
@@ -4846,6 +4847,29 @@ function canvasOwnsKeyboard(event, root, active) {
   }
   if (root === null || root === undefined || typeof root.contains !== 'function') return true
   return root.contains(active) === true
+}
+
+/**
+ * 把键盘焦点收到画布面板根上（不抢就地编辑 / 菜单输入框）。
+ *
+ * 见 canvasOwnsKeyboard：DSH 0.2 点画布后焦点常仍停在对话 contenteditable，
+ * 不主动 focus 的话快捷键整组静默失效。
+ */
+function claimCanvasKeyboard(root, target) {
+  if (root === null || root === undefined || typeof root.focus !== 'function') return
+  if (isTextEntry(target)) return
+  if (target !== null && target !== undefined && typeof target.closest === 'function') {
+    if (target.closest('.drawai-edit') !== null) return
+  }
+  try {
+    if (typeof root.focus === 'function') root.focus({ preventScroll: true })
+  } catch (error) {
+    try {
+      root.focus()
+    } catch (error2) {
+      // 测试环境 / 隐藏节点：静默
+    }
+  }
 }
 
 /**
@@ -7985,6 +8009,18 @@ function CanvasView(props) {
     if (count === 0) setSaveNote('锁定层上的单元移不动：先解锁图层')
   }
 
+  /**
+   * 快捷键字母是否匹配（兼容 event.key 与 event.code）。
+   * 某些布局 / IME 下 Ctrl+C 的 key 不是可靠的 'c'，code 仍是 KeyC。
+   */
+  function accelLetter(event, letter) {
+    if (event === null || event === undefined) return false
+    const upper = String(letter).toUpperCase()
+    if (event.code === 'Key' + upper) return true
+    const key = event.key
+    return key === letter || key === upper
+  }
+
   React.useEffect(() => {
     function onKey(event) {
       // 归属判定见 canvasOwnsKeyboard：**在别处打字时这里一律不动手**。
@@ -8002,44 +8038,51 @@ function CanvasView(props) {
       // 半路踩过的坑：**画布里有选中元素时不能放手**。用户先在对话里划了字、再点画布上的
       // 元素，那次点击不会清掉别处的选区，于是"外部有选区"成立、Ctrl+C 被让给浏览器，
       // 画布里的元素就**复制不了**了。所以判据是两条同时成立：画布空着 **且** 外面有选中的字。
-      if (accel && (event.key === 'c' || event.key === 'C' || event.key === 'x' || event.key === 'X' || event.key === 'a' || event.key === 'A')) {
+      if (accel && (accelLetter(event, 'c') || accelLetter(event, 'x') || accelLetter(event, 'a'))) {
         if (selectedIds.length === 0 && hasTextSelectionOutside(rootRef.current)) return
       }
-      if (accel && (event.key === 'z' || event.key === 'Z')) {
+      if (accel && accelLetter(event, 'z')) {
         event.preventDefault()
         if (event.shiftKey === true) redo()
         else undo()
         return
       }
-      if (accel && (event.key === 'y' || event.key === 'Y')) {
+      if (accel && accelLetter(event, 'y')) {
         event.preventDefault()
         redo()
         return
       }
-      // 复制 / 剪切 / 粘贴：与 drawio 同一套快捷键（Ctrl+C / Ctrl+X / Ctrl+V）。
-      // 必须挡在输入框之外 —— 上面的归属判定已经保证在改标签时不会走到这里。
-      if (accel && (event.key === 'c' || event.key === 'C')) {
+      // 复制 / 剪切：keydown 是兜底；主通道是下面的 copy/cut 捕获监听
+      // （DSH 0.2 有时在冒泡阶段先截走 Ctrl+C，keydown 冒泡听不到）。
+      if (accel && accelLetter(event, 'c')) {
         event.preventDefault()
+        event.stopPropagation()
         copySelection()
         return
       }
-      if (accel && (event.key === 'x' || event.key === 'X')) {
+      if (accel && accelLetter(event, 'x')) {
         event.preventDefault()
+        event.stopPropagation()
         cutSelection()
         return
       }
-      // Ctrl+V：**不要**在 keydown 里 preventDefault —— 否则 paste 事件带不进系统剪贴板里的图片。
-      // 画布内节点粘贴与系统图片粘贴都在下面的 paste 监听里处理。
-      if (accel && (event.key === 'v' || event.key === 'V')) {
+      // Ctrl+V：有画布内剪贴板时直接粘贴（不要等 paste 事件 —— 焦点若在中间被抢走会丢）。
+      // 剪贴板空时不 preventDefault，留给 paste 事件接系统图片。
+      if (accel && accelLetter(event, 'v')) {
+        if (clipboard !== null) {
+          event.preventDefault()
+          event.stopPropagation()
+          pasteClipboard()
+        }
         return
       }
       // 全选：与框选同一套语义（节点与连线都选上），于是能整体拖动/换样式/一把删掉。
-      if (accel && (event.key === 'a' || event.key === 'A')) {
+      if (accel && accelLetter(event, 'a')) {
         event.preventDefault()
         selectAll()
         return
       }
-      if (event.key === 'Delete' || event.key === 'Backspace') {
+      if (event.key === 'Delete' || event.key === 'Backspace' || event.code === 'Delete' || event.code === 'Backspace') {
         event.preventDefault()
         deleteSelected()
         return
@@ -8049,12 +8092,12 @@ function CanvasView(props) {
         nudgeSelectionByKey(event.key, event.shiftKey === true)
         return
       }
-      if (accel && (event.key === 'f' || event.key === 'F')) {
+      if (accel && accelLetter(event, 'f')) {
         event.preventDefault()
         openFindPanel()
         return
       }
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' || event.code === 'Escape') {
         setSelectedIds([])
         setEditing(null)
         setMenu(null)
@@ -8068,9 +8111,54 @@ function CanvasView(props) {
         setDocMenuPos(null)
       }
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // 捕获阶段：抢在 DSH / 其他插件的冒泡监听之前（Ctrl+C 曾被截走导致"能删不能复制"）。
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
   }, [selectedIds, editing, menu, placeTool, placeEdgeKind])
+
+  // 复制 / 剪切的主通道：浏览器 `copy`/`cut` 事件（捕获）。
+  // 比 keydown 更稳 —— 只要用户按了系统复制快捷键就会到这里，不依赖 event.key 字形。
+  React.useEffect(() => {
+    function ownsCopyCut(event) {
+      if (!canvasOwnsKeyboard(event, rootRef.current, document.activeElement)) return false
+      if (selectedIds.length === 0) return false
+      // 画布有选中单元时，复制/剪切归画布（即使页面上还残留对话文字选区）。
+      return true
+    }
+    function onCopy(event) {
+      if (!ownsCopyCut(event)) return
+      const clip = collectClipboard(docRef.current, selectedIds)
+      if (clip === null) return
+      event.preventDefault()
+      event.stopPropagation()
+      clipboard = clip
+      setMenu(null)
+      setSaveNote('已复制 ' + clip.nodes.length + ' 个节点' + (clip.edges.length > 0 ? ' / ' + clip.edges.length + ' 条连线' : ''))
+      try {
+        if (event.clipboardData !== null && event.clipboardData !== undefined) {
+          event.clipboardData.setData('text/plain', 'DrawAI clipboard: ' + clip.nodes.length + ' node(s)')
+        }
+      } catch (error) {
+        // 系统剪贴板写失败不影响画布内 clipboard
+      }
+    }
+    function onCut(event) {
+      if (!ownsCopyCut(event)) return
+      const clip = collectClipboard(docRef.current, selectedIds)
+      if (clip === null) return
+      event.preventDefault()
+      event.stopPropagation()
+      clipboard = clip
+      setSaveNote('已剪切 ' + clip.nodes.length + ' 个节点' + (clip.edges.length > 0 ? ' / ' + clip.edges.length + ' 条连线' : ''))
+      deleteSelected()
+    }
+    document.addEventListener('copy', onCopy, true)
+    document.addEventListener('cut', onCut, true)
+    return () => {
+      document.removeEventListener('copy', onCopy, true)
+      document.removeEventListener('cut', onCut, true)
+    }
+  }, [selectedIds])
 
   // 系统剪贴板粘贴：有图片就落成 image 节点；否则回落到画布内剪贴板（节点/边）。
   React.useEffect(() => {
@@ -8090,8 +8178,8 @@ function CanvasView(props) {
         pasteClipboard()
       }
     }
-    window.addEventListener('paste', onPaste)
-    return () => window.removeEventListener('paste', onPaste)
+    window.addEventListener('paste', onPaste, true)
+    return () => window.removeEventListener('paste', onPaste, true)
   }, [editing, selectedIds, activeLayerId])
 
   React.useEffect(() => {
@@ -9963,6 +10051,9 @@ function CanvasView(props) {
     // ③ 在画布上按下 = "我要操作画布了"：把残留在别处（比如对话里）的文字选区清掉。
     //    不清的话，画布的新元素会因为"外面还有选中文字"而复制不了（见 clearStaleTextSelection）。
     clearStaleTextSelection(target, event === null || event === undefined ? undefined : event.button)
+    // ④ 同时把焦点收到面板根：否则 DSH 0.2 下对话 contenteditable 不放焦点，
+    //    canvasOwnsKeyboard 一直 false，Delete / Ctrl+C/V 全部没反应。
+    claimCanvasKeyboard(rootRef.current, target)
     if (editing !== null && (closest === null || closest('.drawai-edit') === null)) commitEdit()
     if (docMenu === null) return
     if (closest !== null && closest('.drawai-menu') !== null) return
@@ -10318,7 +10409,14 @@ function CanvasView(props) {
 
   return React.createElement(
     'div',
-    { className: 'drawai-root', ref: rootRef, onPointerDownCapture: onRootPointerDown },
+    {
+      className: 'drawai-root',
+      ref: rootRef,
+      // 可聚焦但不进 Tab 序：点画布时 claimCanvasKeyboard 把焦点收到这里，
+      // 快捷键才能通过 canvasOwnsKeyboard（见该函数注释）。
+      tabIndex: -1,
+      onPointerDownCapture: onRootPointerDown,
+    },
     // 1) 工作栏（文件/编辑/视图/导出）—— 层级在标签页**之上**
     head,
     // 2) 标签页：由 CanvasTabs 构造、只在活动窗格里渲染（保证 DOM 里只有一份）
@@ -10748,6 +10846,7 @@ exports.__routeInternals = {
   // 按键归属：谁在打字、这次按键算不算画布的 —— 纯函数，自测直接喂假 DOM 节点。
   isTextEntry: isTextEntry,
   canvasOwnsKeyboard: canvasOwnsKeyboard,
+  claimCanvasKeyboard: claimCanvasKeyboard,
   // 「你有没有选中画布之外的文字」——决定 Ctrl+C/X/A 放不放手让浏览器去复制。
   hasTextSelectionOutside: hasTextSelectionOutside,
   drawaiPaneOf: drawaiPaneOf,
