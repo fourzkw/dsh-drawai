@@ -808,6 +808,9 @@ async function applyOps(doc, ops, out, opctx) {
       if (typeof op.label === 'string') synthetic.label = op.label
       if (has(op, 'x')) synthetic.x = op.x
       if (has(op, 'y')) synthetic.y = op.y
+      // 就地插一条 addNode 紧随其后（读像素是 async 的，所以这条 op 不能在解析参数时先展开）。
+      // 注意：这里改的必须是**我们自己那份** ops —— 调用方（execute）已经 slice 过，
+      // 因为宿主给的 arguments 是深冻结的，直接 splice 会抛 "object is not extensible"。
       ops.splice(i + 1, 0, synthetic)
       notes.push(
         '🖼 ' + rawImage + ' → 逐像素矢量化：' + metrics.palette.length + ' 色 / ' + metrics.paths + ' 条 path / ' +
@@ -2899,7 +2902,13 @@ export function apply(ctx) {
       const focused = focusedPathFor(sessionIdOf(exec))
       const path =
         typeof args.path === 'string' && args.path.length > 0 ? args.path : focused !== undefined && focused.length > 0 ? focused : DEFAULT_PATH
-      const ops = Array.isArray(args.ops) ? args.ops : []
+      // **入参是宿主深冻结的**：dsh-tools 在 execute 之前把整份 arguments 深冻结
+      // （`arguments: deepFreeze(snapshotJsonValue(exec.arguments))`，见 dsh-tools 的 tool 执行器），
+      // 数组和里面的 op 对象都是 non-extensible。所以这里必须**复制成一份可扩展的数组**再用：
+      // traceImage 会往 ops 里插一条合成的 addNode（见下面 applyOps 里的 `ops.splice`），
+      // 就地改冻结数组会抛 `Cannot add property N, object is not extensible`。
+      // op 落盘语义不受影响 —— 复制出来的数组里元素仍是原来那些（本文件只读它们，从不写回）。
+      const ops = Array.isArray(args.ops) ? args.ops.slice() : []
       if (ops.length === 0) throw new Error('ops must contain at least one operation')
 
       const sessionId = sessionIdOf(exec)

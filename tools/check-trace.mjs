@@ -115,6 +115,22 @@ if (!hasSample) {
   const readText = JSON.stringify(read)
   check('diagram_read 能读回这个 svg 节点', readText.includes('image=data:image/svg+xml') || readText.includes('«svg '), '')
   check('节点几何 = 图像像素尺寸', geo !== null, geo === null ? '(没找到 geometry)' : geo[1] + '×' + geo[2])
+
+  // 回归：宿主交给插件的是**深冻结**的 arguments（dsh-tools 在 execute 前 deepFreeze 整份参数，
+  // 见 tool 执行器里的 `arguments: deepFreeze(snapshotJsonValue(exec.arguments))`）。
+  // traceImage 曾经在这里崩：它往调用方的 ops 里 splice 一条合成的 addNode，
+  // 而冻结数组不可扩展 → "Cannot add property 1, object is not extensible"。
+  console.log('check-trace: 冻结的 arguments（宿主真实形态）')
+  const frozenOps = Object.freeze([Object.freeze({ op: 'traceImage', image: 'ref.png', x: 400, y: 40, epsilon: 2.5 })])
+  const frozenResult = await apply.execute(
+    Object.freeze({ path: CANVAS, ops: frozenOps, layout: 'none' }),
+    { agent: { id: SESSION_ID } },
+  )
+  check('深冻结 ops 也能跑通 traceImage', frozenResult.created.length === 1, JSON.stringify(frozenResult.created))
+  const frozenText = readFileSync(CANVAS, 'utf8')
+  check('冻结那次也真的写进了画布', (frozenText.match(/image=data:image\/svg\+xml,/g) || []).length === 2, '')
+  check('原始 ops 数组没被就地改动', frozenOps.length === 1 && frozenOps[0].op === 'traceImage', '长度 ' + frozenOps.length)
+
   rmSync(ROOT, { recursive: true, force: true })
 }
 
