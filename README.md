@@ -6,23 +6,24 @@
 
 [![GitHub stars](https://img.shields.io/github/stars/fourzkw/dsh-drawai?style=social)](https://github.com/fourzkw/dsh-drawai) [![MIT License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**DSH 右侧栏里的可编辑画布 —— 加上让模型直接改图的两个工具。**
+## 功能一览
 
-> *An editable diagram canvas in the DSH right sidebar, plus two agent tools (`diagram_read` / `diagram_apply`) that read and edit the workspace's native `.drawio` files in place.*
+`dsh-drawai` 把可编辑画布放进 DeepSeek Harness 右侧栏，并给模型两个改图工具；人和 AI 读写的是同一份原生 `.drawio`。
 
-`dsh-drawai` 把一块**可编辑的画布**放进 DeepSeek Harness 的右侧栏，再给模型**两个工具**；两者读写的是同一份文件。
+1. **右侧栏可编辑画布** —— 打开 / 新建工作区 `.drawio`：画节点、连边、就地改字、分层、排序、对齐、导出；双击即可改标签。
+2. **自然语言改图** —— 对话里说需求，模型用 `diagram_read` / `diagram_apply` 读现状、结构化改图、自动布局并原子写回。
+3. **选区感知与回退** —— 你在画布上选中什么，模型就知道什么；模型改动最多可退 8 步。
+4. **SVG 图形节点** —— 图标 / logo 可直接当节点内容，拼流程图与示意图。
+5. **位图矢量化（`traceImage`）** —— 照着工作区图片逐像素描成 SVG 节点，不是凭印象手写近似图。
+6. **原生 `.drawio` 载体** —— 无需导入导出；画布读不懂的单元逐字节保留，文件可直接用 drawio / diagrams.net 继续编辑。
 
-- **画布（右侧栏面板）** —— 打开工作区里的 `.drawio`：画节点、连边、就地改字、分层、排序、对齐、导出，双击节点就能改标签。
-- **`diagram_apply`** —— 模型改图的入口：15 个结构化 ops，改完自动布局并**原子写回**。
-- **`diagram_read`** —— 模型的眼睛：结构、样式键、图层、父级、页面尺寸、**你此刻的选区**、文件指纹 `revision`。
-- **选中与回退** —— 你在画布上选中什么，模型就知道什么；模型的改动最多可以退 8 步。
-- **载体是原生 `.drawio` 文件** —— 不需要导入导出，存出来的文件可以直接用 drawio / diagrams.net 打开继续编辑。
+![整体界面：右侧栏画布与多标签](docs/picture/整体界面图.png)
 
-```
-人（侧边栏画布）      ┐
-AI（diagram_apply）  ├──→  工作区的 .drawio（mxfile）  ──→  用 drawio / diagrams.net 直接打开继续编辑
-drawio 本体           ┘         ↑ 无损写回：画布读不懂的单元逐字节保留
-```
+![从对话到改图的逻辑流程](docs/picture/drawai逻辑图.png)
+
+![用 SVG 节点拼的流程图与图标](docs/picture/图标绘制.png)
+
+![位图矢量化复刻对比](docs/picture/大肥鱼复刻图.png)
 
 ## 安装 / Install
 
