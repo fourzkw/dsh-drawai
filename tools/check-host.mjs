@@ -916,8 +916,8 @@ console.log('\n切换画布 → 主动告诉模型"当前是哪一张"（Agent.i
   const message = injected[0] === undefined ? {} : injected[0]
   const text = message.content !== undefined && message.content[0] !== undefined ? message.content[0].text : ''
   ok(
-    message.role === 'user' && message.source !== undefined && message.source.kind === 'plugin' && message.source.plugin === 'drawai',
-    '注入形状 = user + plugin source：' + JSON.stringify(message.source),
+    message.role === 'user' && message.source !== undefined && message.source.kind === 'plugin:drawai',
+    '注入形状 = user + producer-owned source（plugin:drawai）：' + JSON.stringify(message.source),
   )
   ok(text.indexOf('flow.drawio') >= 0 && text.indexOf('不传 path') >= 0, '点名了当前画布并说明不传 path 的默认行为：' + text)
 

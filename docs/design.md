@@ -888,7 +888,7 @@ README、`src/`、`tools/` 都不会过去。于是模型能依仗的是三条�
 |---|---|
 | **工具默认值** | 客户端在画布面板里切换标签页时 `POST {action:'focus'}`，宿主按会话记下路径；`diagram_read` / `diagram_apply` 不传 `path` 时就用它（没打开任何画布才退回 `demo.drawio`）。两个工具的 `path` 说明里都写明了这一点 |
 | **返回值** | 不传 path 调一次，返回里的 `path` / `absolute` 就是当前那张 —— 想确认是哪张，这一步就够 |
-| **主动注入** | 聚焦**变化**时，宿主用 `ctx.agents.get(sessionId).inject(...)` 往那个会话注入一条环境事实（`{role:'user', source:{kind:'plugin', plugin:'drawai'}}`）：`DrawAI 画布：用户现在打开的是 <路径>。diagram_read / diagram_apply 不传 path 时默认就操作这一张。` 于是模型下一步直接看得到，不用先探 |
+| **主动注入** | 聚焦**变化**时，宿主用 `ctx.agents.get(sessionId).inject(...)` 往那个会话注入一条环境事实（`{role:'user', source:{kind:'plugin:drawai'}}`；Session V4 要求 producer-owned kind，字面量 `'plugin'` 会被拒）：`DrawAI 画布：用户现在打开的是 <路径>。diagram_read / diagram_apply 不传 path 时默认就操作这一张。` 于是模型下一步直接看得到，不用先探 |
 
 细节：注入只在**路径真的变了**时才发（客户端每次挂载都会重报同一张，去重；A→B→A 是三次真实切换）；
 画布关掉时也发一条（否则模型还以为是刚才那张）；`agents` 是**可选**服务（走 `ctx.get`），
