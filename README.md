@@ -200,7 +200,7 @@ id / layer / parent、选区能上报给模型、写回是逐单元的、画布�
 
 ## 须知 / Good to know
 
-- **兼容性**：DSH（DeepSeek Harness）Web；官方包以 `peerDependencies` 声明（`@deepseek-ai/dsh-tools`），Node `>= 20`。
+- **兼容性**：DSH（DeepSeek Harness）Web `0.1.x` 与 `0.2.x`（含 `0.2.0-rc.*`）；官方包以 `peerDependencies` 声明（`@deepseek-ai/dsh-tools`），Node `>= 20`。
 - **生效方式**：宿主侧只在 `dsh web` 启动时加载，换 `lib/index.js` 必须**重启**；客户端是独立 bundle，刷新页面即可。
 - **界面语言**：目前只有简体中文，还没有 i18n。
 - **大图性能**：几百个单元时的重渲染与路由开销还没测过。
