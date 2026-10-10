@@ -420,6 +420,8 @@ console.log('\n工具条：按类型合并为下拉菜单')
     for (const gone of ['新建画布…', '打开…', '撤销', '重做', '适应内容', '导出 SVG', '导出 PNG（2×）']) {
       ok(labels.indexOf(gone) >= 0, '旧按钮「' + gone + '」已收进菜单')
     }
+    ok(labels.indexOf('导出透明 PNG（4×）') >= 0, '导出菜单有「导出透明 PNG（4×）」')
+    ok(labels.indexOf('导出选中为透明 PNG') >= 0, '导出菜单有「导出选中为透明 PNG」')
     ok(labels.indexOf('全选') >= 0, '「全选」在编辑菜单里（Ctrl+A 之外的入口）')
     ok(labels.indexOf('查找…') >= 0, '「查找…」在编辑菜单里（Ctrl+F）')
     ok(labels.some((l) => l.indexOf('导出选中') >= 0), '导出菜单有「导出选中」')

@@ -6670,6 +6670,7 @@ function CanvasView(props) {
       if (junk[i].parentNode !== null) junk[i].parentNode.removeChild(junk[i])
     }
     const ids = opts !== undefined && opts !== null && Array.isArray(opts.ids) ? opts.ids : null
+    const transparent = opts !== undefined && opts !== null && opts.transparent === true
     let boundsDoc = current
     if (ids !== null && ids.length > 0) {
       const filtered = docFilteredToIds(current, ids)
@@ -6709,22 +6710,35 @@ function CanvasView(props) {
     // 就是严格模式）会因为"用了未声明的前缀"整份丢弃：导出的 SVG/PNG 里那张图凭空消失。
     clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
     clone.removeAttribute('style')
-    // 网格纸在实时视图里只铺满"当前视口"；导出要铺满整图，否则缩放状态下网格会断掉。
-    const grid = clone.querySelector('rect[fill^="url(#drawai-grid-major"]')
-    if (grid !== null) {
-      grid.setAttribute('x', String(bounds.minX - pad))
-      grid.setAttribute('y', String(bounds.minY - pad))
-      grid.setAttribute('width', String(w))
-      grid.setAttribute('height', String(h))
+    // 视口底：网格纸（url(#drawai-grid-major…)）或关网格时的实色纸。它是 svg 下第一个 <rect>。
+    let pageRect = null
+    for (let i = 0; i < clone.childNodes.length; i += 1) {
+      const child = clone.childNodes[i]
+      if (child.nodeType === 1 && String(child.nodeName).toLowerCase() === 'rect') {
+        pageRect = child
+        break
+      }
     }
-    // 网格图案是半透明的：不加一层底色的话，PNG 出来是透明背景。
-    const paper = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
-    paper.setAttribute('x', String(bounds.minX - pad))
-    paper.setAttribute('y', String(bounds.minY - pad))
-    paper.setAttribute('width', String(w))
-    paper.setAttribute('height', String(h))
-    paper.setAttribute('fill', mode === 'dark' ? '#1b1b1b' : '#ffffff')
-    clone.insertBefore(paper, clone.firstChild)
+    if (transparent) {
+      // 透明导出：底纸/网格都要拿掉，否则 alpha 通道会被盖成不透明。
+      if (pageRect !== null && pageRect.parentNode !== null) pageRect.parentNode.removeChild(pageRect)
+    } else {
+      // 网格纸在实时视图里只铺满"当前视口"；导出要铺满整图，否则缩放状态下网格会断掉。
+      if (pageRect !== null) {
+        pageRect.setAttribute('x', String(bounds.minX - pad))
+        pageRect.setAttribute('y', String(bounds.minY - pad))
+        pageRect.setAttribute('width', String(w))
+        pageRect.setAttribute('height', String(h))
+      }
+      // 网格图案是半透明的：不加一层底色的话，PNG 出来是透明背景。
+      const paper = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+      paper.setAttribute('x', String(bounds.minX - pad))
+      paper.setAttribute('y', String(bounds.minY - pad))
+      paper.setAttribute('width', String(w))
+      paper.setAttribute('height', String(h))
+      paper.setAttribute('fill', mode === 'dark' ? '#1b1b1b' : '#ffffff')
+      clone.insertBefore(paper, clone.firstChild)
+    }
     return { node: clone, width: w, height: h }
   }
 
@@ -6830,12 +6844,16 @@ function CanvasView(props) {
     setTimeout(() => URL.revokeObjectURL(url), 2000)
   }
 
-  function downloadPng(node, width, height, filename) {
+  function downloadPng(node, width, height, filename, opts) {
     const markup = new XMLSerializer().serializeToString(node)
     const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }))
     const image = new Image()
     image.onload = () => {
-      const scale = 2
+      // 默认 2×；透明高质量导出用 4×。过大时压到浏览器常见 canvas 上限，避免整图失败。
+      let scale = opts !== undefined && opts !== null && typeof opts.scale === 'number' && opts.scale > 0 ? opts.scale : 2
+      const transparent = opts !== undefined && opts !== null && opts.transparent === true
+      const maxEdge = 8192
+      while (scale > 1 && (width * scale > maxEdge || height * scale > maxEdge)) scale = scale / 2
       const canvas = document.createElement('canvas')
       canvas.width = Math.max(1, Math.round(width * scale))
       canvas.height = Math.max(1, Math.round(height * scale))
@@ -6844,8 +6862,10 @@ function CanvasView(props) {
         URL.revokeObjectURL(url)
         return
       }
-      context.fillStyle = mode === 'dark' ? '#1b1b1b' : '#ffffff'
-      context.fillRect(0, 0, canvas.width, canvas.height)
+      if (transparent !== true) {
+        context.fillStyle = mode === 'dark' ? '#1b1b1b' : '#ffffff'
+        context.fillRect(0, 0, canvas.width, canvas.height)
+      }
       context.drawImage(image, 0, 0, canvas.width, canvas.height)
       URL.revokeObjectURL(url)
       canvas.toBlob((blob) => {
@@ -8267,19 +8287,23 @@ function CanvasView(props) {
   // 导出。刻意放在 effect 里跑：按钮先清掉选中，等这一帧渲染完（DOM 里没有手柄和选中框了）
   // 再序列化，产物才干净。若在点击回调里直接导，会把手柄一起拍进去。
   //
-  // 两种触发形态：菜单里点的是字符串（'svg' / 'png'）→ 浏览器下载；AI 要的是对象
-  // （`{format, requestId, name}`）→ svg 把文本回执给宿主落盘、png 仍走浏览器下载。
-  // 导出选中：`{format, ids}` —— 不清选区（还要用 ids），从克隆里剔掉未选中的单元。
+  // 两种触发形态：菜单里点的是字符串（'svg' / 'png'）→ 浏览器下载；对象形态
+  // （`{format, requestId?, name?, ids?, transparent?, scale?}`）→ 菜单的选区/透明导出，
+  // 或 AI 的 `{format, requestId, name}`（svg 回执落盘、png 仍走浏览器下载）。
   React.useEffect(() => {
     if (exportRequest === null) return
     const request = exportRequest
     setExportRequest(null)
-    const fromAi = typeof request === 'object' && request !== null
-    const format = fromAi ? request.format : request
-    const requestId = fromAi && typeof request.requestId === 'string' ? request.requestId : null
-    const askedName = fromAi && typeof request.name === 'string' && request.name.length > 0 ? request.name : null
-    const exportIds = fromAi && Array.isArray(request.ids) ? request.ids : null
-    const built = buildExportSvg(exportIds !== null ? { ids: exportIds } : undefined)
+    const fromObj = typeof request === 'object' && request !== null
+    const format = fromObj ? request.format : request
+    const requestId = fromObj && typeof request.requestId === 'string' ? request.requestId : null
+    const askedName = fromObj && typeof request.name === 'string' && request.name.length > 0 ? request.name : null
+    const exportIds = fromObj && Array.isArray(request.ids) ? request.ids : null
+    const transparent = fromObj && request.transparent === true
+    const scale = fromObj && typeof request.scale === 'number' && request.scale > 0 ? request.scale : 2
+    const built = buildExportSvg(
+      exportIds !== null || transparent ? { ids: exportIds !== null ? exportIds : undefined, transparent: transparent } : undefined,
+    )
     if (built === null) {
       if (requestId !== null) reportExportResult(requestId, format, { ok: false, error: '画布还没准备好，导出没做成' })
       else if (exportIds !== null) setSaveNote('导出选中失败：选区里没有可导出的单元')
@@ -8290,7 +8314,9 @@ function CanvasView(props) {
     const name =
       askedName !== null
         ? askedName
-        : String(source).split(/[\\/]/).pop().replace(/\.drawio$/i, '') + (exportIds !== null ? '-selection' : '')
+        : String(source).split(/[\\/]/).pop().replace(/\.drawio$/i, '') +
+          (exportIds !== null ? '-selection' : '') +
+          (transparent ? '-transparent' : '')
     if (format === 'svg') {
       const markup = new XMLSerializer().serializeToString(built.node)
       // AI 要的是"落成工作区里的一个文件"：把文本回执给宿主，由它写在 .drawio 旁边。
@@ -8302,7 +8328,7 @@ function CanvasView(props) {
       downloadBlob(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }), name + '.svg')
       return
     }
-    downloadPng(built.node, built.width, built.height, name + '.png')
+    downloadPng(built.node, built.width, built.height, name + '.png', { scale: scale, transparent: transparent })
     // PNG 走浏览器下载（AI 触发的也一样）：宿主写二进制得另开通道，而"点一次导出"就有的东西
     // 不值得为它搬 base64。下载成不成浏览器不给回执，所以这里只报"已经交给下载"。
     if (requestId !== null) {
@@ -10247,7 +10273,15 @@ function CanvasView(props) {
               setSelectedIds([])
               setExportRequest('png')
             },
-            { hint: '位图，适合贴到文档里', disabled: empty },
+            { hint: '位图，白/深色底，适合贴到文档里', disabled: empty },
+          ),
+          item(
+            '导出透明 PNG（4×）',
+            () => {
+              setSelectedIds([])
+              setExportRequest({ format: 'png', transparent: true, scale: 4 })
+            },
+            { hint: '高质量透明背景，适合叠到幻灯片/海报上', disabled: empty },
           ),
           item(
             '导出选中为 SVG',
@@ -10257,7 +10291,12 @@ function CanvasView(props) {
           item(
             '导出选中为 PNG',
             () => setExportRequest({ format: 'png', ids: selectedIds.slice() }),
-            { hint: '只导出当前选区', disabled: empty || selectedIds.length === 0 },
+            { hint: '只导出当前选区（白/深色底）', disabled: empty || selectedIds.length === 0 },
+          ),
+          item(
+            '导出选中为透明 PNG',
+            () => setExportRequest({ format: 'png', ids: selectedIds.slice(), transparent: true, scale: 4 }),
+            { hint: '选区透明背景，4× 分辨率', disabled: empty || selectedIds.length === 0 },
           ),
         ],
       },

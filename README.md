@@ -4,7 +4,7 @@
 
 # dsh-drawai
 
-[![GitHub stars](https://img.shields.io/github/stars/fourzkw/dsh-drawai?style=social)](https://github.com/fourzkw/dsh-drawai) [![MIT License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/fourzkw/dsh-drawai?style=social)](https://github.com/fourzkw/dsh-drawai) [![npm downloads](https://img.shields.io/npm/dt/dsh-drawai)](https://www.npmjs.com/package/dsh-drawai) [![MIT License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 ## 功能一览
 
