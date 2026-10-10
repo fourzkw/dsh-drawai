@@ -18,7 +18,13 @@ import { readdir } from 'node:fs/promises'
 import { isAbsolute, resolve as resolvePath, join as joinPath } from 'node:path'
 import { applyDocToMxfile, buildMxfile, contentHash, parseMxfile } from './mxfile.js'
 import { decodeRaster } from './raster.js'
-import { TRACE_DEFAULTS, traceRasterToSvg } from './trace-image.js'
+import {
+  TRACE_DEFAULTS,
+  TRACE_PRESET_NAMES,
+  resolveTraceOptions,
+  summarizeTraceForAi,
+  traceRasterToSvg,
+} from './trace-image.js'
 import {
   ARROW_KINDS,
   DASH_KINDS,
@@ -407,8 +413,17 @@ function fontColorFieldOf(style) {
 const DEFAULT_SVG_W = 80
 const DEFAULT_SVG_H = 80
 
-/** 一段内嵌 SVG 标记的长度上限。超了直接拒：一个单元格几十万字符会把文件和上下文一起撑爆。 */
-const SVG_MARKUP_LIMIT = 60000
+/**
+ * 一段内嵌 SVG 标记的长度上限。超了直接拒：一个单元格几十万字符会把文件和上下文一起撑爆。
+ *
+ * 为什么是 250000：**这是整图矢量化精细度的直接瓶颈**。实测一张 1024×1536 的立绘，
+ * grid 800 的原始产出就要 249630 字符 —— 卡在 60000 时管线只能压掉 5.4 倍（eps 抬到 3.2、
+ * 小环大量丢弃，环保留从 10235 掉到 2049），于是"脸和细节糊"就成了必然。
+ * 放到 250000：同一张图 grid 1000 只压 2 次、环保留 5455（翻 2.7 倍）。
+ * 再往上（不压缩约 327000 字符）文件会到 440KB/节点、读回时上下文开销约 8~9 万 token，
+ * 收益递减，所以停在 250000。要更细请用 cropX/cropY/cropW/cropH 做局部（那不受这个上限的边际影响）。
+ */
+const SVG_MARKUP_LIMIT = 250000
 /** traceImage 能读的图片字节上限（够任何截图，又不至于让一次调用把宿主内存吃干）。 */
 const TRACE_IMAGE_MAX_BYTES = 32 * 1024 * 1024
 /** diagram_read 里回显 svg 的长度上限（超了截断并注明总长）。 */
@@ -625,6 +640,54 @@ function styleNote(style) {
 }
 
 /**
+ * 解析 traceImage 的裁剪矩形（cropX / cropY / cropW / cropH，都相对原图像素坐标）。
+ *
+ * 为什么要裁剪：矢量化的工作分辨率上限由 grid（默认 499px 宽）决定 —— 整张图画进去时，
+ * 一张 1024 宽的立绘里"脸"只有约 38px 宽、眼睛 3~4px，量化后五官必然消失。
+ * 裁出局部再描，同一块区域就占满工作图宽度，脸能有 190px —— 这是唯一能真正改善
+ * "面部特征缺失"的手段（调 colors / protectLuma 都无效：已经实测扫过参数）。
+ *
+ * 只写 cropW/cropH 时默认从左上角裁；一个字段都不给 = 整图（返回 null）。
+ * 裁剪后的 SVG viewBox 会平移回原图像素系，所以节点位置仍与原图对齐。
+ */
+function traceCropRect(op, where) {
+  const given = ['cropX', 'cropY', 'cropW', 'cropH'].filter((key) => has(op, key))
+  if (given.length === 0) return null
+  const box = {
+    x: Math.round(numberOr(op.cropX, 0)),
+    y: Math.round(numberOr(op.cropY, 0)),
+    w: Math.round(numberOr(op.cropW, 0)),
+    h: Math.round(numberOr(op.cropH, 0)),
+  }
+  if (box.w <= 0 || box.h <= 0) {
+    throw new Error(
+      where + ': 裁剪区域要给出正数 cropW / cropH（当前 ' + box.w + '×' + box.h +
+        '）；cropX / cropY 缺省为 0（左上角）。只给 cropX/cropY 不是裁剪，给全 cropX/cropY/cropW/cropH。',
+    )
+  }
+  if (box.x < 0 || box.y < 0) {
+    throw new Error(where + ': cropX / cropY 不能是负数（当前 ' + box.x + ',' + box.y + '）')
+  }
+  return box
+}
+
+/** 裁出 raster 的 [x, x+w) × [y, y+h) 一块（RGBA8，逐行拷）。越界会报错，不静默补白。 */
+function cropRaster(raster, box, where) {
+  if (box.x + box.w > raster.width || box.y + box.h > raster.height) {
+    throw new Error(
+      where + ': 裁剪区域超出图片范围（图片 ' + raster.width + '×' + raster.height +
+        '，要裁 x=' + box.x + ' y=' + box.y + ' ' + box.w + '×' + box.h + '）',
+    )
+  }
+  const out = new Uint8Array(box.w * box.h * 4)
+  for (let row = 0; row < box.h; row += 1) {
+    const from = ((box.y + row) * raster.width + box.x) * 4
+    out.set(raster.data.subarray(from, from + box.w * 4), row * box.w * 4)
+  }
+  return { width: box.w, height: box.h, data: out }
+}
+
+/**
  * 施加 ops。语义校验在这里：任何指向不存在节点的边、任何未知 id，都直接抛错并列出已知节点，
  * 于是失败发生在写盘之前 —— 不会画出半张烂图。
  */
@@ -761,6 +824,7 @@ async function applyOps(doc, ops, out, opctx) {
       //
       // 这一步要读像素（I/O），所以整条 applyOps 是 async 的 —— 别把它当成同步 op 来加。
       const where = 'ops[' + i + '] traceImage'
+      const traceCrop = traceCropRect(op, where)
       if (opctx === undefined || opctx === null) throw new Error(where + ': 这个上下文不支持读图片（内部错误）')
       const rawImage = typeof op.image === 'string' && op.image.length > 0 ? op.image : undefined
       if (rawImage === undefined) {
@@ -773,26 +837,65 @@ async function applyOps(doc, ops, out, opctx) {
       } catch (error) {
         throw new Error(where + ': ' + messageOf(error))
       }
-      const traced = traceRasterToSvg(raster, {
-        colors: numberOr(op.colors, TRACE_DEFAULTS.colors),
-        grid: numberOr(op.grid, TRACE_DEFAULTS.grid),
-        scale: numberOr(op.scale, TRACE_DEFAULTS.scale),
-        epsilon: numberOr(op.epsilon, TRACE_DEFAULTS.epsilon),
-        precision: numberOr(op.precision, TRACE_DEFAULTS.precision),
-        minArea: numberOr(op.minArea, TRACE_DEFAULTS.minArea),
-        bgBright: numberOr(op.bgBright, TRACE_DEFAULTS.bgBright),
-        bgTol: numberOr(op.bgTol, TRACE_DEFAULTS.bgTol),
-        seeds: numberOr(op.seeds, TRACE_DEFAULTS.seeds),
-        maxBytes: Math.min(numberOr(op.maxBytes, TRACE_DEFAULTS.maxBytes), SVG_MARKUP_LIMIT - 2000),
-      })
+      // 裁剪：只把这一块交给矢量化，于是这块区域能占满整个工作分辨率（见 traceCropRect 的说明）。
+      let tracedFrom = raster
+      if (traceCrop !== null) {
+        try {
+          tracedFrom = cropRaster(raster, traceCrop, where)
+        } catch (error) {
+          throw new Error(where + ': ' + messageOf(error))
+        }
+      }
+      // 显式字段覆盖预设：没写的键用 undefined，让 resolveTraceOptions / 默认值接手
+      // 没给 maxBytes 时按上限走：细则由这个预算决定（预算越小，管线越要抬 epsilon、丢小环）
+      const rawTraceBudget = has(op, 'maxBytes')
+        ? numberOr(op.maxBytes, TRACE_DEFAULTS.maxBytes)
+        : SVG_MARKUP_LIMIT - 2000
+      const rawTrace = {
+        preset: typeof op.preset === 'string' ? op.preset : TRACE_DEFAULTS.preset,
+        colors: has(op, 'colors') ? op.colors : undefined,
+        colorsDark: has(op, 'colorsDark') ? op.colorsDark : undefined,
+        colorsFill: has(op, 'colorsFill') ? op.colorsFill : undefined,
+        grid: has(op, 'grid') ? op.grid : undefined,
+        gridH: has(op, 'gridH') ? op.gridH : undefined,
+        scale: has(op, 'scale') ? op.scale : undefined,
+        epsilon: has(op, 'epsilon') ? op.epsilon : undefined,
+        precision: has(op, 'precision') ? op.precision : undefined,
+        minArea: has(op, 'minArea') ? op.minArea : undefined,
+        minRegionArea: has(op, 'minRegionArea') ? op.minRegionArea : undefined,
+        protectLuma: has(op, 'protectLuma') ? op.protectLuma : undefined,
+        majorityContrast: has(op, 'majorityContrast') ? op.majorityContrast : undefined,
+        bgBright: has(op, 'bgBright') ? op.bgBright : undefined,
+        bgTol: has(op, 'bgTol') ? op.bgTol : undefined,
+        bgColor: has(op, 'bgColor') ? op.bgColor : undefined,
+        seeds: has(op, 'seeds') ? op.seeds : undefined,
+        maxBytes: Math.min(rawTraceBudget, SVG_MARKUP_LIMIT - 2000),
+      }
+      // 清掉 undefined，避免 Object.assign 把预设盖成 undefined
+      for (const key of Object.keys(rawTrace)) {
+        if (rawTrace[key] === undefined) delete rawTrace[key]
+      }
+      let resolved
+      try {
+        resolved = resolveTraceOptions(rawTrace)
+      } catch (error) {
+        throw new Error(where + ': ' + messageOf(error))
+      }
+      const traced = traceRasterToSvg(tracedFrom, resolved.options)
       const metrics = traced.metrics
       if (traced.svg.length > SVG_MARKUP_LIMIT) {
         throw new Error(
           where + ': 描出来的 SVG 太长（' + traced.svg.length + ' 字符，上限 ' + SVG_MARKUP_LIMIT +
-            '）。调小 grid（当前 ' + metrics.work.width + '）、调大 epsilon（当前 ' + op.epsilon + '）、或减少 colors。',
+            '）。调小 grid（当前 ' + metrics.work.width + '）、调大 epsilon、减少 colors，或 preset:"simple"。' +
+            (metrics.tuneHint ? ' 建议：' + metrics.tuneHint : ''),
         )
       }
-      // 尺寸：默认 1:1（画布坐标 = 原图像素坐标），w/h 显式给了就用给的
+      // 尺寸：默认 1:1（画布坐标 = 原图像素坐标），w/h 显式给了就用给的。
+      //
+      // 裁剪块的 SVG 里路径坐标是**裁剪局部**的（viewBox = 0 0 cropW cropH）—— 别去平移 viewBox：
+      // 路径不会跟着走，内容会整体跑出可视区（实测渲染出空白）。要让它落在原图对应的位置上，
+      // 靠的是节点框的**比例**：节点 w/h ≈ 原图尺寸 × (裁剪块尺寸 / 该块缩放)，
+      // 配合 imageAspect=0 拉伸铺满，局部坐标系就正好铺到原图那一块。
       const w = numberOr(op.w, raster.width)
       const h = numberOr(op.h, raster.height)
       const synthetic = {
@@ -800,7 +903,7 @@ async function applyOps(doc, ops, out, opctx) {
         svg: traced.svg,
         w: w,
         h: h,
-        keys: { imageAspect: 0 }, // 拉伸铺满：viewBox 就是原图像素系，节点框按它 1:1 画
+        keys: { imageAspect: 0 }, // 拉伸铺满：局部 viewBox 按节点框等比铺开
       }
       if (typeof op.id === 'string') synthetic.id = op.id
       if (typeof op.as === 'string') synthetic.as = op.as
@@ -808,15 +911,33 @@ async function applyOps(doc, ops, out, opctx) {
       if (typeof op.label === 'string') synthetic.label = op.label
       if (has(op, 'x')) synthetic.x = op.x
       if (has(op, 'y')) synthetic.y = op.y
+      // 裁剪块没给坐标时，落在原图里它该在的位置（否则会堆到原点压住整图）
+      if (traceCrop !== null && has(op, 'x') === false) synthetic.x = traceCrop.x
+      if (traceCrop !== null && has(op, 'y') === false) synthetic.y = traceCrop.y
       // 就地插一条 addNode 紧随其后（读像素是 async 的，所以这条 op 不能在解析参数时先展开）。
       // 注意：这里改的必须是**我们自己那份** ops —— 调用方（execute）已经 slice 过，
       // 因为宿主给的 arguments 是深冻结的，直接 splice 会抛 "object is not extensible"。
       ops.splice(i + 1, 0, synthetic)
+      // 节点 id：显式 id / as 别名会在下一条 addNode 里落地；这里先记 as 或 id 方便回执
+      const nodeRef = typeof op.id === 'string' ? op.id : typeof op.as === 'string' ? op.as : undefined
+      if (traceCrop !== null) metrics.crop = { x: traceCrop.x, y: traceCrop.y, w: traceCrop.w, h: traceCrop.h }
+      if (out !== undefined && out !== null) {
+        if (!Array.isArray(out.trace)) out.trace = []
+        out.trace.push(summarizeTraceForAi(metrics, { image: rawImage, nodeId: nodeRef }))
+      }
       notes.push(
-        '🖼 ' + rawImage + ' → 逐像素矢量化：' + metrics.palette.length + ' 色 / ' + metrics.paths + ' 条 path / ' +
+        '🖼 ' + rawImage +
+          (traceCrop === null ? '' : ' 裁剪 ' + traceCrop.w + '×' + traceCrop.h + '@' + traceCrop.x + ',' + traceCrop.y) +
+          ' → 逐像素矢量化 preset=' + metrics.preset + '：' +
+          metrics.palette.length + ' 色 / ' + metrics.paths + ' 条 path / ' +
           metrics.loopsKept + ' 个轮廓环 / ' + metrics.svgChars + ' 字符' +
-          '（工作图 ' + metrics.work.width + '×' + metrics.work.height + '，像素覆盖' +
-          (metrics.exactPixelCoverage === true ? '精确' : '不精确 ' + metrics.drawnPixels + '/' + metrics.totalPixels) + '）',
+          '（工作图 ' + metrics.work.width + '×' + metrics.work.height +
+          ', scale ' + metrics.scaleApplied +
+          (metrics.sizeNotes ? '; ' + metrics.sizeNotes : '') +
+          '，像素覆盖' +
+          (metrics.exactPixelCoverage === true ? '精确' : '不精确 ' + metrics.drawnPixels + '/' + metrics.totalPixels) +
+          '）' +
+          (metrics.tuneHint ? '\n   调参：' + metrics.tuneHint : ''),
       )
       continue
     }
@@ -1847,7 +1968,7 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
     {op:"setLayer", id|ids, layer}
     {op:"setLayerProps", layer, name?, visible?, locked?}
     {op:"export", format?:"svg"|"png", name?}
-    {op:"traceImage", image, w?, h?, x?, y?, colors?, grid?, scale?, epsilon?, minArea?, as?, layer?}
+    {op:"traceImage", image, preset?, w?, h?, x?, y?, colors?, colorsDark?, colorsFill?, grid?, gridH?, scale?, epsilon?, minArea?, minRegionArea?, protectLuma?, majorityContrast?, bgColor?, cropX?, cropY?, cropW?, cropH?, as?, layer?}
     {op:"move", id|ids, dx?, dy?, x?, y?}
     {op:"remove", id|ids}
     {op:"highlight", ids:["n1","n2"]}
@@ -1873,17 +1994,25 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
   pending → done（带文件路径）/ downloaded / failed。看到 pending 说明画布还没刷新 ——
   别反复请求，等下一次 read 再看（或提醒用户打开那张画布）。
 - **把一张位图"描"成矢量图用 traceImage**：{op:"traceImage", image:"ref.png", x:40, y:40}。
-  它**真的读那张图的像素**（宿主里跑的管线：四边泛洪去背景 → k-means 定调色板 →
-  3× 超采样归类 + 众数滤波 → 按颜色分连通域、沿像素格边取闭合轮廓 → RDP 简化 →
-  每色一条 nonzero path，按面积降序铺），建成一个 svg 内容节点。
+  它**真的读那张图的像素**，建成一个 svg 内容节点。
   **不要用"手写一段近似的 svg"冒充复刻** —— 形状词汇表表达不了的照片/插画就直接用这个 op。
-  · 默认 **w/h = 原图像素尺寸**、viewBox = 原图像素坐标系，所以画布坐标就是图片坐标（1:1 铺满）。
-  · 要更简洁：colors 调小（默认 12）、scale:2 或 3（先降采样）、grid 调小（工作宽度）。
-    要更保真：epsilon 调小（默认 2px）、minArea 调小（默认 10px²）。
-  · 输出会告诉你要点：色数 / 路径数 / 轮廓环数 / SVG 字符数 / **像素覆盖是否精确**
-    （精确 = 每色轮廓面积之和等于图像总像素，没有像素丢失或重复）。
-  · 单次上限：SVG 标记 60000 字符（超了会自己收紧 epsilon 与碎块阈值，仍超就报错让你调参）。
-  · 输入支持 PNG（自带解码器，零依赖）与 JPEG/GIF/WebP（需要宿主装了 sharp）。
+  · 默认 **w/h = 原图像素尺寸**、viewBox = 原图像素坐标系（1:1 铺满）。
+  · **先选 preset，再按需覆盖单字段**（合并：默认 ← preset ← 显式字段）：
+    - preset:"lineart" 插画/线稿（多暗色配额、严保细线）
+    - preset:"photo" 照片/渐变
+    - preset:"simple" 图标/简单图（少色+降采样，省字符）
+    - 不写 = "default"
+  · 调参闭环：看返回值里的 **trace[]**（结构化指标 + hint），不满意就 **remove 旧节点再 traceImage**（改 preset/字段）。
+    常见：字符紧 → scale:2 / 加大 epsilon / preset:"simple"；线糊断 → preset:"lineart" 或提高 protectLuma/colorsDark。
+  · 单次上限：SVG 标记 250000 字符（整图的精细度主要由它决定：预算紧时管线会抬 epsilon、丢小环，
+    把细节压掉——想要更细也可以给 maxBytes 顶到上限，或干脆用下面的裁剪只描局部）；
+    输入 PNG（零依赖）与 JPEG/GIF/WebP（需 sharp）。
+  · **五官/小物件糊成一团时，别只调参 —— 用 cropX/cropY/cropW/cropH 裁出那一块单独描**：
+    工作分辨率上限是 grid（默认 499px 宽），整张立绘塞进去时"脸"只占三四十像素，眼睛只有 3~4px，
+    量化后五官必然消失（实测把 colors 拉满 24、protectLuma 提到 235 也救不回来）。
+    裁出头部再描，同一块就占满工作图宽度 —— 脸能有一两百像素，五官才留得住。
+    裁剪块的坐标在**裁剪局部系**里，所以要按比例给它 w/h（= 整张图的 w/h × 裁剪块宽高 / 整块原尺寸），
+    x/y 不写时落在原图对应位置，可与整图那块叠着放（顺序在后 = 画在上面）。
 
 - **改一组用 ids**：{op:"setStyle", ids:["n1","n2","n5"], style:"green"} —— setStyle / setLabel /
   move / remove 都收 ids，不要为了"把这几个改成绿色"发 12 个 op。批量 move 只收 dx/dy
@@ -1944,7 +2073,7 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
       （那就把 w/h 设成图形的比例，否则四周会留白）。
     · svg 节点**可以没有 label**（画图不带字）；要图下面带文字就照常给 label，它画在图上。
     · 颜色写在 SVG 自己身上（fill/stroke）—— 配色参数对它是无效的（图片不受 fillColor/strokeColor 影响）。
-    · 内容上限 60000 字符；**别放位图/base64**（那是图片不是图形，本画布画不出来）。
+    · 内容上限 250000 字符；**别放位图/base64**（那是图片不是图形，本画布画不出来）。
     · 改内容只能整段替换（没有"改某一根线"的 op）：先 read 拿回当前 svg，改完整段写回。
 - style：调色板名 plain|blue|green|orange|yellow|red|purple|grey，或直接给一段 style 串
 - dash：solid|dashed|dotted；arrow：end（单向）|both（双向）|none（无）|start（反向）
@@ -2767,7 +2896,7 @@ export function apply(ctx) {
       '{op:"setEdge", id, from?, to?, fromPoint?, toPoint?} / {op:"order", id|ids, to:"front"|"back"|"up"|"down"} / ' +
       '{op:"duplicate", id|ids, dx?, dy?, withEdges?, layer?, as?} / {op:"addLayer", name?, as?} / {op:"setLayer", id|ids, layer} / {op:"setLayerProps", layer, name?, visible?, locked?} / ' +
       '{op:"export", format?:"svg"|"png", name?} / ' +
-      '{op:"traceImage", image, w?, h?, x?, y?, colors?, grid?, scale?, epsilon?, minArea?, as?, layer?} / ' +
+      '{op:"traceImage", image, preset?, w?, h?, x?, y?, colors?, colorsDark?, colorsFill?, grid?, gridH?, scale?, epsilon?, minArea?, minRegionArea?, protectLuma?, majorityContrast?, bgColor?, as?, layer?} / ' +
       '{op:"move", id|ids, dx?, dy?, x?, y?} / {op:"remove", id|ids} / {op:"highlight", ids:[...]}；节点 id 省略时自动分配。' +
       '**改接一条边**用 setEdge（换 from/to 或某一端改成自由点）—— id、标签、标签位置、折点、端点约束全都留着；' +
       '不要 remove + addEdge 重画（那会把这些丢掉）。' +
@@ -2778,12 +2907,14 @@ export function apply(ctx) {
       '**图层**用 addLayer/setLayer/setLayerProps（加层、把单元移到别的层、改名/显示/隐藏/锁定；隐藏≠删除）。' +
       '**导出**用 export：format:"svg" 会让画布渲染一张 SVG 落在 .drawio 旁边、format:"png" 是浏览器下载；' +
       '这一步由画布执行，返回值里的 export.status 是 pending/done/downloaded/failed（pending = 画布还没刷新）。' +
-      '**照着一张位图描矢量图**用 traceImage：{op:"traceImage", image:"ref.png", x, y} 会真的去读那张图的像素' +
-      '（泛洪去背景 → k-means 定调色板 → 3× 超采样归类 → 按颜色取像素级闭合轮廓 → 每色一条 nonzero path），' +
-      '建成一个 svg 内容节点，**不是让模型凭印象重画**。默认 w/h = 原图像素尺寸、viewBox = 原图像素坐标系（1:1）。' +
-      '可调：colors（默认 12，少=更简洁）、grid（工作宽度，调小=更粗更快）、scale（先降采样几倍）、' +
-      'epsilon（轮廓简化容差 px，默认 2，调大=更省字符）、minArea（小于这个面积的碎块并进最相似邻色）。' +
-      '返回的 summary 里带"色数/路径数/轮廓环/像素覆盖是否精确"，据此判断质量。' +
+      '**照着一张位图描矢量图**用 traceImage：{op:"traceImage", image:"ref.png", x, y} 会真的读像素建成 svg 节点，' +
+      '**不是凭印象重画**。默认 w/h = 原图像素尺寸（1:1）。' +
+      '**调参**：先选 preset（' + TRACE_PRESET_NAMES.join('|') + '；lineart=插画线稿、photo=照片、simple=省字符、default=默认），' +
+      '再按需覆盖 colors/colorsDark/scale/epsilon/grid/gridH/minArea/minRegionArea/protectLuma/majorityContrast/bgColor 等。' +
+      '合并顺序：默认 ← preset ← 显式字段。' +
+      '返回值里的 **trace[]** 是结构化指标（svgChars/protectPixels/options/hint 等）；' +
+      '质量不够就根据 hint remove 旧节点再 trace（改 preset 或字段）。' +
+      '字符紧→scale:2/加大epsilon/preset:simple；线糊断→preset:lineart 或提高 protectLuma/colorsDark。' +
       '**一次改一组**就写 ids:[...]（setStyle/setLabel/move/remove 都收，move 的批量只收 dx/dy 相对位移）—— 用户说"把这几个换成绿色"时不要逐个发 op。' +
       '**引用刚建的那个**用 as:"名字"：{op:"addNode", label:"开始", as:"start"} 之后同一个 ops 数组里 from/to/id 可以直接写 "start"，不必猜自动分配的 n7。' +
       '**画图形（图标/logo/示意图）用 svg**：addNode {shape:"svg", svg:"<svg viewBox=…>…</svg>", w, h} 让节点的内容就是那段 SVG 标记' +
@@ -2875,6 +3006,64 @@ export function apply(ctx) {
               error: { type: 'string' },
             },
           },
+          // 本次调用里每次 traceImage 一条：给模型读指标再调参（additionalProperties:false 必须声明）
+          trace: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                preset: { type: 'string' },
+                image: { type: 'string' },
+                nodeId: { type: 'string' },
+                // 只描了原图的一块时才有：那块在原图里的位置与尺寸（像素）
+                crop: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    x: { type: 'number' },
+                    y: { type: 'number' },
+                    w: { type: 'number' },
+                    h: { type: 'number' },
+                  },
+                },
+                source: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    width: { type: 'number' },
+                    height: { type: 'number' },
+                  },
+                },
+                work: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    width: { type: 'number' },
+                    height: { type: 'number' },
+                    scale: { type: 'number' },
+                  },
+                },
+                scaleApplied: { type: 'number' },
+                sizeNotes: { type: 'string' },
+                colors: { type: 'number' },
+                colorsDark: { type: 'number' },
+                colorsFill: { type: 'number' },
+                protectPixels: { type: 'number' },
+                majoritySkipped: { type: 'number' },
+                paths: { type: 'number' },
+                loopsKept: { type: 'number' },
+                loopsProtectedKept: { type: 'number' },
+                regionsProtected: { type: 'number' },
+                svgChars: { type: 'number' },
+                budget: { type: 'number' },
+                attempts: { type: 'number' },
+                exactPixelCoverage: { type: 'boolean' },
+                options: { type: 'json' },
+                hint: { type: 'string' },
+              },
+            },
+          },
         },
       },
       render: function (args, value) {
@@ -2885,6 +3074,24 @@ export function apply(ctx) {
         }
         if (Array.isArray(value.changed) && value.changed.length > 0) bits.push('改动 ' + value.changed.join(', '))
         if (Array.isArray(value.removed) && value.removed.length > 0) bits.push('删除 ' + value.removed.join(', '))
+        if (Array.isArray(value.trace) && value.trace.length > 0) {
+          bits.push(
+            '矢量化 ' +
+              value.trace
+                .map(function (t) {
+                  return (
+                    (t.image || '?') +
+                    ' preset=' +
+                    (t.preset || 'default') +
+                    ' ' +
+                    t.svgChars +
+                    '字' +
+                    (t.hint ? ' | ' + t.hint : '')
+                  )
+                })
+                .join('；'),
+          )
+        }
         return [
           {
             type: 'text',
@@ -3000,6 +3207,7 @@ export function apply(ctx) {
           created: [],
           changed: [],
           removed: [],
+          ...(Array.isArray(out.trace) && out.trace.length > 0 ? { trace: out.trace } : {}),
           ...(exportStateFor(sessionId, loaded.absolute) !== undefined ? { export: exportStateFor(sessionId, loaded.absolute) } : {}),
           summary: notes.length === 0 ? '(no change)' : notes.join('\n'),
         }
@@ -3051,6 +3259,7 @@ export function apply(ctx) {
         created: Array.isArray(out.created) ? out.created : [],
         changed: Array.isArray(out.changed) ? out.changed : [],
         removed: Array.isArray(out.removed) ? out.removed : [],
+        ...(Array.isArray(out.trace) && out.trace.length > 0 ? { trace: out.trace } : {}),
         ...(exportStateFor(sessionId, loaded.absolute) !== undefined ? { export: exportStateFor(sessionId, loaded.absolute) } : {}),
         summary: notes.length === 0 ? '(no change)' : notes.join('\n'),
       }

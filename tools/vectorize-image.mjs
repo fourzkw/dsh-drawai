@@ -8,8 +8,13 @@
  *
  * 用法:
  *   node tools/vectorize-image.mjs --in <图片> --out-svg <输出.svg> [--out-preview <预览.png>]
- *        [--colors 12] [--grid 499] [--scale 1] [--epsilon 2] [--precision 1]
- *        [--min-area 10] [--bg-bright 238] [--bg-tol 10] [--seeds 3] [--budget 50000]
+ *        [--preset default|lineart|photo|simple]
+ *        [--colors 12] [--colors-dark 3] [--colors-fill 0]
+ *        [--grid 499] [--grid-h 0] [--scale 1] [--epsilon 2] [--precision 1]
+ *        [--min-area 10] [--min-region-area 0]
+ *        [--protect-luma 110] [--majority-contrast 40]
+ *        [--bg-bright 238] [--bg-tol 10] [--bg-color #ffffff]
+ *        [--seeds 3] [--budget 50000]
  *        [--out-style <输出.style.txt>] [--out-labels <标签图.json>]
  */
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -40,32 +45,58 @@ const t0 = Date.now()
 const raster = await decodeRaster(bytes)
 const decodeMs = Date.now() - t0
 const t1 = Date.now()
-const out = traceRasterToSvg(raster, {
-  colors: Number(arg('colors', TRACE_DEFAULTS.colors)),
-  grid: Number(arg('grid', TRACE_DEFAULTS.grid)),
-  scale: Number(arg('scale', TRACE_DEFAULTS.scale)),
-  epsilon: Number(arg('epsilon', TRACE_DEFAULTS.epsilon)),
-  precision: Number(arg('precision', TRACE_DEFAULTS.precision)),
-  minArea: Number(arg('min-area', TRACE_DEFAULTS.minArea)),
-  bgBright: Number(arg('bg-bright', TRACE_DEFAULTS.bgBright)),
-  bgTol: Number(arg('bg-tol', TRACE_DEFAULTS.bgTol)),
-  seeds: Number(arg('seeds', TRACE_DEFAULTS.seeds)),
-  maxBytes: Number(arg('budget', TRACE_DEFAULTS.maxBytes)),
-  includeLabels: OUT_LABELS !== null,})
+function optNum(name, def) {
+  const i = argv.indexOf('--' + name)
+  if (i < 0) return undefined
+  return Number(arg(name, def))
+}
+const cliOpts = {
+  preset: arg('preset', TRACE_DEFAULTS.preset),
+  colors: optNum('colors'),
+  colorsDark: optNum('colors-dark'),
+  colorsFill: optNum('colors-fill'),
+  grid: optNum('grid'),
+  gridH: optNum('grid-h'),
+  scale: optNum('scale'),
+  epsilon: optNum('epsilon'),
+  precision: optNum('precision'),
+  minArea: optNum('min-area'),
+  minRegionArea: optNum('min-region-area'),
+  protectLuma: optNum('protect-luma'),
+  majorityContrast: optNum('majority-contrast'),
+  bgBright: optNum('bg-bright'),
+  bgTol: optNum('bg-tol'),
+  bgColor: argv.indexOf('--bg-color') >= 0 ? arg('bg-color', TRACE_DEFAULTS.bgColor) : undefined,
+  seeds: optNum('seeds'),
+  maxBytes: optNum('budget'),
+  includeLabels: OUT_LABELS !== null,
+}
+for (const key of Object.keys(cliOpts)) {
+  if (cliOpts[key] === undefined) delete cliOpts[key]
+}
+const out = traceRasterToSvg(raster, cliOpts)
 const traceMs = Date.now() - t1
 
 const m = out.metrics
 console.log(JSON.stringify({
-  step: 'load', file: IN, source: m.source, work: m.work, decodeMs: decodeMs,
+  step: 'load', file: IN, source: m.source, work: m.work, preset: m.preset,
+  scaleRequested: m.scaleRequested, scaleApplied: m.scaleApplied,
+  grid: m.grid, gridH: m.gridH, sizeNotes: m.sizeNotes, bgColor: m.bgColor,
+  optionsApplied: m.optionsApplied, decodeMs: decodeMs,
 }))
 console.log(JSON.stringify({
-  step: 'trace', colors: m.palette.length, palette: m.palette, paths: m.paths, loops: m.loops,
-  loopsKept: m.loopsKept, regions: m.regions, backgroundPixels: m.backgroundPixels,
-  foregroundPixels: m.foregroundPixels, despeckle: m.despeckle, traceMs: traceMs,
+  step: 'trace', colors: m.palette.length, colorsDark: m.colorsDark, colorsFill: m.colorsFill,
+  protectPixels: m.protectPixels, majoritySkipped: m.majoritySkipped,
+  palette: m.palette, paths: m.paths, loops: m.loops,
+  loopsKept: m.loopsKept, loopsProtectedKept: m.loopsProtectedKept,
+  regions: m.regions, regionsProtected: m.regionsProtected,
+  backgroundPixels: m.backgroundPixels, foregroundPixels: m.foregroundPixels,
+  despeckle: m.despeckle, regionMerge: m.regionMerge, traceMs: traceMs,
 }))
 console.log(JSON.stringify({
   step: 'svg', chars: m.svgChars, budget: m.budget, attempts: m.attempts,
   drawnPixels: m.drawnPixels, totalPixels: m.totalPixels, exactPixelCoverage: m.exactPixelCoverage,
+  tuneHint: m.tuneHint,
 }))
 
 writeFileSync(OUT_SVG, out.svg, 'utf8')

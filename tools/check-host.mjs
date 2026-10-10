@@ -2046,13 +2046,14 @@ console.log('\nSVG 内容节点：节点内容就是一段 SVG 标记（drawio �
   ok(store.get(WORKSPACE + '\\doc.drawio') === beforeShapeOnly, '报错发生在写盘之前')
 
   // 太长的标记：拦住（一个单元格几十万字符会把文件与上下文一起撑爆）
+  // 阈值是内核里的 SVG_MARKUP_LIMIT（当前 250000）—— 这里贴着它再超一点
   let tooLongRejected = false
   try {
-    await apply([{ op: 'addNode', shape: 'svg', svg: '<svg viewBox="0 0 1 1">' + 'x'.repeat(60001) + '</svg>' }])
+    await apply([{ op: 'addNode', shape: 'svg', svg: '<svg viewBox="0 0 1 1">' + 'x'.repeat(250001) + '</svg>' }])
   } catch (error) {
     tooLongRejected = /太长/.test(String(error.message))
   }
-  ok(tooLongRejected, '超长 svg（>60000 字符）被拒')
+  ok(tooLongRejected, '超长 svg（>250000 字符）被拒')
   let notSvgRejected = false
   try {
     await apply([{ op: 'addNode', shape: 'svg', svg: '这不是 SVG' }])
