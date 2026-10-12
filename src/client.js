@@ -6849,10 +6849,11 @@ function CanvasView(props) {
     const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }))
     const image = new Image()
     image.onload = () => {
-      // 默认 2×；透明高质量导出用 4×。过大时压到浏览器常见 canvas 上限，避免整图失败。
-      let scale = opts !== undefined && opts !== null && typeof opts.scale === 'number' && opts.scale > 0 ? opts.scale : 2
+      // 默认 4×（与透明高质量同档）。过大时压到浏览器常见 canvas 上限，避免整图失败。
+      let scale = opts !== undefined && opts !== null && typeof opts.scale === 'number' && opts.scale > 0 ? opts.scale : 4
       const transparent = opts !== undefined && opts !== null && opts.transparent === true
-      const maxEdge = 8192
+      // Chromium / 多数桌面浏览器单边可到 16384；再高容易在部分环境创建失败。
+      const maxEdge = 16384
       while (scale > 1 && (width * scale > maxEdge || height * scale > maxEdge)) scale = scale / 2
       const canvas = document.createElement('canvas')
       canvas.width = Math.max(1, Math.round(width * scale))
@@ -8300,7 +8301,7 @@ function CanvasView(props) {
     const askedName = fromObj && typeof request.name === 'string' && request.name.length > 0 ? request.name : null
     const exportIds = fromObj && Array.isArray(request.ids) ? request.ids : null
     const transparent = fromObj && request.transparent === true
-    const scale = fromObj && typeof request.scale === 'number' && request.scale > 0 ? request.scale : 2
+    const scale = fromObj && typeof request.scale === 'number' && request.scale > 0 ? request.scale : 4
     const built = buildExportSvg(
       exportIds !== null || transparent ? { ids: exportIds !== null ? exportIds : undefined, transparent: transparent } : undefined,
     )
@@ -8352,7 +8353,7 @@ function CanvasView(props) {
       return
     }
     setSaveNote('正在把画布渲成图片给 AI 看…')
-    // 与手动导出同一档 2×；体量不再由客户端预检截断（宿主对 render-result 放开了 body 上限）。
+    // AI 看图用 2×（比手动导出的 4× 更轻）；体量不再由客户端预检截断（宿主对 render-result 放开了 body 上限）。
     // 部署附件服务若自带 maxImageBytes，仍会在那一侧拒收。
     renderPngPayload(built.node, built.width, built.height, 2)
       .then((payload) => {
@@ -10268,12 +10269,12 @@ function CanvasView(props) {
             { hint: '矢量，可再编辑', disabled: empty },
           ),
           item(
-            '导出 PNG（2×）',
+            '导出 PNG（4×）',
             () => {
               setSelectedIds([])
-              setExportRequest('png')
+              setExportRequest({ format: 'png', scale: 4 })
             },
-            { hint: '位图，白/深色底，适合贴到文档里', disabled: empty },
+            { hint: '高质量位图，白/深色底，适合贴到文档里', disabled: empty },
           ),
           item(
             '导出透明 PNG（4×）',
@@ -10290,8 +10291,8 @@ function CanvasView(props) {
           ),
           item(
             '导出选中为 PNG',
-            () => setExportRequest({ format: 'png', ids: selectedIds.slice() }),
-            { hint: '只导出当前选区（白/深色底）', disabled: empty || selectedIds.length === 0 },
+            () => setExportRequest({ format: 'png', ids: selectedIds.slice(), scale: 4 }),
+            { hint: '只导出当前选区（白/深色底，4×）', disabled: empty || selectedIds.length === 0 },
           ),
           item(
             '导出选中为透明 PNG',

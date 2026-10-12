@@ -1,0 +1,34 @@
+<mxfile host="dsh-drawai" agent="dsh-drawai" type="device">
+  <diagram id="dsh-drawai-page-1" name="Page-1">
+    <mxGraphModel dx="0" dy="0" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="n1" value="开始" style="rounded=1;arcSize=50;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n2" value="输入账号" style="fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="0" y="150" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n3" value="校验" style="rhombus=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="0" y="300" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n4" value="进入首页" style="fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="0" y="450" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n1" target="n2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n2" target="n3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="通过" style="rounded=0;html=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;endArrow=classic;" edge="1" parent="1" source="n3" target="n4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="失败" style="rounded=0;html=1;strokeColor=red;dashed=1;edgeStyle=orthogonalEdgeStyle;orthogonalLoop=1;jettySize=auto;exitX=0;exitY=0.5;entryX=0;entryY=0.5;endArrow=classic;" edge="1" parent="1" source="n3" target="n2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

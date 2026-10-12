@@ -579,6 +579,25 @@ console.log('\n非法输入必须在写盘之前失败')
     emptyThrew = true
   }
   ok(emptyThrew, '空 ops 被拒')
+
+  // 装饰面板：空 / 省略 label 合法（drawio 的 value=""）；以前会误拦成「needs non-empty label」
+  seed(baseDoc())
+  const panel = await apply([
+    { op: 'addNode', label: '', shape: 'rect', style: 'blue', w: 240, h: 160, x: 20, y: 20, as: 'panel' },
+    { op: 'addNode', shape: 'rect', style: 'grey', w: 100, h: 80, x: 40, y: 40, as: 'blank' },
+  ])
+  const panelIds = panel.created.map((c) => c.id)
+  ok(panelIds.length === 2, '空 label / 省略 label 的面板都能建出来')
+  const panelDoc = current()
+  ok(panelDoc.nodes.filter((n) => n.id === panelIds[0])[0].label === '', 'label:"" 落成空串')
+  ok(panelDoc.nodes.filter((n) => n.id === panelIds[1])[0].label === '', '省略 label 也是空串')
+  let badLabelType = null
+  try {
+    await apply([{ op: 'addNode', label: 12, w: 40, h: 40 }])
+  } catch (error) {
+    badLabelType = String(error && error.message)
+  }
+  ok(badLabelType !== null && badLabelType.indexOf('must be a string') >= 0, 'label 类型不对仍在写盘前拒绝')
 }
 
 console.log('\nrevision：文件内容指纹 + 原子性')

@@ -417,7 +417,7 @@ console.log('\n工具条：按类型合并为下拉菜单')
     ok(menus.every((m) => m.items.every((i) => typeof i.label === 'string' && i.label.length > 0)), '每一项都有 label')
     ok(menus.every((m) => m.items.every((i) => typeof i.onClick === 'function')), '每一项都有 onClick')
     const labels = menus.reduce((a, m) => a.concat(m.items.map((i) => i.label)), [])
-    for (const gone of ['新建画布…', '打开…', '撤销', '重做', '适应内容', '导出 SVG', '导出 PNG（2×）']) {
+    for (const gone of ['新建画布…', '打开…', '撤销', '重做', '适应内容', '导出 SVG', '导出 PNG（4×）']) {
       ok(labels.indexOf(gone) >= 0, '旧按钮「' + gone + '」已收进菜单')
     }
     ok(labels.indexOf('导出透明 PNG（4×）') >= 0, '导出菜单有「导出透明 PNG（4×）」')
@@ -1132,7 +1132,7 @@ console.log('\n「看一眼」：客户端渲成 PNG 回执给宿主（不下载
   ok(/payload\.render/.test(src), '轮询回执里读 payload.render（宿主把请求挂在那儿）')
   ok(/lookHandledRef\.current !== wantLook\.requestId/.test(src), '按 requestId 去重（不去重就是每 3 秒渲一遍）')
   ok(/LOOK_MAX_BASE64/.test(src) === false, '客户端不再预检 PNG 体量（LOOK_MAX_BASE64 已去掉）')
-  ok(/renderPngPayload\(built\.node, built\.width, built\.height, 2\)/.test(src), '看一眼按 2× 渲（与手动导出同一档）')
+  ok(/renderPngPayload\(built\.node, built\.width, built\.height, 2\)/.test(src), '看一眼按 2× 渲（比手动导出的 4× 更轻）')
   ok(/reportRenderResult\(requestId, \{ ok: false, error: message \}\)/.test(src), '渲染失败也要回执 ok:false（否则宿主永远 pending）')
   ok(/function renderPngPayload/.test(src) && /function downloadPng/.test(src), '「给模型看」与「给用户导出」各走各的（但共用同一套取图路径）')
 }
