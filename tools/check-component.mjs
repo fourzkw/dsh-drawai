@@ -20,6 +20,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { composeClientBody } from './build.mjs'
+import * as styleKernel from '../src/style-kernel.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 // 与产物同款的组合 body（内联的样式内核 + src/client.js）：组件里会用到内核函数，
@@ -408,23 +409,23 @@ console.log('\n工具条：按类型合并为下拉菜单')
     // 固定项会随功能增减；只断言「图层」菜单就是 layerMenuItems，且总数 = 非图层固定项 + 图层项
     const layersMenu = menus.filter((m) => m.key === 'layers')[0]
     ok(
-      layersMenu !== undefined && layersMenu.items.length === (layerItems === null ? -1 : layerItems.length),
-      '「图层」菜单里就是 layerMenuItems() 那几项（实际 ' + (layersMenu === undefined ? '没有这个菜单' : layersMenu.items.length) + '）',
+      layersMenu !== undefined && layersMenu.items.length === 0 && /React\.createElement\(LayersPanel/.test(src),
+      '图层入口使用列表面板，不再展开每层五个菜单动作',
     )
-    const fixed = total - (layerItems === null ? 0 : layerItems.length)
-    ok(fixed >= 18, '非图层固定项至少 18 个（实际 ' + fixed + '，总 ' + total + '）')
+    const fixed = total
+    ok(fixed >= 18, '文件/编辑/视图的常用动作仍然保留（实际 ' + fixed + '）')
     ok(menus.every((m) => typeof m.title === 'string' && m.title.length > 0), '每个菜单都有悬停说明（title）')
     ok(menus.every((m) => m.items.every((i) => typeof i.label === 'string' && i.label.length > 0)), '每一项都有 label')
     ok(menus.every((m) => m.items.every((i) => typeof i.onClick === 'function')), '每一项都有 onClick')
     const labels = menus.reduce((a, m) => a.concat(m.items.map((i) => i.label)), [])
-    for (const gone of ['新建画布…', '打开…', '撤销', '重做', '适应内容', '导出 SVG', '导出 PNG（4×）']) {
+    for (const gone of ['新建画布…', '打开…', '撤销', '重做', '适应内容']) {
       ok(labels.indexOf(gone) >= 0, '旧按钮「' + gone + '」已收进菜单')
     }
-    ok(labels.indexOf('导出透明 PNG（4×）') >= 0, '导出菜单有「导出透明 PNG（4×）」')
-    ok(labels.indexOf('导出选中为透明 PNG') >= 0, '导出菜单有「导出选中为透明 PNG」')
+    ok(/React\.createElement\(ExportPanel/.test(src), '导出入口使用参数面板')
+    ok(/\['transparent', '透明'\]/.test(src), '导出面板提供透明背景选项')
     ok(labels.indexOf('全选') >= 0, '「全选」在编辑菜单里（Ctrl+A 之外的入口）')
     ok(labels.indexOf('查找…') >= 0, '「查找…」在编辑菜单里（Ctrl+F）')
-    ok(labels.some((l) => l.indexOf('导出选中') >= 0), '导出菜单有「导出选中」')
+    ok(/\['selection', '当前选区/.test(src), '导出面板提供选区范围')
     // 工具条本身只应渲染菜单入口
     const headStart = src.indexOf('const head = React.createElement(')
     const headEnd = src.indexOf('  let body', headStart)
@@ -658,9 +659,8 @@ console.log('\n线型与字号的手工入口')
   ok(/applyLineKind\(edgeTargets, it\[0\]\)/.test(src), '点线型对整组连线生效（与改色/箭头一致）')
   ok(/kind === 'straight'\) \{\s*\n\s*delete e\.points/.test(src) || /if \(kind === 'straight'\) \{\n\s+delete e\.points/.test(src), '选直线会清掉折点')
   ok(/e\.points = \[\{ x: snap\(/.test(src), '选曲线会给"本来就笔直"的边补一个弓形中点（否则弧看不见）')
-  // 空白处右键：一条**直线**（无折点）
-  ok(/'╱ 直线'/.test(src), '空白处右键有「╱ 直线」入口')
-  ok(/createFreeEdgeAt\(menu\.userX, menu\.userY, 'straight'\)/.test(src), '它建的是直线（createFreeEdgeAt 的第三个参数）')
+  ok(!/'╱ 直线'/.test(src), '空白处右键不再提供直线创建入口')
+  ok(!/createFreeEdgeAt\(menu\.userX/.test(src), '右键菜单不再调用连线创建函数')
   ok(/styleWithLineKind\(DEFAULT_EDGE_STYLE, lineKind\)/.test(src), '独立线按线型落 style（styleWithLineKind）')
   ok(/isEdgeLineKind\(kind\) \? kind : 'rounded'/.test(src), '缺省/未知线型回落到折线（rounded）')
   // 字号：节点/文字与连线共用同一个控件
@@ -686,7 +686,7 @@ console.log('\n右键菜单：几类只显示当前值，并排成一行')
   // 三个菜单各自**一次**menuSelectRow 调用里给出全部类 —— 这才是"并排成一行"。
   // （形状**不在**右键里：入口是右侧常驻元素条 — 族入口 + 同族变体侧面板。）
   const callSites = src.match(/menuSelectRow\(\[/g) || []
-  ok(callSites.length === 3, '三处右键菜单各调用一次 menuSelectRow（画布 / 节点 / 连线），实际 ' + callSites.length + ' 处')
+  ok(callSites.length === 2, '仅节点和连线菜单保留样式选项，空白菜单只提供编辑操作')
   const categories = ['color', 'fontSize', 'line', 'dash', 'arrow', 'fontColor']
   for (const key of categories) {
     ok(new RegExp("key: '" + key + "'").test(src), '「' + key + '」这一类在 menuSelectRow 的 cats 里')
@@ -707,7 +707,7 @@ console.log('\n右键菜单：几类只显示当前值，并排成一行')
 
   // 当前值必须来自纯函数（能被命令行自测直接断言），而不是在 JSX 里现拼
   ok(/styleSummary: styleSummary,/.test(src), 'styleSummary 挂进 internals（自测能直接调）')
-  ok(/PALETTE_LABELS\[menuStyle\] === undefined \? styleSummary\(menuStyle, 'color'\)/.test(src), '空白处右键的「配色」显示当前选中的那个（而不是颜色名表里查不到就空着）')
+  ok(!/hint: '新建节点用的配色'/.test(src), '空白处右键不再显示新建节点配色偏好')
   // 右侧条：主条只放族入口；同族变体进侧面板；放置单次。
   ok(/function renderShapeRail\(/.test(src), '有右侧常驻元素条 renderShapeRail')
   ok(/function pickFamilyFromRail\(/.test(src), '有 pickFamilyFromRail（按族放置）')
@@ -817,8 +817,7 @@ console.log('\nSVG 内容节点：元素条里有入口、右键里能改内容'
   ok(/const DEFAULT_SVG_MARKUP =/.test(src), '有默认占位图（否则点下去得到的是看不见的空框）')
   ok(/function styleForShapePick\(style, shape\)/.test(src), '换形状走 styleForShapePick（唯一"形状决定不了内容"的那一个）')
   ok(/shape === 'svg' && svgMarkupFromStyle\(next\) === null/.test(src), '只给空节点补占位图（已有内容的不覆盖）')
-  // 右键入口：非 svg 节点上是「改成 SVG 图形…」，已经是 svg 就是「SVG 内容…」——同一件事两种说法
-  ok(/'SVG 内容…' : '改成 SVG 图形…'/.test(src), '右键里有编辑图形内容的入口（不是 svg 节点就是"改成 SVG 图形"）')
+  ok(/currentShape === 'svg' \? React\.createElement/.test(src) && !/'改成 SVG 图形…'/.test(src), '右键仅允许编辑已有 SVG 内容，不提供转换入口')
   ok(/onClick: \(\) => openSvgEditor\(menu\.id\)/.test(src), '那个按钮接的是 openSvgEditor')
   ok(/function openSvgEditor\(id\)/.test(src) && /kind: 'svg'/.test(src), 'openSvgEditor 打开 svg 面板')
   ok(/function commitSvgEditor\(id, text\)/.test(src), '有保存函数（内容整段替换）')
@@ -1152,6 +1151,311 @@ console.log('\n「自动路由」不许把悬空端的落点一起删掉（独�
     /^\s*delete e\.sourcePoint\s*$/m.test(clearSrc) === false && /^\s*delete e\.targetPoint\s*$/m.test(clearSrc) === false,
     '没有"无条件删自由端点"那种写法（那正是上面那个事故）',
   )
+}
+
+console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
+{
+  const doc = { nodes: [
+    { id: 'a', x: 0, y: 0, w: 100, h: 60, style: 'fillColor=#ff0000;strokeWidth=2;custom=keepA;' },
+    { id: 'b', x: 150, y: 0, w: 100, h: 60, style: 'fillColor=#00ff00;strokeWidth=4;custom=keepB;' },
+  ], edges: [{ id: 'e', style: 'dashed=1;custom=keepEdge;' }] }
+  let mutations = 0
+  let lineChange = null
+  const context = Object.assign({}, styleKernel, {
+    doc, view: { x: 0, y: 0, w: 500, h: 500 }, size: { w: 260, h: 400 },
+    editing: null, menu: null, placeEdgeKind: null, placeTool: null,
+    selectedIds: ['a', 'b', 'e'], routeMemoryRef: { current: new Map() },
+    React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
+    filterEditableIds: (doc, ids) => ids,
+    nodeBoxOf: (n) => n,
+    edgeRoutePoints: () => [{ x: 100, y: 30 }, { x: 150, y: 30 }],
+    boxOfBoxes: () => ({ x: 0, y: 0, w: 250, h: 60 }),
+    clampNumber: (v, min, max) => Math.min(max, Math.max(min, v)),
+    clampFontSize: (v) => Math.max(8, Math.min(72, Math.round(Number(v)))),
+    shapeFamilyOf: new Function('shape', bodyOf('shapeFamilyOf')),
+    styleForShapePick: styleKernel.styleWithNodeShape,
+    SHAPE_LIBRARY: ['rect', 'ellipse', 'svg', 'image', 'text', 'section'].map((shape) => ({ shape, label: shape })),
+    edgeLineLabelOf: (kind) => kind,
+    railShapeFace: (shape) => ({ type: 'svg', props: { 'data-shape': shape }, children: [] }),
+    railEdgeFace: (kind) => ({ type: 'svg', props: { 'data-line': kind }, children: [] }),
+    applyLocal: (mutate) => { mutations++; mutate(doc) },
+    applyLineKind: (ids, kind) => { lineChange = { ids, kind } },
+    updateEdge: () => {},
+    lastCoalesceRef: { current: null },
+    ColorPalette: 'color-palette', uid: 'test', prefs: { customColors: [] },
+    customColorList: new Function('normalizeCustomColor', 'value', bodyOf('customColorList')).bind(null, new Function('value', bodyOf('normalizeCustomColor'))),
+    loadDrawaiPrefs: () => ({ customColors: [] }), patchPrefs: () => {},
+  })
+  context.isBasicShapeStyle = new Function('shapeFamilyOf', 'nodeShapeFromStyle', 'imageValueFromStyle', 'styleGet', 'style', bodyOf('isBasicShapeStyle')).bind(null,
+    context.shapeFamilyOf, styleKernel.nodeShapeFromStyle, styleKernel.imageValueFromStyle, styleKernel.styleGet)
+  const start = src.indexOf('function renderSelectionToolbar(')
+  const end = src.indexOf('function renderShapeRail(', start)
+  const render = () => new Function(...Object.keys(context), src.slice(start, end) + '\nreturn renderSelectionToolbar()')(...Object.values(context))
+  const flatten = (node) => Array.isArray(node) ? node.flatMap(flatten) : node && typeof node === 'object' ? [node].concat(flatten(node.children || [])) : []
+  const tree = render()
+  ok(tree.props.role === 'toolbar' && tree.props.style.width === '244px', '窄侧栏中浮动工具栏限制在画布宽度内')
+  const controls = flatten(tree)
+  const control = (label) => controls.find((el) => el.props.label === label || el.props['aria-label'] === label)
+  ok(control('字号').props.value === '', '节点与边字号不同，显示混合状态')
+  control('字号').props.onChange('24')
+  ok(doc.nodes.concat(doc.edges).every((cell) => styleKernel.styleGet(cell.style, 'fontSize') === '24'), '字号一次应用到混合选区所有对象')
+  ok(styleKernel.styleGet(doc.nodes[0].style, 'fillColor') === '#ff0000' && styleKernel.styleGet(doc.nodes[1].style, 'fillColor') === '#00ff00', '批量改字号保留不同填充色')
+  ok(styleKernel.styleGet(doc.nodes[1].style, 'custom') === 'keepB' && styleKernel.styleGet(doc.edges[0].style, 'custom') === 'keepEdge', '不覆盖未知样式属性')
+  controls.find((el) => el.type === 'color-palette' && el.props.label === '填充').props.onPick('#123456')
+  ok(doc.nodes.every((n) => styleKernel.styleGet(n.style, 'fillColor') === '#123456') && styleKernel.styleGet(doc.edges[0].style, 'fillColor', '') === '', '填充只作用于图形，不修改混合选区的连线')
+  control('线型').props.onChange('straight')
+  ok(lineChange.kind === 'straight' && JSON.stringify(lineChange.ids) === '["e"]', '线型仅应用到选中的连线，并走几何处理入口')
+  ok(mutations === 2, '每次批量样式修改只提交一次历史操作')
+  const fillPicker = controls.find((el) => el.type === 'color-palette' && el.props.label === '填充')
+  fillPicker.props.onOpacityChange(45)
+  ok(doc.nodes.every((n) => styleKernel.styleGet(n.style, 'fillOpacity') === '45') && styleKernel.styleGet(doc.edges[0].style, 'fillOpacity', '') === '', '填充透明度仅修改节点，不修改混合选区的连线')
+  context.editing = { kind: 'node', id: 'a' }
+  ok(render() === null, '文字输入时工具栏不遮挡编辑框')
+  context.editing = null
+  context.selectedIds = ['a', 'b']
+  const shapeControl = flatten(render()).find((el) => el.props.label === '形状')
+  ok(shapeControl.props.options.every(([value, label, icon]) => ['rect', 'ellipse'].includes(value) && icon.type === 'svg'), '基础图形以同类形状图标展示，排除 SVG/图片/文字/分区')
+  shapeControl.props.onChange('ellipse')
+  ok(doc.nodes.every((node) => styleKernel.nodeShapeFromStyle(node.style) === 'ellipse'), '基础图形可批量切换形状')
+  ok(styleKernel.styleGet(doc.nodes[1].style, 'custom') === 'keepB', '切换形状保留每个节点自己的属性')
+  const markup = '<svg viewBox="0 0 10 10"><path d="M0 0h10v10z"/></svg>'
+  for (const shape of ['svg', 'image', 'text', 'section']) {
+    doc.nodes[1].style = shape === 'svg' ? styleKernel.styleWithSvgMarkup('', markup)
+      : shape === 'image' ? styleKernel.styleWithImageDataUri('', 'data:image/png;base64,aGVsbG8=')
+      : styleKernel.styleWithNodeShape('', shape)
+    context.selectedIds = ['b']
+    ok(!flatten(render()).some((el) => el.props.label === '形状'), shape + ' 单选不显示跨类别换形入口')
+    context.selectedIds = ['a', 'b']
+    ok(!flatten(render()).some((el) => el.props.label === '形状'), shape + ' 混合选区也不显示换形入口')
+    const original = doc.nodes[1].style
+    shapeControl.props.onChange('rect')
+    ok(doc.nodes[1].style === original, '旧换形回调也不会转换 ' + shape + ' 节点')
+  }
+  ok(new Function('setHoverNodeId', 'id', bodyOf('onNodePointerEnter'))((id) => id, 'a') === undefined, '悬停节点仅更新悬停状态，不再触发工具栏气泡')
+  doc.nodes[1].style = 'shape=image;image=refs/logo.png;'
+  context.selectedIds = ['b']
+  ok(!flatten(render()).some((el) => el.props.label === '形状'), '外链图片占位节点也不提供换形入口')
+  context.selectedIds = []
+  ok(render() === null, '清除选择后关闭浮动工具栏')
+}
+
+console.log('\n标准色与自定义色板')
+{
+  const normalize = new Function('value', bodyOf('normalizeCustomColor'))
+  const colors = new Function('normalizeCustomColor', 'value', bodyOf('customColorList')).bind(null, normalize)
+  ok(normalize(' #AbC ') === '#aabbcc' && normalize('#AABBCC') === '#aabbcc', 'HEX 输入支持简写、大小写和空白归一化')
+  ok(normalize('rgb(0,0,0)') === null && normalize('#12345z') === null, '非法颜色不会加入色板')
+  ok(JSON.stringify(colors(['#abc', '#AABBCC', 'invalid', '#123456'])) === '["#aabbcc","#123456"]', '自定义颜色去重并过滤非法值')
+  ok(colors(null).length === 0 && colors({}).length === 0, '旧偏好或损坏偏好没有自定义色时仍可使用')
+  const React = makeReact()
+  const colorsStart = src.indexOf('const STANDARD_COLORS =')
+  const colorsEnd = src.indexOf('function normalizeCustomColor(', colorsStart)
+  const standard = new Function(src.slice(colorsStart, colorsEnd) + ';return STANDARD_COLORS')()
+  ok(standard.length >= 24 && standard.some(([color]) => color === '#ffffff') && standard.some(([color]) => color === '#000000'), '标准色板包含黑白、常用色与浅色')
+  let chosen = null
+  let saved = null
+  let opacity = null
+  const timers = new Map()
+  let timerId = 0
+  const props = { label: '填充', value: '#ffffff', customColors: ['#123456'], opacity: 100, onOpacityChange: (value) => { opacity = value }, onPick: (color) => { chosen = color }, onSaveColor: (color) => { saved = color } }
+  const Palette = new Function('React', 'normalizeCustomColor', 'customColorList', 'STANDARD_COLORS', 'document', 'setTimeout', 'clearTimeout', 'props', bodyOf('ColorPalette')).bind(null,
+    React, normalize, colors, standard, { documentElement: { clientWidth: 360, clientHeight: 800 } },
+    (fn) => { const id = ++timerId; timers.set(id, fn); return id }, (id) => timers.delete(id))
+  const render = () => { React.__reset(); return Palette(props) }
+  const flatten = (node) => Array.isArray(node) ? node.flatMap(flatten) : node && typeof node === 'object' ? [node].concat(flatten(node.children || [])) : []
+  let tree = render()
+  const popup = flatten(tree).find((el) => el.props.className === 'drawai-palette-panel')
+  const anchor = { open: true, getBoundingClientRect: () => ({ left: 330, top: 400, bottom: 436 }) }
+  const panel = { style: {}, offsetWidth: 320, shown: false, getBoundingClientRect: () => ({ height: 230 }), matches() { return this.shown }, showPopover() { this.shown = true }, hidePopover() { this.shown = false } }
+  tree.props.ref.current = anchor
+  popup.props.ref.current = panel
+  tree.props.onToggle({ target: anchor, currentTarget: anchor })
+  ok(panel.shown && panel.style.top === '158px' && panel.style.left === '28px', '色板在工具栏上方弹出，窄窗口中自动靠内定位')
+  tree.props.onPointerEnter()
+  ok(anchor.open && panel.shown, '悬停工具入口直接打开上浮面板')
+  tree.props.onPointerLeave()
+  ok(timers.size === 1 && anchor.open, '移出入口时延迟关闭，留出移向上方浮窗的时间')
+  popup.props.onPointerEnter()
+  ok(timers.size === 0 && anchor.open, '进入浮窗取消关闭计时，不会闪退')
+  popup.props.onPointerLeave()
+  Array.from(timers.values())[0]()
+  ok(!anchor.open && !panel.shown, '移出浮窗后关闭面板')
+  tree.props.onPointerEnter()
+  let prevented = false
+  popup.props.onKeyDown({ key: 'Escape', preventDefault() { prevented = true }, stopPropagation() {} })
+  ok(prevented && !anchor.open && !panel.shown, 'Esc 关闭上浮面板')
+  flatten(tree).find((el) => el.props['aria-label'] === '填充不透明度').props.onChange({ target: { value: '35' } })
+  ok(opacity === 35, '不透明度滑杆传递实际百分比')
+  const details = { open: true }
+  const click = { currentTarget: { closest: () => details } }
+  flatten(tree).find((el) => el.props['aria-label'] === '填充：红').props.onClick(click)
+  ok(chosen === '#ef4444' && details.open === true, '点标准色直接应用并保留面板，可继续调整不透明度')
+  flatten(tree).find((el) => el.props['aria-label'] === '填充：#123456').props.onClick(click)
+  ok(chosen === '#123456', '保存的自定义颜色可直接点击复用')
+  flatten(tree).find((el) => el.props['aria-label'] === '添加自定义颜色').props.onClick()
+  tree = render()
+  flatten(tree).find((el) => el.props['aria-label'] === '自定义颜色 HEX').props.onChange({ target: { value: '#AbC' } })
+  tree = render()
+  const add = flatten(tree).find((el) => el.type === 'button' && el.children.includes('添加并应用'))
+  add.props.onClick(click)
+  ok(saved === '#aabbcc' && chosen === '#aabbcc', '添加自定义色时保存并应用归一化值')
+  tree = render()
+  flatten(tree).find((el) => el.props['aria-label'] === '添加自定义颜色').props.onClick()
+  tree = render()
+  flatten(tree).find((el) => el.props['aria-label'] === '自定义颜色 HEX').props.onChange({ target: { value: '#oops' } })
+  tree = render()
+  ok(flatten(tree).find((el) => el.type === 'button' && el.children.includes('添加并应用')).props.disabled === true, '非法输入时禁用添加按钮')
+  props.options = [['rect', '矩形', { type: 'svg', props: {}, children: [] }], ['ellipse', '椭圆', { type: 'svg', props: {}, children: [] }]]
+  props.label = '形状'
+  props.value = 'rect'
+  props.onChange = (value) => { chosen = value }
+  tree = render()
+  const choices = flatten(tree).filter((el) => el.type === 'button' && el.props['aria-label'] && el.props['aria-label'].startsWith('形状：'))
+  ok(choices.length === 2 && choices.every((el) => el.children[0].type === 'svg'), '形状面板使用图标网格，不使用文字下拉框')
+  choices[1].props.onClick()
+  ok(chosen === 'ellipse', '点击图标触发形状切换')
+}
+
+console.log('\n图层列表：名称编辑和独立操作')
+{
+  const React = makeReact()
+  const editRef = { current: null }
+  React.useRef = () => editRef
+  const calls = []
+  const doc = { nodes: [{ id: 'n', layer: '1' }], edges: [], layers: [{ id: '1', name: '主流程' }, { id: '2', name: '草稿', locked: true, visible: false }] }
+  const props = { doc, selectedIds: ['n'], activeId: '1', uid: 'layer-test', mode: 'light',
+    onRename: (id, name) => { calls.push(['rename', id, name]); doc.layers.find((l) => l.id === id).name = name },
+    onSelect: (id) => calls.push(['select', id]), onVisible: (id) => calls.push(['visible', id]), onLocked: (id) => calls.push(['locked', id]),
+    onRemove: (id) => calls.push(['remove', id]), onMove: (id) => calls.push(['move', id]), onCreate: () => { doc.layers.push({ id: '3', name: '图层 3' }); return '3' },
+  }
+  const events = new Map()
+  const label = new Function('layer', 'index', bodyOf('layerLabelOf'))
+  const Panel = new Function('React', 'layerLabelOf', 'filterEditableIds', 'LayerThumbnail', 'layerActionIcon', 'document', 'props', bodyOf('LayersPanel')).bind(null, React, label, (doc, ids) => ids, 'thumbnail', (kind) => kind,
+    { addEventListener: (name, callback) => events.set(name, callback), removeEventListener: (name) => events.delete(name) })
+  const render = () => { React.__reset(); return Panel(props) }
+  const flatten = (node) => Array.isArray(node) ? node.flatMap(flatten) : node && typeof node === 'object' ? [node].concat(flatten(node.children || [])) : []
+  const find = (tree, label) => flatten(tree).find((node) => node.props['aria-label'] === label)
+  let tree = render()
+  React.__runEffects()
+  ok(flatten(tree).filter((node) => node.props.className && node.props.className.startsWith('drawai-layer-row')).length === 2, '每个图层只占一个主行')
+  ok(flatten(tree).filter((node) => node.type === 'thumbnail').length === 2, '每层有内容缩略图')
+  find(tree, '隐藏 主流程').props.onClick()
+  find(tree, '解锁 草稿').props.onClick()
+  ok(JSON.stringify(calls) === '[["visible","1"],["locked","2"]]', '可见性和锁定操作不切换当前层')
+  find(tree, '重命名 主流程').props.onClick()
+  tree = render()
+  const input = find(tree, '图层名称')
+  input.props.onChange({ target: { value: '业务流程' } })
+  tree = render()
+  const key = (key, value) => ({ key, target: { value }, preventDefault() {}, stopPropagation() {} })
+  const editing = find(tree, '图层名称')
+  editing.props.onKeyDown(key('Enter', '业务流程'))
+  editing.props.onBlur({ target: { value: '业务流程' } })
+  ok(doc.layers[0].name === '业务流程' && calls.filter((call) => call[0] === 'rename').length === 1, '名称 Enter 保存且失焦不会重复提交')
+  tree = render()
+  find(tree, '重命名 业务流程').props.onClick()
+  tree = render()
+  find(tree, '图层名称').props.onKeyDown(key('Escape', '不应保存'))
+  ok(doc.layers[0].name === '业务流程', 'Esc 取消图层重命名')
+  tree = render()
+  find(tree, '重命名 业务流程').props.onClick()
+  tree = render()
+  find(tree, '图层名称').props.onChange({ target: { value: '点击外部保存' } })
+  events.get('pointerdown')({ target: { closest: () => null } })
+  ok(doc.layers[0].name === '点击外部保存', '菜单关闭前通过捕获事件保存名称草稿，避免依赖卸载时 blur')
+  tree = render()
+  const move = find(tree, '移动到图层')
+  ok(flatten(move).find((node) => node.type === 'option' && node.props.value === '2').props.disabled === true, '移层选择器禁用锁定目标')
+  move.props.onChange({ target: { value: '1' } })
+  ok(calls.some((call) => call[0] === 'move' && call[1] === '1'), '移层动作携带目标层 id')
+  flatten(tree).find((node) => node.type === 'button' && node.children.includes('＋ 新建图层')).props.onClick()
+  tree = render()
+  ok(find(tree, '图层名称').props.value === '图层 3', '新建图层后直接进入名称编辑')
+}
+
+console.log('\n连续调整画布窗口大小')
+{
+  const element = { clientWidth: 800, clientHeight: 600 }
+  const measuredRef = { current: { w: 800, h: 600 } }
+  const viewRef = { current: { x: 40, y: -20, w: 400, h: 300 } }
+  let nextView = null
+  let nextSize = null
+  const resizeViewFor = new Function('current', 'prevSize', 'nextSize', bodyOf('resizeViewFor'))
+  const measure = new Function('element', 'measuredRef', 'viewRef', 'resizeViewFor', 'setViewOverride', 'setSize', bodyOf('measure'))
+    .bind(null, element, measuredRef, viewRef, resizeViewFor, (value) => { nextView = value }, (value) => { nextSize = value })
+  const commit = new Function('measuredRef', 'viewRef', 'size', 'view', bodyOf('syncCommittedViewport'))
+    .bind(null, measuredRef, viewRef)
+  // 两次 observer 通知之间不模拟 React 渲染，复现布局拖动比提交更快的情况。
+  for (const [w, h] of [[1000, 600], [1200, 500], [500, 900], [800, 600]]) {
+    const oldSize = measuredRef.current
+    const oldView = viewRef.current
+    element.clientWidth = w; element.clientHeight = h
+    measure()
+    // observer 之后旧渲染才提交：旧尺寸不能覆盖下一次通知使用的视口。
+    commit(oldSize, oldView)
+    ok(nextSize.w / nextView.w === 2 && nextSize.h / nextView.h === 2, '连续通知 ' + w + '×' + h + ' 保持横纵缩放比例')
+    ok(nextView.x === 40 && nextView.y === -20 && viewRef.current === nextView, '视野原点不变且同步更新事件读取的视口')
+  }
+  const previous = viewRef.current
+  element.clientWidth = 0; element.clientHeight = 0
+  measure()
+  ok(viewRef.current === previous && measuredRef.current.w === 800, '标签页隐藏时保留有效的视口和尺寸')
+  element.clientWidth = 1000; element.clientHeight = 700
+  measure()
+  ok(nextSize.w / nextView.w === 2 && nextSize.h / nextView.h === 2, '重新显示标签页后仍保持原有比例')
+  commit(nextSize, { x: 10, y: 20, w: 1000, h: 700 })
+  element.clientWidth = 500; element.clientHeight = 400
+  measure()
+  ok(nextSize.w / nextView.w === 1 && nextSize.h / nextView.h === 1 && nextView.x === 10 && nextView.y === 20,
+    '主动缩放和平移提交后，后续拖动保持新的比例和原点')
+}
+
+console.log('\n导出参数面板')
+{
+  const React = makeReact()
+  let request = null
+  let saved = null
+  const props = { doc: { nodes: [{ id: 'n' }], edges: [] }, selectedIds: ['n'], path: 'docs/示意.drawio', prefs: { exportOptions: { format: 'png', scale: 2 } },
+    onPrefs: (value) => { saved = value }, onExport: (value) => { request = value } }
+  const bounds = () => ({ minX: 0, minY: 0, maxX: 100, maxY: 50 })
+  const numberOr = new Function('value', 'fallback', bodyOf('numberOr'))
+  const normalizeCustomColor = new Function('value', bodyOf('normalizeCustomColor'))
+  const hiddenLayerIds = new Function('doc', bodyOf('hiddenLayerIds'))
+  const isHiddenCell = new Function('hidden', 'cell', bodyOf('isHiddenCell'))
+  const exportDocument = new Function('docFilteredToIds', 'nodeBoxOf', 'hiddenLayerIds', 'isHiddenCell', 'doc', 'options', bodyOf('exportDocument')).bind(null, (doc) => doc, (node) => node, hiddenLayerIds, isHiddenCell)
+  const exportGeometry = new Function('numberOr', 'paintedBounds', 'contentBounds', 'doc', 'options', bodyOf('exportGeometry')).bind(null, numberOr, bounds, bounds)
+  const exportOutputSize = new Function('numberOr', 'width', 'height', 'options', bodyOf('exportOutputSize')).bind(null, numberOr)
+  const context = { React, numberOr, normalizeCustomColor, exportDocument, exportGeometry, exportOutputSize, hiddenLayerIds, isHiddenCell,
+    layerLabelOf: (layer) => layer.name, ColorPalette: 'color-palette', customColorList: (list) => list }
+  const Panel = new Function(...Object.keys(context), 'props', bodyOf('ExportPanel')).bind(null, ...Object.values(context))
+  const render = () => { React.__reset(); return Panel(props) }
+  const flatten = (node) => Array.isArray(node) ? node.flatMap(flatten) : node && typeof node === 'object' ? [node].concat(flatten(node.children || [])) : []
+  const find = (tree, label) => flatten(tree).find((node) => node.props['aria-label'] === label)
+  let tree = render()
+  ok(find(tree, '导出范围').props.value === 'all', '导出默认整张画布，不隐式裁到当前选区')
+  ok(find(tree, '导出分辨率').props.value === '2' && find(tree, '导出文件名').props.value === '示意', '恢复本机分辨率偏好，并预填画布名称')
+  find(tree, '导出范围').props.onChange({ target: { value: 'selection' } })
+  find(tree, '导出格式').props.onChange({ target: { value: 'svg' } })
+  find(tree, '导出背景').props.onChange({ target: { value: 'transparent' } })
+  tree = render()
+  ok(find(tree, '导出分辨率') === undefined, 'SVG 格式隐藏无关的分辨率选项')
+  find(tree, '导出文件名').props.onChange({ target: { value: '图/样.svg' } })
+  find(tree, '四周留白').props.onChange({ target: { value: '0' } })
+  find(tree, '导出网格').props.onChange({ target: { checked: true } })
+  tree = render()
+  find(tree, '导出尺寸方式').props.onChange({ target: { value: 'custom' } })
+  tree = render()
+  find(tree, '宽度 px').props.onChange({ target: { value: '800' } })
+  tree = render()
+  ok(Number(find(tree, '高度 px').props.value) === 400, '指定宽度后按内容比例调整高度，留白为零仍正确')
+  find(tree, '保持宽高比').props.onChange({ target: { checked: false } })
+  tree = render()
+  find(tree, '高度 px').props.onChange({ target: { value: '300' } })
+  tree = render()
+  flatten(tree).find((node) => node.type === 'button' && node.children.includes('导出')).props.onClick()
+  ok(request.format === 'svg' && request.transparent && request.name === '图_样' && JSON.stringify(request.ids) === '["n"]', '格式、范围、透明度和合法文件名传入现有导出通道')
+  ok(saved.exportOptions.format === 'svg' && saved.exportOptions.scale === 2, '导出设置保存到本机偏好')
+  ok(request.padding === 0 && request.grid && request.pixelWidth === 800 && request.pixelHeight === 300 && request.lockAspect === false, '高级尺寸、留白、独立网格和比例设置传入实际导出')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')

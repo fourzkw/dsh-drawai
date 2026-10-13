@@ -340,10 +340,32 @@ const CSS = [
   // 背景透明、颜色与字号由 inline style 按**这个节点**给（见 renderDiagram 的 labelTextBox）。
   '.drawai-edit{position:absolute;z-index:5;box-sizing:border-box;outline:2px solid #1a73e8;outline-offset:-2px;border:none;border-radius:4px;background:transparent;color:#000;font-family:Helvetica, Arial, sans-serif;font-size:12px;line-height:14px;text-align:center;padding:0;margin:0;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text}',
   '.drawai-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}',
+  '.drawai-selection-toolbar{position:absolute;z-index:6;box-sizing:border-box;display:flex;flex-wrap:nowrap;align-items:stretch;gap:2px;padding:5px 6px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:0 8px 28px #20273814,0 2px 6px #20273808}',
+  '.drawai-style-control{display:flex;align-items:center;gap:5px;font-size:11px;white-space:nowrap;padding-left:8px;border-left:1px solid var(--dsw-alias-border-l2,#e1e3e8)}',
+  '.drawai-style-control select,.drawai-style-control input{box-sizing:border-box;height:30px;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:7px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;max-width:100px;padding:2px 5px}',
+  '.drawai-style-control input[type=color]{width:28px;padding:2px;cursor:pointer}.drawai-style-control input[type=number]{width:52px;padding:2px 4px}',
+  '.drawai-color-palette{flex:1 0 38px;min-width:38px}.drawai-color-palette summary{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;list-style:none;padding:5px 3px;border-radius:7px;min-height:44px}.drawai-color-palette summary::-webkit-details-marker{display:none}.drawai-color-palette summary:hover,.drawai-color-palette[open] summary{background:var(--dsw-alias-bg-layer-2,#f0f1f3)}',
+  '.drawai-color-preview{display:inline-block;flex:0 0 22px;width:22px;height:22px;border:1px solid #d9dde3;border-radius:50%;background:repeating-conic-gradient(#ddd 0% 25%,#fff 0% 50%) 50%/8px 8px}.drawai-color-caret{font-size:13px;color:#7b818c}.drawai-color-palette:not([open]) .drawai-color-caret{transform:rotate(180deg)}',
+  '.drawai-palette-panel{position:fixed;inset:auto;margin:0;width:320px;box-sizing:border-box;padding:18px;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:0 14px 44px #20273824,0 3px 10px #2027380a;overflow:auto;z-index:1000}.drawai-palette-panel::backdrop{background:transparent}.drawai-palette-hint{font-size:11px;opacity:.7;margin:6px 0}',
+  '.drawai-palette-grid{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:10px 7px}.drawai-palette-swatch{width:100%;aspect-ratio:1;min-height:20px;border:none;border-radius:50%;cursor:pointer;padding:0;box-shadow:inset 0 0 0 1px #80808014;transition:box-shadow .12s,transform .12s}.drawai-palette-swatch:hover{transform:scale(1.08)}.drawai-palette-swatch[aria-pressed=true]{outline:2px solid #386bff;outline-offset:3px}',
+  '.drawai-palette-swatch[title^="无颜色"],.drawai-color-preview.none{background:linear-gradient(135deg,transparent 47%,#c8cdd5 48%,#c8cdd5 52%,transparent 53%)!important;border:1px solid #c8cdd5}',
+  '.drawai-palette-custom{margin-top:12px}.drawai-palette-plus{width:100%;aspect-ratio:1;border:none;border-radius:50%;background:var(--dsw-alias-bg-layer-2,#edeef0);color:var(--dsw-alias-label-secondary,#707782);font-size:24px;line-height:1;cursor:pointer}.drawai-palette-plus:hover{background:#e1e7ff;color:#386bff}',
+  '.drawai-palette-add{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#eee)}.drawai-palette-add input{box-sizing:border-box;height:30px;border:1px solid #d9dde3;border-radius:6px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit}.drawai-palette-add input[type=color]{width:32px;padding:2px}.drawai-palette-add input[type=text]{width:90px;padding:4px;font:12px ui-monospace,monospace}.drawai-palette-add button{font-size:11px}',
+  '.drawai-palette-opacity{margin-top:24px}.drawai-palette-opacity-label{display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:10px}.drawai-palette-opacity-label span{color:var(--dsw-alias-label-secondary,#767d89)}.drawai-palette-opacity input{display:block;width:100%;height:18px;margin:0;accent-color:#2355ed;cursor:pointer}',
+  '.drawai-tool-icon{position:relative;height:25px;min-width:28px;display:flex;align-items:center;justify-content:center;padding-right:7px}.drawai-tool-icon>svg{width:28px;height:25px}.drawai-color-label{font-size:10px;line-height:13px;white-space:nowrap;color:var(--dsw-alias-label-secondary,#737a86)}.drawai-tool-icon .drawai-color-caret{position:absolute;right:-2px;top:6px;font-size:10px}.drawai-color-preview.stroke{background:transparent;border-width:5px;box-sizing:border-box}.drawai-font-icon{font:24px/24px Georgia,serif;border-bottom:3px solid}.drawai-value-icon{font:18px/25px Arial,sans-serif}',
+  '.drawai-popover-title{font-size:13px;margin:0 0 12px}.drawai-shape-options{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px}.drawai-choice-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.drawai-choice-button{display:flex;align-items:center;justify-content:center;min-height:38px;padding:4px;border:0;border-radius:7px;background:transparent;color:inherit;cursor:pointer;font-size:16px}.drawai-choice-button:hover{background:var(--dsw-alias-bg-layer-2,#f1f3f6)}.drawai-choice-button.on{background:#e8efff;color:#386bff}.drawai-shape-options .drawai-choice-button{aspect-ratio:1}.drawai-shape-options svg{width:34px;height:28px}',
+  '.drawai-stroke-options{padding-bottom:14px;margin-bottom:16px;border-bottom:1px solid var(--dsw-alias-border-l2,#e1e3e8)}.drawai-option-strip{display:flex;gap:4px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,#f4f5f7);padding:3px;margin:7px 0}.drawai-option-strip>.drawai-choice-button{flex:1}.drawai-width-dot{display:block;background:currentColor;border-radius:50%}.drawai-font-custom{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#eee);font-size:11px}.drawai-font-custom input{box-sizing:border-box;width:100%;height:30px;padding:4px 6px;border:1px solid #d9dde3;border-radius:6px;background:transparent;color:inherit}',
   // 右键菜单 / 元素库
   '.drawai-menu{position:absolute;z-index:20;min-width:196px;padding:8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#555);background:var(--dsw-alias-bg-overlay,#1e1e1e);box-shadow:0 10px 28px rgba(0,0,0,.4);color:var(--dsw-alias-label-primary,#e6e6e6)}',
   '.drawai-menu-title{font-size:11px;color:var(--dsw-alias-label-secondary,#9aa0a6);margin:0 0 6px}',
+  '.drawai-menu-separator{height:1px;margin:6px 0;background:var(--dsw-alias-border-l2,#e1e3e8)}.drawai-menu-label{display:inline-block}.drawai-menu-shortcut{float:right;margin-left:16px;font-size:10px;opacity:.55}.drawai-page-picker{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;padding:8px 2px;border-top:1px solid var(--dsw-alias-border-l2,#e1e3e8)}.drawai-page-picker select{padding:4px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:5px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit}',
+  '.drawai-special-panel{box-sizing:border-box;padding:0;min-width:0;overflow:hidden;border-radius:12px}.drawai-layers-panel{display:flex;flex-direction:column;max-height:inherit}.drawai-panel-heading{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;font-size:13px;font-weight:600;border-bottom:1px solid var(--dsw-alias-border-l2,#e1e3e8)}.drawai-panel-heading span{font-size:11px;font-weight:400;opacity:.65}',
+  '.drawai-layer-list{overflow:auto;min-height:0;max-height:340px;padding:6px}.drawai-layer-row{display:flex;align-items:center;gap:5px;padding:7px 5px;border-radius:8px;min-width:0}.drawai-layer-row.active{background:rgba(56,107,255,.12)}.drawai-layer-row.hidden .drawai-layer-namebox{opacity:.55}.drawai-layer-thumb{flex:0 0 52px;width:52px;height:38px;padding:2px;overflow:hidden;border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:5px;background:#fff;cursor:pointer}.drawai-layer-thumb svg{display:block;width:100%;height:100%;pointer-events:none}.drawai-layer-empty{font-size:9px;color:#999}',
+  '.drawai-layer-namebox{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}.drawai-layer-name{display:block;max-width:100%;border:0;background:none;padding:0;text-align:left;font-size:12px;color:inherit;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.drawai-layer-meta{font-size:10px;opacity:.6}.drawai-layer-icon{display:flex;align-items:center;justify-content:center;flex:0 0 23px;width:23px;height:26px;border:0;border-radius:5px;background:none;color:inherit;cursor:pointer;padding:2px}.drawai-layer-icon:hover{background:rgba(128,128,128,.15)}',
+  '.drawai-layer-name-input,.drawai-panel-input{box-sizing:border-box;min-width:0;width:100%;border:1px solid #386bff;border-radius:5px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;padding:4px;font-size:12px}.drawai-panel-input{width:calc(100% - 24px);margin:8px 12px;border-color:var(--dsw-alias-border-l2,#d9dde3)}.drawai-layer-more{display:flex;flex-direction:column;gap:6px;padding:6px 10px 10px}.drawai-layer-more span{font-size:10px;opacity:.65}.drawai-layer-footer{flex:0 0 auto;display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-top:1px solid var(--dsw-alias-border-l2,#e1e3e8)}.drawai-layer-move{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:11px}.drawai-layer-move select{min-width:0;max-width:55%;border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:5px;padding:4px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit}',
   '.drawai-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}',
+  '.drawai-export-fields{display:flex;flex-direction:column;gap:12px;padding:14px}.drawai-export-field{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px}.drawai-export-field>span{flex:0 0 44px}.drawai-export-field select,.drawai-export-field input{box-sizing:border-box;min-width:0;width:100%;border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:6px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;padding:6px;font-size:12px}.drawai-export-filename{display:flex;align-items:center;gap:4px;min-width:0}.drawai-export-filename span{font-size:11px;opacity:.65}.drawai-export-info{font-size:11px;opacity:.65;line-height:1.6}.drawai-primary-btn{background:#386bff;color:white;border-color:#386bff;padding:7px 12px}.drawai-primary-btn:disabled{opacity:.5;cursor:default}',
+  '.drawai-export-advanced{border-top:1px solid var(--dsw-alias-border-l2,#e1e3e8);padding-top:10px}.drawai-export-advanced>summary{font-size:12px;cursor:pointer;margin-bottom:10px}.drawai-export-advanced>.drawai-export-field{margin:10px 0}.drawai-export-check{display:flex;align-items:center;gap:6px;font-size:11px;margin:8px 0}.drawai-export-dimensions{display:flex;flex-wrap:wrap;gap:8px}.drawai-export-dimension{display:flex;flex:1;min-width:75px;flex-direction:column;gap:5px;font-size:10px}.drawai-export-dimension input{box-sizing:border-box;width:100%;min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:5px;padding:6px;background:transparent;color:inherit}.drawai-export-dimensions>.drawai-export-check{flex-basis:100%}.drawai-export-layer-options{display:flex;flex-direction:column;gap:6px;max-height:140px;overflow:auto;padding:8px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:6px}.drawai-export-layer-options label{display:flex;align-items:center;gap:5px;font-size:11px}',
   '.drawai-chip{display:flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:6px;background:transparent;padding:1px;cursor:pointer}',
   '.drawai-chip:hover{border-color:var(--dsw-alias-brand-primary,#4c8dff);background:rgba(76,141,255,.14)}',
   '.drawai-swatches{display:flex;gap:6px;margin-top:8px}',
@@ -374,6 +396,7 @@ const CSS = [
   // 下拉面板：left/top 由**触发它的按钮**算出来（inline style），这里只给宽度与兜底位置。
   // 兜底 left:8px;top:38px 用于"量不到按钮位置"的情形（首帧 ref 还没挂）。
   '.drawai-docmenu{left:8px;top:38px;min-width:220px;max-width:min(320px,90%)}',
+  '.drawai-docmenu.drawai-special-panel{min-width:0;max-width:calc(100% - 8px)}',
   // 下拉菜单项：整行可点，右侧/下方带一句说明。按钮默认是 inline 且 nowrap，
   // 这里要改成块级 + 允许换行，否则说明文字会把面板撑爆。
   '.drawai-menu-item{display:block;width:100%;text-align:left;margin-bottom:3px;white-space:normal}',
@@ -413,7 +436,16 @@ function charWidth(ch, size) {
   return wide ? size : size * 0.55
 }
 
+let labelMeasureContext = null
 function textWidth(text, size) {
+  // 浏览器按实际字体量宽；无 DOM 的自测环境保留确定性的估算回退。
+  if (labelMeasureContext === null && typeof document !== 'undefined' && typeof document.createElement === 'function') {
+    try { labelMeasureContext = document.createElement('canvas').getContext('2d') } catch (error) { /* 无 canvas 的环境 */ }
+  }
+  if (labelMeasureContext !== null && typeof labelMeasureContext.measureText === 'function') {
+    labelMeasureContext.font = numberOr(size, FSIZE) + 'px ' + FONT
+    return labelMeasureContext.measureText(String(text)).width
+  }
   const chars = Array.from(String(text))
   let total = 0
   for (let i = 0; i < chars.length; i += 1) total += charWidth(chars[i], size)
@@ -434,16 +466,13 @@ function wrapLabel(label, maxWidth, size) {
   for (let p = 0; p < paras.length; p += 1) {
     const chars = Array.from(paras[p])
     let current = ''
-    let width = 0
     for (let i = 0; i < chars.length; i += 1) {
-      const cw = charWidth(chars[i], fs)
-      if (width + cw > maxWidth && current.length > 0) {
+      const nextWidth = textWidth(current + chars[i], fs)
+      if (nextWidth > maxWidth && current.length > 0) {
         lines.push(current)
         current = ''
-        width = 0
       }
       current += chars[i]
-      width += cw
     }
     lines.push(current)
   }
@@ -534,28 +563,29 @@ function labelLineHeight(fontSize) {
  *
  * 为什么不按整个节点框铺：编辑框必须与最终文字**同一个宽度**，否则断行位置都不一样
  * （需求"输入时的效果与输入完成后一致"）。菱形/椭圆的文字区比节点窄，这一条尤其明显。
- * 所以左/上/宽取 `labelTextBox`，高度取"节点框高与行数所需高度的大者"——
- * 打到第 3 行时编辑框自己长高，不会把字裁掉。
+ * 所以位置与尺寸都取 `labelTextBox`，并用草稿计算节点撑高后的几何。
  *
  * `ctm` 是 SVG 的屏幕变换（只有缩放与平移，没有旋转），`origin` 是画布容器左上角的屏幕坐标。
  */
-function nodeEditorBox(node, text, ctm, origin) {
+function nodeEditorBox(node, text, ctm, origin, mode) {
   const scale = numberOr(ctm.a, 1)
-  const geo = nodeBoxOf(node)
   const label = typeof text === 'string' ? text : ''
+  const geo = nodeBoxOf(Object.assign({}, node, { label }))
   const textBox = labelTextBox({ node: node, geo: geo, text: label })
   const size = nodeEditorTextSize(node, label)
-  // 高度：行数不够时就是原来那个节点框高（编辑一个小节点不该让它看起来先跳高），
-  // 行数超过时按行数长高 —— 打到第 3 行不会把字裁掉。
-  const boxH = Math.max(textBox.h, FALLBACK_NODE_H)
+  // textarea 的首行在自身顶部，必须贴文字行盒，不能从整个节点顶部开始排字。
+  const boxH = textBox.h
   return {
     left: textBox.x * scale + numberOr(ctm.e, 0) - origin.left,
-    top: (geo.y - (boxH - geo.h) / 2) * scale + numberOr(ctm.f, 0) - origin.top,
+    top: textBox.y * scale + numberOr(ctm.f, 0) - origin.top,
     width: textBox.w * scale,
     height: boxH * scale,
     fontSize: size.fontSize * scale,
     lineHeight: size.lineHeight * scale,
-    color: colorOf(node, 'light').font,
+    color: colorOf(node, mode).font,
+    opacity: clampNumber(styleNumber(node.style || '', 'textOpacity', 100), 0, 100) / 100,
+    scale: scale,
+    textAlign: shapeOf(node) === 'section' ? 'left' : 'center',
     // 编辑框里的换行方式与画布上的标签一致：nowrap 的标签在编辑时也不换行。
     wraps: size.wraps,
   }
@@ -578,12 +608,13 @@ function labelTextBox(box) {
   const w = Math.max(12, labelTextWidth(box.node, geo.w))
   const lineHeight = labelLineHeight(fontSize)
   const text = typeof box.text === 'string' ? box.text : typeof box.node.label === 'string' ? box.node.label : ''
-  const cols = labelWraps(box.node) ? wrapLabel(text, w, fontSize).length : 1
+  const cols = labelWraps(box.node) ? wrapLabel(text, w, fontSize).length : text.split('\n').length
   // 文字区的**左右边界**在节点里是居中的：右栏窄，菱形/椭圆的可用宽度比节点小很多，
   // 从节点左边起排会让编辑框里的字整体偏左。
-  const x = geo.x + (geo.w - w) / 2
+  const section = shapeOf(box.node) === 'section'
+  const x = section ? geo.x + 10 : geo.x + (geo.w - w) / 2
   const h = Math.max(lineHeight * cols, lineHeight)
-  return { x: x, y: geo.y + Math.max(0, (geo.h - h) / 2), w: w, h: h, fontSize: fontSize, lineHeight: lineHeight }
+  return { x: x, y: section ? geo.y + 6 : geo.y + (geo.h - h) / 2, w: w, h: h, fontSize: fontSize, lineHeight: lineHeight }
 }
 
 /** 标签的字号与行高（就地编辑框要按它画字，否则输入时和输完后大小不一样）。 */
@@ -593,7 +624,7 @@ function nodeEditorTextSize(node, text) {
   // 不换行的标签（whiteSpace=nowrap）在编辑框里也不该换行 —— 否则一打字就换行、
   // 一提交又缩回一行，正是"输入时/输完后不一致"。
   const wraps = labelWraps(node)
-  const cols = wraps ? wrapLabel(typeof text === 'string' ? text : '', Math.max(12, labelTextWidth(node, numberOr(node.w, FALLBACK_NODE_W))), fontSize).length : 1
+  const cols = wraps ? wrapLabel(typeof text === 'string' ? text : '', Math.max(12, labelTextWidth(node, numberOr(node.w, FALLBACK_NODE_W))), fontSize).length : String(text || '').split('\n').length
   return { fontSize: fontSize, lineHeight: lineHeight, lines: cols, wraps: wraps }
 }
 
@@ -1660,7 +1691,10 @@ function shapeElement(node, geo, palette, mode) {
   // 顶点也吃 drawio 的描边参数：strokeWidth / dashed / dashPattern 都在文档里。
   const strokeWidth = styleNumber(style, 'strokeWidth', 1)
   const pattern = dashPatternFromStyle(style)
-  const common = { fill: fill, stroke: stroke, strokeWidth: strokeWidth }
+  const common = { fill: fill, stroke: stroke, strokeWidth: strokeWidth,
+    fillOpacity: clampNumber(styleNumber(style, 'fillOpacity', 100), 0, 100) / 100,
+    strokeOpacity: clampNumber(styleNumber(style, 'strokeOpacity', 100), 0, 100) / 100,
+  }
   if (pattern !== null) common.strokeDasharray = pattern
   // 独立文字：**不画任何边框/底色**，只留一个透明命中框。
   // 为什么还要那个 rect：节点组靠子元素的命中测试接收指针事件（形状 + 标签同组），
@@ -1682,6 +1716,8 @@ function shapeElement(node, geo, palette, mode) {
       fill: fill === undefined || fill === null || fill === '' ? '#f5f5f5' : fill,
       stroke: stroke,
       strokeWidth: strokeWidth,
+      fillOpacity: common.fillOpacity,
+      strokeOpacity: common.strokeOpacity,
       strokeDasharray: pattern !== null ? pattern : '6 3',
     })
   }
@@ -1835,7 +1871,7 @@ function labelPaintBounds(node, geo) {
   const lineHeight = labelLineHeight(fontSize)
   const box = labelTextBox({ node: node, geo: geo, fontSize: fontSize })
   // 与渲染同一处断行：maxWidth 就是那一个 labelTextWidth（nowrap = 一行到底）。
-  const lines = labelWraps(node) ? wrapLabel(label, box.w, fontSize) : [label]
+  const lines = labelWraps(node) ? wrapLabel(label, box.w, fontSize) : label.split('\n')
   let widest = 0
   for (let i = 0; i < lines.length; i += 1) {
     const w = textWidth(lines[i], fontSize)
@@ -2087,6 +2123,12 @@ function shapeFamilyOf(shape) {
   if (shape === 'svg') return 'svg'
   if (shape === 'image') return 'image'
   return 'shape'
+}
+
+/** 外链图片虽然按矩形占位显示，也不能作为基础图形换形。 */
+function isBasicShapeStyle(style) {
+  return shapeFamilyOf(nodeShapeFromStyle(style)) === 'shape' &&
+    imageValueFromStyle(style) === null && styleGet(style, 'shape', null) !== 'image'
 }
 
 function shapesInFamily(family) {
@@ -2812,6 +2854,147 @@ function docFilteredToIds(doc, ids) {
 const DRAWAI_PREFS_KEY = 'dsh-drawai.prefs'
 const DEFAULT_DRAWAI_PREFS = { showGrid: true, defaultShape: 'rounded', defaultColor: 'blue' }
 
+const STANDARD_COLORS = [
+  ['#ffffff', '白'], ['#f5f5f5', '浅灰'], ['#e1d5e7', '浅紫'], ['#eff4ff', '冰蓝'],
+  ['#d7def4', '浅靛蓝'], ['#d5e8d4', '浅绿'], ['#fff2cc', '浅黄'], ['#f8cecc', '浅红'],
+  ['#000000', '黑'], ['#6b7280', '灰'], ['#bcc0c7', '银灰'], ['#8567c9', '紫'],
+  ['#517bc8', '蓝'], ['#5364aa', '靛蓝'], ['#4e9a66', '绿'], ['#d8b953', '金黄'], ['#ef4444', '红'],
+  ['#ffe6cc', '浅橙'], ['#ccfbf1', '浅青绿'], ['#cffafe', '浅青'], ['#f97316', '橙'],
+  ['#14b8a6', '青绿'], ['#ec4899', '粉'], ['#92400e', '棕'],
+]
+
+function normalizeCustomColor(value) {
+  const text = String(value || '').trim().toLowerCase()
+  if (/^#[0-9a-f]{6}$/.test(text)) return text
+  if (/^#[0-9a-f]{3}$/.test(text)) return '#' + text.slice(1).split('').map((c) => c + c).join('')
+  return null
+}
+
+function customColorList(value) {
+  return Array.isArray(value) ? Array.from(new Set(value.map(normalizeCustomColor).filter((color) => color !== null))) : []
+}
+
+/** 色板默认展示标准颜色，自定义取色仅作为添加入口。 */
+function ColorPalette(props) {
+  const [draft, setDraft] = React.useState(() => normalizeCustomColor(props.value) || '#3b82f6')
+  const [customOpen, setCustomOpen] = React.useState(false)
+  const detailsRef = React.useRef(null)
+  const panelRef = React.useRef(null)
+  const closeTimerRef = React.useRef(null)
+  const custom = customColorList(props.customColors)
+  const normalized = normalizeCustomColor(draft)
+  const positionPanel = () => {
+    const details = detailsRef.current
+    const panel = panelRef.current
+    if (details === null || panel === null || !details.open) return
+    if (typeof panel.showPopover === 'function' && !panel.matches(':popover-open')) panel.showPopover()
+    const anchor = details.getBoundingClientRect()
+    const viewportWidth = document.documentElement.clientWidth
+    const viewportHeight = document.documentElement.clientHeight
+    const preferredWidth = props.options && props.label === '字号' ? 156 : 320
+    panel.style.width = Math.min(preferredWidth, viewportWidth - 24) + 'px'
+    panel.style.maxHeight = Math.max(120, viewportHeight - 24) + 'px'
+    const height = panel.getBoundingClientRect().height
+    panel.style.left = Math.max(12, Math.min(anchor.left - 12, viewportWidth - panel.offsetWidth - 12)) + 'px'
+    const above = anchor.top - height - 12
+    const below = anchor.bottom + 12
+    panel.style.top = Math.max(12, above >= 12 ? above : Math.min(below, viewportHeight - height - 12)) + 'px'
+  }
+  const close = () => {
+    if (closeTimerRef.current !== null) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null }
+    if (detailsRef.current !== null) detailsRef.current.open = false
+    const panel = panelRef.current
+    if (panel !== null && typeof panel.hidePopover === 'function' && panel.matches(':popover-open')) panel.hidePopover()
+  }
+  const keepOpen = () => {
+    if (closeTimerRef.current !== null) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null }
+    if (detailsRef.current !== null) { detailsRef.current.open = true; positionPanel() }
+  }
+  const scheduleClose = () => {
+    const active = document.activeElement
+    if (panelRef.current !== null && active && active.tagName === 'INPUT' && panelRef.current.contains(active)) return
+    if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current)
+    closeTimerRef.current = setTimeout(close, 220)
+  }
+  React.useEffect(() => {
+    const onOutside = (event) => {
+      if (detailsRef.current !== null && !detailsRef.current.contains(event.target)) close()
+    }
+    document.addEventListener('pointerdown', onOutside, true)
+    window.addEventListener('resize', close)
+    return () => { document.removeEventListener('pointerdown', onOutside, true); window.removeEventListener('resize', close); if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current) }
+  }, [])
+  React.useEffect(() => { positionPanel() }, [customOpen, custom.length])
+  const choose = (color, event) => {
+    props.onPick(color)
+  }
+  const swatch = (color, name) => React.createElement('button', {
+    key: color, type: 'button', className: 'drawai-palette-swatch',
+    'aria-label': props.label + '：' + name, 'aria-pressed': (color === 'none' ? props.value === 'none' : normalizeCustomColor(props.value) === color),
+    title: name + ' ' + color, style: { background: color },
+    onClick: (event) => choose(color, event),
+  })
+  return React.createElement('details', { ref: detailsRef, className: 'drawai-color-palette', name: props.group,
+    onPointerEnter: keepOpen, onPointerLeave: scheduleClose,
+    onToggle: (event) => {
+      if (event.target !== event.currentTarget) return
+      if (event.currentTarget.open) { if (typeof props.onOpen === 'function') props.onOpen(); positionPanel() }
+      else close()
+    },
+  },
+    React.createElement('summary', { 'aria-label': props.label,
+      onClick: (event) => { event.preventDefault(); keepOpen() }, onFocus: keepOpen,
+    },
+      React.createElement('span', { className: 'drawai-tool-icon' },
+        props.icon || (props.kind === 'font' ? React.createElement('span', { className: 'drawai-font-icon', style: { borderColor: normalizeCustomColor(props.value) || 'currentColor' } }, 'A')
+          : React.createElement('span', { className: 'drawai-color-preview' + (props.value === 'none' ? ' none' : '') + (props.kind === 'stroke' ? ' stroke' : ''),
+            style: props.kind === 'stroke' ? { borderColor: normalizeCustomColor(props.value) || 'currentColor' } : { background: normalizeCustomColor(props.value) || undefined },
+          })),
+        React.createElement('span', { className: 'drawai-color-caret' }, '⌃')),
+      React.createElement('span', { className: 'drawai-color-label' }, props.label)),
+    React.createElement('div', { ref: panelRef, popover: 'manual', className: 'drawai-palette-panel', role: 'group', 'aria-label': props.label + '面板',
+      onPointerEnter: keepOpen, onPointerLeave: scheduleClose,
+      onKeyDown: (event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() } },
+    },
+      props.options ? React.createElement(React.Fragment, null,
+        React.createElement('div', { className: 'drawai-popover-title' }, props.label === '形状' ? '更改图形' : props.label),
+        React.createElement('div', { className: props.label === '形状' ? 'drawai-shape-options' : 'drawai-choice-options' },
+          props.options.map(([value, label, icon]) => React.createElement('button', {
+            key: value, type: 'button', className: 'drawai-choice-button' + (props.value === value ? ' on' : ''),
+            'aria-label': props.label + '：' + label, 'aria-pressed': props.value === value, title: label,
+            onClick: () => props.onChange(value),
+          }, icon || label)),
+        ), props.footer,
+      ) : React.createElement(React.Fragment, null,
+      props.header,
+      React.createElement('div', { className: 'drawai-palette-grid' }, swatch('none', '无颜色'), STANDARD_COLORS.map(([color, name]) => swatch(color, name))),
+      React.createElement('div', { className: 'drawai-palette-grid drawai-palette-custom' }, custom.map((color) => swatch(color, color)),
+        React.createElement('button', { type: 'button', className: 'drawai-palette-plus', 'aria-label': '添加自定义颜色', 'aria-expanded': customOpen,
+          onClick: () => setCustomOpen(!customOpen), title: '添加自定义颜色',
+        }, '+')),
+      customOpen ? React.createElement('div', { className: 'drawai-palette-add' },
+        React.createElement('input', { type: 'color', 'aria-label': '选择自定义颜色', value: normalized || '#3b82f6', onChange: (event) => setDraft(event.target.value) }),
+        React.createElement('input', { type: 'text', 'aria-label': '自定义颜色 HEX', value: draft, placeholder: '#RRGGBB', maxLength: 7,
+          'aria-invalid': normalized === null, onChange: (event) => setDraft(event.target.value),
+          onKeyDown: (event) => { event.stopPropagation(); if (event.key === 'Enter' && !event.isComposing) event.preventDefault() },
+        }),
+        React.createElement('button', { type: 'button', className: 'drawai-btn', disabled: normalized === null,
+          onClick: (event) => { if (normalized !== null) { props.onSaveColor(normalized); choose(normalized, event); setCustomOpen(false) } },
+        }, '添加并应用'),
+      ) : null,
+      customOpen && normalized === null ? React.createElement('div', { className: 'drawai-palette-hint', role: 'status' }, '请输入 #RGB 或 #RRGGBB 格式的颜色') : null,
+      typeof props.onOpacityChange === 'function' ? React.createElement('div', { className: 'drawai-palette-opacity' },
+        React.createElement('div', { className: 'drawai-palette-opacity-label' }, '不透明度', React.createElement('span', null, props.opacity === '' ? '混合' : props.opacity + '%')),
+        React.createElement('input', { type: 'range', min: 0, max: 100, step: 1, 'aria-label': props.label + '不透明度',
+          value: props.opacity === '' ? 100 : Number(props.opacity), onChange: (event) => props.onOpacityChange(Number(event.target.value)),
+          onPointerUp: props.onOpacityEnd, onKeyUp: props.onOpacityEnd,
+        }),
+      ) : null,
+      ),
+    ),
+  )
+}
+
 function loadDrawaiPrefs() {
   try {
     if (typeof localStorage === 'undefined' || localStorage === null) return Object.assign({}, DEFAULT_DRAWAI_PREFS)
@@ -2839,6 +3022,343 @@ function layerLabelOf(layer, index) {
   if (layer === null || layer === undefined) return ''
   const name = typeof layer.name === 'string' ? layer.name : ''
   return name.length > 0 ? name : '第 ' + (index + 1) + ' 层'
+}
+
+/** 缩略图独立读图层内容；隐藏图层仍有预览，不改变原文档。 */
+function layerPreviewDoc(doc, layerId) {
+  const source = doc || { nodes: [], edges: [], layers: [] }
+  const layers = Array.isArray(source.layers) ? source.layers.filter((layer) => layer && typeof layer.id === 'string') : []
+  const firstId = layers.length > 0 ? layers[0].id : null
+  const belongs = (cell) => (cell.layer || firstId) === layerId
+  const nodes = (source.nodes || []).filter(belongs).map((node) => Object.assign({}, node))
+  const ownIds = new Set(nodes.map((node) => node.id))
+  const allNodes = new Map((source.nodes || []).map((node) => [node.id, node]))
+  const edges = (source.edges || []).filter(belongs).map((edge) => {
+    const copy = Object.assign({}, edge)
+    for (const [end, point] of [['from', 'sourcePoint'], ['to', 'targetPoint']]) {
+      if (copy[end] && !ownIds.has(copy[end])) {
+        const node = allNodes.get(copy[end])
+        if (node) { const box = nodeBoxOf(node); copy[point] = { x: box.x + box.w / 2, y: box.y + box.h / 2 } }
+        delete copy[end]
+      }
+    }
+    return copy
+  })
+  const labels = (source.labels || []).filter(belongs).map((label) => Object.assign({}, label))
+  const ids = new Set(nodes.concat(edges, labels).map((cell) => cell.id))
+  return Object.assign({}, source, { nodes, edges, labels,
+    layers: layers.filter((layer) => layer.id === layerId).map((layer) => Object.assign({}, layer, { visible: true, locked: false })),
+    drawOrder: Array.isArray(source.drawOrder) ? source.drawOrder.filter((id) => ids.has(id)) : undefined,
+  })
+}
+
+function layerActionIcon(kind) {
+  const paths = {
+    eye: 'M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
+    hidden: 'M3 3l18 18 M9 6.4A13 13 0 0 1 12 6c6.5 0 10 6 10 6a19 19 0 0 1-3 3.5 M6 7.5A19 19 0 0 0 2 12s3.5 6 10 6a13 13 0 0 0 5-1',
+    lock: 'M7 10V7a5 5 0 0 1 10 0v3 M6 10h12v11H6z M12 14v3',
+    unlock: 'M7 10V7a5 5 0 0 1 9-3 M6 10h12v11H6z M12 14v3',
+    more: 'M5 12h.01 M12 12h.01 M19 12h.01',
+    edit: 'M4 16l12-12 4 4L8 20H4z M14 6l4 4',
+  }
+  return React.createElement('svg', { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: kind === 'more' ? 4 : 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+    React.createElement('path', { d: paths[kind] || paths.more }))
+}
+
+function LayerThumbnail(props) {
+  const makePreview = () => layerPreviewDoc(props.doc, props.id)
+  const preview = typeof React.useMemo === 'function' ? React.useMemo(makePreview, [props.doc, props.id]) : makePreview()
+  if (preview.nodes.length + preview.edges.length + preview.labels.length === 0) return React.createElement('span', { className: 'drawai-layer-empty' }, '空图层')
+  return renderDiagram(preview, props.mode, props.uid, { current: null }, { showGrid: false }, computeFitView(contentBounds(preview), 1.4))
+}
+
+function LayersPanel(props) {
+  const [query, setQuery] = React.useState('')
+  const [edit, setEdit] = React.useState(null)
+  const [moreId, setMoreId] = React.useState(null)
+  const editRef = React.useRef(null)
+  const layers = (props.doc && Array.isArray(props.doc.layers) ? props.doc.layers : []).filter((layer) => layer && typeof layer.id === 'string')
+  const startEdit = (id, name) => { editRef.current = { id, name, original: name, done: false }; setEdit({ id, name }); setMoreId(null) }
+  const finishEdit = (name, cancel) => {
+    const current = editRef.current
+    if (current === null || current.done) return
+    current.done = true
+    setEdit(null)
+    if (!cancel && String(name).trim() !== current.original) props.onRename(current.id, String(name).trim())
+  }
+  // 在宿主关闭下拉之前提交草稿；直接卸载输入框不保证触发 blur。
+  React.useEffect(() => {
+    const commitOutside = (event) => {
+      const current = editRef.current
+      if (current === null || current.done) return
+      if (event.target && typeof event.target.closest === 'function' && event.target.closest('.drawai-layer-name-input')) return
+      finishEdit(current.name, false)
+    }
+    document.addEventListener('pointerdown', commitOutside, true)
+    return () => document.removeEventListener('pointerdown', commitOutside, true)
+  }, [])
+  const ownCount = (id) => {
+    const first = layers.length > 0 ? layers[0].id : null
+    return (props.doc.nodes || []).concat(props.doc.edges || []).filter((cell) => (cell.layer || first) === id).length
+  }
+  const rows = layers.map((layer, index) => {
+    const name = layerLabelOf(layer, index)
+    if (!name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())) return null
+    const active = layer.id === props.activeId
+    const editing = edit !== null && edit.id === layer.id
+    const nextLayer = layers.length > 1 ? layers[index < layers.length - 1 ? index + 1 : index - 1] : null
+    const iconButton = (label, icon, onClick) => React.createElement('button', { type: 'button', className: 'drawai-layer-icon', 'aria-label': label + ' ' + name, title: label, onClick }, layerActionIcon(icon))
+    return React.createElement('div', { key: layer.id, className: 'drawai-layer-entry' },
+      React.createElement('div', { className: 'drawai-layer-row' + (active ? ' active' : '') + (layer.visible === false ? ' hidden' : '') },
+        React.createElement('button', { type: 'button', className: 'drawai-layer-thumb', 'aria-label': '设为当前图层 ' + name, onClick: () => props.onSelect(layer.id) },
+          React.createElement(LayerThumbnail, { doc: props.doc, id: layer.id, mode: props.mode, uid: props.uid + '-layer-' + index })),
+        React.createElement('div', { className: 'drawai-layer-namebox' },
+          editing ? React.createElement('input', { className: 'drawai-layer-name-input', 'aria-label': '图层名称', autoFocus: true, value: edit.name,
+            onFocus: (event) => event.target.select(), onChange: (event) => { if (editRef.current) editRef.current.name = event.target.value; setEdit({ id: layer.id, name: event.target.value }) },
+            onBlur: (event) => finishEdit(event.target.value, false),
+            onKeyDown: (event) => {
+              event.stopPropagation()
+              if (event.isComposing || event.keyCode === 229) return
+              if (event.key === 'Enter') { event.preventDefault(); finishEdit(event.target.value, false) }
+              if (event.key === 'Escape') { event.preventDefault(); finishEdit(event.target.value, true) }
+            },
+          }) : React.createElement('button', { type: 'button', className: 'drawai-layer-name', title: name, onClick: () => props.onSelect(layer.id), onDoubleClick: () => startEdit(layer.id, name) }, name),
+          React.createElement('span', { className: 'drawai-layer-meta' }, (active ? '当前 · ' : '') + ownCount(layer.id) + ' 个元素'),
+        ),
+        iconButton(layer.visible === false ? '显示' : '隐藏', layer.visible === false ? 'hidden' : 'eye', () => props.onVisible(layer.id)),
+        iconButton(layer.locked ? '解锁' : '锁定', layer.locked ? 'lock' : 'unlock', () => props.onLocked(layer.id)),
+        iconButton('重命名', 'edit', () => startEdit(layer.id, name)),
+        iconButton('更多', 'more', () => setMoreId(moreId === layer.id ? null : layer.id)),
+      ),
+      moreId === layer.id ? React.createElement('div', { className: 'drawai-layer-more' },
+        React.createElement('button', { type: 'button', className: 'drawai-btn', disabled: nextLayer === null, onClick: () => { props.onRemove(layer.id); setMoreId(null) } }, '合并并删除图层'),
+        React.createElement('span', null, nextLayer ? '内容将并入「' + layerLabelOf(nextLayer, layers.indexOf(nextLayer)) + '」' : '保留至少一个图层'),
+      ) : null,
+    )
+  }).filter(Boolean)
+  const selectedCount = filterEditableIds(props.doc, props.selectedIds || []).length
+  return React.createElement('div', { className: 'drawai-layers-panel' },
+    React.createElement('div', { className: 'drawai-panel-heading' }, '图层', React.createElement('span', null, layers.length)),
+    layers.length > 8 ? React.createElement('input', { className: 'drawai-panel-input', type: 'search', 'aria-label': '搜索图层', placeholder: '搜索图层', value: query, onChange: (event) => setQuery(event.target.value) }) : null,
+    React.createElement('div', { className: 'drawai-layer-list' }, rows.length > 0 ? rows : React.createElement('div', { className: 'drawai-note' }, layers.length === 0 ? '打开或新建画布后显示图层' : '没有匹配的图层')),
+    React.createElement('div', { className: 'drawai-layer-footer' },
+      React.createElement('button', { type: 'button', className: 'drawai-btn', disabled: !props.doc, onClick: () => {
+        const id = props.onCreate()
+        if (id) { setQuery(''); startEdit(id, '图层 ' + (layers.length + 1)) }
+      } }, '＋ 新建图层'),
+      selectedCount > 0 ? React.createElement('label', { className: 'drawai-layer-move' }, '移动选中项（' + selectedCount + '）',
+        React.createElement('select', { 'aria-label': '移动到图层', value: '', onChange: (event) => props.onMove(event.target.value) },
+          React.createElement('option', { value: '', disabled: true }, '选择目标图层'),
+          layers.map((layer, index) => React.createElement('option', { key: layer.id, value: layer.id, disabled: layer.locked === true }, layerLabelOf(layer, index) + (layer.locked ? '（已锁定）' : ''))),
+        )) : null,
+    ),
+  )
+}
+
+/** 导出范围独立于当前可见 DOM，显式选层也能导出隐藏层。 */
+function exportDocument(doc, options) {
+  if (!doc) return null
+  const opts = options || {}
+  let result = doc
+  if (Array.isArray(opts.layerIds)) {
+    const layers = new Set(opts.layerIds)
+    if (layers.size === 0) return null
+    const defaultId = doc.layers && doc.layers[0] ? doc.layers[0].id : null
+    const belongs = (cell) => layers.has(cell.layer || defaultId)
+    result = Object.assign({}, doc, {
+      nodes: (doc.nodes || []).filter(belongs), edges: (doc.edges || []).filter(belongs), labels: (doc.labels || []).filter(belongs),
+      layers: (doc.layers || []).filter((layer) => layers.has(layer.id)).map((layer) => Object.assign({}, layer, { visible: true })),
+    })
+  } else if (Array.isArray(opts.ids)) {
+    result = docFilteredToIds(doc, opts.ids)
+    if (!result) return null
+    const ids = new Set(opts.ids)
+    result.labels = (doc.labels || []).filter((label) => ids.has(label.id) || ids.has(label.parent))
+  }
+  if (result !== doc) {
+    const nodes = new Set(result.nodes.map((node) => node.id))
+    const source = new Map((doc.nodes || []).map((node) => [node.id, node]))
+    result = Object.assign({}, result, { edges: result.edges.map((edge) => {
+      const copy = Object.assign({}, edge)
+      for (const [end, point] of [['from', 'sourcePoint'], ['to', 'targetPoint']]) {
+        if (copy[end] && !nodes.has(copy[end])) {
+          const node = source.get(copy[end])
+          if (node) { const box = nodeBoxOf(node); copy[point] = { x: box.x + box.w / 2, y: box.y + box.h / 2 } }
+          delete copy[end]
+        }
+      }
+      return copy
+    }) })
+  }
+  const hidden = hiddenLayerIds(result)
+  if (!result.nodes.concat(result.edges, result.labels || []).some((cell) => !isHiddenCell(hidden, cell))) return null
+  return result
+}
+
+function exportGeometry(doc, options) {
+  const padding = Math.max(0, Math.min(2048, numberOr(options && options.padding, 24)))
+  const bounds = paintedBounds(doc) || contentBounds(doc)
+  return { x: bounds.minX - padding, y: bounds.minY - padding,
+    width: Math.max(1, bounds.maxX - bounds.minX + padding * 2), height: Math.max(1, bounds.maxY - bounds.minY + padding * 2) }
+}
+
+function exportOutputSize(width, height, options) {
+  const opts = options || {}
+  const custom = Number.isFinite(Number(opts.pixelWidth)) && Number(opts.pixelWidth) > 0 && Number.isFinite(Number(opts.pixelHeight)) && Number(opts.pixelHeight) > 0
+  const scale = opts.format === 'svg' ? 1 : Math.max(0.01, numberOr(opts.scale, 4))
+  const requestedWidth = custom ? Number(opts.pixelWidth) : width * scale
+  const requestedHeight = custom ? Number(opts.pixelHeight) : height * scale
+  // 同时限制边长和像素总数，实际尺寸直接显示在面板中。
+  const limit = opts.format === 'svg' ? 1 : Math.min(1, 16384 / Math.max(requestedWidth, requestedHeight), Math.sqrt(32000000 / (requestedWidth * requestedHeight)))
+  return { width: Math.max(1, Math.round(requestedWidth * limit)), height: Math.max(1, Math.round(requestedHeight * limit)),
+    limited: limit < 1, requestedWidth: Math.round(requestedWidth), requestedHeight: Math.round(requestedHeight) }
+}
+
+/** 从现有 SVG 渲染树生成独立文档，避免导出被视口、选区手柄或隐藏状态绑住。 */
+function svgTreeToDom(tree, owner) {
+  const document = owner
+  if (tree === null || tree === undefined || typeof tree === 'boolean') return null
+  if (typeof tree !== 'object') return document.createTextNode(String(tree))
+  if (Array.isArray(tree)) {
+    const fragment = document.createDocumentFragment()
+    for (const item of tree) { const node = svgTreeToDom(item, document); if (node) fragment.appendChild(node) }
+    return fragment
+  }
+  const props = tree.props || {}
+  if (typeof tree.type !== 'string') return svgTreeToDom(props.children || tree.children || [], document)
+  const element = document.createElementNS('http://www.w3.org/2000/svg', tree.type)
+  const attributes = { className: 'class', strokeWidth: 'stroke-width', strokeLinecap: 'stroke-linecap', strokeLinejoin: 'stroke-linejoin',
+    strokeDasharray: 'stroke-dasharray', strokeDashoffset: 'stroke-dashoffset', strokeOpacity: 'stroke-opacity', fillOpacity: 'fill-opacity',
+    fillRule: 'fill-rule', textAnchor: 'text-anchor', dominantBaseline: 'dominant-baseline', fontFamily: 'font-family', fontSize: 'font-size',
+    markerEnd: 'marker-end', markerStart: 'marker-start', pointerEvents: 'pointer-events', clipPath: 'clip-path' }
+  for (const [key, value] of Object.entries(props)) {
+    if (value === null || value === undefined || ['children', 'key', 'ref'].includes(key) || key.startsWith('on')) continue
+    if (key === 'style') { for (const [name, val] of Object.entries(value)) if (val !== null && val !== undefined) element.style[name] = String(val) }
+    else if (key === 'xlinkHref') element.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', String(value))
+    else element.setAttribute(attributes[key] || key, String(value))
+  }
+  const children = svgTreeToDom(props.children !== undefined ? props.children : tree.children || [], document)
+  if (children) element.appendChild(children)
+  return element
+}
+
+function encodeExportPng(node, output) {
+  return new Promise((resolve, reject) => {
+    const markup = new XMLSerializer().serializeToString(node)
+    const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }))
+    const image = new Image()
+    image.onload = () => {
+      URL.revokeObjectURL(url)
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = output.width; canvas.height = output.height
+        const context = canvas.getContext('2d')
+        if (!context) { reject(new Error('无法创建导出画布')); return }
+        context.drawImage(image, 0, 0, output.width, output.height)
+        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('PNG 编码失败')), 'image/png')
+      } catch (error) { reject(error) }
+    }
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('导出图像加载失败')) }
+    image.src = url
+  })
+}
+
+function ExportPanel(props) {
+  const saved = props.prefs && props.prefs.exportOptions || {}
+  const [format, setFormat] = React.useState(saved.format === 'svg' ? 'svg' : 'png')
+  const [scope, setScope] = React.useState('all')
+  const [transparent, setTransparent] = React.useState(saved.transparent === true)
+  const [scale, setScale] = React.useState([1, 2, 4].includes(saved.scale) ? saved.scale : 4)
+  const [name, setName] = React.useState(() => String(props.path || 'diagram').split(/[\\/]/).pop().replace(/\.drawio$/i, ''))
+  const [busy, setBusy] = React.useState(false)
+  const [padding, setPadding] = React.useState(numberOr(saved.padding, 24))
+  const [grid, setGrid] = React.useState(saved.grid === true)
+  const [backgroundColor, setBackgroundColor] = React.useState(normalizeCustomColor(saved.backgroundColor) || '#ffffff')
+  const [sizeMode, setSizeMode] = React.useState(saved.sizeMode === 'custom' ? 'custom' : 'scale')
+  const [pixelWidth, setPixelWidth] = React.useState(saved.pixelWidth || 1024)
+  const [pixelHeight, setPixelHeight] = React.useState(saved.pixelHeight || 768)
+  const [lockAspect, setLockAspect] = React.useState(saved.lockAspect !== false)
+  const [chosenLayers, setChosenLayers] = React.useState(props.activeLayerId ? [props.activeLayerId] : [])
+  const [estimate, setEstimate] = React.useState({ status: 'idle' })
+  const selected = Array.isArray(props.selectedIds) ? props.selectedIds : []
+  const selection = scope === 'selection'
+  const layers = props.doc && Array.isArray(props.doc.layers) ? props.doc.layers : []
+  const layerIds = scope === 'current-layer' ? (props.activeLayerId ? [props.activeLayerId] : []) : scope === 'layers' ? chosenLayers.filter((id) => layers.some((layer) => layer.id === id)) : undefined
+  const config = { format, transparent, scale, padding: Math.max(0, Math.min(2048, Number(padding) || 0)), grid, backgroundColor, lockAspect,
+    ...(selection ? { ids: selected.slice() } : {}), ...(layerIds ? { layerIds } : {}),
+    ...(sizeMode === 'custom' ? { pixelWidth: Number(pixelWidth), pixelHeight: Number(pixelHeight) } : {}) }
+  const exportDoc = exportDocument(props.doc, config)
+  const geometry = exportDoc ? exportGeometry(exportDoc, config) : { width: 1, height: 1 }
+  const output = exportOutputSize(geometry.width, geometry.height, config)
+  const ratio = geometry.width / geometry.height
+  const hidden = hiddenLayerIds(exportDoc)
+  const count = exportDoc ? exportDoc.nodes.concat(exportDoc.edges, exportDoc.labels || []).filter((cell) => !isHiddenCell(hidden, cell)).length : 0
+  const invalid = !exportDoc || name.trim().length === 0 || (sizeMode === 'custom' && (!Number.isFinite(Number(pixelWidth)) || !(Number(pixelWidth) > 0) || !Number.isFinite(Number(pixelHeight)) || !(Number(pixelHeight) > 0)))
+  const estimateKey = JSON.stringify(config)
+  React.useEffect(() => {
+    if (invalid || typeof props.onEstimate !== 'function') { setEstimate({ status: 'idle' }); return }
+    let alive = true
+    setEstimate({ status: 'loading' })
+    const timer = setTimeout(() => {
+      Promise.resolve(props.onEstimate(config)).then((result) => { if (alive) setEstimate({ status: 'ready', bytes: result.bytes }) },
+        () => { if (alive) setEstimate({ status: 'error' }) })
+    }, 400)
+    return () => { alive = false; clearTimeout(timer) }
+  }, [estimateKey, props.doc, props.mode, invalid])
+  const field = (label, control) => React.createElement('label', { className: 'drawai-export-field' }, React.createElement('span', null, label), control)
+  const choice = (label, value, options, change) => React.createElement('select', { 'aria-label': label, value, onChange: (event) => change(event.target.value) },
+    options.map(([v, text, disabled]) => React.createElement('option', { key: v, value: v, disabled: disabled === true }, text)))
+  const dimensions = (label, value, change) => React.createElement('label', { className: 'drawai-export-dimension' }, label,
+    React.createElement('input', { type: 'number', min: 1, step: 1, 'aria-label': label, value, onChange: (event) => change(event.target.value), onKeyDown: (event) => event.stopPropagation() }))
+  return React.createElement('div', { className: 'drawai-export-panel' },
+    React.createElement('div', { className: 'drawai-panel-heading' }, '导出'),
+    React.createElement('div', { className: 'drawai-export-fields' },
+      field('范围', choice('导出范围', scope, [['all', '当前页 · 全部可见图层'], ['selection', '当前选区（' + selected.length + '）', selected.length === 0],
+        ['current-layer', '当前图层', !props.activeLayerId], ['layers', '指定图层', layers.length === 0]], setScope)),
+      scope === 'layers' ? React.createElement('div', { className: 'drawai-export-layer-options' }, layers.map((layer, index) => React.createElement('label', { key: layer.id },
+        React.createElement('input', { type: 'checkbox', 'aria-label': '导出图层 ' + layerLabelOf(layer, index), checked: chosenLayers.includes(layer.id),
+          onChange: (event) => setChosenLayers((current) => event.target.checked ? current.concat(layer.id) : current.filter((id) => id !== layer.id)) }), layerLabelOf(layer, index) + (layer.visible === false ? '（隐藏）' : '')))) : null,
+      field('格式', choice('导出格式', format, [['png', 'PNG 图片'], ['svg', 'SVG 矢量图']], setFormat)),
+      field('背景', choice('导出背景', transparent ? 'transparent' : 'paper', [['paper', '保留背景'], ['transparent', '透明']], (value) => setTransparent(value === 'transparent'))),
+      format === 'png' && sizeMode === 'scale' ? field('分辨率', choice('导出分辨率', String(scale), [[1, '1×'], [2, '2×'], [4, '4×']], (value) => setScale(Number(value)))) : null,
+      field('文件名', React.createElement('div', { className: 'drawai-export-filename' },
+        React.createElement('input', { 'aria-label': '导出文件名', value: name, onChange: (event) => setName(event.target.value), onKeyDown: (event) => event.stopPropagation() }),
+        React.createElement('span', null, '.' + format))),
+      React.createElement('details', { className: 'drawai-export-advanced' }, React.createElement('summary', null, '更多设置'),
+        field('尺寸', choice('导出尺寸方式', sizeMode, [['scale', format === 'png' ? '按倍数' : '按内容'], ['custom', '指定宽高']], (value) => {
+          if (value === 'custom' && sizeMode !== 'custom') { setPixelWidth(output.width); setPixelHeight(output.height) }
+          setSizeMode(value)
+        })),
+        sizeMode === 'custom' ? React.createElement('div', { className: 'drawai-export-dimensions' },
+          dimensions('宽度 px', pixelWidth, (value) => { setPixelWidth(value); if (lockAspect && Number(value) > 0) setPixelHeight(Math.max(1, Math.round(Number(value) / ratio))) }),
+          dimensions('高度 px', pixelHeight, (value) => { setPixelHeight(value); if (lockAspect && Number(value) > 0) setPixelWidth(Math.max(1, Math.round(Number(value) * ratio))) }),
+          React.createElement('label', { className: 'drawai-export-check' }, React.createElement('input', { type: 'checkbox', 'aria-label': '保持宽高比', checked: lockAspect, onChange: (event) => {
+            setLockAspect(event.target.checked); if (event.target.checked && Number(pixelWidth) > 0) setPixelHeight(Math.max(1, Math.round(Number(pixelWidth) / ratio)))
+          } }), '保持宽高比'),
+        ) : null,
+        field('留白 px', React.createElement('input', { type: 'number', min: 0, max: 2048, 'aria-label': '四周留白', value: padding, onChange: (event) => setPadding(event.target.value), onKeyDown: (event) => event.stopPropagation() })),
+        React.createElement('label', { className: 'drawai-export-check' }, React.createElement('input', { type: 'checkbox', 'aria-label': '导出网格', checked: grid, onChange: (event) => setGrid(event.target.checked) }), '显示网格'),
+        !transparent ? React.createElement(ColorPalette, { label: '背景色', kind: 'fill', value: backgroundColor, group: 'drawai-export-color', customColors: props.prefs && props.prefs.customColors,
+          onPick: setBackgroundColor, onSaveColor: (color) => props.onPrefs({ customColors: customColorList(customColorList(props.prefs && props.prefs.customColors).concat(color)) }),
+        }) : null,
+      ),
+      React.createElement('div', { className: 'drawai-export-info', 'aria-live': 'polite' },
+        format === 'png' ? output.width + ' × ' + output.height + ' px' : '矢量格式 · ' + output.width + ' × ' + output.height,
+        React.createElement('div', null, count + ' 个对象 · 当前页 ' + (numberOr(props.pageIndex, 0) + 1)),
+        estimate.status === 'ready' ? React.createElement('div', null, '预计文件大小：' + (estimate.bytes < 1048576 ? (estimate.bytes / 1024).toFixed(1) + ' KB' : (estimate.bytes / 1048576).toFixed(2) + ' MB'))
+          : React.createElement('div', null, estimate.status === 'loading' ? '正在编码预估文件大小…' : estimate.status === 'error' ? '暂时无法预估大小' : ''),
+        output.limited ? React.createElement('div', null, '尺寸已按浏览器容量限制等比缩小') : null),
+    ),
+    React.createElement('div', { className: 'drawai-layer-footer' },
+      React.createElement('button', { type: 'button', className: 'drawai-btn drawai-primary-btn', disabled: invalid || busy, onClick: () => {
+        if (invalid || busy) return
+        setBusy(true)
+        props.onPrefs({ exportOptions: { format, transparent, scale, padding: config.padding, grid, backgroundColor, sizeMode, pixelWidth: Number(pixelWidth), pixelHeight: Number(pixelHeight), lockAspect } })
+        const filename = name.trim().replace(/[\\/:*?"<>|]/g, '_').replace(/\.(png|svg)$/i, '') || 'diagram'
+        props.onExport(Object.assign({}, config, { name: filename }))
+      } }, busy ? '正在导出…' : '导出'),
+    ),
+  )
 }
 
 /** 新的图层 id：`L<n>`，避开文档里已经用掉的 id（节点/连线/图层都算）。 */
@@ -3683,11 +4203,30 @@ function pointAtArc(pts, segs, d) {
   return { x: pts[pts.length - 1].x, y: pts[pts.length - 1].y }
 }
 
-/** 标签的框：文字宽度 + 左右各 3px 内边距、高 13px（与就地编辑框同一套数字）。 */
+/** 连线标签按实际字号和行数占位，同时用于线条避让。 */
 function labelBox(pos, text, fontSize) {
   if (pos === null || pos === undefined) return null
-  const w = textWidth(typeof text === 'string' ? text : '', fontSize) + 6
-  return { x: pos.x - w / 2, y: pos.y - 8, w: w, h: 13 }
+  const lines = String(text || '').split('\n')
+  const w = Math.max(...lines.map((line) => textWidth(line, fontSize))) + 6
+  const h = labelLineHeight(fontSize) * lines.length + 2
+  return { x: pos.x - w / 2, y: pos.y + 1 - h / 2, w: w, h: h }
+}
+
+function edgeEditorBox(edge, text, pos, ctm, origin, mode) {
+  const style = typeof edge.style === 'string' ? edge.style : ''
+  const fontSize = styleNumber(style, 'fontSize', 10)
+  const lineHeight = labelLineHeight(fontSize)
+  const lines = String(text || '').split('\n')
+  const width = Math.max(24, ...lines.map((line) => textWidth(line, fontSize)))
+  const height = lines.length * lineHeight
+  const scale = numberOr(ctm.a, 1)
+  return { left: (pos.x - width / 2) * scale + numberOr(ctm.e, 0) - origin.left,
+    top: (pos.y + 1 - height / 2) * scale + numberOr(ctm.f, 0) - origin.top,
+    width: width * scale, height: height * scale, fontSize: fontSize * scale,
+    lineHeight: lineHeight * scale, scale, wraps: false, textAlign: 'center',
+    color: styleGet(style, 'fontColor', (mode === 'dark' ? DARK : LIGHT).text),
+    opacity: clampNumber(styleNumber(style, 'textOpacity', 100), 0, 100) / 100,
+  }
 }
 
 /**
@@ -4026,6 +4565,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
       fill: 'none',
       stroke: lineStroke,
       strokeWidth: selected ? 2 : styleNumber(edgeStyle, 'strokeWidth', 1),
+      strokeOpacity: clampNumber(styleNumber(edgeStyle, 'strokeOpacity', 100), 0, 100) / 100,
       markerEnd: arrow === 'none' || arrow === 'start' ? undefined : 'url(#' + arrowId + ')',
       markerStart: arrow === 'both' || arrow === 'start' ? 'url(#' + arrowStartId + ')' : undefined,
       pointerEvents: 'none',
@@ -4044,23 +4584,27 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
       }
       const edgeFontColor = styleGet(edgeStyle, 'fontColor', null)
       const edgeFontFill = edgeFontColor !== null ? edgeFontColor : skin.text
-      children.push(
+      const editingEdge = ui !== undefined && ui !== null && ui.editingEdgeId === edge.id
+      if (!editingEdge) children.push(
         React.createElement(
           'text',
           edgeLabelFace({
             key: 'edge-text-' + i,
             x: ownPos.x,
-            y: ownPos.y + 1,
+            y: ownPos.y + 1 - (String(edge.label).split('\n').length - 1) * labelLineHeight(labelFontSize) / 2,
             textAnchor: 'middle',
             dominantBaseline: 'middle',
             fontSize: labelFontSize,
             fontFamily: FONT,
             fill: edgeFontFill,
+            fillOpacity: clampNumber(styleNumber(edgeStyle, 'textOpacity', 100), 0, 100) / 100,
             // inline style：CSS 规则优先级高于 SVG presentation attribute，
             // 万一 shell 有 svg text{...} 之类的全局规则，只有 inline style 能压住。
-            style: { fill: edgeFontFill, fontFamily: FONT, fontSize: labelFontSize + 'px', dominantBaseline: 'middle' },
+            style: { fill: edgeFontFill, fontFamily: FONT, fontSize: labelFontSize + 'px', dominantBaseline: 'middle', whiteSpace: 'pre' },
           }),
-          edge.label,
+          String(edge.label).split('\n').map((line, index) => React.createElement('tspan', {
+            key: 'line-' + index, x: ownPos.x, dy: index === 0 ? 0 : labelLineHeight(labelFontSize),
+          }, line)),
         ),
       )
     }
@@ -4320,7 +4864,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     const labelFontSize = styleNumber(labelStyle, 'fontSize', FSIZE)
     const labelFill = colorOf(node, mode).font
     const boxText = labelTextBox({ node: node, geo: geo, fontSize: labelFontSize })
-    const lines = labelWraps(node) ? wrapLabel(box.label, boxText.w, labelFontSize) : [String(box.label)]
+    const lines = labelWraps(node) ? wrapLabel(box.label, boxText.w, labelFontSize) : String(box.label).split('\n')
     const lineHeight = labelLineHeight(labelFontSize)
     // 分区标题贴顶左（飞书分区名）；其它形状仍居中。
     const isSectionLabel = shapeOf(node) === 'section'
@@ -4348,8 +4892,9 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             fontSize: labelFontSize,
             fontFamily: FONT,
             fill: labelFill,
+            fillOpacity: clampNumber(styleNumber(labelStyle, 'textOpacity', 100), 0, 100) / 100,
             pointerEvents: 'none',
-            style: { fill: labelFill, fontFamily: FONT, fontSize: labelFontSize + 'px', lineHeight: lineHeight + 'px', dominantBaseline: 'middle' },
+            style: { fill: labelFill, fontFamily: FONT, fontSize: labelFontSize + 'px', lineHeight: lineHeight + 'px', dominantBaseline: 'middle', whiteSpace: 'pre' },
           },
           spans,
         ),
@@ -4606,7 +5151,17 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     )
   }
 
-  return React.createElement('svg', { ref: svgRef, viewBox: viewBox, width: '100%', height: '100%', preserveAspectRatio: 'none', style: { display: 'block', background: skin.page } }, children)
+  // 使用与 viewBox 同一帧量到的像素尺寸。100% 会在容器拖动时先拉伸旧视口，
+  // ResizeObserver / React 尚未提交更新的那一帧，节点与文字就会被缩放。
+  const viewportSize = ui && ui.viewportSize
+  const width = viewportSize && viewportSize.w > 0 ? viewportSize.w : '100%'
+  const height = viewportSize && viewportSize.h > 0 ? viewportSize.h : '100%'
+  // 宿主的 svg { max-width:100%; height:auto } 不能压缩尚未更新的旧画面。
+  const viewportStyle = { display: 'block', flexShrink: 0, background: skin.page }
+  if (typeof width === 'number' && typeof height === 'number') {
+    Object.assign(viewportStyle, { width, height, maxWidth: 'none', maxHeight: 'none' })
+  }
+  return React.createElement('svg', { ref: svgRef, viewBox: viewBox, width, height, preserveAspectRatio: 'none', style: viewportStyle }, children)
 }
 
 /**
@@ -5213,6 +5768,7 @@ function CanvasView(props) {
   const placeEdgeKindState = React.useState(null)
   const placeEdgeKind = placeEdgeKindState[0]
   const setPlaceEdgeKind = placeEdgeKindState[1]
+  const lastLineKindRef = React.useRef('rounded')
   // 悬停节点：指针停在某个节点上时，可打开同族变体气泡换形（不必先点选）。
   const hoverNodeIdState = React.useState(null)
   const hoverNodeId = hoverNodeIdState[0]
@@ -5262,6 +5818,7 @@ function CanvasView(props) {
   const exportState = React.useState(null) // null | 'svg' | 'png'
   const exportRequest = exportState[0]
   const setExportRequest = exportState[1]
+  const preparedExportRef = React.useRef(null)
   /**
    * AI 触发的那次导出：记住**已经处理过**的请求 id。
    *
@@ -5675,7 +6232,7 @@ function CanvasView(props) {
         if (layers[i].id !== id) continue
         layers[i].visible = layers[i].visible === false
       }
-    }, 'layer-visible:' + id)
+    })
   }
 
   /** 新建图层：自动命名"图层 N"。 */
@@ -5690,6 +6247,7 @@ function CanvasView(props) {
     })
     setCurrentLayerId(id)
     setSaveNote('已新建图层「图层 ' + (index + 1) + '」并设为当前图层')
+    return id
   }
 
   function toggleLayerLocked(id) {
@@ -5703,7 +6261,7 @@ function CanvasView(props) {
         note = (layers[i].locked ? '已锁定图层' : '已解锁图层') + '「' + layerLabelOf(layers[i], i) + '」'
         break
       }
-    }, 'layer-locked:' + id)
+    })
     if (note.length > 0) setSaveNote(note)
   }
 
@@ -5762,6 +6320,7 @@ function CanvasView(props) {
   }
 
   function moveSelectionToLayer(layerId) {
+    if (layerIsLocked(docRef.current, layerId)) { setSaveNote('目标图层已锁定：先解锁后再移动'); return }
     const ids = filterEditableIds(docRef.current, selectedIds)
     if (ids.length === 0) {
       setSaveNote('没有可移层的选中项（锁定层上的单元移不了）')
@@ -6070,15 +6629,10 @@ function CanvasView(props) {
 
   function onNodePointerEnter(id) {
     setHoverNodeId(id)
-    const n = nodeById(id)
-    if (n === null) return
-    const family = shapeFamilyOf(nodeShapeFromStyle(typeof n.style === 'string' ? n.style : ''))
-    openRailFamilyPanel(family)
   }
 
   function onNodePointerLeave(id) {
     setHoverNodeId((cur) => (cur === id ? null : cur))
-    scheduleCloseRailFamilyPanel()
   }
 
   function onNodePointerDown(id, event) {
@@ -6217,7 +6771,7 @@ function CanvasView(props) {
     setSelectedIds([id])
     setMenu(null)
     const text = typeof node.label === 'string' ? node.label : ''
-    const box = nodeEditorBox(node, text, ctm, { left: rect.left, top: rect.top })
+    const box = nodeEditorBox(node, text, ctm, { left: rect.left, top: rect.top }, mode)
     setEditing(
       Object.assign({ kind: 'node', id: id, text: text }, box),
     )
@@ -6661,49 +7215,26 @@ function CanvasView(props) {
 
   /** 导出前把实时 SVG 克隆一份、摘掉交互件 —— 手柄和选中框不该出现在产物里。 */
   function buildExportSvg(opts) {
-    const svg = svgRef.current
     const current = docRef.current
-    if (svg === null || current === null) return null
-    const clone = svg.cloneNode(true)
-    const junk = clone.querySelectorAll('.drawai-handle, .drawai-sel, .drawai-edge-hit')
-    for (let i = 0; i < junk.length; i += 1) {
-      if (junk[i].parentNode !== null) junk[i].parentNode.removeChild(junk[i])
-    }
-    const ids = opts !== undefined && opts !== null && Array.isArray(opts.ids) ? opts.ids : null
-    const transparent = opts !== undefined && opts !== null && opts.transparent === true
-    let boundsDoc = current
-    if (ids !== null && ids.length > 0) {
-      const filtered = docFilteredToIds(current, ids)
-      if (filtered === null || (filtered.nodes.length === 0 && filtered.edges.length === 0)) return null
-      boundsDoc = filtered
-      const keep = new Set()
-      for (let i = 0; i < filtered.nodes.length; i += 1) keep.add(filtered.nodes[i].id)
-      for (let i = 0; i < filtered.edges.length; i += 1) keep.add(filtered.edges[i].id)
-      const nodeGs = clone.querySelectorAll('[data-node-id]')
-      for (let i = 0; i < nodeGs.length; i += 1) {
-        if (keep.has(nodeGs[i].getAttribute('data-node-id')) === false && nodeGs[i].parentNode !== null) {
-          nodeGs[i].parentNode.removeChild(nodeGs[i])
-        }
-      }
-      const cellGs = clone.querySelectorAll('[data-cell-id]')
-      for (let i = 0; i < cellGs.length; i += 1) {
-        if (keep.has(cellGs[i].getAttribute('data-cell-id')) === false && cellGs[i].parentNode !== null) {
-          cellGs[i].parentNode.removeChild(cellGs[i])
-        }
-      }
-    }
+    const options = opts || {}
+    const boundsDoc = exportDocument(current, options)
+    if (!boundsDoc) return null
+    const transparent = options.transparent === true || options.backgroundColor === 'none'
+    const withGrid = typeof options.grid === 'boolean' ? options.grid : !transparent && showGrid
+    const area = exportGeometry(boundsDoc, options)
+    const output = exportOutputSize(area.width, area.height, Object.assign({ format: 'svg' }, options))
+    const clone = svgTreeToDom(renderDiagram(boundsDoc, mode, uid + '-export', { current: null }, { showGrid: withGrid },
+      { x: area.x, y: area.y, w: area.width, h: area.height }), document)
     // 框按**这一刻会画出来的东西**取：`paintedBounds` 用渲染器同一批函数算出
     // 节点框、标签、每条边的实际走线与线上的文字（与 `renderDiagram` 同一个口径）。
     // 少了任何一样，导出图都会"画上有、图里没有"；而如果按 DOM 的 getBBox 去量，
     // 铺满视口的网格纸会把框撑成整个视口 —— 那正是"导出图白留一大圈"的来源。
-    const bounds = paintedBounds(boundsDoc) || contentBounds(boundsDoc)
-    // 24px 留白兜住几何**算不到**的东西：描边宽度与箭头（marker）。
-    const pad = 24
-    const w = Math.max(1, bounds.maxX - bounds.minX + pad * 2)
-    const h = Math.max(1, bounds.maxY - bounds.minY + pad * 2)
-    clone.setAttribute('viewBox', [bounds.minX - pad, bounds.minY - pad, w, h].join(' '))
-    clone.setAttribute('width', String(Math.round(w)))
-    clone.setAttribute('height', String(Math.round(h)))
+    const w = area.width
+    const h = area.height
+    clone.setAttribute('viewBox', [area.x, area.y, w, h].join(' '))
+    clone.setAttribute('width', String(output.width))
+    clone.setAttribute('height', String(output.height))
+    clone.setAttribute('preserveAspectRatio', options.lockAspect === false ? 'none' : 'xMidYMid meet')
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
     // SVG 内容节点用的是 <image>，它带 xlink:href 这个**带命名空间的属性** ——
     // 序列化出来的文档必须声明 xmlns:xlink，否则严格 XML 解析器（浏览器把 SVG 当图片加载时
@@ -6719,27 +7250,45 @@ function CanvasView(props) {
         break
       }
     }
-    if (transparent) {
-      // 透明导出：底纸/网格都要拿掉，否则 alpha 通道会被盖成不透明。
+    if (!withGrid) {
       if (pageRect !== null && pageRect.parentNode !== null) pageRect.parentNode.removeChild(pageRect)
     } else {
       // 网格纸在实时视图里只铺满"当前视口"；导出要铺满整图，否则缩放状态下网格会断掉。
       if (pageRect !== null) {
-        pageRect.setAttribute('x', String(bounds.minX - pad))
-        pageRect.setAttribute('y', String(bounds.minY - pad))
+        pageRect.setAttribute('x', String(area.x))
+        pageRect.setAttribute('y', String(area.y))
         pageRect.setAttribute('width', String(w))
         pageRect.setAttribute('height', String(h))
       }
-      // 网格图案是半透明的：不加一层底色的话，PNG 出来是透明背景。
+    }
+    if (!transparent) {
       const paper = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
-      paper.setAttribute('x', String(bounds.minX - pad))
-      paper.setAttribute('y', String(bounds.minY - pad))
+      paper.setAttribute('x', String(area.x))
+      paper.setAttribute('y', String(area.y))
       paper.setAttribute('width', String(w))
       paper.setAttribute('height', String(h))
-      paper.setAttribute('fill', mode === 'dark' ? '#1b1b1b' : '#ffffff')
+      paper.setAttribute('fill', normalizeCustomColor(options.backgroundColor) || (mode === 'dark' ? '#1b1b1b' : '#ffffff'))
       clone.insertBefore(paper, clone.firstChild)
     }
-    return { node: clone, width: w, height: h }
+    return { node: clone, width: w, height: h, output }
+  }
+
+  function prepareExport(request) {
+    const key = JSON.stringify([mode, showGrid, request.format, request.ids, request.layerIds, request.transparent, request.grid,
+      request.backgroundColor, request.padding, request.scale, request.pixelWidth, request.pixelHeight, request.lockAspect])
+    const previous = preparedExportRef.current
+    if (previous && previous.doc === docRef.current && previous.key === key) return previous.promise
+    const record = { doc: docRef.current, key, promise: null }
+    record.promise = Promise.resolve().then(() => {
+      const built = buildExportSvg(request)
+      if (!built) throw new Error('导出范围内没有可导出的内容')
+      const markup = new XMLSerializer().serializeToString(built.node)
+      if (request.format === 'svg') { const blob = new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }); return { blob, bytes: blob.size, built } }
+      return encodeExportPng(built.node, built.output).then((blob) => ({ blob, bytes: blob.size, built }))
+    })
+    record.promise.catch(() => { if (preparedExportRef.current === record) preparedExportRef.current = null })
+    preparedExportRef.current = record
+    return record.promise
   }
 
   /**
@@ -6845,36 +7394,9 @@ function CanvasView(props) {
   }
 
   function downloadPng(node, width, height, filename, opts) {
-    const markup = new XMLSerializer().serializeToString(node)
-    const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }))
-    const image = new Image()
-    image.onload = () => {
-      // 默认 4×（与透明高质量同档）。过大时压到浏览器常见 canvas 上限，避免整图失败。
-      let scale = opts !== undefined && opts !== null && typeof opts.scale === 'number' && opts.scale > 0 ? opts.scale : 4
-      const transparent = opts !== undefined && opts !== null && opts.transparent === true
-      // Chromium / 多数桌面浏览器单边可到 16384；再高容易在部分环境创建失败。
-      const maxEdge = 16384
-      while (scale > 1 && (width * scale > maxEdge || height * scale > maxEdge)) scale = scale / 2
-      const canvas = document.createElement('canvas')
-      canvas.width = Math.max(1, Math.round(width * scale))
-      canvas.height = Math.max(1, Math.round(height * scale))
-      const context = canvas.getContext('2d')
-      if (context === null) {
-        URL.revokeObjectURL(url)
-        return
-      }
-      if (transparent !== true) {
-        context.fillStyle = mode === 'dark' ? '#1b1b1b' : '#ffffff'
-        context.fillRect(0, 0, canvas.width, canvas.height)
-      }
-      context.drawImage(image, 0, 0, canvas.width, canvas.height)
-      URL.revokeObjectURL(url)
-      canvas.toBlob((blob) => {
-        if (blob !== null) downloadBlob(blob, filename)
-      }, 'image/png')
-    }
-    image.onerror = () => URL.revokeObjectURL(url)
-    image.src = url
+    const options = Object.assign({ format: 'png' }, opts || {})
+    const encoded = options.blob ? Promise.resolve(options.blob) : encodeExportPng(node, exportOutputSize(width, height, options))
+    return encoded.then((blob) => downloadBlob(blob, filename))
   }
 
   /** 收尾框选：没拖动过就是一次"点空白"（取消选中），否则按矩形相交挑节点与连线。 */
@@ -7530,17 +8052,13 @@ function CanvasView(props) {
     const ctm = svg.getScreenCTM()
     if (ctm === null) return
     const rect = canvas.getBoundingClientRect()
-    const scale = ctm.a
     setSelectedIds([edgeId])
     setMenu(null)
     setEditing({
       kind: 'edge',
       id: edgeId,
       text: typeof edge.label === 'string' ? edge.label : '',
-      left: label.x * scale + ctm.e - rect.left - 60,
-      top: label.y * scale + ctm.f - rect.top - 12,
-      width: 120,
-      height: 24,
+      ...edgeEditorBox(edge, edge.label, label, ctm, { left: rect.left, top: rect.top }, mode),
     })
   }
 
@@ -7561,8 +8079,6 @@ function CanvasView(props) {
     const ctm = svg.getScreenCTM()
     if (ctm === null) return
     const rect = canvas.getBoundingClientRect()
-    // 只有连线标签那一支用这两个（节点那一支整份交给 nodeEditorBox 算）。
-    const scale = ctm.a
     const toCanvas = { left: rect.left, top: rect.top }
     let next = null
     if (editing.kind === 'node') {
@@ -7572,7 +8088,7 @@ function CanvasView(props) {
         return
       }
       // 连**打字的内容**一起交给纯函数：行数变了编辑框就长高，断行位置也与画出来的标签一致。
-      next = nodeEditorBox(node, editing.text, ctm, toCanvas)
+      next = nodeEditorBox(node, editing.text, ctm, toCanvas, mode)
     } else {
       const edge = edgeById(editing.id)
       if (edge === null) {
@@ -7582,13 +8098,14 @@ function CanvasView(props) {
       const pts = edgeRoutePoints(current, edge, routeMemoryRef.current)
       const label = pts === null ? null : edgeLabelPosition(pts, edge)
       if (label === null) return
-      next = { left: label.x * scale + ctm.e - rect.left - 60, top: label.y * scale + ctm.f - rect.top - 12, width: 120, height: 24 }
+      next = edgeEditorBox(edge, editing.text, label, ctm, toCanvas, mode)
     }
     const moved =
       Math.abs(next.left - editing.left) > 0.5 ||
       Math.abs(next.top - editing.top) > 0.5 ||
       Math.abs(next.width - editing.width) > 0.5 ||
-      Math.abs(next.height - editing.height) > 0.5
+      Math.abs(next.height - editing.height) > 0.5 ||
+      next.fontSize !== editing.fontSize || next.color !== editing.color || next.textAlign !== editing.textAlign || next.opacity !== editing.opacity
     if (moved) setEditing(Object.assign({}, editing, next))
   })
 
@@ -8044,6 +8561,7 @@ function CanvasView(props) {
 
   React.useEffect(() => {
     function onKey(event) {
+      if (event.target && typeof event.target.closest === 'function' && event.target.closest('.drawai-palette-panel')) return
       // 归属判定见 canvasOwnsKeyboard：**在别处打字时这里一律不动手**。
       // 之前只挡了 input/textarea，而 DSH 的输入框是 contenteditable，
       // 于是输入框里按退格会删掉画布里的选中内容、Ctrl+C/V 也被吞掉。
@@ -8236,7 +8754,7 @@ function CanvasView(props) {
    *
    * 副作用：调整之后视口就是显式的了，不再跟着内容自动变化；要重新贴合按「视图 → 适应内容」。
    */
-  React.useEffect(() => {
+  ;(React.useLayoutEffect || React.useEffect)(() => {
     if (!canvasReady) return undefined
     const element = canvasRef.current
     if (element === null) return undefined
@@ -8245,13 +8763,17 @@ function CanvasView(props) {
       const h = element.clientHeight
       if (w <= 0 || h <= 0) return
       const prev = measuredRef.current
-      const current = viewRef.current
+      const current = prev.view || viewRef.current
       const known = prev.w > 0 && prev.h > 0
       if (known && (prev.w !== w || prev.h !== h)) {
         const resized = resizeViewFor(current, prev, { w: w, h: h })
-        if (resized !== null) setViewOverride(resized)
+        if (resized !== null) {
+          // 同步更新引用：连续通知可能早于下一次 React 渲染，不能拿旧视口配新尺寸。
+          viewRef.current = resized
+          setViewOverride(resized)
+        }
       }
-      measuredRef.current = { w: w, h: h }
+      measuredRef.current = { w: w, h: h, view: viewRef.current }
       setSize({ w: w, h: h })
     }
     measure()
@@ -8272,6 +8794,7 @@ function CanvasView(props) {
     const element = canvasRef.current
     if (element === null) return undefined
     function onWheel(event) {
+      if (event.target && typeof event.target.closest === 'function' && event.target.closest('.drawai-selection-toolbar')) return
       const current = viewRef.current
       if (current === null) return
       event.preventDefault()
@@ -8301,15 +8824,6 @@ function CanvasView(props) {
     const askedName = fromObj && typeof request.name === 'string' && request.name.length > 0 ? request.name : null
     const exportIds = fromObj && Array.isArray(request.ids) ? request.ids : null
     const transparent = fromObj && request.transparent === true
-    const scale = fromObj && typeof request.scale === 'number' && request.scale > 0 ? request.scale : 4
-    const built = buildExportSvg(
-      exportIds !== null || transparent ? { ids: exportIds !== null ? exportIds : undefined, transparent: transparent } : undefined,
-    )
-    if (built === null) {
-      if (requestId !== null) reportExportResult(requestId, format, { ok: false, error: '画布还没准备好，导出没做成' })
-      else if (exportIds !== null) setSaveNote('导出选中失败：选区里没有可导出的单元')
-      return
-    }
     // 导出文件名：绑定文件就用它的名字；没有绑定就叫 'diagram'，别去借 demo 的名字。
     const source = typeof status.path === 'string' && status.path.length > 0 && status.path[0] !== '(' ? status.path : 'diagram'
     const name =
@@ -8318,24 +8832,33 @@ function CanvasView(props) {
         : String(source).split(/[\\/]/).pop().replace(/\.drawio$/i, '') +
           (exportIds !== null ? '-selection' : '') +
           (transparent ? '-transparent' : '')
+    setSaveNote('正在生成导出文件…')
+    prepareExport(fromObj ? Object.assign({}, request, { format }) : { format }).then((result) => {
     if (format === 'svg') {
-      const markup = new XMLSerializer().serializeToString(built.node)
+      const markup = new XMLSerializer().serializeToString(result.built.node)
       // AI 要的是"落成工作区里的一个文件"：把文本回执给宿主，由它写在 .drawio 旁边。
       if (requestId !== null) {
         setSaveNote('AI 要的 SVG 已渲染，交给宿主落盘…')
         reportExportResult(requestId, 'svg', { ok: true, svg: markup })
         return
       }
-      downloadBlob(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }), name + '.svg')
+      downloadBlob(result.blob, name + '.svg')
+      setSaveNote('SVG 已交给浏览器下载')
       return
     }
-    downloadPng(built.node, built.width, built.height, name + '.png', { scale: scale, transparent: transparent })
+    downloadPng(result.built.node, result.built.width, result.built.height, name + '.png', { blob: result.blob })
+    setSaveNote('PNG 已交给浏览器下载（' + result.built.output.width + ' × ' + result.built.output.height + ' px）')
     // PNG 走浏览器下载（AI 触发的也一样）：宿主写二进制得另开通道，而"点一次导出"就有的东西
     // 不值得为它搬 base64。下载成不成浏览器不给回执，所以这里只报"已经交给下载"。
     if (requestId !== null) {
       setSaveNote('AI 要的 PNG 已交给浏览器下载')
       reportExportResult(requestId, 'png', { ok: true, downloaded: true })
     }
+    }).catch((error) => {
+      const message = error && error.message ? error.message : String(error)
+      setSaveNote('导出失败：' + message)
+      if (requestId !== null) reportExportResult(requestId, format, { ok: false, error: message })
+    })
   }, [exportRequest])
 
   // AI 的「看一眼」。与导出同一个理由放在 effect 里：pull() 先清掉选中，等这一帧渲染完
@@ -8563,9 +9086,15 @@ function CanvasView(props) {
     viewOverride === null
       ? fitView
       : { x: viewOverride.x, y: viewOverride.y, w: viewOverride.w, h: viewOverride.h }
-  // 在渲染期写入 ref：指针事件回调是渲染期创建的闭包，读 state 会拿到上一帧的视口，
-  // 平移/缩放会因此"慢半拍"。
-  viewRef.current = view
+  // 只发布已提交且尺寸匹配的视口。快速拖动时，旧的并发渲染可能晚于
+  // ResizeObserver；不能让旧视口覆盖新尺寸对应的引用，导致下一次测量缩放漂移。
+  function syncCommittedViewport() {
+    const measured = measuredRef.current
+    if (size.w !== measured.w || size.h !== measured.h) return
+    viewRef.current = view
+    measuredRef.current = { w: size.w, h: size.h, view }
+  }
+  ;(React.useLayoutEffect || React.useEffect)(syncCommittedViewport, [view, size])
   const zoomPercent = view === null || size.w <= 0 ? 100 : Math.round((size.w / view.w) * 100)
 
   const singleSelectedNodeId = selectedIds.length === 1 && nodeById(selectedIds[0]) !== null ? selectedIds[0] : null
@@ -8573,12 +9102,14 @@ function CanvasView(props) {
   const editingNodeId = editing !== null && editing.kind === 'node' ? editing.id : null
 
   const ui = {
+    viewportSize: size,
     selectedIds: selectedIds,
     guides: guides,
     routeMemory: routeMemoryRef.current,
     marquee: marquee,
     singleSelectedNodeId: singleSelectedNodeId,
     editingNodeId: editingNodeId,
+    editingEdgeId: editing !== null && editing.kind === 'edge' ? editing.id : null,
     showGrid: showGrid,
     connectFrom: connectFrom,
     connectTo: connectTo,
@@ -8682,16 +9213,13 @@ function CanvasView(props) {
     return React.createElement('div', { className: 'drawai-grid' }, buttons)
   }
 
-  /** 选区节点，否则悬停节点 —— 换形目标用这一份。 */
+  /** 只对明确选中的节点换形，悬停不驱动右侧工具栏。 */
   function railReplaceTargets() {
     const selectedNodes = []
     for (let i = 0; i < selectedIds.length; i += 1) {
       if (nodeById(selectedIds[i]) !== null) selectedNodes.push(selectedIds[i])
     }
     if (selectedNodes.length > 0) return selectedNodes
-    if (typeof hoverNodeId === 'string' && hoverNodeId.length > 0 && nodeById(hoverNodeId) !== null) {
-      return [hoverNodeId]
-    }
     return []
   }
 
@@ -8706,12 +9234,6 @@ function CanvasView(props) {
     const targets = railReplaceTargets()
     // 线条族：悬停出四种线型；点击武装放置（空白单击或拖拽定起终点）；选中连线时打开气泡换线型。
     if (family === 'edge') {
-      const edgeTargets = railReplaceEdgeTargets()
-      if (edgeTargets.length > 0) {
-        openRailHover('edge')
-        setSaveNote('在气泡里选线型，应用到选中的 ' + edgeTargets.length + ' 条连线')
-        return
-      }
       if (placeEdgeKind !== null) {
         setPlaceEdgeKind(null)
         setRailOpenFamily(null)
@@ -8719,8 +9241,8 @@ function CanvasView(props) {
         return
       }
       setPlaceTool(null)
-      setPlaceEdgeKind(typeof shape === 'string' && isEdgeLineKind(shape) ? shape : 'rounded')
-      openRailHover('edge')
+      setSelectedIds([])
+      setPlaceEdgeKind(lastLineKindRef.current)
       setSaveNote('放置线条：可在气泡里选线型，再在空白处单击落下或拖拽定起终点（单次，Esc 取消）')
       return
     }
@@ -8781,28 +9303,29 @@ function CanvasView(props) {
     // 线条族：kind 与节点 shape 名可能撞车（都有 rounded），以当前打开的族为准。
     if (railOpenFamily === 'edge' || (placeEdgeKind !== null && isEdgeLineKind(shape))) {
       if (!isEdgeLineKind(shape)) return
-      const edgeTargets = railReplaceEdgeTargets()
-      if (edgeTargets.length > 0) {
-        applyLineKind(edgeTargets, shape)
-        setPlaceEdgeKind(null)
-        setPlaceTool(null)
-        setRailOpenFamily(null)
-        setSaveNote('已换成「' + edgeLineLabelOf(shape) + '」')
-        return
-      }
+      lastLineKindRef.current = shape
+      setSelectedIds([])
       setPlaceTool(null)
       setPlaceEdgeKind(shape)
+      setRailOpenFamily(null)
       setSaveNote('放置「' + edgeLineLabelOf(shape) + '」：空白处单击落下，或拖拽定起终点（单次，Esc 取消）')
       return
     }
     setMenuShape(shape)
     const targets = railReplaceTargets()
     if (targets.length > 0) {
-      const first = nodeById(targets[0])
-      const currentShape = first === null ? '' : nodeShapeFromStyle(typeof first.style === 'string' ? first.style : '')
-      if (shapeFamilyOf(currentShape) !== shapeFamilyOf(shape)) return
-      const baseStyle = first === null || typeof first.style !== 'string' ? '' : first.style
-      updateNode(targets, { style: styleForShapePick(baseStyle, shape) })
+      // 混合选区不可跨类别转换；逐节点保留各自的样式与内容。
+      const family = shapeFamilyOf(shape)
+      if (!targets.every((id) => {
+        const node = nodeById(id)
+        return node !== null && shapeFamilyOf(nodeShapeFromStyle(node.style || '')) === family &&
+          (family !== 'shape' || isBasicShapeStyle(node.style || ''))
+      })) return
+      applyLocal((next) => {
+        for (const node of next.nodes) {
+          if (targets.indexOf(node.id) >= 0) node.style = styleForShapePick(node.style || '', shape)
+        }
+      })
       setPlaceTool(null)
       setPlaceEdgeKind(null)
       setRailOpenFamily(null)
@@ -8901,6 +9424,123 @@ function CanvasView(props) {
   }
 
   /** 右侧常驻元素条：多变体族悬停出同族；最后一级悬停只出名称气泡。 */
+  function renderSelectionToolbar() {
+    if (doc === null || view === null || editing !== null || menu !== null || placeEdgeKind !== null || placeTool !== null) return null
+    const ids = filterEditableIds(doc, selectedIds)
+    const nodes = doc.nodes.filter((n) => ids.indexOf(n.id) >= 0)
+    const edges = doc.edges.filter((e) => ids.indexOf(e.id) >= 0)
+    if (nodes.length + edges.length === 0) return null
+    const cells = nodes.concat(edges)
+    const boxes = nodes.map((n) => nodeBoxOf(n))
+    for (const edge of edges) {
+      const points = edgeRoutePoints(doc, edge, routeMemoryRef.current) || []
+      for (const p of points) boxes.push({ x: p.x, y: p.y, w: 0, h: 0 })
+    }
+    const bounds = boxOfBoxes(boxes)
+    if (bounds === null) return null
+    const scale = size.w / view.w
+    const center = (bounds.x + bounds.w / 2 - view.x) * scale
+    const top = (bounds.y - view.y) * scale
+    const bottom = (bounds.y + bounds.h - view.y) * scale
+    const width = Math.min(460, Math.max(0, size.w - 16))
+    const styleOf = (cell) => typeof cell.style === 'string' ? cell.style : ''
+    // 每个对象只更新本次指定的键，混合选区保留各自其余样式。
+    const patch = (change, targets = ids, coalesceKey) => applyLocal((next) => {
+      for (const cell of next.nodes.concat(next.edges)) {
+        if (targets.indexOf(cell.id) >= 0) cell.style = stylePatch(styleOf(cell), change)
+      }
+    }, coalesceKey)
+    const uniform = (targets, read) => {
+      const value = read(targets[0])
+      return targets.every((cell) => read(cell) === value) ? value : ''
+    }
+    const select = (label, value, options, onChange, footer) => React.createElement(ColorPalette, {
+      key: label, label, value, group: 'drawai-colors-' + uid, options, onChange, footer,
+      icon: (options.find(([v]) => v === value) || [])[2] || React.createElement('span', { className: 'drawai-value-icon' }, value || '—'),
+    })
+    const strokeSample = (dash, width) => React.createElement('svg', { width: 28, height: 24, viewBox: '0 0 28 24', 'aria-hidden': true },
+      React.createElement('line', { x1: 3, x2: 25, y1: 12, y2: 12, stroke: 'currentColor', strokeWidth: width, strokeDasharray: dash === 'dashed' ? '5 4' : dash === 'dotted' ? '1 4' : undefined, strokeLinecap: 'round' }))
+    const color = (label, key, targets, fallback) => {
+      const value = uniform(targets, (cell) => styleGet(styleOf(cell), key, fallback))
+      const opacityKey = key === 'fontColor' ? 'textOpacity' : key === 'fillColor' ? 'fillOpacity' : 'strokeOpacity'
+      return React.createElement(ColorPalette, { key, label, value, group: 'drawai-colors-' + uid,
+        kind: key === 'fontColor' ? 'font' : key === 'strokeColor' ? 'stroke' : 'fill',
+        header: key === 'strokeColor' ? React.createElement('div', { className: 'drawai-stroke-options' },
+          React.createElement('div', { className: 'drawai-popover-title' }, '边框样式'),
+          React.createElement('div', { className: 'drawai-option-strip' }, ['solid', 'dashed', 'dotted'].map((dash) => React.createElement('button', {
+            key: dash, type: 'button', className: 'drawai-choice-button' + (uniform(cells, (cell) => dashFromStyle(styleOf(cell))) === dash ? ' on' : ''),
+            'aria-label': '边框：' + dash, title: { solid: '实线', dashed: '虚线', dotted: '点线' }[dash],
+            onClick: () => applyLocal((next) => {
+              for (const cell of next.nodes.concat(next.edges)) if (ids.indexOf(cell.id) >= 0) cell.style = styleWithDash(styleOf(cell), dash)
+            }),
+          }, strokeSample(dash, 2)))),
+          React.createElement('div', { className: 'drawai-option-strip' }, [1, 2, 3, 4, 6, 8].map((width) => React.createElement('button', {
+            key: width, type: 'button', className: 'drawai-choice-button' + (uniform(cells, (cell) => String(styleNumber(styleOf(cell), 'strokeWidth', 1))) === String(width) ? ' on' : ''),
+            'aria-label': '线宽：' + width, title: width + ' px', onClick: () => patch({ strokeWidth: String(width) }),
+          }, React.createElement('span', { className: 'drawai-width-dot', style: { width: Math.max(5, width * 3) + 'px', height: Math.max(5, width * 3) + 'px' } })))),
+        ) : null,
+        opacity: uniform(targets, (cell) => String(styleNumber(styleOf(cell), opacityKey, 100))),
+        onOpacityChange: (value) => patch({ [opacityKey]: String(clampNumber(value, 0, 100)) }, targets.map((cell) => cell.id), 'opacity:' + key + ':' + ids.join(',')),
+        onOpacityEnd: () => { lastCoalesceRef.current = null },
+        customColors: prefs.customColors,
+        onOpen: () => setPrefs((current) => Object.assign({}, current, { customColors: customColorList(loadDrawaiPrefs().customColors) })),
+        onPick: (color) => patch({ [key]: color }, targets.map((cell) => cell.id)),
+        onSaveColor: (color) => patchPrefs({ customColors: customColorList(customColorList(loadDrawaiPrefs().customColors).concat(color)) }),
+      })
+    }
+    const controls = []
+    if (nodes.length > 0) {
+      // 只有基础图形之间可以直接换形；SVG/图片/文字/分区保留自身类别。
+      const canChangeShape = nodes.every((n) => isBasicShapeStyle(styleOf(n)))
+      if (canChangeShape) controls.push(select('形状', uniform(nodes, (n) => nodeShapeFromStyle(styleOf(n))),
+        SHAPE_LIBRARY.filter((entry) => shapeFamilyOf(entry.shape) === 'shape').map((entry) => [entry.shape, entry.label, railShapeFace(entry.shape)]),
+        (shape) => applyLocal((next) => {
+          if (!SHAPE_LIBRARY.some((entry) => entry.shape === shape && shapeFamilyOf(shape) === 'shape')) return
+          for (const node of next.nodes) {
+            if (ids.indexOf(node.id) >= 0 && isBasicShapeStyle(styleOf(node))) {
+              node.style = styleForShapePick(styleOf(node), shape)
+            }
+          }
+        })))
+      const filled = nodes.filter((n) => !['text', 'svg', 'image'].includes(nodeShapeFromStyle(styleOf(n))))
+      if (filled.length > 0) controls.push(color('填充', 'fillColor', filled, '#ffffff'))
+    }
+    controls.push(color('描边', 'strokeColor', cells, '#000000'))
+    controls.push(color('字色', 'fontColor', cells, '#000000'))
+    controls.push(select('字号', uniform(cells, (cell) => String(styleGet(styleOf(cell), 'fontSize', edges.indexOf(cell) >= 0 ? '10' : '12'))),
+      [10, 12, 14, 18, 24, 36, 48, 72].map((n) => [String(n), String(n)]), (value) => patch({ fontSize: value }),
+      React.createElement('label', { className: 'drawai-font-custom' }, '自定义字号',
+      React.createElement('input', { type: 'number', min: 8, max: 72, 'aria-label': '字号', placeholder: '混合',
+        key: ids.join(',') + cells.map((cell) => styleGet(styleOf(cell), 'fontSize', '')).join(','),
+        defaultValue: uniform(cells, (cell) => String(styleGet(styleOf(cell), 'fontSize', edges.indexOf(cell) >= 0 ? '10' : '12'))),
+        onBlur: (event) => {
+          const value = clampFontSize(event.target.value)
+          if (value !== null) patch({ fontSize: String(value) })
+        },
+        onKeyDown: (event) => {
+          event.stopPropagation()
+          if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); event.target.blur() }
+        },
+      }))))
+    if (edges.length > 0) {
+      const edgeIds = edges.map((edge) => edge.id)
+      controls.push(select('线型', uniform(edges, (edge) => lineKindFromStyle(styleOf(edge))),
+        ['straight', 'sharp', 'rounded', 'curved'].map((kind) => [kind, edgeLineLabelOf(kind), railEdgeFace(kind)]),
+        (kind) => applyLineKind(edgeIds, kind)))
+      controls.push(select('箭头', uniform(edges, (edge) => arrowFromStyle(styleOf(edge))),
+        [['end', '单向', '→'], ['both', '双向', '↔'], ['none', '无', '—'], ['start', '反向', '←']],
+        (arrow) => updateEdge(edgeIds, { arrow })))
+    }
+    return React.createElement('div', {
+      className: 'drawai-selection-toolbar', role: 'toolbar', 'aria-label': '选区样式',
+      style: { width: width + 'px', left: clampNumber(center - width / 2, 8, Math.max(8, size.w - width - 8)) + 'px',
+        top: clampNumber(top >= 84 ? top - 72 : bottom + 12, 8, Math.max(8, size.h - 72)) + 'px' },
+      onPointerDown: (event) => event.stopPropagation(),
+      onDoubleClick: (event) => event.stopPropagation(),
+      onContextMenu: (event) => { event.preventDefault(); event.stopPropagation() },
+    }, controls)
+  }
+
   function renderShapeRail() {
     if (doc === null) return null
     const targets = railReplaceTargets()
@@ -8934,7 +9574,7 @@ function CanvasView(props) {
         : panelFamily === 'edge'
           ? typeof placeEdgeKind === 'string' && placeEdgeKind.length > 0
             ? placeEdgeKind
-            : focusEdgeKind || defaultShapeOfFamily('edge', 'rounded')
+            : lastLineKindRef.current
           : placeFamily === panelFamily && typeof placeTool === 'string'
             ? placeTool
             : focusFamily === panelFamily
@@ -8950,7 +9590,6 @@ function CanvasView(props) {
     for (let i = 0; i < RAIL_FAMILIES.length; i += 1) {
       const entry = RAIL_FAMILIES[i]
       const on = placeFamily === entry.family || railOpenFamily === entry.family || focusFamily === entry.family
-      const multi = shapesInFamily(entry.family).length > 1
       const armed = entry.family === 'edge' ? placeEdgeKind !== null : placeFamily === entry.family
       // 母图标跟当前子类型走：放置中 > 选中/悬停 > 族缺省。
       let face = null
@@ -8958,9 +9597,7 @@ function CanvasView(props) {
         const kind =
           typeof placeEdgeKind === 'string' && placeEdgeKind.length > 0
             ? placeEdgeKind
-            : focusFamily === 'edge' && focusEdgeKind.length > 0
-              ? focusEdgeKind
-              : defaultShapeOfFamily('edge', 'rounded')
+            : lastLineKindRef.current
         face = railEdgeFace(kind)
       } else if (entry.family === 'shape') {
         const shape =
@@ -8976,13 +9613,7 @@ function CanvasView(props) {
           'rail-fam-' + entry.family,
           entry.icon,
           on,
-          multi
-            ? entry.family === 'edge'
-              ? '悬停选择线型；点击后在画布点一下放置独立线'
-              : '悬停选择「' + entry.label + '」同族形状；点击后在画布点一下放置'
-            : armed
-              ? '取消放置'
-              : '放置「' + entry.label + '」（点画布一次）',
+          armed ? '取消放置' : entry.label,
           () => pickFamilyFromRail(entry.family),
           hoverHandlers(entry.family),
           face,
@@ -8992,14 +9623,14 @@ function CanvasView(props) {
 
     const rail = React.createElement(
       'div',
-      { className: 'drawai-rail', title: '元素条：悬停看名称或同族；点击后在画布点一下放置（单次）' },
+      { className: 'drawai-rail', 'aria-label': '元素工具栏' },
       chips,
     )
 
     let panel = null
     if (panelFamily !== null) {
       const variants = shapesInFamily(panelFamily)
-      const replacing = panelFamily === 'edge' ? edgeTargets.length > 0 : focusFamily === panelFamily
+      const replacing = panelFamily === 'edge' ? false : focusFamily === panelFamily
       const topPx = railHoverTopPx(panelFamily)
       const panelChips = [
         React.createElement(
@@ -9022,7 +9653,7 @@ function CanvasView(props) {
               'rail-line-' + entry.shape,
               entry.shape,
               panelCurrent === entry.shape,
-              replacing ? '换成「' + entry.label + '」' : '将放置「' + entry.label + '」',
+              entry.label,
               () => pickVariantFromRail(entry.shape),
             ),
           )
@@ -9032,7 +9663,7 @@ function CanvasView(props) {
               'rail-var-' + entry.shape,
               entry.shape,
               panelCurrent === entry.shape,
-              replacing ? '换成「' + entry.label + '」' : '将放置「' + entry.label + '」',
+              entry.label,
               () => pickVariantFromRail(entry.shape),
             ),
           )
@@ -9115,7 +9746,7 @@ function CanvasView(props) {
         step: 1,
         defaultValue: current === null ? '' : String(current),
         placeholder: '字号',
-        title: '直接输入字号（' + FONT_SIZE_MIN + '–' + FONT_SIZE_MAX + '），回车生效',
+        'aria-label': '字号',
         onKeyDown: (event) => {
           if (event.key === 'Enter') {
             event.preventDefault()
@@ -9157,7 +9788,7 @@ function CanvasView(props) {
         {
           key: 'sel-' + cat.key,
           className: 'drawai-btn drawai-select-chip' + (open ? ' on' : ''),
-          title: cat.hint === undefined ? '展开这一类的可选值' : cat.hint,
+          'aria-label': cat.label,
           onClick: () => setMenu(Object.assign({}, menu, { openKey: open ? null : cat.key })),
         },
         cat.label + '：' + cat.value,
@@ -9259,39 +9890,12 @@ function CanvasView(props) {
     }
 
     if (menu.kind === 'canvas') {
-      // 形状入口在右侧常驻元素条；空白右键只留配色偏好、独立连线与粘贴。
-      rows.push(menuTitle('画布 —— 形状请用右侧元素条'))
-      rows.push.apply(
-        rows,
-        menuSelectRow([
-          {
-            key: 'color',
-            label: '配色',
-            value: PALETTE_LABELS[menuStyle] === undefined ? styleSummary(menuStyle, 'color') : PALETTE_LABELS[menuStyle],
-            hint: '新建节点用的配色',
-            body: swatchRow((style) => {
-              setMenuStyle(style)
-              closeSelect()
-            }, menuStyle),
-          },
-        ]),
-      )
-      rows.push(
-        React.createElement(
-          'div',
-          { className: 'drawai-menu-row' },
-          React.createElement(
-            'button',
-            { className: 'drawai-btn', onClick: () => createFreeEdgeAt(menu.userX, menu.userY), title: '画一条两端都没接节点的线，之后拖它的端点可以接到节点上' },
-            '／ 独立连线',
-          ),
-          React.createElement(
-            'button',
-            { className: 'drawai-btn', onClick: () => createFreeEdgeAt(menu.userX, menu.userY, 'straight'), title: '画一条两端都不接节点、也不带折点的直线' },
-            '╱ 直线',
-          ),
-        ),
-      )
+      rows.push(menuTitle('画布'))
+      rows.push(React.createElement('div', { className: 'drawai-menu-row' },
+        React.createElement('button', { className: 'drawai-btn', disabled: !canUndo, onClick: () => { undo(); setMenu(null) }, title: 'Ctrl+Z' }, '撤销'),
+        React.createElement('button', { className: 'drawai-btn', disabled: !canRedo, onClick: () => { redo(); setMenu(null) }, title: 'Ctrl+Shift+Z' }, '重做'),
+        React.createElement('button', { className: 'drawai-btn', onClick: selectAll, title: 'Ctrl+A' }, '全选'),
+      ))
     } else if (menu.kind === 'multi') {
       // 多选右键：对齐 / 分布。放在菜单而不是常驻工具条，是为了不挤压右栏宽度 ——
       // 这两个操作是"偶尔批量收拾一下"，不是常驻动作。
@@ -9376,30 +9980,25 @@ function CanvasView(props) {
           'div',
           { className: 'drawai-menu-row' },
           React.createElement('button', { className: 'drawai-btn', onClick: () => openNodeEditor(menu.id) }, '改标签'),
-          // 图形内容（svg 节点画的到底是什么）—— 它不是标签文字，改不了就地双击那套，
-          // 所以给它一个能贴一大段标记的入口。还不是 svg 的节点，这一步就是"变成 SVG 图形"。
-          React.createElement(
+          // 仅编辑已有 SVG 内容；右键不提供跨类别创建或转换入口。
+          currentShape === 'svg' ? React.createElement(
             'button',
             {
               className: 'drawai-btn',
               onClick: () => openSvgEditor(menu.id),
-              title: '编辑这个节点的 SVG 图形标记（内容整段替换）',
             },
-            currentShape === 'svg' ? 'SVG 内容…' : '改成 SVG 图形…',
-          ),
+            'SVG 内容…',
+          ) : null,
           currentShape === 'section'
             ? React.createElement(
                 'button',
                 {
                   className: 'drawai-btn',
                   onClick: () => dissolveSection(menu.id),
-                  title: '删掉分区框，里面的节点保留并回到图层下',
                 },
                 '解散分区',
               )
             : null,
-          React.createElement('button', { className: 'drawai-btn', onClick: copySelection, title: 'Ctrl+C' }, '复制'),
-          React.createElement('button', { className: 'drawai-btn', onClick: cutSelection, title: 'Ctrl+X' }, '剪切'),
           React.createElement('button', { className: 'drawai-btn', onClick: () => deleteById(menu.id) }, '删除'),
           React.createElement('button', { className: 'drawai-btn', onClick: () => openDataEditor('node', menu.id) }, '编辑数据…'),
         ),
@@ -9586,16 +10185,14 @@ function CanvasView(props) {
       )
     }
 
-    // 画布空白处右键：元素库 + 粘贴（drawio 也是这么放的）。
-    if (menu.kind === 'canvas') {
-      rows.push(
-        React.createElement(
-          'div',
-          { className: 'drawai-menu-row' },
-          React.createElement('button', { className: 'drawai-btn', onClick: pasteClipboard, title: 'Ctrl+V' }, '粘贴'),
-        ),
-      )
-    }
+    // 所有普通右键菜单共用编辑入口，不再承担创建元素的职责。
+    const canCopy = collectClipboard(docRef.current, selectedIds) !== null
+    rows.push(React.createElement('div', { className: 'drawai-menu-row' },
+      React.createElement('button', { className: 'drawai-btn', disabled: !canCopy, onClick: copySelection, title: 'Ctrl+C' }, '复制'),
+      React.createElement('button', { className: 'drawai-btn', disabled: !canCopy, onClick: cutSelection, title: 'Ctrl+X' }, '剪切'),
+      React.createElement('button', { className: 'drawai-btn', disabled: clipboard === null || activeLayerLocked(), onClick: pasteClipboard, title: 'Ctrl+V' }, '粘贴'),
+      menu.kind === 'multi' ? React.createElement('button', { className: 'drawai-btn', onClick: deleteSelected }, '删除') : null,
+    ))
 
     // 夹在画布内：容器是 overflow:hidden，菜单贴边弹出会被裁掉。
     const left = Math.max(0, Math.min(menu.left, size.w - 214))
@@ -9613,6 +10210,28 @@ function CanvasView(props) {
   /** 新建 / 打开 的弹出面板。复用 drawai-menu 的样式，位置固定在画布左上角下面。 */
   function renderDocMenu() {
     if (docMenu === null) return null
+    if (docMenu === 'export') {
+      const width = Math.min(300, Math.max(180, size.w - 8))
+      return React.createElement('div', { className: 'drawai-menu drawai-docmenu drawai-special-panel', style: Object.assign({}, panelStyle(docMenuPos, width), { width: width + 'px', maxHeight: Math.max(150, size.h - 12) + 'px', overflowY: 'auto' }) },
+        React.createElement(ExportPanel, { doc, path: hasPath ? target : 'diagram', selectedIds, prefs, mode, activeLayerId, pageIndex, onPrefs: patchPrefs,
+          onEstimate: prepareExport,
+          onExport: (request) => { setExportRequest(request); setDocMenu(null); setDocMenuPos(null) },
+        }))
+    }
+    if (docMenu === 'layers') {
+      const width = Math.min(360, Math.max(180, size.w - 8))
+      return React.createElement('div', { className: 'drawai-menu drawai-docmenu drawai-special-panel', style: Object.assign({}, panelStyle(docMenuPos, width), { width: width + 'px', maxHeight: Math.max(150, size.h - 12) + 'px' }) },
+        React.createElement(LayersPanel, { doc, activeId: activeLayerId, selectedIds, mode, uid,
+          onSelect: setCurrentLayerId, onVisible: toggleLayerVisible, onLocked: toggleLayerLocked,
+          onRename: (id, name) => {
+            const current = docRef.current
+            const layer = current && Array.isArray(current.layers) ? current.layers.find((layer) => layer.id === id) : null
+            if (!layer || layer.name === name) return
+            applyLocal((next) => renameLayerInDoc(next, id, name))
+          },
+          onCreate: createLayer, onRemove: removeLayer, onMove: moveSelectionToLayer,
+        }))
+    }
     // **先把状态归一化**，后面的代码才敢直接读 .error / .files。
     //
     // 这里崩过一次，报错就长这样：
@@ -9627,9 +10246,10 @@ function CanvasView(props) {
     // 工具条下拉菜单（文件 / 编辑 / 视图 / 导出）：docMenu 的值就是菜单的 key。
     const toolbarMenu = toolbarMenus().filter((m) => m.key === docMenu)[0]
     if (toolbarMenu !== undefined) {
-      const rows = [menuTitle(toolbarMenu.title)]
+      const rows = [menuTitle(toolbarMenu.label)]
       for (let i = 0; i < toolbarMenu.items.length; i += 1) {
         const entry = toolbarMenu.items[i]
+        if (i > 0 && entry.group !== toolbarMenu.items[i - 1].group) rows.push(React.createElement('div', { key: 'sep-' + i, className: 'drawai-menu-separator' }))
         rows.push(
           React.createElement(
             'button',
@@ -9646,11 +10266,15 @@ function CanvasView(props) {
                 entry.onClick()
               },
             },
-            entry.label,
+            React.createElement('span', { className: 'drawai-menu-label' }, entry.label),
+            entry.shortcut ? React.createElement('span', { className: 'drawai-menu-shortcut' }, entry.shortcut) : null,
             entry.hint.length > 0 ? React.createElement('span', { className: 'drawai-menu-hint' }, entry.hint) : null,
           ),
         )
       }
+      if (docMenu === 'view' && pageCount > 1) rows.push(React.createElement('label', { className: 'drawai-page-picker' }, '页面',
+        React.createElement('select', { 'aria-label': '切换页面', value: pageIndex, onChange: (event) => switchPage(Number(event.target.value)) },
+          Array.from({ length: pageCount }, (_, index) => React.createElement('option', { key: index, value: index }, '第 ' + (index + 1) + ' / ' + pageCount + ' 页')))))
       return React.createElement('div', { className: 'drawai-menu drawai-docmenu', style: panelStyle(docMenuPos) }, rows)
     }
     // 宿主把"列不出来"的原因也带回来了 —— 必须显示，否则用户只看到"找不到文件"，无从判断。
@@ -10095,9 +10719,9 @@ function CanvasView(props) {
    * 为什么用 inline style 而不是 CSS 类：位置随按钮宽度和右栏宽度变，属于运行期数据。
    * 夹取用画布的当前尺寸（size）—— 右栏很窄，靠右的菜单（「导出」）不夹会伸到面板外面看不见。
    */
-  function panelStyle(pos) {
+  function panelStyle(pos, preferredWidth) {
     if (pos === null || pos === undefined) return undefined
-    const width = 240
+    const width = preferredWidth || 240
     const maxLeft = Math.max(0, (size.w > 0 ? size.w : width) - width - 4)
     const maxTop = Math.max(0, (size.h > 0 ? size.h : 200) - 60)
     return { left: Math.min(Math.max(0, pos.left), maxLeft) + 'px', top: Math.min(Math.max(0, pos.top), maxTop) + 'px' }
@@ -10118,6 +10742,8 @@ function CanvasView(props) {
     hint: opts !== undefined && opts.hint !== undefined ? opts.hint : '',
     disabled: opts !== undefined && opts.disabled === true,
     keepOpen: opts !== undefined && opts.keepOpen === true,
+    group: opts && opts.group || '',
+    shortcut: opts && opts.shortcut || '',
   })
 
   /**
@@ -10190,32 +10816,20 @@ function CanvasView(props) {
    * 这里是窄栏，hover 弹出很难点，鼠标一移开就收起。
    */
   function toolbarMenus() {
-    const pageItems = []
-    if (pageCount > 1) {
-      for (let p = 0; p < pageCount; p += 1) {
-        const idx = p
-        pageItems.push(
-          item((pageIndex === idx ? '● ' : '○ ') + '第 ' + (idx + 1) + ' 页', () => switchPage(idx), {
-            hint: pageIndex === idx ? '当前页' : '切换到这一页（会先保存当前页）',
-            keepOpen: true,
-          }),
-        )
-      }
-    }
     return [
       {
         key: 'file',
         label: '文件',
         title: '新建 / 打开 / 保存',
         items: [
-          item('新建画布…', openNewCanvasPanel, { hint: '自己起个名字（默认预填下一个可用的 untitled*）' }),
-          item('打开…', openFilePicker, { hint: '列出上次用过的目录里已有的画布' }),
+          item('新建画布…', openNewCanvasPanel, { group: 'open' }),
+          item('打开…', openFilePicker, { group: 'open' }),
           item(hasPath ? '保存' : '另存为…', () => (hasPath ? saveNow() : openSaveAsPanel()), {
-            hint: empty ? '还没有画布可保存' : hasPath ? '立刻落盘（平时会自动保存）' : '给这张画布一个文件名',
+            group: 'save',
             disabled: empty || (hasPath && !canSave),
           }),
-          item('另存为…', openSaveAsPanel, { hint: '换个文件名保存一份', disabled: empty }),
-          item('选择目录…', pickDirectoryAndList, { hint: '打开系统文件管理器另选一个目录' }),
+          ...(hasPath ? [item('另存为…', openSaveAsPanel, { group: 'save', disabled: empty })] : []),
+          item('重新载入', () => setNonce((n) => n + 1), { group: 'reload', disabled: empty }),
         ],
       },
       {
@@ -10223,83 +10837,43 @@ function CanvasView(props) {
         label: '编辑',
         title: '撤销 / 重做 / 复制粘贴',
         items: [
-          item('撤销', undo, { hint: 'Ctrl+Z', disabled: empty || !canUndo }),
-          item('重做', redo, { hint: 'Ctrl+Shift+Z', disabled: empty || !canRedo }),
-          item('复制', copySelection, { hint: 'Ctrl+C', disabled: empty || selectedIds.length === 0 }),
-          item('剪切', cutSelection, { hint: 'Ctrl+X', disabled: empty || selectedIds.length === 0 }),
-          item('粘贴', pasteClipboard, { hint: 'Ctrl+V（跨标签页也能贴）', disabled: empty }),
-          item('全选', selectAll, { hint: 'Ctrl+A（节点与连线都选上，可整体拖动/换样式/删除）', disabled: empty }),
-          item('查找…', openFindPanel, { hint: 'Ctrl+F：按标签或 id 跳转', disabled: empty }),
+          item('撤销', undo, { shortcut: 'Ctrl+Z', group: 'history', disabled: empty || !canUndo }),
+          item('重做', redo, { shortcut: 'Ctrl+Shift+Z', group: 'history', disabled: empty || !canRedo }),
+          item('剪切', cutSelection, { shortcut: 'Ctrl+X', group: 'clipboard', disabled: empty || selectedIds.length === 0 }),
+          item('复制', copySelection, { shortcut: 'Ctrl+C', group: 'clipboard', disabled: empty || selectedIds.length === 0 }),
+          item('粘贴', pasteClipboard, { shortcut: 'Ctrl+V', group: 'clipboard', disabled: empty }),
+          item('全选', selectAll, { shortcut: 'Ctrl+A', group: 'selection', disabled: empty }),
+          item('查找…', openFindPanel, { shortcut: 'Ctrl+F', group: 'selection', disabled: empty }),
           item('撤销 AI 改动', revertAiChange, {
-            hint: '退回最近一次 AI 写盘前的版本（只保留一层；AI 的改动不在本地撤销历史里）',
+            hint: '与人工撤销分开', group: 'ai',
             disabled: empty || !canRevert,
           }),
-          item('整理几何（吸附到格线）', normalizeGeometry, { hint: '节点对齐整格、折点对齐半格；从 drawio 手画来的图常用', disabled: empty }),
+          item('对齐到网格', normalizeGeometry, { group: 'arrange', disabled: empty }),
         ],
       },
       {
         key: 'layers',
         label: '图层',
         title: '显示 / 隐藏 / 锁定 / 移层',
-        items: layerMenuItems(),
+        items: [],
       },
       {
         key: 'view',
         label: '视图',
         title: '缩放与外观',
         items: [
-          item('适应内容', () => setViewOverride(null), { hint: '把图缩放到刚好铺满面板', disabled: empty }),
-          item(modeTag, () => setMode(mode === 'light' ? 'dark' : 'light'), { hint: '切换明暗配色' }),
-          item(showGrid ? '隐藏网格' : '显示网格', () => setShowGrid(!showGrid), { hint: '只影响本机显示，不写进文件' }),
-          item('偏好…', openPrefsPanel, { hint: '默认形状、配色、格线等（本机记住）' }),
-          item('重新读取文件', () => setNonce((n) => n + 1), { hint: '从磁盘重新载入这张画布', disabled: empty }),
-        ].concat(pageItems),
+          item('适应内容', () => setViewOverride(null), { group: 'zoom', disabled: empty }),
+          item('100%', () => { const current = viewRef.current; if (current && size.w > 0) setViewOverride(zoomViewAt(current, { x: current.x + current.w / 2, y: current.y + current.h / 2 }, size.w / current.w)) }, { group: 'zoom', disabled: empty }),
+          item(modeTag, () => setMode(mode === 'light' ? 'dark' : 'light'), { group: 'appearance', keepOpen: true }),
+          item(showGrid ? '隐藏网格' : '显示网格', () => setShowGrid(!showGrid), { group: 'appearance', keepOpen: true }),
+          item('偏好…', openPrefsPanel, { group: 'settings' }),
+        ],
       },
       {
         key: 'export',
         label: '导出',
-        title: '导出为图片、矢量或 drawio 文件',
-        items: [
-          item(
-            '导出 SVG',
-            () => {
-              setSelectedIds([])
-              setExportRequest('svg')
-            },
-            { hint: '矢量，可再编辑', disabled: empty },
-          ),
-          item(
-            '导出 PNG（4×）',
-            () => {
-              setSelectedIds([])
-              setExportRequest({ format: 'png', scale: 4 })
-            },
-            { hint: '高质量位图，白/深色底，适合贴到文档里', disabled: empty },
-          ),
-          item(
-            '导出透明 PNG（4×）',
-            () => {
-              setSelectedIds([])
-              setExportRequest({ format: 'png', transparent: true, scale: 4 })
-            },
-            { hint: '高质量透明背景，适合叠到幻灯片/海报上', disabled: empty },
-          ),
-          item(
-            '导出选中为 SVG',
-            () => setExportRequest({ format: 'svg', ids: selectedIds.slice() }),
-            { hint: '只导出当前选区', disabled: empty || selectedIds.length === 0 },
-          ),
-          item(
-            '导出选中为 PNG',
-            () => setExportRequest({ format: 'png', ids: selectedIds.slice(), scale: 4 }),
-            { hint: '只导出当前选区（白/深色底，4×）', disabled: empty || selectedIds.length === 0 },
-          ),
-          item(
-            '导出选中为透明 PNG',
-            () => setExportRequest({ format: 'png', ids: selectedIds.slice(), transparent: true, scale: 4 }),
-            { hint: '选区透明背景，4× 分辨率', disabled: empty || selectedIds.length === 0 },
-          ),
-        ],
+        title: '导出',
+        items: [],
       },
     ]
   }
@@ -10322,7 +10896,7 @@ function CanvasView(props) {
             },
             className: 'drawai-btn drawai-menu-trigger' + (docMenu === m.key ? ' on' : ''),
             onClick: () => toggleToolbarMenu(m.key),
-            title: m.title,
+            'aria-label': m.label,
           },
           m.label + ' ▾',
         ),
@@ -10347,7 +10921,16 @@ function CanvasView(props) {
   } else if (doc === null) {
     body = React.createElement('div', { className: 'drawai-note' }, '读取中…')
   } else {
-    const canvasChildren = [renderDiagram(doc, mode, uid, svgRef, ui, view)]
+    // 草稿仅用于预览几何：编辑中撑高的节点与提交后的排版一致，不提前写盘。
+    let previewDoc = doc
+    if (editing !== null) {
+      previewDoc = cloneDoc(doc)
+      const cells = editing.kind === 'edge' ? previewDoc.edges : previewDoc.nodes
+      for (const cell of cells) if (cell.id === editing.id) cell.label = editing.text
+    }
+    const canvasChildren = [renderDiagram(previewDoc, mode, uid, svgRef, ui, view)]
+    const selectionToolbar = renderSelectionToolbar()
+    if (selectionToolbar !== null) canvasChildren.push(selectionToolbar)
     const menuNode = renderMenu()
     if (menuNode !== null) canvasChildren.push(menuNode)
     if (editing !== null) {
@@ -10355,20 +10938,26 @@ function CanvasView(props) {
       // 不用 SVG foreignObject —— React 会把 <svg> 后代一律建成 SVG 命名空间元素，
       // 里面的输入控件不会按 HTML 渲染。
       //
-      // 节点用 textarea（能换行、能长高），连线标签仍然是一行 input：
-      // 需求"输入过程中也要自动换行"针对的是节点里的长文字。
-      const isNodeEditor = editing.kind === 'node'
+      // 节点与连线标签都用多行输入框。
+      const editorScale = numberOr(editing.scale, 1)
       const editorStyle = {
         left: editing.left + 'px',
         top: editing.top + 'px',
-        width: Math.max(isNodeEditor ? 24 : 60, editing.width) + 'px',
-        height: Math.max(isNodeEditor ? 24 : 24, editing.height) + 'px',
+        width: Math.max(1, editing.width / editorScale) + 'px',
+        height: Math.max(1, editing.height / editorScale) + 'px',
+        transform: 'scale(' + editorScale + ')', transformOrigin: 'top left',
+        fontFamily: FONT,
+        fontWeight: 'normal', fontStyle: 'normal', letterSpacing: '0px', textIndent: 0,
+        textAlign: editing.textAlign || 'center',
+        opacity: editing.opacity === undefined ? 1 : editing.opacity,
       }
-      if (isNodeEditor) {
+      {
         // 字号/行高/字色按这个节点给：编辑时看到的字，就是提交后画出来的字。
-        editorStyle.fontSize = Math.max(1, numberOr(editing.fontSize, FSIZE)) + 'px'
-        editorStyle.lineHeight = Math.max(1, numberOr(editing.lineHeight, LHEIGHT)) + 'px'
+        editorStyle.fontSize = Math.max(1, numberOr(editing.fontSize, FSIZE) / editorScale) + 'px'
+        editorStyle.lineHeight = Math.max(1, numberOr(editing.lineHeight, LHEIGHT) / editorScale) + 'px'
         editorStyle.color = editing.color === undefined || editing.color === null ? '#000000' : editing.color
+        editorStyle.wordBreak = 'break-all'
+        editorStyle.overflowWrap = 'normal'
         // whiteSpace=nowrap 的标签在编辑框里也不换行（否则一打字就换行、一提交又缩回一行）。
         if (editing.wraps === false) {
           editorStyle.whiteSpace = 'pre'
@@ -10386,9 +10975,10 @@ function CanvasView(props) {
         onChange: (event) => setEditing(Object.assign({}, editing, { text: event.target.value })),
         onBlur: commitEdit,
         onKeyDown: (event) => {
-          // Enter 提交、Esc 取消；**Shift+Enter 换行**（多行标签的入口 ——
-          // 原来它是个单行 input，连手写多行标签都做不到）。
-          if (event.key === 'Enter' && event.shiftKey !== true) {
+          event.stopPropagation()
+          // 输入法确认键不结束编辑；Enter / Shift+Enter 均换行。
+          if (event.isComposing || event.keyCode === 229) return
+          if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
             event.preventDefault()
             commitEdit()
           } else if (event.key === 'Escape') {
@@ -10398,7 +10988,7 @@ function CanvasView(props) {
         },
       }
       canvasChildren.push(
-        isNodeEditor ? React.createElement('textarea', editorProps) : React.createElement('input', editorProps),
+        React.createElement('textarea', Object.assign({ 'aria-label': '编辑标签' }, editorProps)),
       )
     }
     const canvasEl = React.createElement(
@@ -10771,6 +11361,13 @@ exports.__routeInternals = {
   hiddenLayerIds: hiddenLayerIds,
   isHiddenCell: isHiddenCell,
   layerLabelOf: layerLabelOf,
+  layerPreviewDoc: layerPreviewDoc,
+  LayersPanel: LayersPanel,
+  ExportPanel: ExportPanel,
+  exportDocument: exportDocument,
+  exportGeometry: exportGeometry,
+  exportOutputSize: exportOutputSize,
+  svgTreeToDom: svgTreeToDom,
   nextLayerIdOf: nextLayerIdOf,
   layerIsLocked: layerIsLocked,
   filterEditableIds: filterEditableIds,
@@ -10800,6 +11397,7 @@ exports.__routeInternals = {
   labelWraps: labelWraps,
   labelLineHeight: labelLineHeight,
   nodeEditorBox: nodeEditorBox,
+  edgeEditorBox: edgeEditorBox,
   wrapLabel: wrapLabel,
   pathFromAddress: pathFromAddress,
   computeFitView: computeFitView,

@@ -521,7 +521,7 @@ console.log('\n导出取框：按"这一刻会画出来的东西"算（线绕到
 
   // 取框那一行必须是 paintedBounds（不是 getBBox 量 DOM）—— 这是那次留白事故的回归线。
   const srcText = readFileSync(source, 'utf8')
-  ok(/paintedBounds\((?:boundsDoc|current)\) \|\| contentBounds\((?:boundsDoc|current)\)/.test(srcText), '导出/看图按 paintedBounds 取框，算不出来才退回 contentBounds')
+  ok(/paintedBounds\((?:boundsDoc|current|doc)\) \|\| contentBounds\((?:boundsDoc|current|doc)\)/.test(srcText), '导出/看图按 paintedBounds 取框，算不出来才退回 contentBounds')
   ok(srcText.indexOf('measurePaintedBounds') < 0, '不再用 getBBox() 量 DOM 取框（量到的是视口，不是内容）')
   ok(/routeEdgeStyled\(from, to, geometry\.boxes, geometry\.bounds, edge, undefined\)/.test(srcText), '框里的走线用的是渲染器同一套路由')
 }
@@ -701,6 +701,17 @@ console.log('\n适应内容：居中、覆盖，且缩放锚点不漂移')
   ok(internals.resizeViewFor(null, { w: 800, h: 600 }, { w: 500, h: 600 }) === null, '还没有视口时不折算（交给自适应）')
   ok(internals.resizeViewFor(before, { w: 0, h: 0 }, { w: 500, h: 600 }) === null, '尺寸还没量到时（0）不折算')
   ok(internals.resizeViewFor(before, { w: 800, h: 600 }, { w: 0, h: 0 }) === null, '新尺寸是 0 时不折算（隐藏的标签页）')
+  const resizeDoc = { nodes: [{ id: 'fixed', x: 0, y: 0, w: 100, h: 50 }], edges: [] }
+  const fixedSvg = renderDiagram(resizeDoc, 'light', 'fixed-size', { current: null }, { viewportSize: { w: 800, h: 600 } }, before)
+  ok(fixedSvg.props.width === 800 && fixedSvg.props.height === 600, 'SVG 像素尺寸与视口同步，容器变化时旧画面不会被百分比拉伸')
+  ok(fixedSvg.props.style.width === 800 && fixedSvg.props.style.height === 600 && fixedSvg.props.style.maxWidth === 'none' && fixedSvg.props.style.maxHeight === 'none',
+    '内联尺寸覆盖宿主响应式 SVG 样式，快速缩窄时保持像素大小')
+  const changedView = internals.resizeViewFor(before, { w: 800, h: 600 }, { w: 1200, h: 500 })
+  const changedSvg = renderDiagram(resizeDoc, 'light', 'fixed-size', { current: null }, { viewportSize: { w: 1200, h: 500 } }, changedView)
+  ok(changedSvg.props.width / changedView.w === 1 && changedSvg.props.height / changedView.h === 1, '拖宽并降低窗口后每个画布单位仍为一个屏幕像素')
+  const genericSvg = renderDiagram(resizeDoc, 'light', 'preview-size', { current: null }, {}, before)
+  ok(genericSvg.props.width === '100%' && genericSvg.props.height === '100%', '图层缩略图等无独立视口的渲染仍填满容器')
+  ok(genericSvg.props.style.width === undefined && genericSvg.props.style.height === undefined, '缩略图和导出的尺寸仍由 SVG 属性控制')
 
   // 锚点缩放：滚轮手感的关键 —— 锚点前后必须停在同一位置
   const current = { x: 0, y: 0, w: 800, h: 600 }
@@ -1999,7 +2010,7 @@ console.log('\n文字撑高节点 + 就地编辑框（输入时与输完后必�
   const tb = textBox({ node: editNode, geo: geo, fontSize: 18 })
   const eb = editorBox(editNode, editNode.label, ctm, { left: 0, top: 0 })
   ok(Math.abs(eb.width - tb.w) < 0.01, '编辑框宽度 = 文字区宽度（' + eb.width + ' vs ' + tb.w + '）——同一宽度才会在同一处断行')
-  ok(Math.abs(eb.left - tb.x) < 0.01 && Math.abs(eb.height - Math.max(tb.h, internals.FALLBACK_NODE_H)) < 0.01, '编辑框贴着文字区摆，高度按行数')
+  ok(Math.abs(eb.left - tb.x) < 0.01 && Math.abs(eb.height - tb.h) < 0.01, '编辑框贴着文字区摆，高度按行数')
   ok(eb.fontSize === 18 && eb.lineHeight === internals.labelLineHeight(18), '编辑框的字号/行高取自这个节点的 fontSize：' + eb.fontSize + '/' + eb.lineHeight)
   ok(eb.color === '#000000', '浅底节点上编辑框是黑字（与画出来的标签同一套字色规则）：' + eb.color)
   ok(eb.wraps === true, '缺省标签在编辑框里也是换行的')
@@ -2016,10 +2027,25 @@ console.log('\n文字撑高节点 + 就地编辑框（输入时与输完后必�
   const db = editorBox(diamond, long, ctm, { left: 0, top: 0 })
   ok(db.width < 200 - 12 + 0.01 && Math.abs(db.width - 120) < 0.01, '菱形节点的编辑框按 60% 宽度摆：' + db.width)
 
-  // 接线：节点用 textarea（能换行），Enter 提交、Shift+Enter 换行
+  // 节点和连线标签统一多行编辑。
   const src = composeClientBody()
-  ok(/isNodeEditor \? React\.createElement\('textarea', editorProps\) : React\.createElement\('input', editorProps\)/.test(src), '节点编辑用 textarea、连线标签仍是一行 input')
-  ok(/event\.key === 'Enter' && event\.shiftKey !== true/.test(src), 'Enter 提交、Shift+Enter 用来换行')
+  ok(/React\.createElement\('textarea', Object\.assign/.test(src), '节点和连线标签均用 textarea')
+  const handlerText = src.slice(src.indexOf('onKeyDown: (event) => {', src.indexOf("key: 'label-editor'")), src.indexOf('canvasChildren.push(', src.indexOf("key: 'label-editor'")))
+  const handlerBody = handlerText.slice(handlerText.indexOf('{') + 1, handlerText.lastIndexOf('},'))
+  let commits = 0
+  let cancels = 0
+  const onKey = new Function('commitEdit', 'setEditing', 'event', handlerBody).bind(null, () => commits++, () => cancels++)
+  const key = (extra) => Object.assign({ key: 'Enter', preventDefault() {}, stopPropagation() {} }, extra)
+  onKey(key({}))
+  onKey(key({ shiftKey: true }))
+  ok(commits === 0, 'Enter 和 Shift+Enter 均保留换行，不提前提交')
+  onKey(key({ ctrlKey: true, isComposing: true }))
+  ok(commits === 0, '输入法确认时不提前提交')
+  onKey(key({ ctrlKey: true }))
+  onKey(key({ metaKey: true }))
+  ok(commits === 2, 'Ctrl/Command+Enter 完成编辑')
+  onKey(key({ key: 'Escape' }))
+  ok(cancels === 1, 'Escape 取消编辑')
   ok(/editorStyle\.fontSize = /.test(src) && /editorStyle\.color = /.test(src), '编辑框的字号/字色按节点给（输入时与输完后一致）')
   ok(/function autoHeightIfNeeded|'auto-height'/.test(src), '撑高的结果会被写回文档（盘上的图与屏幕上的图一致）')
 }
@@ -2241,7 +2267,7 @@ console.log('\n一次性几何迁移：节点对齐整格、折点与自由端�
 
   // 源码接线：菜单里真的有这个入口
   const src = composeClientBody()
-  ok(/item\('整理几何（吸附到格线）', normalizeGeometry/.test(src), '编辑菜单里有「整理几何（吸附到格线）」')
+  ok(/item\('对齐到网格', normalizeGeometry/.test(src), '编辑菜单里有「对齐到网格」')
   ok(/snapDocGeometry\(current, \{ grid: GRID, edgeGrid: EDGE_GRID/.test(src), '用的是画布自己的单位（GRID / EDGE_GRID）')
 }
 
@@ -2345,7 +2371,7 @@ console.log('\n暗色外观不该改节点里的字色（浅底浅字 = 看不�
 
   // 边的文字在**页面**上（暗色页面就是深底），所以它照旧跟主题走 —— 这一条不能被上面那套带偏
   const edgeDoc = { nodes: [{ id: 'a', x: 0, y: 0, w: 100, h: 60 }, { id: 'b', x: 400, y: 0, w: 100, h: 60 }], edges: [{ id: 'e1', from: 'a', to: 'b', label: '线上的字' }] }
-  const edgeTextOf = (tree) => walk(tree, (n) => n.type === 'text' && n.children.indexOf('线上的字') >= 0, [])[0]
+  const edgeTextOf = (tree) => walk(tree, (n) => n.type === 'text' && n.props.key === 'edge-text-0', [])[0]
   const edgeLight = edgeTextOf(render(edgeDoc, 'light'))
   const edgeDark = edgeTextOf(render(edgeDoc, 'dark'))
   ok(edgeLight !== undefined && edgeLight.props.fill === '#000000', '边上的字在亮色下是黑字')
@@ -2382,6 +2408,122 @@ console.log('\n字号/字色菜单里不再有「默认」那一项')
   ok(swRow.length > 0, '源码里有 swatchRow')
   ok(/forFont && isPlain \? '黑' : entry\.name/.test(swRow), '字色那一行的 plain 叫「黑」（它写出去就是把字变黑）')
   ok(/title: \(forFont \? '字色：' : ''\) \+ label/.test(swRow), '提示文字跟着这个叫法走')
+}
+
+console.log('\n编辑排版与显示排版一致')
+{
+  const node = { id: 'n', label: '短文字', x: 100, y: 200, w: 160, h: 100, style: 'fontSize=18;' }
+  const box = internals.nodeEditorBox(node, node.label, { a: 1, e: 0, f: 0 }, { left: 0, top: 0 })
+  const lineHeight = internals.labelLineHeight(18)
+  ok(Math.abs(box.top + box.height / 2 - 250) < 0.01 && box.height === lineHeight, '短文字编辑框垂直居中，不再从节点顶部输入')
+  const section = Object.assign({}, node, { style: 'group;container=1;fontSize=18;' })
+  const sectionBox = internals.nodeEditorBox(section, section.label, { a: 1, e: 0, f: 0 }, { left: 0, top: 0 })
+  ok(sectionBox.left === 110 && sectionBox.top === 206 && sectionBox.textAlign === 'left', '分区标题编辑保持左上对齐')
+  const multiline = Object.assign({}, node, { style: 'whiteSpace=nowrap;fontSize=18;', label: '第一行\n第二行' })
+  const multilineBox = internals.nodeEditorBox(multiline, multiline.label, { a: 1, e: 0, f: 0 }, { left: 0, top: 0 })
+  ok(multilineBox.height === lineHeight * 2, '禁止自动换行时仍保留显式换行')
+  const draft = '长文字'.repeat(40)
+  const draftBox = internals.nodeEditorBox(node, draft, { a: 1, e: 0, f: 0 }, { left: 0, top: 0 })
+  const finalGeo = internals.nodeBoxOf(Object.assign({}, node, { label: draft }))
+  ok(Math.abs(draftBox.top + draftBox.height / 2 - (finalGeo.y + finalGeo.h / 2)) < 0.01, '草稿撑高后编辑文字位置与提交后的几何相同')
+  const edge = { id: 'e', from: 'a', to: 'b', label: '第一行\n第二行', style: 'fontSize=24;fontColor=#ff0000;' }
+  const pos = { x: 200, y: 100 }
+  const edit = internals.edgeEditorBox(edge, edge.label, pos, { a: 2, e: 30, f: 10 }, { left: 5, top: 5 }, 'dark')
+  ok(edit.fontSize === 48 && edit.color === '#ff0000' && edit.height === internals.labelLineHeight(24) * 4, '连线编辑跟随字号、字色、行高和缩放')
+  ok(Math.abs(edit.top + edit.height / 2 - 207) < 0.01, '连线多行编辑保持标签锚点居中')
+  const doc = { nodes: [{ id: 'a', x: 0, y: 0, w: 100, h: 60 }, { id: 'b', x: 400, y: 0, w: 100, h: 60 }], edges: [edge] }
+  const tree = renderDiagram(doc, 'light', 'multi', { current: null }, {}, null)
+  const text = walk(tree, (n) => n.type === 'text' && n.props.key === 'edge-text-0', [])[0]
+  ok(walk(text, (n) => n.type === 'tspan', []).length === 2, '多行连线标签提交后仍分行显示')
+  const editing = renderDiagram(doc, 'light', 'multi', { current: null }, { editingEdgeId: 'e' }, null)
+  ok(walk(editing, (n) => n.type === 'text' && n.props.key === 'edge-text-0', []).length === 0, '编辑连线时不叠加原标签')
+  const measuredModule = { exports: {} }
+  const context = { font: '', measureText: (text) => ({ width: Array.from(text).reduce((sum, char) => sum + (char === 'i' ? 2 : 12), 0) }) }
+  new Function('module', 'exports', 'require', 'window', 'document', clientBody)(measuredModule, measuredModule.exports, require, {}, {
+    createElement: () => ({ getContext: () => context }),
+  })
+  ok(JSON.stringify(measuredModule.exports.__routeInternals.wrapLabel('iiiiWW', 15, 12)) === '["iiii","W","W"]', '浏览器换行使用真实字体测量，区分宽窄字母')
+  ok(context.font === '12px Helvetica, Arial, sans-serif', '测量使用与显示相同的字体与字号')
+}
+
+console.log('\n色板透明度写入渲染')
+{
+  const doc = { nodes: [
+    { id: 'a', x: 0, y: 0, w: 100, h: 60, label: '透明文字', style: 'fillColor=#ff0000;fillOpacity=40;strokeOpacity=60;textOpacity=25;' },
+    { id: 'b', x: 400, y: 0, w: 100, h: 60 },
+  ], edges: [{ id: 'e', from: 'a', to: 'b', label: '线标签', style: 'strokeOpacity=35;textOpacity=50;' }] }
+  const tree = renderDiagram(doc, 'light', 'opacity', { current: null }, {}, null)
+  const group = walk(tree, (n) => n.props['data-node-id'] === 'a' && n.type === 'g', [])[0]
+  const shape = walk(group, (n) => n.type === 'rect', [])[0]
+  const text = walk(group, (n) => n.type === 'text', [])[0]
+  ok(shape.props.fillOpacity === 0.4 && shape.props.strokeOpacity === 0.6, '节点填充与边框使用独立的不透明度')
+  ok(text.props.fillOpacity === 0.25, '文字不透明度不影响节点填充')
+  const edge = walk(tree, (n) => n.type === 'path' && n.props.strokeOpacity === 0.35, [])[0]
+  ok(edge !== undefined, '连线描边使用色板设置的不透明度')
+  ok(walk(tree, (n) => n.type === 'text' && n.props.key === 'edge-text-0', [])[0].props.fillOpacity === 0.5, '连线标签独立设置不透明度')
+  const edit = internals.nodeEditorBox(doc.nodes[0], doc.nodes[0].label, { a: 1 }, { left: 0, top: 0 }, 'light')
+  ok(edit.opacity === 0.25, '编辑框沿用文字的不透明度')
+}
+
+console.log('\n图层缩略图只读预览')
+{
+  const doc = { nodes: [
+    { id: 'n1', x: 0, y: 0, w: 80, h: 40, label: '主流程', layer: '1' },
+    { id: 'n2', x: 200, y: 0, w: 80, h: 40, label: '隐藏层', layer: 'L2' },
+    { id: 'n3', x: 0, y: 100, w: 80, h: 40, label: '默认层' },
+  ], edges: [{ id: 'e', from: 'n1', to: 'n2', layer: 'L2' }], labels: [],
+  layers: [{ id: '1', name: '主流程' }, { id: 'L2', name: '草稿', visible: false, locked: true }] }
+  const before = JSON.stringify(doc)
+  const preview = internals.layerPreviewDoc(doc, 'L2')
+  ok(preview.nodes.length === 1 && preview.nodes[0].id === 'n2' && preview.edges.length === 1, '缩略图只包含所属图层的节点和连线')
+  ok(preview.layers[0].visible === true && preview.layers[0].locked === false, '隐藏/锁定图层仍可预览内容')
+  ok(preview.edges[0].from === undefined && preview.edges[0].sourcePoint.x === 40, '跨层连线使用外部节点位置作为自由端，不引入其他层的节点')
+  const tree = renderDiagram(preview, 'light', 'layer-thumb', { current: null }, { showGrid: false }, null)
+  ok(walk(tree, (n) => n.type === 'text' && n.props['data-node-id'] === 'n2', []).length === 1, '隐藏图层缩略图实际渲染内容')
+  ok(JSON.stringify(doc) === before, '生成缩略图不修改原图层或连线')
+  ok(internals.layerPreviewDoc(doc, '1').nodes.some((n) => n.id === 'n3'), '没有显式图层的单元归入默认图层预览')
+}
+
+console.log('\n高级导出范围、尺寸与 SVG 文档')
+{
+  const doc = { nodes: [{ id: 'a', x: 0, y: 0, w: 100, h: 50, layer: '1' }, { id: 'b', x: 200, y: 0, w: 80, h: 40, layer: '2' }],
+    edges: [{ id: 'e', from: 'a', to: 'b', layer: '2' }], labels: [], layers: [{ id: '1' }, { id: '2', visible: false }] }
+  const before = JSON.stringify(doc)
+  const subset = internals.exportDocument(doc, { layerIds: ['2'] })
+  ok(subset.nodes.length === 1 && subset.nodes[0].id === 'b' && subset.layers[0].visible, '显式选择隐藏图层时可导出其内容')
+  ok(!subset.edges[0].from && subset.edges[0].sourcePoint.x === 50 && subset.edges[0].to === 'b', '跨层连线保留外部端点位置')
+  ok(JSON.stringify(doc) === before && internals.exportDocument(doc, { layerIds: [] }) === null, '范围筛选不改原图，空图层范围不可导出')
+  const zero = internals.exportGeometry(doc, { padding: 0 })
+  const padded = internals.exportGeometry(doc, { padding: 30 })
+  ok(padded.width === zero.width + 60 && padded.height === zero.height + 60 && padded.x === zero.x - 30, '四周留白直接改变导出取框')
+  const custom = internals.exportOutputSize(100, 50, { format: 'png', scale: 4, pixelWidth: 900, pixelHeight: 300 })
+  ok(custom.width === 900 && custom.height === 300, '指定像素宽高优先于倍数')
+  const capped = internals.exportOutputSize(100, 50, { format: 'png', pixelWidth: 40000, pixelHeight: 20000 })
+  ok(capped.limited && capped.width <= 16384 && capped.width * capped.height <= 32010000 && Math.abs(capped.width / capped.height - 2) < 0.001, '大 PNG 按比例限制边长和像素总数')
+  const vector = internals.exportOutputSize(100, 50, { format: 'svg', scale: 4 })
+  ok(vector.width === 100 && vector.height === 50, 'SVG 内容尺寸不受 PNG 倍数影响')
+  function element(name, type = 1) {
+    return { nodeName: name, nodeType: type, childNodes: [], attributes: {}, style: {}, parentNode: null,
+      get firstChild() { return this.childNodes[0] || null },
+      setAttribute(key, value) { this.attributes[key] = value }, setAttributeNS(ns, key, value) { this.attributes[key] = value },
+      removeAttribute(key) { delete this.attributes[key] },
+      appendChild(node) { if (node.nodeType === 11) { for (const child of [...node.childNodes]) this.appendChild(child) } else { this.childNodes.push(node); node.parentNode = this } return node },
+      insertBefore(node, ref) { this.childNodes.splice(ref ? this.childNodes.indexOf(ref) : this.childNodes.length, 0, node); node.parentNode = this },
+      removeChild(node) { this.childNodes.splice(this.childNodes.indexOf(node), 1); node.parentNode = null },
+    }
+  }
+  const owner = { createElementNS: (ns, name) => element(name), createDocumentFragment: () => element('#fragment', 11), createTextNode: (text) => Object.assign(element('#text', 3), { text }) }
+  const sourceText = readFileSync(source, 'utf8')
+  const start = sourceText.indexOf('  function buildExportSvg(opts) {')
+  const end = sourceText.indexOf('\n  function prepareExport', start)
+  const build = new Function('docRef', 'mode', 'uid', 'showGrid', 'document', 'exportDocument', 'exportGeometry', 'exportOutputSize', 'svgTreeToDom', 'renderDiagram', 'normalizeCustomColor', sourceText.slice(start, end) + '\nreturn buildExportSvg')(
+    { current: doc }, 'dark', 'test', true, owner, internals.exportDocument, internals.exportGeometry, internals.exportOutputSize, internals.svgTreeToDom, renderDiagram, (color) => color)
+  const solid = build({ format: 'svg', grid: false, backgroundColor: '#ffcc00', padding: 0, pixelWidth: 900, pixelHeight: 300, lockAspect: false })
+  ok(solid.node.firstChild.attributes.fill === '#ffcc00' && solid.node.attributes.width === '900' && solid.node.attributes.preserveAspectRatio === 'none', '独立背景色、指定尺寸和取消比例锁实际写入 SVG')
+  ok(solid.node.childNodes.filter((node) => node.nodeName === 'rect').length === 1, '关闭导出网格不受画布网格开关影响')
+  const transparent = build({ format: 'svg', transparent: true, grid: true, layerIds: ['2'] })
+  ok(transparent.node.childNodes.filter((node) => node.nodeName === 'rect').length === 1 && transparent.node.childNodes.some((node) => String(node.attributes.fill).startsWith('url(')), '透明背景仍可独立保留网格')
+  ok(transparent.width > 100 && transparent.node.attributes.xmlns === 'http://www.w3.org/2000/svg', '隐藏图层使用完整内容渲染为独立 SVG 文档')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
