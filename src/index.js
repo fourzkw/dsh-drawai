@@ -14,8 +14,11 @@
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { readdir } from 'node:fs/promises'
-import { isAbsolute, resolve as resolvePath, join as joinPath } from 'node:path'
+import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises'
+import { existsSync, rmSync, writeFileSync, appendFileSync, renameSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { isAbsolute, resolve as resolvePath, join as joinPath, dirname as dirnamePath, basename as basenamePath } from 'node:path'
+import { createVideoTracePool } from './video-trace-pool.js'
 import { applyDocToMxfile, buildMxfile, contentHash, parseMxfile } from './mxfile.js'
 import { decodeRaster } from './raster.js'
 import {
@@ -23,8 +26,40 @@ import {
   TRACE_PRESET_NAMES,
   resolveTraceOptions,
   summarizeTraceForAi,
+  toLosslessJson,
   traceRasterToSvg,
+  traceRasterForToolbar,
 } from './trace-image.js'
+import {
+  DEFAULT_MEDIA_FPS,
+  DEFAULT_MEDIA_H,
+  DEFAULT_MEDIA_W,
+  MAX_FRAME_SVG_CHARS,
+  allocateClipId,
+  appendFrameSvgs,
+  cleanupUnreferencedClips,
+  clipDirFor,
+  copyMediaBeside,
+  ensureClipPack,
+  findSourceFile,
+  importSourceFile,
+  listFrameEntries,
+  listStillIndices,
+  mediaRootFor,
+  packCanvasBundle,
+  packSvgVideoZip,
+  readFrameSvg,
+  readManifest,
+  readStillPng,
+  sanitizeClipId,
+  unpackCanvasBundle,
+  unpackSvgVideoZip,
+  videoDataAttrs,
+  videoMetaFromData,
+  writeFrameSvg,
+  writeManifest,
+  writeStillPng,
+} from './media.js'
 import {
   ARROW_KINDS,
   DASH_KINDS,
@@ -32,6 +67,7 @@ import {
   DEFAULT_FONT,
   DEFAULT_NODE_STYLE,
   DEFAULT_STROKE,
+  DEFAULT_VIDEO_POSTER,
   NODE_SHAPES,
   NODE_SHAPE_STYLE,
   PALETTE,
@@ -48,12 +84,14 @@ import {
   isRasterDataUri,
   isSvgDataUri,
   isSvgMarkup,
+  isVideoNodeData,
   jettyFromStyle,
   lineKindFromStyle,
   nodeShapeFromStyle,
   normalizeDrawioDoc,
   normalizePoints,
   parseStyle,
+  reportNodeShape,
   sideFromStyle,
   styleWithArrow,
   styleWithAvoid,
@@ -412,6 +450,32 @@ function fontColorFieldOf(style) {
  */
 const DEFAULT_SVG_W = 80
 const DEFAULT_SVG_H = 80
+const DEFAULT_VIDEO_W = DEFAULT_MEDIA_W
+const DEFAULT_VIDEO_H = DEFAULT_MEDIA_H
+
+/** 只碰旁路媒体、不改 .drawio 的 ops（单独出现时不写盘、不重排）。 */
+const MEDIA_SIDE_OPS = {
+  listFrames: true,
+  getFrame: true,
+  setFrame: true,
+  appendFrames: true,
+  extractFrames: true,
+  traceFrame: true,
+  exportSvgVideo: true,
+  exportMediaSource: true,
+}
+
+function resolveVideoNode(doc, id, where) {
+  for (let i = 0; i < doc.nodes.length; i += 1) {
+    if (String(doc.nodes[i].id) !== String(id)) continue
+    const meta = videoMetaFromData(doc.nodes[i].data)
+    if (meta === null || meta.clip === null) {
+      throw new Error(where + ': node "' + id + '" is not a video node (missing drawaiMedia/mediaClip)')
+    }
+    return { node: doc.nodes[i], meta: meta, index: i }
+  }
+  throw new Error(where + ': unknown node "' + id + '"')
+}
 
 /**
  * 一段内嵌 SVG 标记的长度上限。超了直接拒：一个单元格几十万字符会把文件和上下文一起撑爆。
@@ -517,6 +581,10 @@ function nodeStyleFromOp(style, op, where) {
   // 只给 shape:"svg" 却没有任何内容 —— 那会得到一个看不见的空框。直接说清楚要什么。
   if (op.shape === 'svg' && nodeShapeFromStyle(out) !== 'svg') {
     throw new Error(where + ': shape "svg" 还要一起给内容 —— "svg": "<svg …>…</svg>"（形状本身决定不了画什么）')
+  }
+  // video：style 层是海报 SVG；没给 svg 时塞缺省播放按钮海报。
+  if (op.shape === 'video' && nodeShapeFromStyle(out) !== 'svg') {
+    out = styleWithSvgMarkup(out, DEFAULT_VIDEO_POSTER, '0')
   }
   if (typeof op.style === 'string' && op.style.length > 0) {
     // 文字元素（独立文字）没有填充与描边：给它调色板名要落到 **fontColor** 上，
@@ -830,6 +898,12 @@ async function applyOps(doc, ops, out, opctx) {
       if (rawImage === undefined) {
         throw new Error(where + ' needs a non-empty string "image"（工作区里那张位图的路径，png/jpg/webp/gif）')
       }
+      if (has(op, 'removeBg') === false) {
+        throw new Error(
+          where +
+            ' 必须显式传 removeBg:true（抠背景）或 removeBg:false（保留背景）；不再支持 auto / 省略',
+        )
+      }
       const bytes = await opctx.readBytes(rawImage, where)
       let raster
       try {
@@ -868,6 +942,9 @@ async function applyOps(doc, ops, out, opctx) {
         bgBright: has(op, 'bgBright') ? op.bgBright : undefined,
         bgTol: has(op, 'bgTol') ? op.bgTol : undefined,
         bgColor: has(op, 'bgColor') ? op.bgColor : undefined,
+        removeBg: has(op, 'removeBg') ? op.removeBg : undefined,
+        bgSolidTol: has(op, 'bgSolidTol') ? op.bgSolidTol : undefined,
+        bgSolidBorderRatio: has(op, 'bgSolidBorderRatio') ? op.bgSolidBorderRatio : undefined,
         seeds: has(op, 'seeds') ? op.seeds : undefined,
         maxBytes: Math.min(rawTraceBudget, SVG_MARKUP_LIMIT - 2000),
       }
@@ -893,11 +970,10 @@ async function applyOps(doc, ops, out, opctx) {
       // 尺寸：默认 1:1（画布坐标 = 原图像素坐标），w/h 显式给了就用给的。
       //
       // 裁剪块的 SVG 里路径坐标是**裁剪局部**的（viewBox = 0 0 cropW cropH）—— 别去平移 viewBox：
-      // 路径不会跟着走，内容会整体跑出可视区（实测渲染出空白）。要让它落在原图对应的位置上，
-      // 靠的是节点框的**比例**：节点 w/h ≈ 原图尺寸 × (裁剪块尺寸 / 该块缩放)，
-      // 配合 imageAspect=0 拉伸铺满，局部坐标系就正好铺到原图那一块。
-      const w = numberOr(op.w, raster.width)
-      const h = numberOr(op.h, raster.height)
+      // 路径不会跟着走，内容会整体跑出可视区。默认节点框使用裁剪块原始尺寸，
+      // 与 cropX/cropY 配合按原图像素 1:1 放置；显式 w/h 表示裁剪块的目标尺寸。
+      const w = numberOr(op.w, tracedFrom.width)
+      const h = numberOr(op.h, tracedFrom.height)
       const synthetic = {
         op: 'addNode',
         svg: traced.svg,
@@ -934,8 +1010,11 @@ async function applyOps(doc, ops, out, opctx) {
           '（工作图 ' + metrics.work.width + '×' + metrics.work.height +
           ', scale ' + metrics.scaleApplied +
           (metrics.sizeNotes ? '; ' + metrics.sizeNotes : '') +
-          '，像素覆盖' +
-          (metrics.exactPixelCoverage === true ? '精确' : '不精确 ' + metrics.drawnPixels + '/' + metrics.totalPixels) +
+          '，量化图轮廓' +
+          (metrics.exactPixelCoverage === true ? '无损' : '已简化/删减') +
+          '，丢弃 ' + metrics.loopsDropped + ' 个环' +
+          (metrics.attempts > 1 ? '，预算降级 epsilon=' + metrics.appliedEpsilon : '') +
+          (metrics.budgetExceeded ? '，仍超请求预算' : '') +
           '）' +
           (metrics.tuneHint ? '\n   调参：' + metrics.tuneHint : ''),
       )
@@ -960,7 +1039,8 @@ async function applyOps(doc, ops, out, opctx) {
       // 别名：给这个名字之后就能在同一个 ops 数组里引用它（见 applyOps 开头的注释）。
       registerAlias(op.as, id, 'ops[' + i + '] addNode')
       const style = nodeStyleFromOp(DEFAULT_NODE_STYLE, op, 'ops[' + i + '] addNode')
-      const svgNode = nodeShapeFromStyle(style) === 'svg'
+      const videoNode = op.shape === 'video'
+      const svgNode = videoNode === false && nodeShapeFromStyle(style) === 'svg'
       const node = {
         id: id,
         label: label,
@@ -968,8 +1048,37 @@ async function applyOps(doc, ops, out, opctx) {
         style: style,
         // svg 节点缺省是**正方形**：按标签文字估宽（estimateWidth）对图没有意义。
         // 空 label 的装饰面板也请显式给 w/h，否则会落到最短标签估宽（130）。
-        w: numberOr(op.w, svgNode ? DEFAULT_SVG_W : estimateWidth(label)),
-        h: numberOr(op.h, svgNode ? DEFAULT_SVG_H : DEFAULT_H),
+        // video 缺省 320×180（16:9 播放器框）。
+        w: numberOr(op.w, videoNode ? DEFAULT_VIDEO_W : svgNode ? DEFAULT_SVG_W : estimateWidth(label)),
+        h: numberOr(op.h, videoNode ? DEFAULT_VIDEO_H : svgNode ? DEFAULT_SVG_H : DEFAULT_H),
+      }
+      if (videoNode) {
+        const existingClips = []
+        for (let vi = 0; vi < doc.nodes.length; vi += 1) {
+          const vm = videoMetaFromData(doc.nodes[vi].data)
+          if (vm !== null && vm.clip !== null) existingClips.push(vm.clip)
+        }
+        const clip =
+          sanitizeClipId(op.mediaClip) ||
+          allocateClipId(existingClips)
+        node.data = videoDataAttrs({
+          clip: clip,
+          kind: op.mediaKind === 'raster' ? 'raster' : 'svg',
+          fps: numberOr(op.fps, numberOr(op.mediaFps, DEFAULT_MEDIA_FPS)),
+          w: node.w,
+          h: node.h,
+          posterFrame: numberOr(op.posterFrame, 0),
+        })
+        if (opctx !== undefined && opctx !== null) {
+          if (Array.isArray(opctx.ensureClips) === false) opctx.ensureClips = []
+          opctx.ensureClips.push({
+            clip: clip,
+            kind: node.data.mediaKind,
+            fps: Number(node.data.mediaFps),
+            w: node.w,
+            h: node.h,
+          })
+        }
       }
       if (typeof op.layer === 'string' && op.layer.length > 0) node.layer = resolveLayerRef(op.layer, 'ops[' + i + '] addNode layer')
       // 位置：只有显式给了坐标才写入。缺省写 (0,0) 会让 placeMissing 以为"坐标齐全"而不补位，
@@ -980,7 +1089,7 @@ async function applyOps(doc, ops, out, opctx) {
       recordCreated(id, 'node', label)
       notes.push(
         '+ node ' + id +
-          (svgNode ? ' [svg]' : label.length > 0 ? ' "' + label + '"' : ' (empty label)') +
+          (videoNode ? ' [video clip=' + node.data.mediaClip + ']' : svgNode ? ' [svg]' : label.length > 0 ? ' "' + label + '"' : ' (empty label)') +
           (has(op, 'x') || has(op, 'y') ? ' at explicit coords' : ' (position pending)'),
       )
       continue
@@ -1587,9 +1696,271 @@ async function applyOps(doc, ops, out, opctx) {
       continue
     }
 
+    // ── 视频媒体 ops（旁路 *.media/<clip>/；多数不改 .drawio）────────────────
+    if (
+      kind === 'listFrames' ||
+      kind === 'getFrame' ||
+      kind === 'setFrame' ||
+      kind === 'appendFrames' ||
+      kind === 'setMediaMeta' ||
+      kind === 'importMedia' ||
+      kind === 'extractFrames' ||
+      kind === 'traceFrame' ||
+      kind === 'exportSvgVideo' ||
+      kind === 'exportMediaSource'
+    ) {
+      const drawioPath = opctx !== undefined && opctx !== null ? opctx.drawioPath : null
+      if (typeof drawioPath !== 'string' || drawioPath.length === 0) {
+        throw new Error('ops[' + i + '] ' + kind + ': 需要已绑定的画布路径（旁路媒体包跟 .drawio 走）')
+      }
+      const where = 'ops[' + i + '] ' + kind
+      const id = typeof op.id === 'string' ? op.id : ''
+      if (id.length === 0) throw new Error(where + ': "id" is required')
+      const resolved = resolveVideoNode(doc, id, where)
+      const clipDir = clipDirFor(drawioPath, resolved.meta.clip)
+      ensureClipPack(drawioPath, resolved.meta.clip, {
+        kind: resolved.meta.kind,
+        fps: resolved.meta.fps,
+        w: resolved.meta.w,
+        h: resolved.meta.h,
+      })
+      let manifest = readManifest(clipDir)
+
+      if (kind === 'listFrames') {
+        const listed = listFrameEntries(manifest, op.from, op.to)
+        if (out !== undefined && out !== null) {
+          if (Array.isArray(out.media) === false) out.media = []
+          out.media.push({ op: kind, id: id, clip: resolved.meta.clip, ...listed })
+        }
+        notes.push('listFrames ' + id + ' → ' + listed.total + ' frame(s)')
+        continue
+      }
+
+      if (kind === 'getFrame') {
+        const index = Math.floor(Number(op.index))
+        const svg = readFrameSvg(clipDir, manifest, index)
+        if (out !== undefined && out !== null) {
+          if (Array.isArray(out.media) === false) out.media = []
+          out.media.push({
+            op: kind,
+            id: id,
+            clip: resolved.meta.clip,
+            index: index,
+            svg: svg.length > SVG_REPORT_LIMIT ? svg.slice(0, SVG_REPORT_LIMIT) + '…«truncated ' + svg.length + '»' : svg,
+            svgChars: svg.length,
+          })
+        }
+        notes.push('getFrame ' + id + '[' + index + '] ' + svg.length + ' chars')
+        continue
+      }
+
+      if (kind === 'setFrame') {
+        if (typeof op.svg !== 'string') throw new Error(where + ': "svg" markup required')
+        const index = Math.floor(Number(op.index))
+        manifest = writeFrameSvg(clipDir, manifest, index, op.svg)
+        if (resolved.meta.posterFrame === index) {
+          resolved.node.style = styleWithSvgMarkup(resolved.node.style || '', op.svg, '0')
+          recordChanged(id)
+        }
+        notes.push('setFrame ' + id + '[' + index + '] → ' + manifest.frames.length + ' frame(s)')
+        continue
+      }
+
+      if (kind === 'appendFrames') {
+        if (Array.isArray(op.svgs) === false) throw new Error(where + ': "svgs" array required')
+        const before = manifest.frames.length
+        manifest = appendFrameSvgs(clipDir, manifest, op.svgs)
+        notes.push('appendFrames ' + id + ' +' + (manifest.frames.length - before) + ' → ' + manifest.frames.length)
+        continue
+      }
+
+      if (kind === 'setMediaMeta') {
+        const next = Object.assign({}, resolved.meta)
+        if (has(op, 'fps') || has(op, 'mediaFps')) next.fps = numberOr(op.fps, numberOr(op.mediaFps, next.fps))
+        if (has(op, 'kind') || has(op, 'mediaKind')) {
+          const k = op.kind !== undefined ? op.kind : op.mediaKind
+          next.kind = k === 'raster' ? 'raster' : 'svg'
+        }
+        if (has(op, 'posterFrame') || has(op, 'mediaPosterFrame')) {
+          next.posterFrame = Math.floor(numberOr(op.posterFrame, numberOr(op.mediaPosterFrame, next.posterFrame)))
+        }
+        if (has(op, 'w') || has(op, 'mediaW')) next.w = numberOr(op.w, numberOr(op.mediaW, next.w))
+        if (has(op, 'h') || has(op, 'mediaH')) next.h = numberOr(op.h, numberOr(op.mediaH, next.h))
+        resolved.node.data = Object.assign({}, resolved.node.data, videoDataAttrs(next))
+        manifest.kind = next.kind
+        manifest.fps = next.fps
+        manifest.width = next.w
+        manifest.height = next.h
+        writeManifest(clipDir, manifest)
+        if (next.posterFrame >= 0 && next.posterFrame < manifest.frames.length) {
+          try {
+            const posterSvg = readFrameSvg(clipDir, manifest, next.posterFrame)
+            resolved.node.style = styleWithSvgMarkup(resolved.node.style || '', posterSvg, '0')
+          } catch (error) {
+            // 海报帧暂不可读时保留原海报
+          }
+        }
+        recordChanged(id)
+        notes.push('setMediaMeta ' + id + ' kind=' + next.kind + ' fps=' + next.fps)
+        continue
+      }
+
+      if (kind === 'importMedia') {
+        const file = typeof op.file === 'string' ? op.file : ''
+        if (file.length === 0) throw new Error(where + ': "file" workspace path required')
+        if (typeof opctx.readAbsolutePath !== 'function') {
+          throw new Error(where + ': host cannot resolve workspace files')
+        }
+        const abs = await opctx.readAbsolutePath(file, where)
+        const lower = abs.toLowerCase()
+        if (/\.(webm|mp4|mov|mkv)$/.test(lower)) {
+          const imported = importSourceFile(clipDir, abs)
+          manifest = imported.manifest
+          resolved.node.data = Object.assign({}, resolved.node.data, videoDataAttrs(Object.assign({}, resolved.meta, { kind: 'raster' })))
+          recordChanged(id)
+          notes.push('importMedia ' + id + ' ← ' + imported.rel + ' (raster)')
+        } else if (/\.zip$/i.test(lower)) {
+          const buf = await readFile(abs)
+          manifest = unpackSvgVideoZip(buf, clipDir)
+          resolved.node.data = Object.assign({}, resolved.node.data, videoDataAttrs(Object.assign({}, resolved.meta, { kind: 'svg' })))
+          if (manifest.frames.length > 0) {
+            try {
+              const posterSvg = readFrameSvg(clipDir, manifest, 0)
+              resolved.node.style = styleWithSvgMarkup(resolved.node.style || '', posterSvg, '0')
+            } catch (error) {
+              // ignore
+            }
+          }
+          recordChanged(id)
+          notes.push('importMedia ' + id + ' ← svg-video zip (' + manifest.frames.length + ' frames)')
+        } else {
+          throw new Error(where + ': unsupported media file (use .webm/.mp4/.mov/.mkv or .zip)')
+        }
+        continue
+      }
+
+      if (kind === 'extractFrames') {
+        // 宿主侧解不了视频：真实抽帧由客户端（<video> + canvas）写 stills/。
+        // 两种用法：
+        //   1) 只回报 —— `{op:'extractFrames', id}`：回执照抄 stills 数量（模型拿它看进度）。
+        //   2) 下计划 —— 带上 seconds/fps/width，宿主把计划挂给画布，浏览器按计划抽帧。
+        const every = Math.max(1, Math.floor(numberOr(op.every, 1)))
+        const max = Math.max(1, Math.floor(numberOr(op.max, 24)))
+        const source = findSourceFile(clipDir, manifest)
+        const stills = listStillIndices(clipDir)
+        const wantsPlan = has(op, 'seconds') || has(op, 'fps') || has(op, 'width') || has(op, 'from')
+        const plan =
+          wantsPlan === true
+            ? {
+                from: Math.max(0, numberOr(op.from, 0)),
+                seconds: Math.max(0.1, Math.min(3600, numberOr(op.seconds, 5))),
+                fps: Math.max(0.1, Math.min(60, numberOr(op.fps, manifest.fps))),
+                width: Math.max(16, Math.min(2048, Math.round(numberOr(op.width, manifest.width)))),
+                max: Math.max(1, Math.min(1200, Math.floor(numberOr(op.max, 360)))),
+              }
+            : null
+        if (out !== undefined && out !== null) {
+          if (Array.isArray(out.media) === false) out.media = []
+          out.media.push({
+            op: kind,
+            id: id,
+            clip: resolved.meta.clip,
+            hasSource: source !== null,
+            ...(source !== null ? { source: source.rel } : {}),
+            stills: stills.length,
+            plan:
+              plan !== null
+                ? Object.assign({}, plan, { note: '已把抽帧计划挂给画布：它在浏览器里解码视频写 stills/' })
+                : { every: every, max: max, note: '带上 seconds/fps/width 下发抽帧计划，浏览器会写入 stills/' },
+          })
+          // 计划由 applyOps 收集、由外层挂到画布轮询上（见 diagram_apply 尾部）。
+          if (plan !== null) out.extract = Object.assign({ clip: resolved.meta.clip }, plan)
+        }
+        notes.push(
+          'extractFrames ' + id + ': source=' + (source !== null ? source.rel : 'none') +
+            ', stills=' + stills.length + (plan !== null ? ', plan=' + plan.seconds + 's@' + plan.fps + 'fps ' + plan.width + 'w' : ' (report only)'),
+        )
+        continue
+      }
+
+      if (kind === 'traceFrame') {
+        const index = Math.floor(Number(op.index))
+        if (has(op, 'removeBg') === false) {
+          throw new Error(
+            where +
+              ' 必须显式传 removeBg:true（抠背景）或 removeBg:false（保留背景）；不再支持 auto / 省略',
+          )
+        }
+        if (typeof opctx.readBytes !== 'function' && existsSync(joinPath(clipDir, 'stills', String(index + 1).padStart(4, '0') + '.png')) === false) {
+          // still 在 clip 内，直接读盘即可
+        }
+        let png
+        try {
+          png = readStillPng(clipDir, index)
+        } catch (error) {
+          throw new Error(where + ': ' + messageOf(error) + ' —— 先 extractFrames 下发抽帧计划并等待 stills/ 写出')
+        }
+        const raster = await decodeRaster(png)
+        const traced = traceRasterToSvg(raster, op)
+        if (traced.svg.length > MAX_FRAME_SVG_CHARS) {
+          throw new Error(where + ': traced svg too long (' + traced.svg.length + ' > ' + MAX_FRAME_SVG_CHARS + ')')
+        }
+        manifest = writeFrameSvg(clipDir, manifest, index, traced.svg)
+        if (resolved.meta.posterFrame === index) {
+          resolved.node.style = styleWithSvgMarkup(resolved.node.style || '', traced.svg, '0')
+          recordChanged(id)
+        }
+        if (out !== undefined && out !== null) {
+          if (Array.isArray(out.trace) === false) out.trace = []
+          out.trace.push(Object.assign({ frame: index, id: id }, summarizeTraceForAi(traced.metrics)))
+        }
+        notes.push('traceFrame ' + id + '[' + index + '] → ' + traced.svg.length + ' chars')
+        continue
+      }
+
+      if (kind === 'exportSvgVideo') {
+        const zip = packSvgVideoZip(clipDir)
+        const outName =
+          typeof op.out === 'string' && op.out.length > 0
+            ? op.out
+            : basenamePath(drawioPath).replace(/\.drawio$/i, '') + '-' + resolved.meta.clip + '.svgvideo.zip'
+        if (typeof opctx.writeWorkspaceFile !== 'function') {
+          throw new Error(where + ': cannot write export file')
+        }
+        const written = await opctx.writeWorkspaceFile(outName, zip, where)
+        if (out !== undefined && out !== null) {
+          if (Array.isArray(out.media) === false) out.media = []
+          out.media.push({ op: kind, id: id, path: written, bytes: zip.length })
+        }
+        notes.push('exportSvgVideo ' + id + ' → ' + written)
+        continue
+      }
+
+      if (kind === 'exportMediaSource') {
+        const source = findSourceFile(clipDir, manifest)
+        if (source === null) throw new Error(where + ': no source.* video in clip')
+        const outName =
+          typeof op.out === 'string' && op.out.length > 0
+            ? op.out
+            : basenamePath(drawioPath).replace(/\.drawio$/i, '') + '-' + resolved.meta.clip + '-' + source.rel
+        if (typeof opctx.writeWorkspaceFile !== 'function') {
+          throw new Error(where + ': cannot write export file')
+        }
+        const buf = await readFile(source.abs)
+        const written = await opctx.writeWorkspaceFile(outName, buf, where)
+        if (out !== undefined && out !== null) {
+          if (Array.isArray(out.media) === false) out.media = []
+          out.media.push({ op: kind, id: id, path: written, bytes: buf.length })
+        }
+        notes.push('exportMediaSource ' + id + ' → ' + written)
+        continue
+      }
+    }
+
     throw new Error(
       'ops[' + i + '] unknown op ' + JSON.stringify(kind) +
-        '. Supported: addNode, addEdge, setLabel, setLabelPos, setStyle, setEdge, order, duplicate, addLayer, setLayer, setLayerProps, move, remove, highlight',
+        '. Supported: addNode, addEdge, setLabel, setLabelPos, setStyle, setEdge, order, duplicate, addLayer, setLayer, setLayerProps, move, remove, highlight, ' +
+        'listFrames, getFrame, setFrame, appendFrames, setMediaMeta, importMedia, extractFrames, traceFrame, exportSvgVideo, exportMediaSource',
     )
   }
   // 结构化返回"这次到底动了什么"：模型要用新建的 id（或确认改到了谁）时不必解析 summary 文本。
@@ -1972,7 +2343,7 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
     {op:"setLayer", id|ids, layer}
     {op:"setLayerProps", layer, name?, visible?, locked?}
     {op:"export", format?:"svg"|"png", name?}
-    {op:"traceImage", image, preset?, w?, h?, x?, y?, colors?, colorsDark?, colorsFill?, grid?, gridH?, scale?, epsilon?, minArea?, minRegionArea?, protectLuma?, majorityContrast?, bgColor?, cropX?, cropY?, cropW?, cropH?, as?, layer?}
+    {op:"traceImage", image, removeBg, preset?, w?, h?, x?, y?, colors?, colorsDark?, colorsFill?, grid?, gridH?, scale?, epsilon?, minArea?, minRegionArea?, protectLuma?, majorityContrast?, bgColor?, bgSolidTol?, bgSolidBorderRatio?, cropX?, cropY?, cropW?, cropH?, as?, layer?}
     {op:"move", id|ids, dx?, dy?, x?, y?}
     {op:"remove", id|ids}
     {op:"highlight", ids:["n1","n2"]}
@@ -1997,7 +2368,7 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
   渲染在画布那一半做，所以这一步是"请求"：返回值/下一次 read 里的 export 状态
   pending → done（带文件路径）/ downloaded / failed。看到 pending 说明画布还没刷新 ——
   别反复请求，等下一次 read 再看（或提醒用户打开那张画布）。
-- **把一张位图"描"成矢量图用 traceImage**：{op:"traceImage", image:"ref.png", x:40, y:40}。
+- **把一张位图"描"成矢量图用 traceImage**：{op:"traceImage", image:"ref.png", removeBg:false, x:40, y:40}。
   它**真的读那张图的像素**，建成一个 svg 内容节点。
   **不要用"手写一段近似的 svg"冒充复刻** —— 形状词汇表表达不了的照片/插画就直接用这个 op。
   · 默认 **w/h = 原图像素尺寸**、viewBox = 原图像素坐标系（1:1 铺满）。
@@ -2006,6 +2377,8 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
     - preset:"photo" 照片/渐变
     - preset:"simple" 图标/简单图（少色+降采样，省字符）
     - 不写 = "default"
+  · **removeBg 必填**（无 auto）：true = 抠背景（先识纯色底，否则近白泛洪）；false = 整图保留。
+    白底/纯色底图标、透明 PNG 通常 true；风景/照片/带场景背景通常 false。回执看 bgRemoved / bgDetect。
   · 调参闭环：看返回值里的 **trace[]**（结构化指标 + hint），不满意就 **remove 旧节点再 traceImage**（改 preset/字段）。
     常见：字符紧 → scale:2 / 加大 epsilon / preset:"simple"；线糊断 → preset:"lineart" 或提高 protectLuma/colorsDark。
   · 单次上限：SVG 标记 250000 字符（整图的精细度主要由它决定：预算紧时管线会抬 epsilon、丢小环，
@@ -2015,8 +2388,9 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
     工作分辨率上限是 grid（默认 499px 宽），整张立绘塞进去时"脸"只占三四十像素，眼睛只有 3~4px，
     量化后五官必然消失（实测把 colors 拉满 24、protectLuma 提到 235 也救不回来）。
     裁出头部再描，同一块就占满工作图宽度 —— 脸能有一两百像素，五官才留得住。
-    裁剪块的坐标在**裁剪局部系**里，所以要按比例给它 w/h（= 整张图的 w/h × 裁剪块宽高 / 整块原尺寸），
-    x/y 不写时落在原图对应位置，可与整图那块叠着放（顺序在后 = 画在上面）。
+    裁剪块的 SVG 使用**裁剪局部系**，节点框负责缩放和放置。
+    默认 w/h 为裁剪块原始尺寸，x/y 为裁剪原点；显式 w/h 是裁剪块目标尺寸。
+    原图若已缩放，x/y 与 w/h 都需按同一比例换算，可与整图那块叠着放（顺序在后 = 画在上面）。
 
 - **改一组用 ids**：{op:"setStyle", ids:["n1","n2","n5"], style:"green"} —— setStyle / setLabel /
   move / remove 都收 ids，不要为了"把这几个改成绿色"发 12 个 op。批量 move 只收 dx/dy
@@ -2059,6 +2433,37 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
 - 糖（shape/style/dash/arrow/color/exit/entry/jettySize/edgeStyle/avoid）由宿主翻译成 drawio 的 style 键，
   **绝不落盘**；keys 用来写任意 drawio 键，值给 null = 删键回默认。
 - shape：rect | rounded | **text**（独立文字：无边框无底色的一段字）| stadium | ellipse | diamond | parallelogram | cylinder | document | hexagon | **svg**
+  **节点标签与无边框节点**：图片、SVG 内容、视频与独立文字不提供无效描边工具，混合选区描边只作用于有边框的图形和连线。
+  用户可独立拖动节点文字到节点内部或外部，双击文字编辑（视频标签也一样）。独立文字节点仍整体拖动。
+  节点标签偏移以 labelOffsetX/labelOffsetY（像素）回报，写入原生 mxGeometry 的 mxPoint offset；不要与边标签 labelX/labelY 的相对量混淆。
+  偏移随保存、复制、撤销保留；移动节点时文字跟随，导出与适应内容包含节点外的文字。
+  **视频节点（旁路媒体包）**：
+  - **用户导入入口**：右侧「视频」先选本地文件，再点击画布放置；也可拖入视频或 Ctrl+V 粘贴剪贴板中的视频文件。
+    仅支持浏览器可解码的 MP4/WebM/MOV/MKV，单文件最多 48MB。画布须先保存，完整上传后才创建有封面的原视频节点，不创建空占位。
+  - addNode {shape:"video", fps?, w?, h?, mediaKind?, mediaClip?, x, y} → 海报 + \`*.media/<clip>/\`
+  - listFrames / getFrame / setFrame / appendFrames / setMediaMeta / importMedia
+  - extractFrames（看 stills 计划）/ traceFrame（stills → SVG 帧）
+  - exportSvgVideo / exportMediaSource
+  - diagram_read 对视频只回 mediaKind/mediaClip/fps/frameCount/duration/hasSource，帧内容用 getFrame
+  - **视频复刻交互**：用户选中已导入的普通视频，悬停或点击工具条「绘制复刻」展开设置浮窗。图片绘制同样使用悬停设置卡片。
+    复刻结果保留原视频音频与片段起点，播放可静音，SVG 视频包及 WebM 导出携带对应音频。
+    开始后视频在后台静默复刻，画布角落显示可收起的进度卡片，不占全屏、不抢焦点，可继续编辑画布、取消任务或失败后按原参数重试；切换画布/页面会取消任务。
+    视频工具条复用其他节点的图标在上、文字在下的样式及悬停反馈；绘制与导出使用同一个悬停卡片组件。
+    悬浮条保留绘制复刻、预览、抽帧、导出；SVG 节点隐藏绘制入口，导出菜单只展示当前媒体适用的格式。抽帧把当前画面放到右侧：源视频为 PNG，SVG 视频保留当前帧矢量。
+    悬停视频节点表面时显示进度条与播放/暂停；停止、逐帧、时间轴、循环和适配等完整控件集中在预览窗口，选区悬浮条不再提供设置封面按钮。
+    用户决定完整视频或起止时间范围、任意正数帧率（支持 25/29.97/30/60fps 等）、480/887/1440px 长边、原始尺寸或自定义长边。
+    碎片数量可选低/中/高，内部自动匹配每帧 60000/120000/248000 字符预算；保留画风、颜色数和去背景选项。
+    不再按 30 秒、360 帧或 640px 截断。面板估算帧数；源视频末尾自动截短，小视频不放大。
+    单帧保留 1600 万像素及 16384px 长边的处理边界，超过时明确提示用户选择较小尺寸，不静默降采样。
+    浏览器负责解码和分块传输高清 PNG；抽帧与常驻 Worker 池描边流水线重叠，帧按序落盘，仅计算选中碎片档位。图片原有的 887px 校准上限不应用于视频。
+    面板显示实际进度和最近完成帧，长 SVG 序列按需预取并最多缓存 48 帧内容。
+    原视频保留，全部成功后在右侧新建 SVG 视频节点；取消、失败、切换画布会停止任务，取消/失败清理本次临时媒体。
+    失败可重新复刻（从头开始）。完成后可播放、逐帧查看、撤销新增节点，以及导出 SVG 视频包。
+    SVG 视频包为 .svgvideo.zip（manifest + SVG 帧 + 封面），不是单文件动态 SVG，不含音轨。逐帧绘制暂不做跨帧稳定处理。
+  - **AI 分步处理视频**：先 importMedia，再 extractFrames {from,seconds,fps,width,max} 下发计划；
+    返回计划不等于完成，须再次查询 extractFrames 确认 stills 数量及回执，再按实际帧数逐个 traceFrame {id,index,removeBg,…}。
+    全部写出后 setMediaMeta {id,kind:"svg",fps,w,h,posterFrame:0}，用 listFrames 核对帧数后 exportSvgVideo。
+
   要"一段不带框的说明/标题文字"就用 addNode {shape:"text", label:"…", x, y} —— 它就是 drawio 的
   text 形状（样式原样写 text;html=1;whiteSpace=wrap;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;rounded=0）。
   文字元素想换颜色要写 **fontColor**（setStyle {id, keys:{fontColor:"#b85450"}}）：
@@ -2174,9 +2579,9 @@ HTML 标签按纯文本显示、图层结构原样保留（画布把它们叠在
 const SKILL_SUMMARY = {
   name: 'drawai-canvas',
   description:
-    '读写工作区里的 DrawAI 画布（.drawio，就是 drawio 的 mxfile）：diagram_read 看现状、diagram_apply 结构化改图（自动布局、无损写回）。',
+    '读写 DrawAI 画布（.drawio）：diagram_read 看现状、diagram_apply 结构化改图；支持图像复刻、视频分段复刻及 SVG 帧序列导出。',
   whenToUse:
-    '用户让你画流程图/架构图/泳道图，或让你读/改某张 .drawio 画布，或问"这张图里有什么""画布上怎么操作"时。',
+    '用户让你画流程图/架构图/泳道图、复刻图片或视频、将视频转为 SVG 帧动画，或让你读/改某张 .drawio 画布，或问"这张图里有什么""画布上怎么操作"时。',
 }
 
 /**
@@ -2514,6 +2919,8 @@ export function apply(ctx) {
                 y: { type: 'number', required: true },
                 w: { type: 'number', required: true },
                 h: { type: 'number', required: true },
+                labelOffsetX: { type: 'number' },
+                labelOffsetY: { type: 'number' },
                 // 这个单元在哪一层（图层 id）。多于一层的文档才带。
                 layer: { type: 'string' },
                 // 字色（设过且不是缺省黑字才有）：命中调色板给名字，否则给十六进制。
@@ -2521,6 +2928,16 @@ export function apply(ctx) {
                 // 容器父级（**只读信息**）：单元挂在某个容器/分组里时才有。
                 // 画布按绝对位置显示，所以"移动容器"不会带走它 —— 要一起动就把它们一起写进 ids。
                 parent: { type: 'string' },
+                // 视频节点摘要（shape=video 才有）。帧内容不塞进 read —— 用 getFrame / listFrames。
+                // 漏声明会踩 additionalProperties:false：画布里一旦有视频节点，diagram_read 整次失败。
+                mediaKind: { type: 'string' },
+                mediaClip: { type: 'string' },
+                fps: { type: 'number' },
+                posterFrame: { type: 'number' },
+                frameCount: { type: 'number' },
+                duration: { type: 'number' },
+                hasSource: { type: 'boolean' },
+                mediaMissing: { type: 'boolean' },
               },
             },
           },
@@ -2744,7 +3161,32 @@ export function apply(ctx) {
         if (keepNode(n) === false) continue
         const style = typeof n.style === 'string' ? n.style : ''
         const svgMarkup = svgMarkupForReport(style)
-        const shapeName = nodeShapeFromStyle(style)
+        const shapeName = reportNodeShape(n)
+        const videoMeta = videoMetaFromData(n.data)
+        const mediaSummary =
+          videoMeta !== null && videoMeta.clip !== null
+            ? (function () {
+                const summary = {
+                  mediaKind: videoMeta.kind,
+                  mediaClip: videoMeta.clip,
+                  fps: videoMeta.fps,
+                  posterFrame: videoMeta.posterFrame,
+                }
+                try {
+                  const m = readManifest(clipDirFor(loaded.absolute, videoMeta.clip))
+                  summary.frameCount = Array.isArray(m.frames) ? m.frames.length : 0
+                  summary.duration = Number(m.duration) || 0
+                  summary.hasSource = findSourceFile(clipDirFor(loaded.absolute, videoMeta.clip), m) !== null
+                  summary.mediaMissing = false
+                } catch (error) {
+                  summary.frameCount = 0
+                  summary.duration = 0
+                  summary.hasSource = false
+                  summary.mediaMissing = true
+                }
+                return summary
+              })()
+            : null
         nodes.push({
           id: String(n.id),
           label: typeof n.label === 'string' ? n.label : String(n.id),
@@ -2758,9 +3200,13 @@ export function apply(ctx) {
           y: numberOr(n.y, 0),
           w: numberOr(n.w, DEFAULT_W),
           h: numberOr(n.h, DEFAULT_H),
-          ...(typeof svgMarkup === 'string' ? { svg: svgMarkup } : {}),
+          ...(Number.isFinite(n.labelOffsetX) ? { labelOffsetX: n.labelOffsetX } : {}),
+          ...(Number.isFinite(n.labelOffsetY) ? { labelOffsetY: n.labelOffsetY } : {}),
+          // 视频节点不回整段海报 svg（用 media 摘要）；普通 svg 节点照旧回 svg 字段。
+          ...(shapeName !== 'video' && typeof svgMarkup === 'string' ? { svg: svgMarkup } : {}),
           // 位图节点：只报有图，不把 base64 塞进上下文（用户侧粘贴/拖入）。
           ...(shapeName === 'image' ? { image: true } : {}),
+          ...(mediaSummary !== null ? mediaSummary : {}),
           ...(typeof n.layer === 'string' && n.layer.length > 0 ? { layer: n.layer } : {}),
           // 容器父级：AI 得知道"这东西在哪个分组里"，否则把容器挪走/删掉时它不知道会连带什么。
           ...(typeof n.parent === 'string' && n.parent.length > 0 ? { parent: n.parent } : {}),
@@ -2902,7 +3348,7 @@ export function apply(ctx) {
       '{op:"setEdge", id, from?, to?, fromPoint?, toPoint?} / {op:"order", id|ids, to:"front"|"back"|"up"|"down"} / ' +
       '{op:"duplicate", id|ids, dx?, dy?, withEdges?, layer?, as?} / {op:"addLayer", name?, as?} / {op:"setLayer", id|ids, layer} / {op:"setLayerProps", layer, name?, visible?, locked?} / ' +
       '{op:"export", format?:"svg"|"png", name?} / ' +
-      '{op:"traceImage", image, preset?, w?, h?, x?, y?, colors?, colorsDark?, colorsFill?, grid?, gridH?, scale?, epsilon?, minArea?, minRegionArea?, protectLuma?, majorityContrast?, bgColor?, as?, layer?} / ' +
+      '{op:"traceImage", image, removeBg, preset?, w?, h?, x?, y?, colors?, colorsDark?, colorsFill?, grid?, gridH?, scale?, epsilon?, minArea?, minRegionArea?, protectLuma?, majorityContrast?, bgColor?, as?, layer?} / ' +
       '{op:"move", id|ids, dx?, dy?, x?, y?} / {op:"remove", id|ids} / {op:"highlight", ids:[...]}；节点 id 省略时自动分配。' +
       '**改接一条边**用 setEdge（换 from/to 或某一端改成自由点）—— id、标签、标签位置、折点、端点约束全都留着；' +
       '不要 remove + addEdge 重画（那会把这些丢掉）。' +
@@ -2913,12 +3359,14 @@ export function apply(ctx) {
       '**图层**用 addLayer/setLayer/setLayerProps（加层、把单元移到别的层、改名/显示/隐藏/锁定；隐藏≠删除）。' +
       '**导出**用 export：format:"svg" 会让画布渲染一张 SVG 落在 .drawio 旁边、format:"png" 是浏览器下载；' +
       '这一步由画布执行，返回值里的 export.status 是 pending/done/downloaded/failed（pending = 画布还没刷新）。' +
-      '**照着一张位图描矢量图**用 traceImage：{op:"traceImage", image:"ref.png", x, y} 会真的读像素建成 svg 节点，' +
+      '**照着一张位图描矢量图**用 traceImage：{op:"traceImage", image:"ref.png", removeBg:false, x, y} 会真的读像素建成 svg 节点，' +
       '**不是凭印象重画**。默认 w/h = 原图像素尺寸（1:1）。' +
+      '**removeBg 必填**（无 auto）：true=抠背景（先识纯色底，否则近白泛洪）；false=整图保留。' +
+      '白底/纯色底图标通常 true；风景/照片/场景背景通常 false。' +
       '**调参**：先选 preset（' + TRACE_PRESET_NAMES.join('|') + '；lineart=插画线稿、photo=照片、simple=省字符、default=默认），' +
       '再按需覆盖 colors/colorsDark/scale/epsilon/grid/gridH/minArea/minRegionArea/protectLuma/majorityContrast/bgColor 等。' +
       '合并顺序：默认 ← preset ← 显式字段。' +
-      '返回值里的 **trace[]** 是结构化指标（svgChars/protectPixels/options/hint 等）；' +
+      '返回值里的 **trace[]** 是结构化指标（svgChars/bgRemoved/bgDetect/options/hint 等）；' +
       '质量不够就根据 hint remove 旧节点再 trace（改 preset 或字段）。' +
       '字符紧→scale:2/加大epsilon/preset:simple；线糊断→preset:lineart 或提高 protectLuma/colorsDark。' +
       '**一次改一组**就写 ids:[...]（setStyle/setLabel/move/remove 都收，move 的批量只收 dx/dy 相对位移）—— 用户说"把这几个换成绿色"时不要逐个发 op。' +
@@ -3012,7 +3460,23 @@ export function apply(ctx) {
               error: { type: 'string' },
             },
           },
-          // 本次调用里每次 traceImage 一条：给模型读指标再调参（additionalProperties:false 必须声明）
+          // 抽帧状态（只有下过抽帧计划才有）：pending = 计划挂在画布上、还没抽；done = stills 已写出
+          // （written 是张数）；failed = 抽帧时报错（error 是原因）。报告一次即清（取走即清）。
+          extract: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              status: { type: 'string', required: true },
+              clip: { type: 'string' },
+              seconds: { type: 'number' },
+              fps: { type: 'number' },
+              width: { type: 'number' },
+              max: { type: 'number' },
+              written: { type: 'number' },
+              error: { type: 'string' },
+            },
+          },
+          // 本次调用里每次 traceImage / traceFrame 一条：给模型读指标再调参（additionalProperties:false 必须声明）
           trace: {
             type: 'array',
             items: {
@@ -3022,6 +3486,9 @@ export function apply(ctx) {
                 preset: { type: 'string' },
                 image: { type: 'string' },
                 nodeId: { type: 'string' },
+                // traceFrame 才有：视频节点 id 与帧下标
+                id: { type: 'string' },
+                frame: { type: 'number' },
                 // 只描了原图的一块时才有：那块在原图里的位置与尺寸（像素）
                 crop: {
                   type: 'object',
@@ -3065,10 +3532,22 @@ export function apply(ctx) {
                 budget: { type: 'number' },
                 attempts: { type: 'number' },
                 exactPixelCoverage: { type: 'boolean' },
+                labelPartitionComplete: { type: 'boolean' },
+                coverageBasis: { type: 'string' },
+                loopsDropped: { type: 'number' },
+                budgetExceeded: { type: 'boolean' },
+                appliedEpsilon: { type: 'number' },
+                bgRemoved: { type: 'boolean' },
+                bgDetect: { type: 'json' },
                 options: { type: 'json' },
                 hint: { type: 'string' },
               },
             },
+          },
+          // listFrames / getFrame / extractFrames / export* 的结构化回执（heterogeneous —— 用 json）
+          media: {
+            type: 'array',
+            items: { type: 'json' },
           },
         },
       },
@@ -3086,7 +3565,7 @@ export function apply(ctx) {
               value.trace
                 .map(function (t) {
                   return (
-                    (t.image || '?') +
+                    (t.image || (typeof t.frame === 'number' ? 'frame[' + t.frame + ']' : '?')) +
                     ' preset=' +
                     (t.preset || 'default') +
                     ' ' +
@@ -3151,7 +3630,14 @@ export function apply(ctx) {
       // `highlight` 只是"让客户端选中这几个"、`export` 只是"让画布渲染一张图"—— 都不改文档：
       //   · 一次全是这类 op 的调用**不写盘**（也不会顺手重排，那条特别危险）；
       //   · 混着编辑时，它们跟着一起生效。
-      const edits = ops.filter((op) => op === null || typeof op !== 'object' || (op.op !== 'highlight' && op.op !== 'export'))
+      const edits = ops.filter((op) => {
+        if (op === null || typeof op !== 'object') return true
+        if (op.op === 'highlight' || op.op === 'export') return false
+        // 旁路媒体 ops 默认不改 .drawio；setMediaMeta / importMedia / setFrame(海报) 可能改，
+        // 下面用 out.changed 再判定是否真要写盘。
+        if (MEDIA_SIDE_OPS[op.op] === true) return false
+        return true
+      })
       const noDocEdit = edits.length === 0
       // 默认布局：pinned、纯 highlight、以及**ops 里自带几何**（addNode 给了 x/y、有 move、
       // 或有 duplicate —— 复制出来的位置是相对原件的）时都不重排 —— 否则"把 n1 往右挪 40"
@@ -3169,7 +3655,9 @@ export function apply(ctx) {
       if (LAYOUTS.indexOf(mode) < 0) throw new Error('unknown layout "' + mode + '"; use one of ' + LAYOUTS.join(', '))
 
       const out = {}
-      const notes = await applyOps(doc, ops, out, {
+      const opctx = {
+        drawioPath: loaded.absolute,
+        ensureClips: [],
         /**
          * traceImage 的图片读取：走**同一个工作区解析器**（相对路径按会话根解析），
          * 于是"AI 能描哪张图"和"画布能打开哪些文件"是同一套围栏。
@@ -3193,7 +3681,41 @@ export function apply(ctx) {
             throw new Error(where + ': 读 "' + imagePath + '" 失败（' + messageOf(error) + '）')
           }
         },
-      })
+        readAbsolutePath: async function (filePath, where) {
+          const target = await resolveTarget(filePath, sessionId)
+          const abs = absoluteHint(target, filePath)
+          const info = await ctx.fs.stat(target)
+          if (info === undefined) throw new Error(where + ': 工作区里没有 "' + filePath + '"')
+          return abs
+        },
+        writeWorkspaceFile: async function (relPath, buffer, where) {
+          const root = workspaceRootOf(sessionId)
+          if (root === undefined) throw new Error(where + ': no workspace root')
+          const safe = String(relPath).replace(/^[\\/]+/, '')
+          if (safe.indexOf('..') >= 0) throw new Error(where + ': path must stay in workspace')
+          const abs = joinPath(root, safe)
+          await mkdir(dirnamePath(abs), { recursive: true })
+          await writeFile(abs, buffer)
+          return safe.replace(/\\/g, '/')
+        },
+      }
+      const notes = await applyOps(doc, ops, out, opctx)
+      // 新建 / 已有视频节点：确保旁路 `*.media/<clip>/` 存在。
+      {
+        const seen = new Set()
+        const queue = Array.isArray(opctx.ensureClips) ? opctx.ensureClips.slice() : []
+        for (let ni = 0; ni < doc.nodes.length; ni += 1) {
+          const meta = videoMetaFromData(doc.nodes[ni].data)
+          if (meta === null || meta.clip === null) continue
+          queue.push({ clip: meta.clip, kind: meta.kind, fps: meta.fps, w: meta.w, h: meta.h })
+        }
+        for (let qi = 0; qi < queue.length; qi += 1) {
+          const item = queue[qi]
+          if (seen.has(item.clip)) continue
+          seen.add(item.clip)
+          ensureClipPack(loaded.absolute, item.clip, item)
+        }
+      }
       if (Array.isArray(out.highlight)) highlightFor.set(sessionId, out.highlight)
       // 删掉的东西不该还挂在"用户选中"里（id 会被复用，见 forgetSelection）。
       if (Array.isArray(out.removed) && out.removed.length > 0) forgetSelection(sessionId, loaded.absolute, out.removed)
@@ -3203,8 +3725,32 @@ export function apply(ctx) {
         exportRequests.set(sessionId, { requestId: requestId, absolute: loaded.absolute, format: out.export.format, name: out.export.name })
         exportResults.delete(sessionId)
       }
-      if (noDocEdit) {
-        return {
+      // 抽帧计划：同样挂成请求 —— 真正解码视频的是画布那一半（浏览器）。
+      if (out.extract !== undefined && out.extract !== null) {
+        const requestId = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+        extractRequests.set(sessionId, {
+          requestId: requestId,
+          absolute: loaded.absolute,
+          clip: out.extract.clip,
+          from: out.extract.from,
+          seconds: out.extract.seconds,
+          fps: out.extract.fps,
+          width: out.extract.width,
+          max: out.extract.max,
+        })
+        extractResults.delete(sessionId)
+      }
+      // 抽帧状态：pending 得留着（模型据此看进度）；done / failed **只报一次就清掉** ——
+      // 否则这条回执会永远粘在之后每一次 diagram_apply 上（与 highlight「取走即清」同一套）。
+      const extractState = extractStateFor(sessionId, loaded.absolute)
+      if (extractState !== undefined && extractState.status !== 'pending') extractResults.delete(sessionId)
+      const mediaChangedDoc =
+        Array.isArray(out.changed) && out.changed.length > 0 &&
+        ops.some((op) => op !== null && typeof op === 'object' && (op.op === 'setMediaMeta' || op.op === 'importMedia' || op.op === 'setFrame' || op.op === 'traceFrame'))
+      if (noDocEdit && mediaChangedDoc === false) {
+        // toLosslessJson：宿主对工具输出做 isJsonValue，自有属性值为 undefined / -0 会整次打回
+        // （表现为 `returned invalid output: value is not lossless JSON`）。
+        return toLosslessJson({
           path: loaded.absolute,
           revision: doc.revision,
           nodeCount: doc.nodes.length,
@@ -3214,9 +3760,11 @@ export function apply(ctx) {
           changed: [],
           removed: [],
           ...(Array.isArray(out.trace) && out.trace.length > 0 ? { trace: out.trace } : {}),
+          ...(Array.isArray(out.media) && out.media.length > 0 ? { media: out.media } : {}),
           ...(exportStateFor(sessionId, loaded.absolute) !== undefined ? { export: exportStateFor(sessionId, loaded.absolute) } : {}),
+          ...(extractState !== undefined ? { extract: extractState } : {}),
           summary: notes.length === 0 ? '(no change)' : notes.join('\n'),
-        }
+        })
       }
       if (mode === 'none') placeMissing(doc)
       else {
@@ -3254,7 +3802,7 @@ export function apply(ctx) {
       if (revertDepth(snapshotKey(sessionId, loaded.absolute)) > 0) {
         notes.push('↩ 这次改动可以退回（还能退 ' + revertDepth(snapshotKey(sessionId, loaded.absolute)) + ' 步）：界面上「编辑 → 撤销 AI 改动」')
       }
-      return {
+      return toLosslessJson({
         path: loaded.absolute,
         revision: doc.revision,
         nodeCount: doc.nodes.length,
@@ -3266,9 +3814,11 @@ export function apply(ctx) {
         changed: Array.isArray(out.changed) ? out.changed : [],
         removed: Array.isArray(out.removed) ? out.removed : [],
         ...(Array.isArray(out.trace) && out.trace.length > 0 ? { trace: out.trace } : {}),
+        ...(Array.isArray(out.media) && out.media.length > 0 ? { media: out.media } : {}),
         ...(exportStateFor(sessionId, loaded.absolute) !== undefined ? { export: exportStateFor(sessionId, loaded.absolute) } : {}),
+        ...(extractState !== undefined ? { extract: extractState } : {}),
         summary: notes.length === 0 ? '(no change)' : notes.join('\n'),
-      }
+      })
     },
   })
 
@@ -3452,6 +4002,18 @@ function sanitizeNewName(raw) {
   /** 最近一次导出的结果（`diagram_read` 把它带回给模型）。 */
   const exportResults = new Map()
 
+  /**
+   * AI 请求的抽帧计划（按会话）：`{ requestId, absolute, clip, from, seconds, fps, width, max }`。
+   *
+   * 视频解码在浏览器里（宿主没有解码器），所以真实抽帧也是一条**请求/回执**通道：
+   * AI 用 `extractFrames {seconds,fps,width}` 写计划 → 客户端轮询的 `read` 里取走 →
+   * 浏览器解码视频写 `stills/NNNN.png` → POST 回 `media-extract-result` → 宿主清掉请求。
+   * 模型侧想看进度就再调一次 `extractFrames`（回执里带 stills 数量）。
+   */
+  const extractRequests = new Map()
+  /** 最近一次抽帧回执（`extractFrames` 把它带回给模型）。 */
+  const extractResults = new Map()
+
   /** 路径小工具：导出文件落在 `.drawio` 旁边，所以只需要在同级拼名字。 */
   function dirOf(absolute) {
     const text = String(absolute)
@@ -3480,6 +4042,29 @@ function sanitizeNewName(raw) {
     if (done.status === 'done') return { status: 'done', format: done.format, path: done.path }
     if (done.status === 'downloaded') return { status: 'downloaded', format: done.format }
     return { status: 'failed', format: done.format, error: String(done.error) }
+  }
+
+  /**
+   * 这张画布上的抽帧状态：挂着计划 = pending；画布回过执 = done / failed；什么都没发生过 = undefined。
+   * 与导出同一条护栏：路径不对就是别人的事，不报。
+   */
+  function extractStateFor(sessionId, absolute) {
+    if (typeof sessionId !== 'string' || sessionId.length === 0) return undefined
+    const pending = extractRequests.get(sessionId)
+    if (pending !== undefined && pending.absolute === absolute) {
+      return {
+        status: 'pending',
+        clip: pending.clip,
+        seconds: pending.seconds,
+        fps: pending.fps,
+        width: pending.width,
+        max: pending.max,
+      }
+    }
+    const done = extractResults.get(sessionId)
+    if (done === undefined || done.absolute !== absolute) return undefined
+    if (done.error.length > 0) return { status: 'failed', clip: done.clip, written: done.written, error: done.error }
+    return { status: 'done', clip: done.clip, written: done.written }
   }
 
   /**
@@ -3586,6 +4171,54 @@ function sanitizeNewName(raw) {
    * 顺带把 meta.pinned 打成 true —— 从此这个文档被人手工摆过，
    * diagram_apply 不该再默认自动重排把它冲掉。
    */
+  // 临时复刻包只由持有本次令牌的会话管理，取消不触及已有媒体。
+  const videoTraceJobs = new Map()
+  const videoUploadJobs = new Map()
+  const videoTracePool = createVideoTracePool()
+  const decodeVideoFingerprint = (value) => {
+    if (typeof value !== 'string' || value.length === 0) return null
+    const raw = Buffer.from(value, 'base64')
+    return raw.length === 32 * 18 ? raw : null
+  }
+  const fingerprintDistance = (a, b) => {
+    let sum = 0
+    for (let i = 0; i < a.length; i += 1) sum += Math.abs(a[i] - b[i])
+    return sum / a.length
+  }
+  const wakeVideoTrace = (job) => {
+    const waiters = job.waiters || []
+    job.waiters = []
+    for (const wake of waiters) wake()
+  }
+  const waitVideoTraceTurn = (job, index) => new Promise((resolve, reject) => {
+    const check = () => {
+      if (job.cancelled || videoTraceJobs.get(job.token) !== job) {
+        reject(new Error('复刻任务已取消'))
+        return true
+      }
+      try {
+        if (readManifest(job.dir).frames.length === index) {
+          resolve()
+          return true
+        }
+      } catch (error) {
+        reject(error)
+        return true
+      }
+      return false
+    }
+    if (check()) return
+    const wake = () => { if (check()) return; job.waiters.push(wake) }
+    job.waiters.push(wake)
+  })
+  ctx.effect(() => () => {
+    for (const job of videoTraceJobs.values()) {
+      job.cancelled = true
+      wakeVideoTrace(job)
+    }
+    videoTracePool.close()
+    videoTraceJobs.clear(); videoUploadJobs.clear()
+  })
   async function handleSave(req, res) {
     if (req.method !== 'POST') {
       sendJson(res, 405, { ok: false, error: 'POST only' })
@@ -3635,6 +4268,44 @@ function sanitizeNewName(raw) {
 
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined
     const rawPath = typeof body.path === 'string' ? body.path : undefined
+
+    // 仅计算图像节点的 SVG；由客户端通过同一历史/保存通道应用结果。
+    if (body.action === 'trace-node-image') {
+      if (sessionId === undefined || sessionOf(sessionId) === undefined || workspaceRootOf(sessionId) === undefined) {
+        sendJson(res, 403, { ok: false, error: '无法确定当前会话工作区' })
+        return
+      }
+      if (typeof body.image !== 'string' || !isRasterDataUri(body.image)) {
+        sendJson(res, 400, { ok: false, error: '请选择已导入的 PNG/JPEG/GIF/WebP 图片节点' })
+        return
+      }
+      try {
+        const bytes = Buffer.from(body.image.slice(body.image.indexOf(',') + 1), 'base64')
+        if (bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) {
+          if (bytes.readUInt32BE(16) * bytes.readUInt32BE(20) > 16000000) throw new Error('图片超过 1600 万像素，请先缩小图片')
+        }
+        const raster = await decodeRaster(bytes)
+        if (raster.width * raster.height > 16000000) throw new Error('图片超过 1600 万像素，请先缩小图片')
+        const traced = traceRasterForToolbar(raster, {
+          level: body.level, preset: body.preset, colors: body.colors, removeBg: body.removeBg,
+          includeDrawing: true,
+        })
+        sendJson(res, 200, { ok: true, svg: traced.svg, drawing: traced.drawing, metrics: {
+          fragments: traced.metrics.fragments, colors: traced.metrics.colors,
+          svgChars: traced.metrics.svgChars, budget: traced.metrics.budget,
+          level: traced.metrics.fragmentLevel, attempts: traced.metrics.attempts,
+          detailReduced: traced.metrics.detailReduced,
+          targetFragments: traced.metrics.targetFragments,
+          fragmentThresholds: traced.metrics.fragmentThresholds,
+          targetReached: traced.metrics.targetReached,
+          imageAnalysis: traced.metrics.imageAnalysis,
+          resolutionRetries: traced.metrics.resolutionRetries, work: traced.metrics.work,
+        } })
+      } catch (error) {
+        sendJson(res, 400, { ok: false, error: messageOf(error) })
+      }
+      return
+    }
 
     // action: 'list' —— 列出工作区里可打开的 .drawio，供「打开」菜单用。
     // 复用同一条路由而不是另开一个：信任围栏（POST + 自定义头 + 同源）只写一次，
@@ -3763,6 +4434,20 @@ function sanitizeNewName(raw) {
         const pendingRender = renderRequests.get(sessionId)
         const renderForThis =
           pendingRender !== undefined && pendingRender.absolute === loaded.absolute ? { requestId: pendingRender.requestId } : null
+        // AI 下发的抽帧计划同理：画布取走后用浏览器解码视频、写 stills/，完成后 POST 回 media-extract-result。
+        const pendingExtract = extractRequests.get(sessionId)
+        const extractForThis =
+          pendingExtract !== undefined && pendingExtract.absolute === loaded.absolute
+            ? {
+                requestId: pendingExtract.requestId,
+                clip: pendingExtract.clip,
+                from: pendingExtract.from,
+                seconds: pendingExtract.seconds,
+                fps: pendingExtract.fps,
+                width: pendingExtract.width,
+                max: pendingExtract.max,
+              }
+            : null
         sendJson(res, 200, {
           ok: true,
           exists: true,
@@ -3780,6 +4465,7 @@ function sanitizeNewName(raw) {
           selection: selectionForCanvas(sessionId, loaded.absolute, loaded.doc),
           export: exportForThis,
           render: renderForThis,
+          media: extractForThis,
         })
       } catch (error) {
         sendJson(res, 400, { ok: false, error: '这个文件读不出画布：' + messageOf(error) })
@@ -3996,6 +4682,34 @@ function sanitizeNewName(raw) {
       return
     }
 
+    // action: 'media-extract-result' —— 画布抽完帧的回执（AI 的 `extractFrames {seconds,fps,width}` 走这条）。
+    // 与 export-result 同一条护栏：只有"这个会话此刻真的挂着一份抽帧计划"才收。
+    if (body.action === 'media-extract-result') {
+      if (sessionId === undefined) {
+        sendJson(res, 400, { ok: false, error: 'sessionId is required' })
+        return
+      }
+      const pending = extractRequests.get(sessionId)
+      if (pending === undefined) {
+        sendJson(res, 409, { ok: false, error: 'no pending extract request' })
+        return
+      }
+      if (typeof body.requestId === 'string' && body.requestId !== pending.requestId) {
+        sendJson(res, 409, { ok: false, error: 'stale extract request' })
+        return
+      }
+      const written = Math.max(0, Math.floor(Number(body.written) || 0))
+      extractRequests.delete(sessionId)
+      extractResults.set(sessionId, {
+        absolute: pending.absolute,
+        clip: pending.clip,
+        written: written,
+        error: typeof body.error === 'string' ? body.error : '',
+      })
+      sendJson(res, 200, { ok: true, written: written })
+      return
+    }
+
     // action: 'focus' —— 画布告诉宿主"用户现在打开的是哪一张"。
     // 之后 diagram_apply 不传 path 时就改它（见下面的 execute）。
     // 校验后**只存相对工作区的路径**：绝对路径能存但会让日志/提示变长，
@@ -4138,6 +4852,449 @@ function sanitizeNewName(raw) {
         name = base + '-' + n
       }
       sendJson(res, 200, { ok: true, name: base })
+      return
+    }
+
+    // action: 'media-*' —— 旁路媒体包（*.media/<clip>/）的读写。不改 mxfile 时也不碰 revision。
+    if (typeof body.action === 'string' && body.action.indexOf('media-') === 0) {
+      if (sessionId === undefined || rawPath === undefined) {
+        sendJson(res, 400, { ok: false, error: 'sessionId and path are required' })
+        return
+      }
+      if (!String(rawPath).toLowerCase().endsWith('.drawio')) {
+        sendJson(res, 403, { ok: false, error: 'media actions require a .drawio path' })
+        return
+      }
+      const mediaRoot = workspaceRootOf(sessionId)
+      if (mediaRoot === undefined) {
+        sendJson(res, 403, { ok: false, error: 'no workspace root resolved for this session' })
+        return
+      }
+      let mediaTarget
+      try {
+        mediaTarget = await ctx.fs.resolve(rawPath, { cwd: mediaRoot })
+      } catch (error) {
+        sendJson(res, 400, { ok: false, error: 'resolve failed: ' + messageOf(error) })
+        return
+      }
+      try {
+        const rootTarget = await ctx.fs.resolve(mediaRoot)
+        if (!ctx.fs.contains(rootTarget, mediaTarget)) {
+          sendJson(res, 403, { ok: false, error: 'path escapes the workspace root' })
+          return
+        }
+      } catch (error) {
+        sendJson(res, 403, { ok: false, error: 'containment check failed: ' + messageOf(error) })
+        return
+      }
+      const drawioAbs = absoluteHint(mediaTarget, rawPath)
+      const clip = sanitizeClipId(body.clip)
+      try {
+        if (body.action === 'media-upload-start') {
+          const size = Number(body.size), w = Number(body.w), h = Number(body.h)
+          if (!['mp4', 'webm', 'mov', 'mkv'].includes(body.extension) || !Number.isInteger(size) || size <= 0 || size > 48 * 1024 * 1024 ||
+              !Number.isInteger(w) || !Number.isInteger(h) || Math.min(w, h) <= 0 || Math.max(w, h) > 16384) throw new Error('无效视频文件：须为 48MB 以内的 MP4/WebM/MOV/MKV')
+          for (const [key, job] of videoUploadJobs) if (Date.now() - job.time > 3600000) videoUploadJobs.delete(key)
+          if (videoUploadJobs.size >= 16) throw new Error('导入任务过多，请稍后重试')
+          const token = randomUUID(), newClip = 'video-' + randomUUID()
+          ensureClipPack(drawioAbs, newClip, { kind: 'raster', w, h })
+          const dir = clipDirFor(drawioAbs, newClip), part = joinPath(dir, 'source.upload')
+          writeFileSync(part, Buffer.alloc(0))
+          videoUploadJobs.set(token, { sessionId, drawioAbs, clip: newClip, dir, part, source: 'source.' + body.extension, size, received: 0, time: Date.now(), finished: false })
+          sendJson(res, 200, { ok: true, clip: newClip, token })
+          return
+        }
+        if (body.action.indexOf('media-upload-') === 0) {
+          const job = videoUploadJobs.get(body.token)
+          if (!job || job.sessionId !== sessionId || job.drawioAbs !== drawioAbs || job.clip !== clip) throw new Error('视频导入任务已失效')
+          job.time = Date.now()
+          if (body.action === 'media-upload-discard') {
+            rmSync(job.dir, { recursive: true, force: true }); videoUploadJobs.delete(body.token)
+            sendJson(res, 200, { ok: true }); return
+          }
+          if (body.action === 'media-upload-chunk') {
+            const bytes = Buffer.from(typeof body.base64 === 'string' ? body.base64 : '', 'base64')
+            if (job.finished || body.offset !== job.received || bytes.length < 1 || bytes.length > 1024 * 1024 || job.received + bytes.length > job.size) throw new Error('视频分块位置或大小无效')
+            appendFileSync(job.part, bytes); job.received += bytes.length
+            sendJson(res, 200, { ok: true, received: job.received }); return
+          }
+          if (body.action === 'media-upload-finish') {
+            if (job.received !== job.size) throw new Error('视频尚未上传完整')
+            if (!job.finished) {
+              renameSync(job.part, joinPath(job.dir, job.source))
+              const manifest = readManifest(job.dir); manifest.source = job.source
+              writeManifest(job.dir, manifest); job.finished = true
+            }
+            sendJson(res, 200, { ok: true, manifest: readManifest(job.dir) }); return
+          }
+          if (body.action === 'media-upload-release' && job.finished) {
+            videoUploadJobs.delete(body.token); sendJson(res, 200, { ok: true }); return
+          }
+          throw new Error('未知视频导入操作')
+        }
+        if (body.action === 'media-trace-start') {
+          const fps = Number(body.fps), w = Number(body.w), h = Number(body.h), count = Number(body.count)
+          const maxBytes = body.maxBytes === undefined ? 60000 : Number(body.maxBytes)
+          if (!Number.isSafeInteger(count) || count < 1 || !Number.isFinite(fps) || fps <= 0) throw new Error('无效帧数或帧率')
+          if (!Number.isInteger(w) || !Number.isInteger(h) || Math.min(w, h) < 1 || Math.max(w, h) > 16384 || w * h > 16000000) throw new Error('单帧处理上限为 1600 万像素、长边 16384px')
+          if (!Number.isInteger(maxBytes) || maxBytes < 2000 || maxBytes > 248000) throw new Error('无效细节预算')
+          for (const [key, job] of videoTraceJobs) {
+            // 过期仅释放令牌；网络中断时结果可能已被画布引用，不能擅自删文件。
+            if (!job.inFlight && Date.now() - job.time > 3600000) videoTraceJobs.delete(key)
+          }
+          if (videoTraceJobs.size >= 16) throw new Error('复刻任务过多，请稍后重试')
+          const token = randomUUID(), newClip = 'trace-' + randomUUID()
+          let originalSource = null
+          if (body.sourceClip !== undefined) {
+            const sourceDir = clipDirFor(drawioAbs, body.sourceClip)
+            originalSource = findSourceFile(sourceDir, readManifest(sourceDir))
+            if (!originalSource) throw new Error('原视频文件缺失，无法保留音频')
+            if (!Number.isFinite(Number(body.sourceOffset)) || Number(body.sourceOffset) < 0) throw new Error('无效音频起始时间')
+          }
+          const pack = ensureClipPack(drawioAbs, newClip, { kind: 'svg', fps, w, h })
+          if (originalSource) {
+            try {
+              importSourceFile(pack.dir, originalSource.abs)
+              const manifest = readManifest(pack.dir)
+              manifest.kind = 'svg'; manifest.sourceOffset = Number(body.sourceOffset)
+              writeManifest(pack.dir, manifest)
+              pack.manifest = readManifest(pack.dir)
+            } catch (error) { rmSync(pack.dir, { recursive: true, force: true }); throw error }
+          }
+          videoTraceJobs.set(token, {
+            token, sessionId, drawioAbs, clip: newClip, dir: clipDirFor(drawioAbs, newClip),
+            count, maxBytes, time: Date.now(), nextSubmit: 0, inFlight: 0, uploads: new Map(), waiters: [], cancelled: false,
+            frameSvg: [], palette: null, prevFingerprint: null,
+          })
+          sendJson(res, 200, { ok: true, token, clip: newClip, manifest: pack.manifest, poolSize: videoTracePool.size })
+          return
+        }
+        if (body.action.indexOf('media-trace-') === 0) {
+          const job = videoTraceJobs.get(body.token)
+          if (!job || job.sessionId !== sessionId || job.drawioAbs !== drawioAbs || job.clip !== clip) throw new Error('复刻任务已失效')
+          job.time = Date.now()
+          if (body.action === 'media-trace-discard') {
+            job.cancelled = true
+            wakeVideoTrace(job)
+            videoTracePool.cancelToken(body.token)
+            rmSync(job.dir, { recursive: true, force: true })
+            videoTraceJobs.delete(body.token)
+            sendJson(res, 200, { ok: true })
+            return
+          }
+          let manifest = readManifest(job.dir)
+          if (body.action === 'media-trace-frame-chunk') {
+            const index = Number(body.index)
+            if (!Number.isInteger(index) || index !== job.nextSubmit || index >= job.count) throw new Error('帧分块位置无效')
+            const upload = job.uploads.get(index) || { received: 0 }
+            if (body.offset !== upload.received) throw new Error('帧分块位置无效')
+            const bytes = Buffer.from(typeof body.base64 === 'string' ? body.base64 : '', 'base64')
+            if (!bytes.length || bytes.length > 1024 * 1024 || upload.received + bytes.length > 68 * 1024 * 1024) throw new Error('帧分块大小无效')
+            const part = joinPath(job.dir, 'frame.' + index + '.upload')
+            if (body.offset === 0) writeFileSync(part, bytes)
+            else appendFileSync(part, bytes)
+            job.uploads.set(index, { received: upload.received + bytes.length })
+            sendJson(res, 200, { ok: true, received: upload.received + bytes.length })
+            return
+          }
+          if (body.action === 'media-trace-frame') {
+            const index = Number(body.index)
+            if (job.cancelled || !Number.isInteger(index) || index !== job.nextSubmit || index >= job.count) throw new Error('帧序号不连续或任务已取消')
+            job.nextSubmit += 1
+            job.inFlight += 1
+            const part = joinPath(job.dir, 'frame.' + index + '.upload')
+            try {
+              const png = typeof body.pngBase64 === 'string' ? Buffer.from(body.pngBase64, 'base64') : await readFile(part)
+              if (job.cancelled || videoTraceJobs.get(body.token) !== job) throw new Error('复刻任务已取消')
+              if (png.length < 24 || png.toString('hex', 0, 8) !== '89504e470d0a1a0a' ||
+                  png.readUInt32BE(16) !== manifest.width || png.readUInt32BE(20) !== manifest.height) throw new Error('PNG 帧尺寸与任务不一致')
+              const fingerprint = decodeVideoFingerprint(body.fingerprint)
+              const distance = fingerprint && job.prevFingerprint ? fingerprintDistance(fingerprint, job.prevFingerprint) : Infinity
+              if (fingerprint) job.prevFingerprint = fingerprint
+              const reuse = index > 0 && distance <= 6
+              const scene = !fingerprint || !job.palette || distance >= 24
+              let result
+              if (reuse) {
+                await waitVideoTraceTurn(job, index)
+                const svg = job.frameSvg[index - 1]
+                if (typeof svg !== 'string') throw new Error('上一帧缺失，无法复用')
+                result = { svg, detailReduced: false, work: null, reused: true }
+              } else {
+                const traceOptions = {
+                  width: manifest.width, height: manifest.height, level: body.level, preset: body.preset,
+                  colors: body.colors, removeBg: body.removeBg, maxBytes: job.maxBytes,
+                }
+                if (!scene) traceOptions.paletteOverride = job.palette
+                result = await videoTracePool.run(png, traceOptions, { token: body.token })
+                await waitVideoTraceTurn(job, index)
+              }
+              if (job.cancelled || videoTraceJobs.get(body.token) !== job) throw new Error('复刻任务已取消')
+              manifest = writeFrameSvg(job.dir, readManifest(job.dir), index, result.svg)
+              job.frameSvg[index] = result.svg
+              if (!result.reused && Array.isArray(result.palette) && result.palette.length >= 2) job.palette = result.palette
+              job.uploads.delete(index)
+              rmSync(part, { force: true })
+              wakeVideoTrace(job)
+              sendJson(res, 200, {
+                ok: true, svg: result.svg, count: manifest.frames.length, detailReduced: result.detailReduced, work: result.work,
+                reused: result.reused === true, paletteShared: result.reused !== true && scene === false,
+              })
+            } finally {
+              job.inFlight = Math.max(0, job.inFlight - 1)
+            }
+            return
+          }
+          if (body.action === 'media-trace-finish' || body.action === 'media-trace-release') {
+            if (manifest.frames.length !== job.count) throw new Error('复刻帧尚未全部完成')
+            if (body.action === 'media-trace-release') videoTraceJobs.delete(body.token)
+            sendJson(res, 200, { ok: true, manifest })
+            return
+          }
+          throw new Error('未知复刻操作')
+        }
+        if (body.action === 'media-ensure') {
+          if (clip === null) {
+            sendJson(res, 400, { ok: false, error: 'clip is required' })
+            return
+          }
+          const pack = ensureClipPack(drawioAbs, clip, {
+            kind: body.kind === 'raster' ? 'raster' : 'svg',
+            fps: Number(body.fps),
+            w: Number(body.w),
+            h: Number(body.h),
+          })
+          sendJson(res, 200, { ok: true, clip: pack.clip, manifest: pack.manifest, mediaRoot: mediaRootFor(drawioAbs) })
+          return
+        }
+        if (body.action === 'media-manifest') {
+          if (clip === null) {
+            sendJson(res, 400, { ok: false, error: 'clip is required' })
+            return
+          }
+          const dir = clipDirFor(drawioAbs, clip)
+          if (existsSync(dir) === false) {
+            sendJson(res, 200, { ok: true, missing: true, manifest: null })
+            return
+          }
+          const manifest = readManifest(dir)
+          const source = findSourceFile(dir, manifest)
+          sendJson(res, 200, {
+            ok: true,
+            missing: false,
+            manifest: manifest,
+            hasSource: source !== null,
+            source: source !== null ? source.rel : null,
+          })
+          return
+        }
+        if (body.action === 'media-frame') {
+          if (clip === null) {
+            sendJson(res, 400, { ok: false, error: 'clip is required' })
+            return
+          }
+          const dir = clipDirFor(drawioAbs, clip)
+          const manifest = readManifest(dir)
+          const index = Math.floor(Number(body.index))
+          const svg = readFrameSvg(dir, manifest, index)
+          sendJson(res, 200, { ok: true, index: index, svg: svg })
+          return
+        }
+        if (body.action === 'media-write-frame') {
+          if (clip === null) {
+            sendJson(res, 400, { ok: false, error: 'clip is required' })
+            return
+          }
+          const dir = clipDirFor(drawioAbs, clip)
+          ensureClipPack(drawioAbs, clip, {})
+          let manifest = readManifest(dir)
+          if (Array.isArray(body.svgs)) {
+            manifest = appendFrameSvgs(dir, manifest, body.svgs)
+          } else if (typeof body.svg === 'string') {
+            manifest = writeFrameSvg(dir, manifest, Number(body.index), body.svg)
+          } else {
+            sendJson(res, 400, { ok: false, error: 'svg or svgs required' })
+            return
+          }
+          sendJson(res, 200, { ok: true, manifest: manifest })
+          return
+        }
+        if (body.action === 'media-write-still') {
+          if (clip === null) {
+            sendJson(res, 400, { ok: false, error: 'clip is required' })
+            return
+          }
+          const dir = clipDirFor(drawioAbs, clip)
+          ensureClipPack(drawioAbs, clip, {})
+          const index = Math.floor(Number(body.index))
+          const b64 = typeof body.pngBase64 === 'string' ? body.pngBase64 : ''
+          if (b64.length === 0) {
+            sendJson(res, 400, { ok: false, error: 'pngBase64 required' })
+            return
+          }
+          const file = writeStillPng(dir, index, Buffer.from(b64, 'base64'))
+          sendJson(res, 200, { ok: true, file: file, index: index })
+          return
+        }
+        if (body.action === 'media-import-source') {
+          if (clip === null) {
+            sendJson(res, 400, { ok: false, error: 'clip is required' })
+            return
+          }
+          const file = typeof body.file === 'string' ? body.file : ''
+          if (file.length === 0) {
+            sendJson(res, 400, { ok: false, error: 'file required' })
+            return
+          }
+          const srcTarget = await resolveTarget(file, sessionId)
+          const srcAbs = absoluteHint(srcTarget, file)
+          const dir = clipDirFor(drawioAbs, clip)
+          ensureClipPack(drawioAbs, clip, { kind: 'raster' })
+          const imported = importSourceFile(dir, srcAbs)
+          sendJson(res, 200, { ok: true, source: imported.rel, manifest: imported.manifest })
+          return
+        }
+        if (body.action === 'media-source-bytes') {
+          if (clip === null) {
+            sendJson(res, 400, { ok: false, error: 'clip is required' })
+            return
+          }
+          const dir = clipDirFor(drawioAbs, clip)
+          const manifest = readManifest(dir)
+          const source = findSourceFile(dir, manifest)
+          if (source === null) {
+            sendJson(res, 404, { ok: false, error: 'no source video in clip' })
+            return
+          }
+          const buf = await readFile(source.abs)
+          // 上限约 48MB：更大的片请用外部播放器；JSON base64 约膨胀 33%。
+          if (buf.length > 48 * 1024 * 1024) {
+            sendJson(res, 413, { ok: false, error: 'source too large for inline transfer (>48MB)' })
+            return
+          }
+          const ext = source.rel.toLowerCase().split('.').pop()
+          const mime =
+            ext === 'mp4' ? 'video/mp4' : ext === 'webm' ? 'video/webm' : ext === 'mov' ? 'video/quicktime' : 'application/octet-stream'
+          sendJson(res, 200, { ok: true, rel: source.rel, mime: mime, base64: buf.toString('base64') })
+          return
+        }
+        if (body.action === 'media-pack-bundle') {
+          const zip = packCanvasBundle(drawioAbs)
+          const outName =
+            typeof body.out === 'string' && body.out.length > 0
+              ? body.out
+              : basenamePath(drawioAbs).replace(/\.drawio$/i, '') + '.drawai.zip'
+          const safe = String(outName).replace(/^[\\/]+/, '')
+          if (safe.indexOf('..') >= 0) {
+            sendJson(res, 400, { ok: false, error: 'invalid out path' })
+            return
+          }
+          const abs = joinPath(mediaRoot, safe)
+          await mkdir(dirnamePath(abs), { recursive: true })
+          await writeFile(abs, zip)
+          sendJson(res, 200, { ok: true, path: safe.replace(/\\/g, '/'), bytes: zip.length })
+          return
+        }
+        if (body.action === 'media-unpack-bundle') {
+          const file = typeof body.file === 'string' ? body.file : ''
+          if (file.length === 0) {
+            sendJson(res, 400, { ok: false, error: 'file required' })
+            return
+          }
+          const zipTarget = await resolveTarget(file, sessionId)
+          const zipAbs = absoluteHint(zipTarget, file)
+          const buf = await readFile(zipAbs)
+          const stem = typeof body.stem === 'string' && body.stem.length > 0 ? body.stem : undefined
+          const destDir = dirnamePath(drawioAbs)
+          const result = unpackCanvasBundle(buf, destDir, stem)
+          sendJson(res, 200, { ok: true, path: result.path })
+          return
+        }
+        if (body.action === 'media-pack-svgvideo') {
+          if (clip === null) {
+            sendJson(res, 400, { ok: false, error: 'clip is required' })
+            return
+          }
+          const zip = packSvgVideoZip(clipDirFor(drawioAbs, clip))
+          const outName =
+            typeof body.out === 'string' && body.out.length > 0
+              ? body.out
+              : basenamePath(drawioAbs).replace(/\.drawio$/i, '') + '-' + clip + '.svgvideo.zip'
+          const safe = String(outName).replace(/^[\\/]+/, '')
+          if (safe.indexOf('..') >= 0) {
+            sendJson(res, 400, { ok: false, error: 'invalid out path' })
+            return
+          }
+          const abs = joinPath(mediaRoot, safe)
+          await mkdir(dirnamePath(abs), { recursive: true })
+          await writeFile(abs, zip)
+          sendJson(res, 200, { ok: true, path: safe.replace(/\\/g, '/'), bytes: zip.length })
+          return
+        }
+        if (body.action === 'media-unpack-svgvideo') {
+          if (clip === null) {
+            sendJson(res, 400, { ok: false, error: 'clip is required' })
+            return
+          }
+          const file = typeof body.file === 'string' ? body.file : ''
+          if (file.length === 0) {
+            sendJson(res, 400, { ok: false, error: 'file required' })
+            return
+          }
+          const zipTarget = await resolveTarget(file, sessionId)
+          const buf = await readFile(absoluteHint(zipTarget, file))
+          ensureClipPack(drawioAbs, clip, { kind: 'svg' })
+          const manifest = unpackSvgVideoZip(buf, clipDirFor(drawioAbs, clip))
+          sendJson(res, 200, { ok: true, manifest: manifest })
+          return
+        }
+        if (body.action === 'media-copy-beside') {
+          const from = typeof body.fromPath === 'string' ? body.fromPath : ''
+          if (from.length === 0) {
+            sendJson(res, 400, { ok: false, error: 'fromPath required' })
+            return
+          }
+          const fromTarget = await resolveTarget(from, sessionId)
+          const result = copyMediaBeside(absoluteHint(fromTarget, from), drawioAbs)
+          sendJson(res, 200, { ok: true, copied: result.copied, from: result.from, to: result.to })
+          return
+        }
+        if (body.action === 'media-cleanup') {
+          const doc = body.doc
+          const removed = cleanupUnreferencedClips(drawioAbs, doc)
+          sendJson(res, 200, { ok: true, removed: removed })
+          return
+        }
+        if (body.action === 'media-export-source') {
+          if (clip === null) {
+            sendJson(res, 400, { ok: false, error: 'clip is required' })
+            return
+          }
+          const dir = clipDirFor(drawioAbs, clip)
+          const manifest = readManifest(dir)
+          const source = findSourceFile(dir, manifest)
+          if (source === null) {
+            sendJson(res, 404, { ok: false, error: 'no source video' })
+            return
+          }
+          const outName =
+            typeof body.out === 'string' && body.out.length > 0
+              ? body.out
+              : basenamePath(drawioAbs).replace(/\.drawio$/i, '') + '-' + clip + '-' + source.rel
+          const safe = String(outName).replace(/^[\\/]+/, '')
+          if (safe.indexOf('..') >= 0) {
+            sendJson(res, 400, { ok: false, error: 'invalid out path' })
+            return
+          }
+          const abs = joinPath(mediaRoot, safe)
+          await mkdir(dirnamePath(abs), { recursive: true })
+          await writeFile(abs, await readFile(source.abs))
+          sendJson(res, 200, { ok: true, path: safe.replace(/\\/g, '/') })
+          return
+        }
+        sendJson(res, 400, { ok: false, error: 'unknown media action: ' + body.action })
+      } catch (error) {
+        sendJson(res, 500, { ok: false, error: messageOf(error) })
+      }
       return
     }
 
@@ -4300,6 +5457,15 @@ function sanitizeNewName(raw) {
       const scope = policy === undefined ? 'unresolved policy' : policy.mode + ' @ ' + String(policy.workspaceRoot)
       sendJson(res, 500, { ok: false, error: 'write failed: ' + messageOf(error) + ' [sandbox: ' + scope + ']' })
       return
+    }
+    // 另存为：把源画布旁的 *.media 成对复制到新主名（节点只存 mediaClip，不必改 XML）。
+    if (body.createOnly === true && typeof body.fromPath === 'string' && body.fromPath.length > 0) {
+      try {
+        const fromTarget = await resolveTarget(body.fromPath, sessionId)
+        copyMediaBeside(absoluteHint(fromTarget, body.fromPath), absolute)
+      } catch (error) {
+        // 媒体复制失败不回滚画布写入：海报仍在；播放时会报媒体包缺失。
+      }
     }
     sendJson(res, 200, { ok: true, revision: rendered.revision, path: absolute, dropped: rendered.dropped })
   }

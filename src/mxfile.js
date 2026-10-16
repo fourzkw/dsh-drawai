@@ -52,16 +52,44 @@ export const META_ID = 'drawai-meta'
 
 // ---- 文本与属性小工具（mxfile 的属性/文本足够用，不引入 XML 依赖）-----------
 
-/** 解码 XML 实体（含数字实体）。*/
+/** 常见命名实体（数字实体之外；`&amp;` 必须最后解）。*/
+const NAMED_ENTITIES = {
+  nbsp: '\u00A0',
+  ensp: '\u2002',
+  emsp: '\u2003',
+  thinsp: '\u2009',
+  mdash: '\u2014',
+  ndash: '\u2013',
+  lsquo: '\u2018',
+  rsquo: '\u2019',
+  ldquo: '\u201C',
+  rdquo: '\u201D',
+  hellip: '\u2026',
+  middot: '\u00B7',
+  bull: '\u2022',
+  copy: '\u00A9',
+  reg: '\u00AE',
+  trade: '\u2122',
+  deg: '\u00B0',
+  times: '\u00D7',
+  divide: '\u00F7',
+}
+
+/** 解码 XML 实体（含数字实体与常见命名实体）。*/
 function decodeEntities(text) {
   return String(text)
     .replace(/&#x([0-9a-fA-F]+);/g, (m, hex) => String.fromCodePoint(parseInt(hex, 16)))
     .replace(/&#(\d+);/g, (m, dec) => String.fromCodePoint(parseInt(dec, 10)))
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, '&')
+    .replace(/&([a-zA-Z]+);/g, (m, name) => {
+      const key = name.toLowerCase()
+      if (key === 'lt') return '<'
+      if (key === 'gt') return '>'
+      if (key === 'quot') return '"'
+      if (key === 'apos') return "'"
+      if (key === 'amp') return '&'
+      const named = NAMED_ENTITIES[key]
+      return named === undefined ? m : named
+    })
 }
 
 /** 属性值转义（写回用）。*/
@@ -193,8 +221,12 @@ function attrIn(text, attrsStart, attrsEnd, name) {
 /**
  * 把 drawio 的标签文本变成"纯文本标签"。
  *
- * 我们按纯文本渲染标签，而 drawio 的标签常带 HTML（`html=1` + `<br>`、`<b>`…）。
- * 所以把 `<br>` 折成空格、去掉其余标签，再解实体 —— 读起来才是人写的那句话。
+ * 我们按纯文本渲染标签，而 drawio 的标签常带 HTML（`html=1` + `<br>`、`<b>`、表格…）。
+ * 折算规则（有损但可读）：
+ *   · `<br>` / 块级收尾标签 → 换行；
+ *   · `<td>` / `<th>` 之间留空格（表格粗折算成列）；
+ *   · 其余标签剥掉；命名实体（含 `&nbsp;`）解码；
+ *   · 行内空白折叠，**换行保留**。
  * 代价：改过标签的单元写回时 markup 回不去（如实记在 notes 里）。
  */
 function labelFromValue(value) {
@@ -202,9 +234,23 @@ function labelFromValue(value) {
   let text = String(value)
   if (text.indexOf('<') < 0 && text.indexOf('&') < 0) return text
   const hadMarkup = /<[a-zA-Z/][^>]*>/.test(text)
-  text = text.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, '')
+  // 先把换行语义钉死，再剥其余标签 —— 顺序反了会丢行结构。
+  text = text
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:div|p|tr|li|h[1-6])\s*>/gi, '\n')
+    .replace(/<\/(?:td|th)\s*>/gi, ' ')
+    .replace(/<(?:td|th)\b[^>]*>/gi, '')
+    .replace(/<[^>]*>/g, '')
   text = decodeEntities(text)
-  return hadMarkup ? text.replace(/\s+/g, ' ').trim() : text
+  if (!hadMarkup) return text
+  // 折叠行内空白，保留换行；首尾空白与多余空行去掉。
+  text = text
+    .split('\n')
+    .map((line) => line.replace(/[^\S\n]+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return text
 }
 
 /** 这个标签文本里是否含 markup（用于 notes）。*/
@@ -344,7 +390,7 @@ function scanCells(source, from, to) {
       }
       // `<mxPoint as="offset"/>`：drawio 存"标签相对于那个点的残余偏移"用的。
       // 没有 x/y 属性时按 (0,0) 处理。
-      const offsetMatch = /<mxPoint\b([^>]*?)as\s*=\s*"offset"[^>]*?\/>/.exec(geoInnerText)
+      const offsetMatch = Array.from(geoInnerText.matchAll(/<mxPoint\b([^>]*?)\/>/g)).find((match) => attr(match[1], 'as') === 'offset') || null
       const offset =
         offsetMatch === null
           ? { x: 0, y: 0 }
@@ -782,6 +828,10 @@ export function parseMxfile(text, options) {
       w: geo !== null && geo.width !== undefined ? geo.width : 120,
       h: geo !== null && geo.height !== undefined ? geo.height : 60,
     }
+    if (geo && geo.offset && (geo.offset.x !== 0 || geo.offset.y !== 0)) {
+      node.labelOffsetX = geo.offset.x
+      node.labelOffsetY = geo.offset.y
+    }
     if (cell.data !== undefined && cell.data !== null && Object.keys(cell.data).length > 0) node.data = cell.data
     // 属于哪个图层（沿 parent 往上找第一个图层）：渲染时隐藏层要整层不画。
     const layerId = layerIdOf(info, cell)
@@ -959,10 +1009,13 @@ function nodeCellXml(node, parentId, indent) {
   const y = Number.isFinite(Number(node.y)) ? Number(node.y) : 0
   const w = Number.isFinite(Number(node.w)) ? Number(node.w) : 120
   const h = Number.isFinite(Number(node.h)) ? Number(node.h) : 60
+  const offset = nodeLabelOffset(node)
+  const head = indent + '  <mxGeometry x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" as="geometry"'
+  const geometry = offset.x === 0 && offset.y === 0 ? head + ' />' : head + '><mxPoint x="' + offset.x + '" y="' + offset.y + '" as="offset" /></mxGeometry>'
   return withDataWrapper(
     [
       indent + '<mxCell id="' + escapeAttr(String(node.id)) + '"' + label + style + ' vertex="1" parent="' + escapeAttr(parentId) + '">',
-      indent + '  <mxGeometry x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" as="geometry" />',
+      geometry,
       indent + '</mxCell>',
     ],
     node,
@@ -1136,6 +1189,23 @@ function wrapAsObject(cell, text, data) {
   return '<object label="' + escapeAttr(labelFromValue(cell.label)) + '"' + attrs + ' id="' + escapeAttr(String(cell.id)) + '">' + inner + '</object>'
 }
 
+function nodeLabelOffset(node) {
+  return { x: Number.isFinite(node.labelOffsetX) ? node.labelOffsetX : 0, y: Number.isFinite(node.labelOffsetY) ? node.labelOffsetY : 0 }
+}
+
+/** 仅修改顶点标签的原生 offset 点，保留折叠尺寸等未知几何子元素。 */
+function writeNodeLabelOffset(text, cell, offset) {
+  const point = offset.x === 0 && offset.y === 0 ? '' : '<mxPoint x="' + offset.x + '" y="' + offset.y + '" as="offset" />'
+  if (!cell.geo) return appendGeometry(text, cell, '<mxGeometry as="geometry">' + point + '</mxGeometry>')
+  const geo = cell.geo
+  if (geo.selfClosing) return text.slice(0, geo.start) + '<mxGeometry' + text.slice(geo.attrsStart, geo.attrsEnd) + '>' + point + '</mxGeometry>' + text.slice(geo.end)
+  const inner = text.slice(geo.innerFrom, geo.innerTo)
+  const match = Array.from(inner.matchAll(/<mxPoint\b([^>]*?)\/>/g)).find((item) => attr(item[1], 'as') === 'offset')
+  const replacement = match && point ? setAttrsIn(match[0], '<mxPoint'.length, match[0].length - 2, { x: String(offset.x), y: String(offset.y) }) : point
+  const next = match ? inner.slice(0, match.index) + replacement + inner.slice(match.index + match[0].length) : inner + point
+  return text.slice(0, geo.innerFrom) + next + text.slice(geo.innerTo)
+}
+
 /** 改写一个顶点单元：标签、style、几何（几何要写回**相对父级**的坐标）。 */
 function rebuildNodeCell(info, cell, node, chain) {
   // 单元跨度是**相对页体（mxGraphModel）**的，不是相对整份文件 —— 切错参照系会把
@@ -1152,6 +1222,12 @@ function rebuildNodeCell(info, cell, node, chain) {
       original = wrapped
       subject = fresh
     }
+  }
+  const wantLabelOffset = nodeLabelOffset(node)
+  const fileLabelOffset = subject.geometry && subject.geometry.offset || { x: 0, y: 0 }
+  if (wantLabelOffset.x !== fileLabelOffset.x || wantLabelOffset.y !== fileLabelOffset.y) {
+    original = writeNodeLabelOffset(original, subject, wantLabelOffset)
+    subject = rescanCell(original) || subject
   }
   const changes = []
   const label = typeof node.label === 'string' ? node.label : ''

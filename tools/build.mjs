@@ -42,7 +42,8 @@ const MXFILE_PATH = 'src/mxfile.js'
  * 抛 MODULE_NOT_FOUND —— 而那一刻插件已经"装好了"，报错在启动期，很难联想到构建。
  * 所以新增这类模块时：源文件放 src/、在这里登记一行，构建器同时做存在性校验。
  */
-const HOST_ONLY_MODULES = ['src/raster.js', 'src/trace-image.js']
+const HOST_ONLY_MODULES = ['src/raster.js', 'src/trace-image.js', 'src/media.js', 'src/video-trace-worker.js', 'src/video-trace-pool.js']
+
 
 /**
  * 客户端 bundle body 的起点：**内核的第一行**（哨兵）。
@@ -97,7 +98,9 @@ export function composeClientBody() {
   const source = readFileSync('src/client.js', 'utf8').replace(/\s+$/, '')
   const cut = source.indexOf(CLIENT_SOURCE_START)
   const body = cut < 0 ? source : source.slice(cut)
-  return kernelInline() + '\n\n' + body
+  const player = readFileSync('src/video-player.js', 'utf8').replace(/^export \{[^\n]+\}\s*$/m, '')
+  return kernelInline() + '\n\nconst videoPlayer = (() => {\n' + player +
+    '\nreturn { createVideoController, VideoSurface, VideoControls, VideoPreview }\n})()\n\n' + body
 }
 
 /** 从内核尾部的 `export { ... }` 列表里取出符号名（单源：符号表不用手抄第二遍）。 */

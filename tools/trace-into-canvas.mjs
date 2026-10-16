@@ -3,13 +3,14 @@
  *
  * 为什么走这条路（与 diagram_apply 的 traceImage 等价，但更适合批量）：
  *   · 用的是**同一份** src/trace-image.js（不重复实现），参数语义完全一致；
- *   · 不经工具返回值传输 —— 每张产出的 SVG 动辄十几万字符，走工具调用会因为
- *     返回值巨大而反复报 `invalid output: value is not lossless JSON`（虚警），
- *     而 CLI 只回指标、写盘由本脚本负责。
+ *   · 不经工具返回值传输 —— 批量时 CLI 只回指标、写盘由本脚本负责，比一轮轮
+ *     diagram_apply 更省往返（曾误把宿主的 `not lossless JSON` 归咎于返回值太大；
+ *     真正的雷是回执里挂了 `undefined` 自有属性，已在 summarizeTraceForAi 修好）。
  *   · 写盘前比对文件是否真的变了（没变就不写），避免无谓触发画布重载。
  *
  * 用法:
  *   node tools/trace-into-canvas.mjs --canvas <目标.drawio> --grid 700 \
+ *        --remove-bg true|false \
  *        --place "img.png:x,y,w,h" [--place ...] [--preset lineart] [--colors N] ...
  *   可选参数与 vectorize-image.mjs 同名：--preset --colors --colors-dark --epsilon
  *        --min-area --protect-luma --majority-contrast --grid-h
@@ -43,6 +44,11 @@ if (CANVAS === null || places.length === 0) {
   process.exit(2)
 }
 
+const removeBgRaw = arg('remove-bg', undefined)
+if (removeBgRaw === undefined || removeBgRaw === true) {
+  console.error('必须显式传 --remove-bg true 或 --remove-bg false（不再支持 auto / 省略）')
+  process.exit(2)
+}
 const baseOpts = {
   preset: String(arg('preset', 'lineart')),
   grid: num('grid', 700),
@@ -53,6 +59,7 @@ const baseOpts = {
   minArea: num('min-area', undefined),
   protectLuma: num('protect-luma', undefined),
   majorityContrast: num('majority-contrast', undefined),
+  removeBg: removeBgRaw,
 }
 for (const k of Object.keys(baseOpts)) if (baseOpts[k] === undefined) delete baseOpts[k]
 

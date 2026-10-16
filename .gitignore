@@ -13,6 +13,12 @@ node_modules/
 # 本机画布 / 自检素材（不进仓库；根目录只留 demo.drawio）
 _local/
 
+# 自检输出、下载素材和临时工具（历史目录；新素材统一放 _local/）
+/artifacts/
+/downloads/
+/.tools/
+/.tmp-video/
+
 # 本地 drawio webapp junction（见 README 开发一节）
 vendor/
 

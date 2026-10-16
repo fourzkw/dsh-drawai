@@ -745,7 +745,7 @@ console.log('\n右键菜单：几类只显示当前值，并排成一行')
   ok(/function imageFilesFromDataTransfer\(/.test(src), '有 imageFilesFromDataTransfer（从剪贴板/拖放抽图片）')
   ok(/function insertImageFiles\(/.test(src), '有 insertImageFiles（落成 image 节点）')
   ok(/addEventListener\('paste', onPaste, true\)/.test(src), '挂了 paste 捕获监听（系统剪贴板图片 → 节点）')
-  ok(/onDrop:/.test(src) && /imageFilesFromDataTransfer\(event\.dataTransfer\)/.test(src), '画布支持拖入图片文件')
+  ok(/onDrop:/.test(src) && /mediaFilesFromDataTransfer\(event\.dataTransfer\)/.test(src), '画布通过统一媒体入口支持拖入图片和视频文件')
   ok(/styleWithImageDataUri/.test(src), '贴图走 styleWithImageDataUri（drawio 的 shape=image + data URI）')
   ok(!/'＋ 新增节点'/.test(src), '「＋ 新增节点」按钮已移除')
   ok(!/key: 'shape-pick'/.test(src), '右键菜单不再内嵌形状平铺块')
@@ -789,21 +789,31 @@ console.log('\n独立文字：右侧元素条能放一段字（不接节点、�
   // 入口是右侧元素条的「文字」—— 点它武装放置，再点画布走 createNodeAt。
   ok(/createNodeAt\(drag\.placeShape, menuStyle, drag\.x0, drag\.y0\)/.test(src), '放置工具点空白 = createNodeAt(形状, 配色, 点的位置)（「文字」也走这一条）')
   ok(/\{ shape: 'text', label: '文字' \}/.test(src), '形状面板里有「文字」（点它就是放一段独立文字）')
-  ok(/const text = typeof label === 'string' \? label : isText \? '文字' : isSvg \? '' : isSection \? '分区' : '新节点'/.test(src), '文字元素的默认文字是「文字」（svg 节点不给默认文字，免得压在图上）')
+  // 直接验证新建结果，避免增加视频分支后旧的源码正则误报。
+  const placeholder = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0L10 0L10 10z"/></svg>'
+  const freshContext = Object.assign({}, styleKernel, {
+    DEFAULT_SVG_MARKUP: placeholder, DEFAULT_VIDEO_POSTER: placeholder,
+    NEW_VIDEO_W: 160, NEW_VIDEO_H: 90, NEW_SVG_SIZE: 100, NEW_SECTION_W: 300, NEW_SECTION_H: 200,
+    NEW_NODE_W: 130, NEW_NODE_H: 60, GRID: 10, snap: (v) => v, snapTo: (v) => v, nodeTextFitHeight: () => 0,
+  })
+  const fresh = new Function(...Object.keys(freshContext), 'id', 'shape', 'styleName', 'userX', 'userY', 'label', bodyOf('freshNode')).bind(null, ...Object.values(freshContext))
+  const textNode = fresh('t', 'text', 'blue', 0, 0)
+  const svgNode = fresh('s', 'svg', 'blue', 0, 0)
+  ok(textNode.label === '文字' && svgNode.label === '', '文字元素的默认文字是「文字」（svg 节点不给默认文字，免得压在图上）')
   // 文字不吃配色：它的样式就是 drawio 的 defaultTextStyle，盖上 fillColor/strokeColor
   // 只会让文件与 drawio 不一致，屏幕上还什么都看不出来。svg 同理（图片不吃填充/描边）。
   // 分区自带淡底虚线，也不盖调色板。
   ok(
-    /const base =\s*isText \|\| isSvg \|\| isSection \? styleWithNodeShape\('', shape\) : styleWithColorName/.test(src),
+    textNode.style === styleKernel.styleWithNodeShape('', 'text'),
     '新建节点对文字不套配色（保持 drawio 的 defaultTextStyle）',
   )
   ok(/\{ shape: 'section', label: '分区' \}/.test(src), '形状面板里有「分区」（可插入的区块元素）')
   ok(!/成为一组/.test(src) && !/取消组合/.test(src), '不再用编辑菜单「成为一组/取消组合」')
   ok(/解散分区/.test(src), '分区右键可解散（删框留内容）')
-  ok(/const style = isSvg \? styleWithSvgMarkup\(base, DEFAULT_SVG_MARKUP\) : base/.test(src), '放 svg 节点时带上一张占位图（否则拿到的是看不见的空框）')
+  ok(styleKernel.svgMarkupFromStyle(svgNode.style) === placeholder, '放 svg 节点时带上一张占位图（否则拿到的是看不见的空框）')
   ok(/if \(isText\) openNodeEditor\(id\)/.test(src), '放下来直接进编辑态（drawio 的 insertText 也是这样）')
   ok(
-    /isTextNode \? styleWithTextColorName\(nodeStyle, color\) : styleWithColorName/.test(src),
+    /labelOnlyColor \? styleWithTextColorName\(nodeStyle, color\) : styleWithColorName/.test(src),
     '文字元素的调色板改 fontColor 而不是填充/描边（否则点一圈颜色毫无变化）',
   )
 }
@@ -817,7 +827,7 @@ console.log('\nSVG 内容节点：元素条里有入口、右键里能改内容'
   ok(/const DEFAULT_SVG_MARKUP =/.test(src), '有默认占位图（否则点下去得到的是看不见的空框）')
   ok(/function styleForShapePick\(style, shape\)/.test(src), '换形状走 styleForShapePick（唯一"形状决定不了内容"的那一个）')
   ok(/shape === 'svg' && svgMarkupFromStyle\(next\) === null/.test(src), '只给空节点补占位图（已有内容的不覆盖）')
-  ok(/currentShape === 'svg' \? React\.createElement/.test(src) && !/'改成 SVG 图形…'/.test(src), '右键仅允许编辑已有 SVG 内容，不提供转换入口')
+  ok(/currentShape === 'svg' && isVideoNodeData\(node.data\) === false \? React\.createElement/.test(src) && !/'改成 SVG 图形…'/.test(src), '右键仅允许编辑已有 SVG 内容，不提供转换入口')
   ok(/onClick: \(\) => openSvgEditor\(menu\.id\)/.test(src), '那个按钮接的是 openSvgEditor')
   ok(/function openSvgEditor\(id\)/.test(src) && /kind: 'svg'/.test(src), 'openSvgEditor 打开 svg 面板')
   ok(/function commitSvgEditor\(id, text\)/.test(src), '有保存函数（内容整段替换）')
@@ -1096,8 +1106,8 @@ console.log('\n字色：节点与连线的标签颜色都能改（fontColor）')
   ok(labelHits.length === 2, '节点菜单与连线菜单各有一类「字色」（实际 ' + labelHits.length + ' 处）')
   const keyHits = src.match(/key: 'fontColor'/g) || []
   ok(keyHits.length === 2, '两类的 key 都是 fontColor（实际 ' + keyHits.length + ' 处）')
-  ok(/label: isTextNode \? '字色' : '配色'/.test(src), '独立文字的那一类直接叫「字色」（它没有填充描边，配色就是字色）')
-  ok(/\.\.\.\(isTextNode\s*\n\s*\? \[\]/.test(src), '独立文字不再多出一类重复的「字色」（同一件事两个入口只会让人犹豫）')
+  ok(/label: labelOnlyColor \? '字色' : '配色'/.test(src), '文字、图片及视频等无边框节点只提供字色，不提供无效配色')
+  ok(/\.\.\.\(labelOnlyColor\s*\n\s*\? \[\]/.test(src), '无边框节点不再多出重复的「字色」入口')
   // 写入路径：节点走内核的 styleWithTextColorName（'plain' = 删键回缺省字色），连线走 updateEdge 的 fontColor
   ok(
     /updateNode\(nodeTargets, \{ style: styleWithTextColorName\(nodeStyle, color\) \}\)/.test(src),
@@ -1161,7 +1171,10 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
   ], edges: [{ id: 'e', style: 'dashed=1;custom=keepEdge;' }] }
   let mutations = 0
   let lineChange = null
-  const context = Object.assign({}, styleKernel, {
+  // 与真实客户端保持相同的解构边界，不能把内核全部导出注入桩中，掩盖漏引入错误。
+  const importedNames = /const\s*\{([^}]+)\}\s*=\s*styleKernel/.exec(src)[1].split(',').map((name) => name.trim()).filter(Boolean)
+  const importedKernel = Object.fromEntries(importedNames.map((name) => [name, styleKernel[name]]))
+  const context = Object.assign({}, importedKernel, {
     doc, view: { x: 0, y: 0, w: 500, h: 500 }, size: { w: 260, h: 400 },
     editing: null, menu: null, placeEdgeKind: null, placeTool: null,
     selectedIds: ['a', 'b', 'e'], routeMemoryRef: { current: new Map() },
@@ -1185,9 +1198,14 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
     ColorPalette: 'color-palette', uid: 'test', prefs: { customColors: [] },
     customColorList: new Function('normalizeCustomColor', 'value', bodyOf('customColorList')).bind(null, new Function('value', bodyOf('normalizeCustomColor'))),
     loadDrawaiPrefs: () => ({ customColors: [] }), patchPrefs: () => {},
+    ImageTraceControl: 'image-trace-control',
+    generateImageTrace: () => {},
+    applyImageTrace: () => {},
   })
   context.isBasicShapeStyle = new Function('shapeFamilyOf', 'nodeShapeFromStyle', 'imageValueFromStyle', 'styleGet', 'style', bodyOf('isBasicShapeStyle')).bind(null,
     context.shapeFamilyOf, styleKernel.nodeShapeFromStyle, styleKernel.imageValueFromStyle, styleKernel.styleGet)
+  context.nodeShowsLabel = new Function('isVideoNodeData', 'shapeOf', 'node', bodyOf('nodeShowsLabel')).bind(null,
+    context.isVideoNodeData, new Function('nodeShapeFromStyle', 'node', bodyOf('shapeOf')).bind(null, context.nodeShapeFromStyle))
   const start = src.indexOf('function renderSelectionToolbar(')
   const end = src.indexOf('function renderShapeRail(', start)
   const render = () => new Function(...Object.keys(context), src.slice(start, end) + '\nreturn renderSelectionToolbar()')(...Object.values(context))
@@ -1224,6 +1242,13 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
       : shape === 'image' ? styleKernel.styleWithImageDataUri('', 'data:image/png;base64,aGVsbG8=')
       : styleKernel.styleWithNodeShape('', shape)
     context.selectedIds = ['b']
+    const drawControl = flatten(render()).find((el) => el.type === 'image-trace-control')
+    if (['svg', 'image', 'text'].includes(shape)) ok(!flatten(render()).some((el) => el.props.label === '描边'), shape + ' 无边框内容节点不显示无效的描边工具')
+    ok(Boolean(drawControl) === (shape === 'image'), shape + ' 的工具栏绘制入口按节点类别显示')
+    if (shape === 'image') {
+      ok(drawControl.props.source && drawControl.props.source.id === 'b', '绘制控件绑定当前选中的图片节点')
+      ok(drawControl.props.disabled !== true, '已导入位图时绘制可用')
+    }
     ok(!flatten(render()).some((el) => el.props.label === '形状'), shape + ' 单选不显示跨类别换形入口')
     context.selectedIds = ['a', 'b']
     ok(!flatten(render()).some((el) => el.props.label === '形状'), shape + ' 混合选区也不显示换形入口')
@@ -1235,6 +1260,7 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
   doc.nodes[1].style = 'shape=image;image=refs/logo.png;'
   context.selectedIds = ['b']
   ok(!flatten(render()).some((el) => el.props.label === '形状'), '外链图片占位节点也不提供换形入口')
+  ok(flatten(render()).find((el) => el.type === 'image-trace-control').props.disabled === true, '外链图片未导入时禁用绘制')
   context.selectedIds = []
   ok(render() === null, '清除选择后关闭浮动工具栏')
 }

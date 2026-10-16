@@ -93,6 +93,10 @@ var NODE_SHAPE_STYLE = {
   // image：内嵌位图（png/jpeg/gif/webp 的 data URI）。落盘同样是 drawio 的图片形状；
   // 缺省 imageAspect=1（等比居中）—— 截图/照片拉伸会变形，和 svg 图标的缺省相反。
   image: 'shape=image;imageAspect=1',
+  // video：画布上的统一播放器节点。落盘仍是 shape=image + 海报 SVG；真实元数据在
+  // `<object>` 的 drawaiMedia / mediaClip 上（旁路 `*.media/<clip>/`）。style 层面与 svg 同构，
+  // 识别视频靠 data，不靠 style 键 —— 这样 drawio 桌面版也能看见海报静帧。
+  video: 'shape=image;imageAspect=0',
   // 分区（飞书式区块 / drawio 的 group 容器）：可插入的容器元素，不是"选中后成组"。
   // verticalAlign=top + align=left：标题贴在框顶部左侧（区块名），里面再放其它节点。
   section:
@@ -100,17 +104,42 @@ var NODE_SHAPE_STYLE = {
 }
 
 /** 形状枚举的顺序（UI 菜单、read 输出的稳定顺序）。顺序对齐 drawio 的形状面板。 */
-var NODE_SHAPES = ['rect', 'rounded', 'text', 'section', 'stadium', 'ellipse', 'diamond', 'parallelogram', 'cylinder', 'document', 'hexagon', 'svg', 'image']
+var NODE_SHAPES = ['rect', 'rounded', 'text', 'section', 'stadium', 'ellipse', 'diamond', 'parallelogram', 'cylinder', 'document', 'hexagon', 'svg', 'image', 'video']
+
+/** 视频节点缺省海报（播放按钮静帧）。 */
+var DEFAULT_VIDEO_POSTER =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 90">' +
+  '<rect width="160" height="90" fill="#1f1f1f"/>' +
+  '<circle cx="80" cy="45" r="20" fill="#ffffff" fill-opacity="0.92"/>' +
+  '<path d="M74 35 L74 55 L94 45 Z" fill="#1f1f1f"/>' +
+  '</svg>'
 
 /** 文字形状独有的"隐形"设置：离开文字形状时要清掉（它们不该跟着变成别的形状）。 */
 var TEXT_SHAPE_ONLY_KEYS = { strokeColor: 'none', fillColor: 'none' }
 
-/** SVG / 位图形状独有的键：离开这类形状时要清掉（否则文件里留着一大段看不见的 data URI）。 */
+/** SVG / 位图 / 视频海报形状独有的键：离开这类形状时要清掉（否则文件里留着一大段看不见的 data URI）。 */
 var SVG_SHAPE_ONLY_KEYS = ['image', 'imageAspect']
 var IMAGE_SHAPE_ONLY_KEYS = SVG_SHAPE_ONLY_KEYS
+var VIDEO_SHAPE_ONLY_KEYS = SVG_SHAPE_ONLY_KEYS
+
+/** 节点是否为视频播放器（看 `<object>` 数据，不看 style）。 */
+function isVideoNodeData(data) {
+  if (data === null || data === undefined || typeof data !== 'object') return false
+  var v = data.drawaiMedia
+  return v === '1' || v === 1 || v === true
+}
+
+/** 报告/UI 用的形状名：视频优先于 style 推导的 svg/image。 */
+function reportNodeShape(node) {
+  if (node !== null && node !== undefined && typeof node === 'object' && isVideoNodeData(node.data)) return 'video'
+  return nodeShapeFromStyle(node && typeof node.style === 'string' ? node.style : '')
+}
 
 /** 分区形状独有的键：离开 section 时要清掉（否则普通矩形仍带着 container=1）。 */
 var SECTION_SHAPE_ONLY_KEYS = ['group', 'container', 'collapsible', 'recursiveResize', 'spacingLeft', 'spacingTop', 'fontStyle']
+
+/** swimlane 独有的键：离开时清掉，避免普通矩形仍被认成泳道。 */
+var SWIMLANE_SHAPE_ONLY_KEYS = ['swimlane', 'startSize', 'swimlaneFillColor', 'horizontal', 'collapsible']
 
 /** 线型枚举 → style 键。solid 是缺省，落盘即"没有 dashed 键"。 */
 var DASH_PRESETS = {
@@ -292,9 +321,11 @@ function styleIsEmpty(style) {
 function nodeShapeFromStyle(style) {
   // 独立文字：drawio 用裸键 `text`（不是 `shape=text`）表达，所以要单独认一次。
   if (styleGet(style, 'text', null) !== null) return 'text'
+  // swimlane：标题带容器（startSize）；优先于 container=1 的分区判定。
+  if (styleGet(style, 'swimlane', null) !== null || styleGet(style, 'shape', null) === 'swimlane') return 'swimlane'
   // 分区 / 分组容器：drawio 用裸键 `group` + `container=1`（不是 shape=group）。
   if (styleGet(style, 'group', null) !== null) return 'section'
-  if (styleGet(style, 'container', null) === '1' && styleGet(style, 'swimlane', null) === null) return 'section'
+  if (styleGet(style, 'container', null) === '1') return 'section'
   var shape = styleGet(style, 'shape', null)
   // 图片形状：`shape=image`（或 drawio 的裸键写法留下的 `image=` data URI）。
   //   · SVG data URI → 工具形状 `svg`（可编辑标记）
@@ -334,6 +365,9 @@ function styleWithNodeShape(style, shape) {
   var wasSvg = nodeShapeFromStyle(style) === 'svg'
   var wasImage = nodeShapeFromStyle(style) === 'image'
   var wasSection = nodeShapeFromStyle(style) === 'section'
+  var wasSwimlane = nodeShapeFromStyle(style) === 'swimlane'
+  // video 在 style 层与 svg 同构（都是 shape=image + image=）；换离视频时清海报键。
+  var target = shape === 'video' ? 'svg' : shape
   var shapeKeys = ['shape', 'ellipse', 'rhombus', 'rounded', 'arcSize', 'text']
   for (var i = 0; i < shapeKeys.length; i += 1) delete map[shapeKeys[i]]
   // 从"文字"换成别的形状：把它的隐形设置也清掉，否则换出来的矩形/椭圆是看不见的
@@ -344,19 +378,22 @@ function styleWithNodeShape(style, shape) {
       if (String(map[noneKeys[n]]).toLowerCase() === TEXT_SHAPE_ONLY_KEYS[noneKeys[n]]) delete map[noneKeys[n]]
     }
   }
-  // 同理：从"SVG 图形 / 位图"换成别的形状时，把那段内嵌 data URI 一起清掉 —— 留着它
-  // 没人看得见，却会让文件白白胖一大截（而且下次换回会突然冒出一张旧图）。
-  // svg ↔ image 互切也要清：一个是标记、一个是位图，不能共用同一段 image=。
-  if ((wasSvg || wasImage) && shape !== 'svg' && shape !== 'image') {
+  // 同理：从"SVG 图形 / 位图 / 视频海报"换成别的形状时，把那段内嵌 data URI 一起清掉。
+  // video 在 style 层等同 svg（都是 image + svg data URI）；svg ↔ image 互切也要清。
+  var keepImage = target === 'svg' || target === 'image' || shape === 'video'
+  if ((wasSvg || wasImage) && keepImage === false) {
     for (var s = 0; s < SVG_SHAPE_ONLY_KEYS.length; s += 1) delete map[SVG_SHAPE_ONLY_KEYS[s]]
-  } else if (wasSvg && shape === 'image') {
+  } else if (wasSvg && target === 'image') {
     for (var s2 = 0; s2 < SVG_SHAPE_ONLY_KEYS.length; s2 += 1) delete map[SVG_SHAPE_ONLY_KEYS[s2]]
-  } else if (wasImage && shape === 'svg') {
+  } else if (wasImage && (target === 'svg' || shape === 'video')) {
     for (var s3 = 0; s3 < IMAGE_SHAPE_ONLY_KEYS.length; s3 += 1) delete map[IMAGE_SHAPE_ONLY_KEYS[s3]]
   }
   // 离开分区：清掉容器键，否则普通矩形还会带着 container=1，被当成分区。
   if (wasSection && shape !== 'section') {
     for (var c = 0; c < SECTION_SHAPE_ONLY_KEYS.length; c += 1) delete map[SECTION_SHAPE_ONLY_KEYS[c]]
+  }
+  if (wasSwimlane && shape !== 'swimlane') {
+    for (var sw = 0; sw < SWIMLANE_SHAPE_ONLY_KEYS.length; sw += 1) delete map[SWIMLANE_SHAPE_ONLY_KEYS[sw]]
   }
   var preset = parseStyle(styleFromNodeShape(shape))
   var names = Object.keys(preset)
@@ -919,6 +956,8 @@ function normalizeDrawioDoc(raw) {
     out.y = Number.isFinite(Number(rawNode.y)) ? Number(rawNode.y) : 0
     out.w = Number.isFinite(Number(rawNode.w)) ? Number(rawNode.w) : 0
     out.h = Number.isFinite(Number(rawNode.h)) ? Number(rawNode.h) : 0
+    if (Number.isFinite(rawNode.labelOffsetX)) out.labelOffsetX = rawNode.labelOffsetX
+    if (Number.isFinite(rawNode.labelOffsetY)) out.labelOffsetY = rawNode.labelOffsetY
     // 编辑数据（drawio 用户对象上的自定义属性）：只收字符串值，原样带上。
     var data = rawNode.data
     if (isObject(data)) out.data = copyData(data)
@@ -1010,9 +1049,9 @@ function normalizeDrawioDoc(raw) {
 
 export {
   STYLE_KEY_ORDER, PALETTE, NODE_SHAPES, NODE_SHAPE_STYLE, DASH_KINDS, ARROW_KINDS, SIDES,
-  DEFAULT_FILL, DEFAULT_STROKE, DEFAULT_FONT, DEFAULT_NODE_STYLE, DEFAULT_EDGE_STYLE,
+  DEFAULT_FILL, DEFAULT_STROKE, DEFAULT_FONT, DEFAULT_NODE_STYLE, DEFAULT_EDGE_STYLE, DEFAULT_VIDEO_POSTER,
   parseStyle, formatStyle, styleGet, styleSet, stylePatch, styleIsEmpty, styleNumber,
-  nodeShapeFromStyle, styleFromNodeShape, styleWithNodeShape,
+  nodeShapeFromStyle, styleFromNodeShape, styleWithNodeShape, isVideoNodeData, reportNodeShape,
   isSvgMarkup, normalizeSvgMarkup, isSvgDataUri, isRasterDataUri, svgMarkupFromImageValue, imageValueFromSvgMarkup,
   imageValueFromStyle, svgMarkupFromStyle, styleWithSvgMarkup, styleWithoutSvgMarkup,
   styleWithImageDataUri, styleWithoutImageDataUri,
@@ -1027,5 +1066,6 @@ export {
   avoidFromStyle, styleWithAvoid,
   normalizePoint, normalizePoints, pointsEqual,
   edgeTerminalId, edgeFreePoint,
+  copyData,
   normalizeDrawioDoc, snapDocGeometry,
 }

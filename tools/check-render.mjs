@@ -2025,7 +2025,7 @@ console.log('\n文字撑高节点 + 就地编辑框（输入时与输完后必�
   // 菱形/椭圆：文字区比节点窄 —— 编辑框必须跟着窄（否则输入时和输完后断行不同）
   const diamond = { id: 'd', label: long, style: 'rhombus;', x: 0, y: 0, w: 200, h: 60 }
   const db = editorBox(diamond, long, ctm, { left: 0, top: 0 })
-  ok(db.width < 200 - 12 + 0.01 && Math.abs(db.width - 120) < 0.01, '菱形节点的编辑框按 60% 宽度摆：' + db.width)
+  ok(db.width < 200 - 12 + 0.01 && Math.abs(db.width - 112.8) < 0.01, '菱形节点的编辑框按内宽 60% 摆：' + db.width)
 
   // 节点和连线标签统一多行编辑。
   const src = composeClientBody()
@@ -2419,6 +2419,45 @@ console.log('\n编辑排版与显示排版一致')
   const section = Object.assign({}, node, { style: 'group;container=1;fontSize=18;' })
   const sectionBox = internals.nodeEditorBox(section, section.label, { a: 1, e: 0, f: 0 }, { left: 0, top: 0 })
   ok(sectionBox.left === 110 && sectionBox.top === 206 && sectionBox.textAlign === 'left', '分区标题编辑保持左上对齐')
+  const aligned = Object.assign({}, node, { style: 'align=left;verticalAlign=top;spacingLeft=14;spacingTop=8;fontSize=18;' })
+  const alignedBox = internals.labelTextBox({ node: aligned, geo: internals.nodeBoxOf(aligned) })
+  ok(alignedBox.align === 'left' && alignedBox.verticalAlign === 'top', '文字区读出 align/verticalAlign')
+  ok(Math.abs(alignedBox.x - (aligned.x + 14)) < 0.01, 'align=left + spacingLeft 把文字区推到框内左侧：' + alignedBox.x)
+  ok(Math.abs(alignedBox.y - (aligned.y + 8)) < 0.01, 'verticalAlign=top + spacingTop 把文字区贴到顶部：' + alignedBox.y)
+  const png = 'data:image/png;base64,iVBORw0KGgo='
+  const icon = {
+    id: 'icon',
+    label: 'list',
+    x: 0,
+    y: 0,
+    w: 160,
+    h: 40,
+    style: 'shape=image;imageAspect=1;image=' + png + ';labelPosition=right;align=left;verticalAlign=middle;',
+  }
+  const iconGeo = internals.nodeBoxOf(icon)
+  const iconImg = internals.imageContentRect(icon, iconGeo)
+  ok(iconImg.w === iconGeo.w && iconImg.h === iconGeo.h, '图片节点不给文字留位置，图铺满框')
+  const iconDoc = { version: 2, revision: '', nodes: [icon], edges: [], labels: [] }
+  const iconTree = renderDiagram(iconDoc, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const iconImage = walk(iconTree, (n) => n.type === 'image', [])[0]
+  ok(iconImage !== undefined && iconImage.props.width === icon.w && iconImage.props.height === icon.h, '渲染出的图片铺满节点框')
+  ok(walk(iconTree, (n) => n.type === 'text' && n.props['data-node-id'] === 'icon', []).length === 0, '图片节点不画文字')
+  const broken = Object.assign({}, icon, { id: 'broken', label: '参数', style: 'shape=image;imageAspect=0;image=data:image/svg+xml,%ZZbroken;labelPosition=right;align=left;' })
+  const brokenTree = renderDiagram({ version: 2, revision: '', nodes: [broken], edges: [], labels: [] }, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const brokenTexts = walk(brokenTree, (n) => n.type === 'text', [])
+  const brokenChars = brokenTexts.map((t) => {
+    const own = Array.isArray(t.children[0]) ? t.children[0] : t.children
+    return own.map((sp) => (sp && Array.isArray(sp.children) ? sp.children.join('') : '')).join('')
+  }).join('|')
+  ok(brokenChars.indexOf('SVG') < 0 && brokenChars.indexOf('参数') >= 0, '有真实标签时不画「SVG」占位字：' + brokenChars)
+  ok(nodeShapeFromStyle('swimlane;startSize=30;horizontal=1;') === 'swimlane', 'swimlane 样式识别为 swimlane')
+  const lane = { id: 'lane', label: '程序', x: 40, y: 80, w: 200, h: 160, style: 'swimlane;startSize=30;align=left;verticalAlign=middle;fontSize=12;' }
+  const laneGeo = internals.nodeBoxOf(lane)
+  const laneText = internals.labelTextBox({ node: lane, geo: laneGeo })
+  ok(laneText.y >= laneGeo.y && laneText.y + laneText.h <= laneGeo.y + 30 + 0.01, 'swimlane 标题落在 startSize 顶栏内：' + laneText.y + '+' + laneText.h)
+  const laneTree = renderDiagram({ version: 2, revision: '', nodes: [lane], edges: [], labels: [] }, 'light', 'u1', { current: null }, { selectedIds: [] }, null)
+  const laneLine = walk(laneTree, (n) => n.type === 'line', [])[0]
+  ok(laneLine !== undefined && Math.abs(laneLine.props.y1 - (lane.y + 30)) < 0.01, '标题带底边画在 startSize：' + (laneLine && laneLine.props.y1))
   const multiline = Object.assign({}, node, { style: 'whiteSpace=nowrap;fontSize=18;', label: '第一行\n第二行' })
   const multilineBox = internals.nodeEditorBox(multiline, multiline.label, { a: 1, e: 0, f: 0 }, { left: 0, top: 0 })
   ok(multilineBox.height === lineHeight * 2, '禁止自动换行时仍保留显式换行')

@@ -14,7 +14,7 @@
     "build": "node tools/build.mjs",
     "watch": "node tools/watch.mjs",
     "check": "node tools/check-package.mjs",
-    "test": "node tools/check-mxfile.mjs && node tools/check-route-preview.mjs && node tools/check-host.mjs && node tools/check-render.mjs && node tools/check-component.mjs && node tools/check-trace.mjs"
+    "test": "node tools/check-mxfile.mjs && node tools/check-route-preview.mjs && node tools/check-host.mjs && node tools/check-render.mjs && node tools/check-component.mjs && node tools/check-trace.mjs && node tools/check-media.mjs && node tools/check-video-player.mjs && node tools/check-image-trace.mjs && node tools/check-video-trace.mjs && node tools/check-video-audio.mjs && node tools/check-video-import.mjs && node tools/check-node-labels.mjs"
   },
   "exports": {
     ".": "./lib/index.js",

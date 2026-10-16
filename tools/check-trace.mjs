@@ -8,8 +8,17 @@ import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSyn
 import { createRequire } from 'node:module'
 import { resolve as resolvePath } from 'node:path'
 import { decodeRaster, decodePng, looksLikeRaster } from '../src/raster.js'
-import { TRACE_DEFAULTS, TRACE_PRESET_NAMES, svgToImageValue, traceRasterToSvg } from '../src/trace-image.js'
+import {
+  TRACE_DEFAULTS,
+  TRACE_PRESET_NAMES,
+  svgToImageValue,
+  summarizeTraceForAi,
+  toLosslessJson,
+  traceRasterToSvg,
+} from '../src/trace-image.js'
 import * as plugin from '../lib/index.js'
+import './check-trace-regressions.mjs'
+import './check-image-trace.mjs'
 
 let failures = 0
 function check(label, condition, detail) {
@@ -54,9 +63,9 @@ if (!hasSample) {
 
   console.log('check-trace: 矢量化不变量')
   const raster = await decodeRaster(bytes)
-  const out = traceRasterToSvg(raster, { epsilon: 2.5 })
+  const out = traceRasterToSvg(raster, { epsilon: 2.5, removeBg: true })
   const m = out.metrics
-  check('像素覆盖精确（各色轮廓面积之和 == 总像素）', m.exactPixelCoverage === true, m.drawnPixels + ' / ' + m.totalPixels)
+  check('量化图标签分区完整', m.labelPartitionComplete === true, String(m.paletteAreaSum))
   // 背景色（palette[0]）不落 path，前景每色一条
   check('前景每色一条 path', m.paths === m.palette.length - 1, m.paths + ' 条 / 前景 ' + (m.palette.length - 1) + ' 色')
   check('SVG 不含背景填充色', m.palette.length > 0 && !out.svg.includes("fill='" + m.palette[0] + "'"), m.palette[0])
@@ -78,13 +87,13 @@ if (!hasSample) {
       data[i * 4 + 2] = 40
       data[i * 4 + 3] = 255
     }
-    const scaled = traceRasterToSvg({ width: w, height: h, data: data }, { scale: 2, grid: 999, colors: 4, epsilon: 1, minArea: 1 })
+    const scaled = traceRasterToSvg({ width: w, height: h, data: data }, { scale: 2, grid: 999, colors: 4, epsilon: 1, minArea: 1, removeBg: false })
     check('scale:2 → scaleApplied=2', scaled.metrics.scaleApplied === 2, String(scaled.metrics.scaleApplied))
     check('scale:2 → work ≈ 20×20', scaled.metrics.work.width === 20 && scaled.metrics.work.height === 20,
       scaled.metrics.work.width + '×' + scaled.metrics.work.height)
     check('scale:2 sizeNotes 提到 scaleApplied', scaled.metrics.sizeNotes.includes('scaleApplied 2'), scaled.metrics.sizeNotes)
 
-    const clamped = traceRasterToSvg({ width: w, height: h, data: data }, { scale: 0, grid: 999, colors: 4, epsilon: 1, minArea: 1 })
+    const clamped = traceRasterToSvg({ width: w, height: h, data: data }, { scale: 0, grid: 999, colors: 4, epsilon: 1, minArea: 1, removeBg: false })
     check('scale:0 被夹到 1', clamped.metrics.scaleApplied === 1, String(clamped.metrics.scaleApplied))
     check('scale 被忽略时 sizeNotes 说出来', clamped.metrics.sizeNotes.includes('clamped'), clamped.metrics.sizeNotes)
 
@@ -95,7 +104,7 @@ if (!hasSample) {
       tall[i * 4 + 2] = 200
       tall[i * 4 + 3] = 255
     }
-    const capped = traceRasterToSvg({ width: 40, height: 80, data: tall }, { scale: 1, grid: 100, gridH: 40, colors: 4, epsilon: 1, minArea: 1 })
+    const capped = traceRasterToSvg({ width: 40, height: 80, data: tall }, { scale: 1, grid: 100, gridH: 40, colors: 4, epsilon: 1, minArea: 1, removeBg: false })
     check('gridH 压住长图高度', capped.metrics.work.height === 40, capped.metrics.work.width + '×' + capped.metrics.work.height)
     check('gridH sizeNotes 提到 height', capped.metrics.sizeNotes.includes('height'), capped.metrics.sizeNotes)
   }
@@ -115,7 +124,7 @@ if (!hasSample) {
     }
     const alphaOut = traceRasterToSvg(
       { width: w, height: h, data: data },
-      { scale: 1, grid: 999, colors: 4, epsilon: 1, minArea: 1, bgBright: 238, bgTol: 10 },
+      { scale: 1, grid: 999, colors: 4, epsilon: 1, minArea: 1, bgBright: 238, bgTol: 10, removeBg: true },
     )
     check('半透明前景有前景像素', alphaOut.metrics.foregroundPixels > 0, String(alphaOut.metrics.foregroundPixels))
     check('半透明前景未整幅当背景', alphaOut.metrics.backgroundPixels < w * h, String(alphaOut.metrics.backgroundPixels))
@@ -159,7 +168,7 @@ if (!hasSample) {
       { width: w, height: h, data: data },
       {
         scale: 1, grid: 999, colors: 6, colorsDark: 2, colorsFill: 0,
-        epsilon: 1, minArea: 80, protectLuma: 110, majorityContrast: 40,
+        epsilon: 1, minArea: 80, protectLuma: 110, majorityContrast: 40, removeBg: true,
       },
     )
     check('暗线产生 protectPixels', prot.metrics.protectPixels > 0, String(prot.metrics.protectPixels))
@@ -176,7 +185,7 @@ if (!hasSample) {
       { width: w, height: h, data: data },
       {
         scale: 1, grid: 999, colors: 6, colorsDark: 0,
-        epsilon: 1, minArea: 80, protectLuma: 0, majorityContrast: 0,
+        epsilon: 1, minArea: 80, protectLuma: 0, majorityContrast: 0, removeBg: true,
       },
     )
     check('protectLuma:0 → 无保护像素', off.metrics.protectPixels === 0, String(off.metrics.protectPixels))
@@ -188,7 +197,7 @@ if (!hasSample) {
       {
         scale: 1, grid: 999, colors: 6, colorsDark: 0,
         epsilon: 1, minArea: 0, minRegionArea: 40,
-        protectLuma: 0, majorityContrast: 0,
+        protectLuma: 0, majorityContrast: 0, removeBg: true,
       },
     )
     check('minArea:0 → despeckle 关闭', onlyRegion.metrics.despeckle.mergedPixels === 0, JSON.stringify(onlyRegion.metrics.despeckle))
@@ -224,13 +233,101 @@ if (!hasSample) {
     }
     const ring = traceRasterToSvg(
       { width: w, height: h, data: data },
-      { scale: 1, grid: 999, colors: 4, colorsDark: 1, epsilon: 1, minArea: 1, includeLabels: true },
+      { scale: 1, grid: 999, colors: 4, colorsDark: 1, epsilon: 1, minArea: 1, includeLabels: true, removeBg: true },
     )
     const lab = Buffer.from(ring.labels.labels, 'base64')
     const center = lab[cy * w + cx]
     check('白心不是 label 0', center !== 0, 'label=' + center)
     check('有把内部白从 bg 色改回前景', ring.metrics.fgRelabeledFromBg > 0, String(ring.metrics.fgRelabeledFromBg))
     check('至少画出前景 path（含白心）', ring.metrics.paths >= 1, String(ring.metrics.paths))
+    check('纯白底被识为有纯色底并抠除', ring.metrics.bgRemoved === true && ring.metrics.bgDetect.hasSolid === true, JSON.stringify(ring.metrics.bgDetect))
+    check('白底 backgroundPixels > 0', ring.metrics.backgroundPixels > 0, String(ring.metrics.backgroundPixels))
+  }
+
+  console.log('check-trace: 无纯色底则保留背景')
+  {
+    // 四边做成彩虹色带（每边一段不同色）→ 不应判定为纯色底，整图保留
+    const w = 40
+    const h = 40
+    const data = new Uint8Array(w * h * 4)
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const o = (y * w + x) * 4
+        data[o + 3] = 255
+        // 内部灰块
+        data[o] = 120
+        data[o + 1] = 120
+        data[o + 2] = 120
+        const onBorder = x === 0 || y === 0 || x === w - 1 || y === h - 1
+        if (onBorder === false) continue
+        if (y === 0) {
+          data[o] = 220
+          data[o + 1] = 40
+          data[o + 2] = 40
+        } else if (y === h - 1) {
+          data[o] = 40
+          data[o + 1] = 220
+          data[o + 2] = 40
+        } else if (x === 0) {
+          data[o] = 40
+          data[o + 1] = 40
+          data[o + 2] = 220
+        } else {
+          data[o] = 220
+          data[o + 1] = 220
+          data[o + 2] = 40
+        }
+      }
+    }
+    const kept = traceRasterToSvg(
+      { width: w, height: h, data: data },
+      { scale: 1, grid: 999, colors: 6, epsilon: 1, minArea: 1, removeBg: false },
+    )
+    check('杂色边 + removeBg:false → 不抠', kept.metrics.bgRemoved === false && kept.metrics.backgroundPixels === 0, String(kept.metrics.backgroundPixels))
+    check('保留背景时 foreground=全图', kept.metrics.foregroundPixels === w * h, String(kept.metrics.foregroundPixels))
+
+    let omitted = false
+    try {
+      traceRasterToSvg({ width: w, height: h, data: data }, { scale: 1, grid: 999, colors: 4 })
+    } catch (error) {
+      omitted = String(error.message || error).includes('removeBg 必填')
+    }
+    check('省略 removeBg 报错', omitted === true)
+
+    let autoRejected = false
+    try {
+      traceRasterToSvg({ width: w, height: h, data: data }, { scale: 1, grid: 999, colors: 4, removeBg: 'auto' })
+    } catch (error) {
+      autoRejected = String(error.message || error).includes('removeBg 必填')
+    }
+    check('removeBg:auto 报错', autoRejected === true)
+
+    // 白底图强制 never：也不抠
+    const white = new Uint8Array(w * h * 4)
+    for (let i = 0; i < w * h; i += 1) {
+      white[i * 4] = 250
+      white[i * 4 + 1] = 250
+      white[i * 4 + 2] = 250
+      white[i * 4 + 3] = 255
+    }
+    for (let y = 10; y < 30; y += 1) {
+      for (let x = 10; x < 30; x += 1) {
+        const o = (y * w + x) * 4
+        white[o] = 20
+        white[o + 1] = 20
+        white[o + 2] = 20
+      }
+    }
+    const never = traceRasterToSvg(
+      { width: w, height: h, data: white },
+      { scale: 1, grid: 999, colors: 4, removeBg: 'never' },
+    )
+    check('白底 + removeBg:never → 保留', never.metrics.bgRemoved === false && never.metrics.backgroundPixels === 0, JSON.stringify(never.metrics.bgDetect))
+    const always = traceRasterToSvg(
+      { width: w, height: h, data: white },
+      { scale: 1, grid: 999, colors: 4, removeBg: true },
+    )
+    check('白底 + removeBg:true → 强制抠', always.metrics.bgRemoved === true && always.metrics.backgroundPixels > 0, String(always.metrics.backgroundPixels))
   }
 
   console.log('check-trace: AI 调参 preset / hint')
@@ -254,19 +351,19 @@ if (!hasSample) {
     }
     const lineart = traceRasterToSvg(
       { width: w, height: h, data: data },
-      { preset: 'lineart', grid: 999, colors: 6 },
+      { preset: 'lineart', grid: 999, colors: 6, removeBg: true },
     )
     check('preset:lineart 写入 metrics', lineart.metrics.preset === 'lineart', lineart.metrics.preset)
     check('lineart 提高 precision', lineart.metrics.optionsApplied.precision === 2, JSON.stringify(lineart.metrics.optionsApplied))
     check('metrics 带 tuneHint', typeof lineart.metrics.tuneHint === 'string' && lineart.metrics.tuneHint.length > 0, lineart.metrics.tuneHint)
     const simple = traceRasterToSvg(
       { width: w, height: h, data: data },
-      { preset: 'simple', grid: 999 },
+      { preset: 'simple', grid: 999, removeBg: true },
     )
     check('preset:simple 启用 scale', simple.metrics.scaleApplied === 2, String(simple.metrics.scaleApplied))
     let threw = false
     try {
-      traceRasterToSvg({ width: w, height: h, data: data }, { preset: 'nope' })
+      traceRasterToSvg({ width: w, height: h, data: data }, { preset: 'nope', removeBg: true })
     } catch (error) {
       threw = String(error.message || error).includes('未知 trace preset')
     }
@@ -314,13 +411,13 @@ if (!hasSample) {
   plugin.apply(ctx)
   const apply = tools.get('diagram_apply')
   const result = await apply.execute(
-    { path: CANVAS, ops: [{ op: 'traceImage', image: 'ref.png', x: 40, y: 40, preset: 'lineart', as: 'traced' }], layout: 'none' },
+    { path: CANVAS, ops: [{ op: 'traceImage', image: 'ref.png', removeBg: true, x: 40, y: 40, preset: 'lineart', as: 'traced' }], layout: 'none' },
     { agent: { id: SESSION_ID } },
   )
   const text = readFileSync(CANVAS, 'utf8')
   check('建出了一个节点', result.created.length === 1, JSON.stringify(result.created))
   check('写回了 svg data URI', text.includes('image=data:image/svg+xml,'))
-  check('summary 报告了矢量化指标', result.summary.includes('逐像素矢量化') && result.summary.includes('像素覆盖'), '')
+  check('summary 报告了矢量化指标', result.summary.includes('逐像素矢量化') && result.summary.includes('量化图轮廓'), '')
   check('返回结构化 trace[]', Array.isArray(result.trace) && result.trace.length === 1, JSON.stringify(result.trace))
   check('trace.preset=lineart', result.trace[0].preset === 'lineart', result.trace[0] && result.trace[0].preset)
   check('trace 带 hint', typeof result.trace[0].hint === 'string' && result.trace[0].hint.length > 0, result.trace[0] && result.trace[0].hint)
@@ -337,7 +434,7 @@ if (!hasSample) {
   // traceImage 曾经在这里崩：它往调用方的 ops 里 splice 一条合成的 addNode，
   // 而冻结数组不可扩展 → "Cannot add property 1, object is not extensible"。
   console.log('check-trace: 冻结的 arguments（宿主真实形态）')
-  const frozenOps = Object.freeze([Object.freeze({ op: 'traceImage', image: 'ref.png', x: 400, y: 40, epsilon: 2.5 })])
+  const frozenOps = Object.freeze([Object.freeze({ op: 'traceImage', image: 'ref.png', removeBg: true, x: 400, y: 40, epsilon: 2.5 })])
   const frozenResult = await apply.execute(
     Object.freeze({ path: CANVAS, ops: frozenOps, layout: 'none' }),
     { agent: { id: SESSION_ID } },
@@ -353,7 +450,7 @@ if (!hasSample) {
   const cropResult = await apply.execute(
     {
       path: CANVAS,
-      ops: [{ op: 'traceImage', image: 'ref.png', cropX: 20, cropY: 30, cropW: 120, cropH: 90, as: 'face' }],
+      ops: [{ op: 'traceImage', image: 'ref.png', removeBg: true, cropX: 20, cropY: 30, cropW: 120, cropH: 90, as: 'face' }],
       layout: 'none',
     },
     { agent: { id: SESSION_ID } },
@@ -378,10 +475,9 @@ if (!hasSample) {
   const cropCoords = (cropSvg.match(/d='[^']+'/g) || []).join(' ').match(/-?\d+/g) || []
   const maxCoord = cropCoords.reduce((m, v) => Math.max(m, Math.abs(Number(v))), 0)
   check('路径坐标不超过裁剪块尺寸', maxCoord <= Math.max(120, 90), 'max=' + maxCoord + ' (路径数 ' + cropCoords.length + ')')
-  // 几何按比例：整图 499 宽 / 裁剪块 120 宽 → 节点宽 ≈ 499（这样局部坐标正好铺到原图那一块）
+  // 默认按裁剪块原始尺寸放置，才能覆盖原图对应局部。
   check('裁剪节点坐标 = 裁剪原点', afterCrop.includes('<mxGeometry x="20" y="30"'), '')
-  // 默认 w/h 仍按整张图（1:1），于是局部坐标铺开后正好是"原图里那一块"的比例
-  check('裁剪节点 w/h 仍按整张图', afterCrop.includes('width="499" height="847"'), '')
+  check('裁剪节点 w/h 等于裁剪块', cropNode !== undefined && cropNode.w === 120 && cropNode.h === 90, '')
 
   const expectThrow = async (label, op, expectText) => {
     let message = ''
@@ -393,13 +489,251 @@ if (!hasSample) {
     check(label, message.includes(expectText), message.slice(0, 90))
   }
   await expectThrow('只给 cropX/cropY 报错（不是裁剪）',
-    { op: 'traceImage', image: 'ref.png', cropX: 10, cropY: 10 }, '裁剪区域要给出正数')
+    { op: 'traceImage', image: 'ref.png', removeBg: true, cropX: 10, cropY: 10 }, '裁剪区域要给出正数')
   await expectThrow('裁剪超出图片范围报错',
-    { op: 'traceImage', image: 'ref.png', cropX: 9999, cropY: 0, cropW: 50, cropH: 50 }, '超出图片范围')
+    { op: 'traceImage', image: 'ref.png', removeBg: true, cropX: 9999, cropY: 0, cropW: 50, cropH: 50 }, '超出图片范围')
+  await expectThrow('traceImage 省略 removeBg 报错',
+    { op: 'traceImage', image: 'ref.png', x: 0, y: 0 }, '必须显式传 removeBg')
   const afterBad = readFileSync(CANVAS, 'utf8')
   check('裁剪参数报错发生在写盘之前', afterBad === afterCrop, '')
 
   rmSync(ROOT, { recursive: true, force: true })
+}
+
+// 不依赖本地 .vectorize 素材：工具回执必须是 DSH lossless JSON
+console.log('check-trace: summarizeTraceForAi 是无损 JSON（无 undefined / -0）')
+{
+  const w = 16
+  const h = 16
+  const data = new Uint8Array(w * h * 4)
+  for (let i = 0; i < w * h; i += 1) {
+    data[i * 4] = 40
+    data[i * 4 + 1] = 40
+    data[i * 4 + 2] = 40
+    data[i * 4 + 3] = 255
+  }
+  const traced = traceRasterToSvg(
+    { width: w, height: h, data: data },
+    { scale: 1, grid: 999, colors: 4, epsilon: 1, minArea: 1, removeBg: false },
+  )
+  const summary = summarizeTraceForAi(traced.metrics, { image: 'ref.png', nodeId: 'pic' })
+  check('回执不含 crop 键（未裁剪）', Object.prototype.hasOwnProperty.call(summary, 'crop') === false)
+  check('回执含 image/nodeId', summary.image === 'ref.png' && summary.nodeId === 'pic')
+  const bare = summarizeTraceForAi(traced.metrics, {})
+  check('无 extra 时不挂 image/nodeId', Object.prototype.hasOwnProperty.call(bare, 'image') === false && Object.prototype.hasOwnProperty.call(bare, 'nodeId') === false)
+  check('toLosslessJson 丢掉 undefined', Object.prototype.hasOwnProperty.call(toLosslessJson({ a: 1, b: undefined }), 'b') === false)
+  check('toLosslessJson 收 -0', Object.is(toLosslessJson({ n: -0 }).n, 0) === true && Object.is(toLosslessJson({ n: -0 }).n, -0) === false)
+  // 有 dsh-util-values 时用宿主同一套 isJsonValue 钉死（没装不算失败）
+  let isJsonValue = null
+  for (const spec of [
+    '@deepseek-ai/dsh-util-values',
+    'C:/Users/86476/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-util-values',
+  ]) {
+    try {
+      isJsonValue = createRequire(import.meta.url)(spec).isJsonValue
+      break
+    } catch (error) {
+      isJsonValue = null
+    }
+  }
+  if (isJsonValue === null) {
+    console.log('  – 跳过 isJsonValue 对照（没装 @deepseek-ai/dsh-util-values）')
+  } else {
+    check('summarizeTraceForAi 通过 isJsonValue', isJsonValue(summary) === true)
+    check('无 extra 回执通过 isJsonValue', isJsonValue(bare) === true)
+    const poisoned = Object.assign({}, summary, { crop: undefined })
+    check('挂 crop:undefined 会被 isJsonValue 拒绝（回归锚点）', isJsonValue(poisoned) === false)
+  }
+}
+
+// 不依赖本地 .vectorize 素材：贴边轮廓 / 纯色底识图 / removeBg 策略始终跑
+console.log('check-trace: 贴左边/顶边的色块轮廓必须闭合')
+{
+  // 回归：只扫右/下邻时左框与顶框缺边，贴边连通域外环不闭合 → 栅格化后左侧大块透明。
+  const w = 32
+  const h = 24
+  const data = new Uint8Array(w * h * 4)
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const o = (y * w + x) * 4
+      const dark = x < w / 2
+      data[o] = dark ? 30 : 220
+      data[o + 1] = dark ? 20 : 210
+      data[o + 2] = dark ? 20 : 200
+      data[o + 3] = 255
+    }
+  }
+  const edged = traceRasterToSvg(
+    { width: w, height: h, data: data },
+    {
+      scale: 1,
+      grid: 999,
+      colors: 2,
+      colorsDark: 0,
+      epsilon: 0,
+      minArea: 0,
+      protectLuma: 0,
+      majorityContrast: 0,
+      removeBg: false,
+    },
+  )
+  check('贴边二分图覆盖精确', edged.metrics.exactPixelCoverage === true, edged.metrics.drawnPixels + '/' + edged.metrics.totalPixels)
+  // 解析 path 游标，确认暗色外环真的走到了左框 x=0 与顶框 y=0（相对编码下字符串不一定出现 M0）
+  {
+    const dark = edged.svg.match(/fill='#[^']+' fill-rule='nonzero' d='([^']+)'/)
+    const d = dark ? dark[1] : ''
+    const tokens = d.match(/[MLZl]|-?\d*\.?\d+/g) || []
+    let x = 0
+    let y = 0
+    let minX = Infinity
+    let minY = Infinity
+    let i = 0
+    while (i < tokens.length) {
+      const t = tokens[i]
+      if (t === 'M' || t === 'L') {
+        x = Number(tokens[i + 1])
+        y = Number(tokens[i + 2])
+        i += 3
+      } else if (t === 'l') {
+        x += Number(tokens[i + 1])
+        y += Number(tokens[i + 2])
+        i += 3
+      } else {
+        i += 1
+        continue
+      }
+      if (x < minX) minX = x
+      if (y < minY) minY = y
+    }
+    check('贴边路径游标触到左框 x=0', minX === 0, 'minX=' + minX)
+    check('贴边路径游标触到顶框 y=0', minY === 0, 'minY=' + minY)
+  }
+  try {
+    const { Resvg } = createRequire(import.meta.url)('@resvg/resvg-js')
+    let sharp = null
+    for (const spec of ['sharp', 'C:/Users/86476/AppData/Roaming/npm/node_modules/@deepseek-ai/dsh/node_modules/sharp']) {
+      try {
+        sharp = createRequire(import.meta.url)(spec)
+        break
+      } catch (error) {
+        sharp = null
+      }
+    }
+    if (sharp === null) {
+      console.log('  – 跳过贴边栅格化（没装 sharp）')
+    } else {
+      const png = new Resvg(edged.svg, {
+        fitTo: { mode: 'width', value: w },
+        background: 'rgba(0,0,0,0)',
+      })
+        .render()
+        .asPng()
+      const got = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+      const a00 = got.data[3]
+      const aMid = got.data[(Math.floor(h / 2) * w + 0) * 4 + 3]
+      const aTop = got.data[(0 * w + Math.floor(w / 4)) * 4 + 3]
+      check(
+        '贴边栅格化左上/左中/顶边不透明',
+        a00 >= 200 && aMid >= 200 && aTop >= 200,
+        'a00=' + a00 + ' aMid=' + aMid + ' aTop=' + aTop,
+      )
+    }
+  } catch (error) {
+    console.log('  – 跳过贴边栅格化（没装 @resvg/resvg-js）')
+  }
+}
+
+console.log('check-trace: 纯色底识图（removeBg 显式）')
+{
+  const w = 40
+  const h = 40
+
+  // 白底 + 深色块 → removeBg:true 应检出纯色底并抠除
+  const white = new Uint8Array(w * h * 4)
+  for (let i = 0; i < w * h; i += 1) {
+    white[i * 4] = 250
+    white[i * 4 + 1] = 250
+    white[i * 4 + 2] = 250
+    white[i * 4 + 3] = 255
+  }
+  for (let y = 10; y < 30; y += 1) {
+    for (let x = 10; x < 30; x += 1) {
+      const o = (y * w + x) * 4
+      white[o] = 20
+      white[o + 1] = 20
+      white[o + 2] = 20
+    }
+  }
+  const solid = traceRasterToSvg(
+    { width: w, height: h, data: white },
+    { scale: 1, grid: 999, colors: 4, epsilon: 1, minArea: 1, removeBg: true },
+  )
+  check('白底 + removeBg:true → hasSolid', solid.metrics.bgDetect.hasSolid === true, JSON.stringify(solid.metrics.bgDetect))
+  check('白底 + removeBg:true → 抠除', solid.metrics.bgRemoved === true && solid.metrics.backgroundPixels > 0, String(solid.metrics.backgroundPixels))
+
+  // 四边彩虹 → removeBg:false 保留
+  const mixed = new Uint8Array(w * h * 4)
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const o = (y * w + x) * 4
+      mixed[o] = 120
+      mixed[o + 1] = 120
+      mixed[o + 2] = 120
+      mixed[o + 3] = 255
+      if (x !== 0 && y !== 0 && x !== w - 1 && y !== h - 1) continue
+      if (y === 0) {
+        mixed[o] = 220
+        mixed[o + 1] = 40
+        mixed[o + 2] = 40
+      } else if (y === h - 1) {
+        mixed[o] = 40
+        mixed[o + 1] = 220
+        mixed[o + 2] = 40
+      } else if (x === 0) {
+        mixed[o] = 40
+        mixed[o + 1] = 40
+        mixed[o + 2] = 220
+      } else {
+        mixed[o] = 220
+        mixed[o + 1] = 220
+        mixed[o + 2] = 40
+      }
+    }
+  }
+  const kept = traceRasterToSvg(
+    { width: w, height: h, data: mixed },
+    { scale: 1, grid: 999, colors: 6, epsilon: 1, minArea: 1, removeBg: false },
+  )
+  check('杂色边 + removeBg:false → 不抠', kept.metrics.bgRemoved === false && kept.metrics.backgroundPixels === 0, JSON.stringify(kept.metrics.bgDetect))
+  check('杂色边 → 前景=全图', kept.metrics.foregroundPixels === w * h, String(kept.metrics.foregroundPixels))
+
+  const never = traceRasterToSvg(
+    { width: w, height: h, data: white },
+    { scale: 1, grid: 999, colors: 4, removeBg: 'never' },
+  )
+  check('removeBg:never 强制保留白底', never.metrics.bgRemoved === false, String(never.metrics.bgRemoved))
+
+  const always = traceRasterToSvg(
+    { width: w, height: h, data: mixed },
+    { scale: 1, grid: 999, colors: 6, removeBg: true },
+  )
+  check('杂色边 + removeBg:true → 近白回退', always.metrics.bgDetect.kind === 'legacy-nearwhite', JSON.stringify(always.metrics.bgDetect))
+
+  let omitted = false
+  try {
+    traceRasterToSvg({ width: w, height: h, data: white }, { scale: 1, grid: 999, colors: 4 })
+  } catch (error) {
+    omitted = String(error.message || error).includes('removeBg 必填')
+  }
+  check('省略 removeBg 报错', omitted === true)
+
+  let autoRejected = false
+  try {
+    traceRasterToSvg({ width: w, height: h, data: white }, { scale: 1, grid: 999, colors: 4, removeBg: 'auto' })
+  } catch (error) {
+    autoRejected = String(error.message || error).includes('removeBg 必填')
+  }
+  check('removeBg:auto 报错', autoRejected === true)
 }
 
 console.log(failures === 0 ? 'check-trace: OK' : 'check-trace: ' + failures + ' 处失败')

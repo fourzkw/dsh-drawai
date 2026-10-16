@@ -13,6 +13,7 @@
  */
 
 const React = require('react')
+const { createVideoController, VideoSurface, VideoControls, VideoPreview } = videoPlayer
 
 /**
  * 样式内核（drawio 的 style 键语义）—— 构建时从 src/style-kernel.js 内联进本 bundle，
@@ -36,6 +37,7 @@ const {
   formatStyle,
   imageValueFromStyle,
   isRasterDataUri,
+  isSvgDataUri,
   isSvgMarkup,
   isOrthogonalEdgeStyle,
   jettyFromStyle,
@@ -45,6 +47,7 @@ const {
   normalizeSvgMarkup,
   snapDocGeometry,
   parseStyle,
+  reportNodeShape,
   sideFromStyle,
   styleGet,
   styleNumber,
@@ -61,7 +64,60 @@ const {
   styleWithLineKind,
   styleWithNodeShape,
   styleWithSide,
+  isVideoNodeData,
+  DEFAULT_VIDEO_POSTER,
+  copyData,
 } = styleKernel
+
+/** 视频节点缺省尺寸（16:9）。 */
+const NEW_VIDEO_W = 320
+const NEW_VIDEO_H = 180
+const DEFAULT_MEDIA_FPS = 12
+
+function videoMetaOf(node) {
+  if (node === null || node === undefined || isVideoNodeData(node.data) === false) return null
+  const d = node.data
+  const clip = typeof d.mediaClip === 'string' ? d.mediaClip : null
+  if (clip === null || clip.length === 0) return null
+  const fps = Number(d.mediaFps)
+  return {
+    clip: clip,
+    kind: d.mediaKind === 'raster' ? 'raster' : 'svg',
+    fps: Number.isFinite(fps) && fps > 0 ? fps : DEFAULT_MEDIA_FPS,
+    posterFrame: Math.max(0, Math.floor(Number(d.mediaPosterFrame) || 0)),
+  }
+}
+
+function videoPosterOf(node) {
+  const markup = svgMarkupFromStyle(node.style || '')
+  if (markup) return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(markup)
+  return imageValueFromStyle(node.style || '') || 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(DEFAULT_VIDEO_POSTER)
+}
+
+function allocateClientClipId(doc) {
+  const used = new Set()
+  if (doc !== null && Array.isArray(doc.nodes)) {
+    for (let i = 0; i < doc.nodes.length; i += 1) {
+      const m = videoMetaOf(doc.nodes[i])
+      if (m !== null) used.add(m.clip)
+    }
+  }
+  let n = 1
+  while (used.has('clip-' + n)) n += 1
+  return 'clip-' + n
+}
+
+function videoDataForNew(clip, w, h) {
+  return {
+    drawaiMedia: '1',
+    mediaKind: 'svg',
+    mediaClip: clip,
+    mediaFps: String(DEFAULT_MEDIA_FPS),
+    mediaW: String(Math.round(w)),
+    mediaH: String(Math.round(h)),
+    mediaPosterFrame: '0',
+  }
+}
 
 const ID = 'drawai:diagram'
 const KIND = 'diagram'
@@ -94,6 +150,107 @@ function imageFilesFromDataTransfer(data) {
     }
   }
   return out
+}
+
+const VIDEO_FILE_MAX_BYTES = 48 * 1024 * 1024
+function videoFileExtension(file) {
+  if (!file) return null
+  const match = /\.(mp4|webm|mov|mkv)$/i.exec(file.name || '')
+  if (match) return match[1].toLowerCase()
+  return ({ 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov', 'video/x-matroska': 'mkv', 'video/matroska': 'mkv' })[file.type] || null
+}
+
+function mediaFilesFromDataTransfer(data) {
+  if (!data) return []
+  const files = [], seen = new Set()
+  const add = (file) => {
+    if (!file || seen.has(file) || (!videoFileExtension(file) && !/^image\/(png|jpe?g|gif|webp)$/i.test(file.type || ''))) return
+    seen.add(file); files.push(file)
+  }
+  for (const file of Array.from(data.files || [])) add(file)
+  if (!files.length) for (const item of Array.from(data.items || [])) if (item.kind === 'file' && typeof item.getAsFile === 'function') add(item.getAsFile())
+  return files
+}
+
+function hasMediaFileDrag(data) {
+  return !!data && (mediaFilesFromDataTransfer(data).length > 0 || Array.from(data.types || []).includes('Files') ||
+    Array.from(data.items || []).some((item) => item.kind === 'file'))
+}
+
+async function readVideoFile(file, signal) {
+  if (!videoFileExtension(file)) throw new Error('支持 MP4 / WebM / MOV / MKV 视频文件')
+  if (!Number.isFinite(file.size) || file.size <= 0 || file.size > VIDEO_FILE_MAX_BYTES) throw new Error('视频文件须在 48MB 以内且不能为空')
+  const url = URL.createObjectURL(file), video = document.createElement('video')
+  video.muted = true; video.playsInline = true; video.preload = 'auto'
+  try {
+    await waitForVideoTraceEvent(video, 'loadeddata', signal, () => { video.src = url; video.load() })
+    if (!video.videoWidth || !video.videoHeight || !Number.isFinite(video.duration) || video.duration <= 0) throw new Error('无法读取视频尺寸或时长')
+    const canvas = document.createElement('canvas'), scale = Math.min(1, 320 / Math.max(video.videoWidth, video.videoHeight))
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale)); canvas.height = Math.max(1, Math.round(video.videoHeight * scale))
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('无法生成视频封面')
+    context.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const poster = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + canvas.width + ' ' + canvas.height + '"><image width="100%" height="100%" href="' + canvas.toDataURL('image/png') + '"/></svg>'
+    return { w: video.videoWidth, h: video.videoHeight, duration: video.duration, poster }
+  } finally { video.pause(); video.removeAttribute('src'); video.load(); URL.revokeObjectURL(url) }
+}
+
+function readVideoChunk(blob, signal) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    const abort = () => reader.abort()
+    const finish = (error) => { signal.removeEventListener('abort', abort); if (error) reject(error); else resolve(String(reader.result).split(',')[1]) }
+    reader.onload = () => finish()
+    reader.onerror = () => finish(new Error('读取视频文件失败'))
+    reader.onabort = () => finish(new Error('已取消视频导入'))
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) { finish(new Error('已取消视频导入')); return }
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function uploadVideoFile(file, metadata, api, signal, onProgress) {
+  let pack
+  const check = () => { if (signal.aborted) throw new Error('已取消视频导入') }
+  try {
+    check()
+    pack = await api('media-upload-start', { name: file.name, extension: videoFileExtension(file), size: file.size, w: metadata.w, h: metadata.h })
+    check()
+    const auth = { clip: pack.clip, token: pack.token }, chunkSize = 1024 * 1024
+    for (let offset = 0; offset < file.size; offset += chunkSize) {
+      check()
+      const base64 = await readVideoChunk(file.slice(offset, Math.min(file.size, offset + chunkSize)), signal)
+      await api('media-upload-chunk', Object.assign({}, auth, { offset, base64 }))
+      check()
+      onProgress(Math.min(file.size, offset + chunkSize), file.size)
+    }
+    await api('media-upload-finish', auth)
+    check()
+    return Object.assign({}, metadata, auth)
+  } catch (error) {
+    if (pack) {
+      try { await api('media-upload-discard', { clip: pack.clip, token: pack.token }) }
+      catch { error.message += '；临时媒体清理失败，可用媒体清理菜单清除未引用素材' }
+    }
+    throw error
+  }
+}
+
+function applyImportedVideoToDoc(doc, result, at, layerId) {
+  const layer = (doc.layers || []).find((item) => item.id === layerId)
+  if (layerId !== null && !layer) throw new Error('目标图层已删除')
+  if (layer && layer.locked) throw new Error('目标图层已锁定')
+  const used = new Set(doc.nodes.concat(doc.edges, doc.layers || [], doc.labels || []).map((cell) => String(cell.id)))
+  let index = 1
+  while (used.has('n' + index)) index++
+  const size = fitImageNodeSize(result.w, result.h)
+  const node = { id: 'n' + index, label: '', x: snapTo(at.x - size.w / 2, GRID), y: snapTo(at.y - size.h / 2, GRID), w: size.w, h: size.h,
+    style: styleWithSvgMarkup('', result.poster, '1'), data: Object.assign(videoDataForNew(result.clip, result.w, result.h), { mediaKind: 'raster', mediaDuration: String(result.duration) }) }
+  if (layerId !== null) node.layer = layerId
+  const host = sectionAtPoint(doc, at.x, at.y, null)
+  if (host) node.parent = host.id
+  doc.nodes.push(node); ensureDrawOrder(doc)
+  return node.id
 }
 
 /**
@@ -245,6 +402,7 @@ const DARK = {
 let client = null
 
 const CSS = [
+  '.drawai-trace-pin{border:0;border-radius:6px;background:transparent;color:inherit;padding:5px 8px;cursor:pointer;font:inherit;font-size:11px}.drawai-trace-pin:hover,.drawai-trace-pin:focus-visible{background:var(--dsw-alias-bg-hover,#eef0f5)}.drawai-trace-card-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:600;margin-bottom:10px}.drawai-trace-card-actions{display:flex;gap:2px}.drawai-video-task-card{position:absolute;right:12px;bottom:36px;width:300px;max-width:calc(100% - 24px);box-sizing:border-box;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:0 6px 24px #20273820;z-index:950}.drawai-video-task-card progress{width:100%;height:5px;display:block}.drawai-video-task-detail{font-size:12px;line-height:1.5;margin-top:10px;overflow-wrap:anywhere}.drawai-video-task-detail small{display:block;opacity:.65;margin-top:4px}.drawai-video-task-detail .drawai-btn{margin-top:8px}',
   // 用绝对定位铺满宿主给的那一格，**不用 height:100%**。
   //
   // 这里连续出过两次"画布没高度"（先是一条，后来整块消失）：根因都是
@@ -340,11 +498,14 @@ const CSS = [
   // 背景透明、颜色与字号由 inline style 按**这个节点**给（见 renderDiagram 的 labelTextBox）。
   '.drawai-edit{position:absolute;z-index:5;box-sizing:border-box;outline:2px solid #1a73e8;outline-offset:-2px;border:none;border-radius:4px;background:transparent;color:#000;font-family:Helvetica, Arial, sans-serif;font-size:12px;line-height:14px;text-align:center;padding:0;margin:0;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text}',
   '.drawai-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}',
+  '.drawai-trace-surface{position:relative;width:100%;height:100%;overflow:hidden}.drawai-trace-surface>svg{display:block;pointer-events:none}.drawai-trace-progress{position:absolute;left:8px;right:8px;bottom:8px;pointer-events:none;line-height:0}.drawai-trace-progress progress{display:block;width:100%;height:5px;accent-color:#386bff}',
+  '.drawai-video-surface{position:relative;width:100%;height:100%;background:transparent;overflow:hidden}.drawai-video-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);min-width:44px;min-height:44px;border:1px solid #ffffff80;border-radius:24px;background:#101827bf;color:#fff;font-size:18px;cursor:pointer;z-index:1}.drawai-video-play:disabled{cursor:wait}.drawai-video-chrome{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;align-items:center;gap:8px;padding:10px 10px 8px;box-sizing:border-box;background:linear-gradient(transparent,#000000bf);color:#fff;font:11px/1.2 sans-serif}.drawai-video-chrome-toggle{flex:0 0 auto;min-width:28px;min-height:28px;border:0;border-radius:4px;background:transparent;color:#fff;cursor:pointer;font-size:12px;padding:2px 4px;line-height:1}.drawai-video-chrome-toggle:hover,.drawai-video-chrome-toggle:focus-visible{background:#ffffff24}.drawai-video-chrome-progress{flex:1 1 auto;min-width:0;height:4px;margin:0;accent-color:#fff;cursor:pointer}.drawai-video-chrome-time{flex:0 0 auto;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.9}.drawai-video-message{position:absolute;bottom:0;left:0;right:0;padding:6px;background:#000c;color:#fff;font:12px/1.4 sans-serif;pointer-events:none}.drawai-video-toolbar{overflow:visible!important;max-height:none}.drawai-video-controls{display:flex;flex-wrap:wrap;align-items:center;gap:6px;width:100%;box-sizing:border-box;font:12px/1.4 sans-serif}.drawai-video-controls button,.drawai-video-controls select,.drawai-video-more summary{min-height:30px;border:1px solid var(--dsw-alias-border-l2,#dde1e8);border-radius:6px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;padding:4px 7px;cursor:pointer}.drawai-video-controls button:disabled{opacity:.4;cursor:default}.drawai-video-controls input[type=range]{flex:1 1 120px;min-width:70px;max-width:100%;accent-color:#386bff}.drawai-video-controls label{display:flex;align-items:center;white-space:nowrap}.drawai-video-time{font-variant-numeric:tabular-nums;white-space:nowrap}.drawai-video-more{position:relative}.drawai-video-more summary{list-style:none}.drawai-video-more>div{position:absolute;right:0;top:100%;display:flex;flex-direction:column;min-width:140px;gap:4px;padding:6px;border-radius:8px;background:var(--dsw-alias-bg-overlay,#fff);box-shadow:0 6px 24px #0003;z-index:10}.drawai-video-preview{position:absolute;inset:0;z-index:1100;display:flex;flex-direction:column;gap:12px;padding:16px;box-sizing:border-box;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35)}.drawai-video-preview-media{flex:1;min-height:0;overflow:hidden}.drawai-video-close{align-self:flex-end;cursor:pointer;background:transparent;color:inherit;border:0;padding:6px}',
   '.drawai-selection-toolbar{position:absolute;z-index:6;box-sizing:border-box;display:flex;flex-wrap:nowrap;align-items:stretch;gap:2px;padding:5px 6px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:0 8px 28px #20273814,0 2px 6px #20273808}',
+  '.drawai-video-actions{display:flex;align-items:stretch;gap:2px;width:100%;min-width:0}.drawai-toolbar-button{flex:1 0 38px;min-width:38px;border:0;background:transparent;color:inherit;font:inherit}.drawai-toolbar-button:disabled{opacity:.45;cursor:default}.drawai-toolbar-button:disabled:hover{background:transparent}.drawai-video-export-options{display:flex;flex-direction:column;gap:8px}.drawai-video-export-options .drawai-choice-button{min-height:34px;text-align:left;padding:7px 10px}',
   '.drawai-style-control{display:flex;align-items:center;gap:5px;font-size:11px;white-space:nowrap;padding-left:8px;border-left:1px solid var(--dsw-alias-border-l2,#e1e3e8)}',
   '.drawai-style-control select,.drawai-style-control input{box-sizing:border-box;height:30px;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:7px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;max-width:100px;padding:2px 5px}',
   '.drawai-style-control input[type=color]{width:28px;padding:2px;cursor:pointer}.drawai-style-control input[type=number]{width:52px;padding:2px 4px}',
-  '.drawai-color-palette{flex:1 0 38px;min-width:38px}.drawai-color-palette summary{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;list-style:none;padding:5px 3px;border-radius:7px;min-height:44px}.drawai-color-palette summary::-webkit-details-marker{display:none}.drawai-color-palette summary:hover,.drawai-color-palette[open] summary{background:var(--dsw-alias-bg-layer-2,#f0f1f3)}',
+  '.drawai-color-palette{flex:1 0 38px;min-width:38px}.drawai-color-palette summary,.drawai-toolbar-button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;list-style:none;padding:5px 3px;border-radius:7px;min-height:44px}.drawai-color-palette summary::-webkit-details-marker{display:none}.drawai-color-palette summary:hover,.drawai-color-palette[open] summary,.drawai-toolbar-button:hover,.drawai-toolbar-button:focus-visible{background:var(--dsw-alias-bg-layer-2,#f0f1f3)}.drawai-color-palette.disabled summary{opacity:.45;cursor:default}.drawai-color-palette.disabled summary:hover{background:transparent}',
   '.drawai-color-preview{display:inline-block;flex:0 0 22px;width:22px;height:22px;border:1px solid #d9dde3;border-radius:50%;background:repeating-conic-gradient(#ddd 0% 25%,#fff 0% 50%) 50%/8px 8px}.drawai-color-caret{font-size:13px;color:#7b818c}.drawai-color-palette:not([open]) .drawai-color-caret{transform:rotate(180deg)}',
   '.drawai-palette-panel{position:fixed;inset:auto;margin:0;width:320px;box-sizing:border-box;padding:18px;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:0 14px 44px #20273824,0 3px 10px #2027380a;overflow:auto;z-index:1000}.drawai-palette-panel::backdrop{background:transparent}.drawai-palette-hint{font-size:11px;opacity:.7;margin:6px 0}',
   '.drawai-palette-grid{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:10px 7px}.drawai-palette-swatch{width:100%;aspect-ratio:1;min-height:20px;border:none;border-radius:50%;cursor:pointer;padding:0;box-shadow:inset 0 0 0 1px #80808014;transition:box-shadow .12s,transform .12s}.drawai-palette-swatch:hover{transform:scale(1.08)}.drawai-palette-swatch[aria-pressed=true]{outline:2px solid #386bff;outline-offset:3px}',
@@ -530,6 +691,14 @@ function shapeOf(node) {
   return nodeShapeFromStyle(typeof node.style === 'string' ? node.style : '')
 }
 
+/** 图片和视频节点不画标签、也不能就地改字。文件里的 value 仍原样保留。 */
+function nodeShowsLabel(node) {
+  if (node === null || node === undefined) return false
+  if (isVideoNodeData(node.data)) return false
+  const shape = shapeOf(node)
+  return shape !== 'image' && shape !== 'video'
+}
+
 /**
  * 一个节点里，标签**能不能按宽度换行**。与渲染那一处读的是同一个键
  * （drawio 的语义：`whiteSpace=nowrap` 不换行，其余含缺省都换行）。
@@ -540,17 +709,80 @@ function labelWraps(node) {
 }
 
 /**
+ * 标签内边距与对齐（drawio 的 spacing* / align / verticalAlign）。
+ * 左右缺省 6px（对齐旧的 `w-12` 观感）；上下缺省 0（竖直靠 verticalAlign 居中）。
+ * 若写了 `spacing=`，四边都回落它。
+ */
+function labelInsetsOf(node) {
+  const style = typeof node.style === 'string' ? node.style : ''
+  const shape = shapeOf(node)
+  const section = shape === 'section'
+  const base = styleNumber(style, 'spacing', null)
+  const lr = base !== null ? base : 6
+  const tb = base !== null ? base : 0
+  // 分区标题缺省贴左上（与分区预设 spacingLeft=10 / spacingTop=6 一致），即使文件没写这些键。
+  return {
+    left: styleNumber(style, 'spacingLeft', section ? 10 : lr),
+    right: styleNumber(style, 'spacingRight', lr),
+    top: styleNumber(style, 'spacingTop', section ? 6 : tb),
+    bottom: styleNumber(style, 'spacingBottom', tb),
+    align: styleGet(style, 'align', section || shape === 'swimlane' ? 'left' : 'center'),
+    verticalAlign: styleGet(style, 'verticalAlign', section ? 'top' : 'middle'),
+    labelPosition: styleGet(style, 'labelPosition', 'center'),
+    verticalLabelPosition: styleGet(style, 'verticalLabelPosition', 'middle'),
+  }
+}
+
+/**
+ * swimlane 标题带高度（drawio `startSize`，缺省 23）。
+ */
+function swimlaneStartSize(node) {
+  const style = typeof node.style === 'string' ? node.style : ''
+  const n = styleNumber(style, 'startSize', 23)
+  return n > 0 ? n : 23
+}
+
+/**
+ * 图片+标签同框时，图在框内占哪一块（labelPosition 决定标签侧，图在对侧）。
+ * 无非中心 labelPosition / 无标签 → 整框。
+ */
+function imageContentRect(node, geo) {
+  const label = nodeShowsLabel(node) && typeof node.label === 'string' ? node.label : ''
+  const insets = labelInsetsOf(node)
+  const pos = insets.labelPosition
+  const vpos = insets.verticalLabelPosition
+  if (label.length === 0 || (pos === 'center' && vpos === 'middle')) {
+    return { x: geo.x, y: geo.y, w: geo.w, h: geo.h }
+  }
+  // 标签侧大约一半；图至少留出正方形边（小图标行常见）。
+  if (pos === 'right' || pos === 'left') {
+    const split = Math.max(Math.min(geo.h, geo.w * 0.45), Math.min(geo.w * 0.5, 28))
+    if (pos === 'right') return { x: geo.x, y: geo.y, w: split, h: geo.h }
+    return { x: geo.x + geo.w - split, y: geo.y, w: split, h: geo.h }
+  }
+  if (pos === 'bottom' || pos === 'top') {
+    const split = Math.max(Math.min(geo.w, geo.h * 0.45), Math.min(geo.h * 0.5, 28))
+    if (pos === 'bottom') return { x: geo.x, y: geo.y, w: geo.w, h: split }
+    return { x: geo.x, y: geo.y + geo.h - split, w: geo.w, h: split }
+  }
+  return { x: geo.x, y: geo.y, w: geo.w, h: geo.h }
+}
+
+/**
  * 标签能用的横向宽度 —— 就是渲染时传给 `wrapLabel` 的那个 maxWidth。
  *
- * 菱形/椭圆里的字要缩进来才不压到斜边，所以可用宽度比节点宽度窄。
+ * 菱形/椭圆里的字要缩进来才不压到斜边，所以可用宽度比内容区窄。
  * **只有这一处**：换行位置、自适应高度、就地编辑框的内边距全都读它，
  * 三处各写一份迟早会漂移（"输入时和输完后不一样"最常见的原因）。
  */
 function labelTextWidth(node, w) {
+  const insets = labelInsetsOf(node)
   const shape = shapeOf(node)
-  if (shape === 'diamond') return w * 0.6
-  if (shape === 'ellipse') return w * 0.72
-  return w - 12
+  // `w` 已是标签可用外宽（image+label / swimlane 时由 labelTextBox 先裁过）。
+  const inner = Math.max(12, w - insets.left - insets.right)
+  if (shape === 'diamond') return Math.max(12, inner * 0.6)
+  if (shape === 'ellipse') return Math.max(12, inner * 0.72)
+  return inner
 }
 
 /** 字号 → 行高。渲染与就地编辑框共用，否则编辑时会与最终效果差几像素。 */
@@ -585,17 +817,17 @@ function nodeEditorBox(node, text, ctm, origin, mode) {
     color: colorOf(node, mode).font,
     opacity: clampNumber(styleNumber(node.style || '', 'textOpacity', 100), 0, 100) / 100,
     scale: scale,
-    textAlign: shapeOf(node) === 'section' ? 'left' : 'center',
+    textAlign: textBox.align === 'left' || textBox.align === 'right' ? textBox.align : 'center',
     // 编辑框里的换行方式与画布上的标签一致：nowrap 的标签在编辑时也不换行。
     wraps: size.wraps,
   }
 }
 
 /**
- * 标签的**文字区**（不是节点框）：文字在这里居中、也在这里换行。
+ * 标签的**文字区**（不是节点框）：按 align / verticalAlign / spacing* 摆，也在这里换行。
  *
- * @param {{ node: object, geo: object, fontSize?: number }} args
- * @returns {{ x: number, y: number, w: number, h: number, fontSize: number, lineHeight: number, color: string }}
+ * @param {{ node: object, geo: object, fontSize?: number, text?: string }} args
+ * @returns {{ x: number, y: number, w: number, h: number, fontSize: number, lineHeight: number, align: string, verticalAlign: string }}
  *
  * 就地编辑框（`openNodeEditor` 的 textarea）就按这个盒子摆 —— 同一宽度 → 同一断行位置，
  * 同一字色字号行高 → 同一观感。需求里"输入时的效果与输入完成后不一致"根子就在
@@ -604,17 +836,78 @@ function nodeEditorBox(node, text, ctm, origin, mode) {
  */
 function labelTextBox(box) {
   const geo = box.geo
-  const fontSize = numberOr(box.fontSize, styleNumber(typeof box.node.style === 'string' ? box.node.style : '', 'fontSize', FSIZE))
-  const w = Math.max(12, labelTextWidth(box.node, geo.w))
+  const node = box.node
+  const style = typeof node.style === 'string' ? node.style : ''
+  const insets = labelInsetsOf(node)
+  const fontSize = numberOr(box.fontSize, styleNumber(style, 'fontSize', FSIZE))
   const lineHeight = labelLineHeight(fontSize)
-  const text = typeof box.text === 'string' ? box.text : typeof box.node.label === 'string' ? box.node.label : ''
-  const cols = labelWraps(box.node) ? wrapLabel(text, w, fontSize).length : text.split('\n').length
-  // 文字区的**左右边界**在节点里是居中的：右栏窄，菱形/椭圆的可用宽度比节点小很多，
-  // 从节点左边起排会让编辑框里的字整体偏左。
-  const section = shapeOf(box.node) === 'section'
-  const x = section ? geo.x + 10 : geo.x + (geo.w - w) / 2
+  const text = typeof box.text === 'string' ? box.text : typeof node.label === 'string' ? node.label : ''
+  const shape = shapeOf(node)
+
+  // 标签可用的外框：swimlane 只占标题带；image+label 占 labelPosition 一侧。
+  let areaX = geo.x
+  let areaY = geo.y
+  let areaW = geo.w
+  let areaH = geo.h
+  if (shape === 'swimlane') {
+    areaH = Math.min(geo.h, swimlaneStartSize(node))
+  } else if ((shape === 'image' || shape === 'svg') && text.length > 0) {
+    const pos = insets.labelPosition
+    const vpos = insets.verticalLabelPosition
+    if (pos === 'right' || pos === 'left') {
+      const img = imageContentRect(node, geo)
+      if (pos === 'right') {
+        areaX = img.x + img.w
+        areaW = Math.max(12, geo.w - img.w)
+      } else {
+        areaW = Math.max(12, geo.w - img.w)
+      }
+    } else if (pos === 'bottom' || pos === 'top') {
+      const img = imageContentRect(node, geo)
+      if (pos === 'bottom') {
+        areaY = img.y + img.h
+        areaH = Math.max(lineHeight, geo.h - img.h)
+      } else {
+        areaH = Math.max(lineHeight, geo.h - img.h)
+      }
+    } else if (vpos === 'top' || vpos === 'bottom') {
+      // 水平居中但垂直贴外：给图留中间，字贴顶/底条。
+      const band = Math.max(lineHeight + insets.top + insets.bottom, Math.min(geo.h * 0.35, 28))
+      if (vpos === 'top') areaH = band
+      else {
+        areaY = geo.y + geo.h - band
+        areaH = band
+      }
+    }
+  }
+
+  const w = Math.max(12, labelTextWidth(Object.assign({}, node, { w: areaW, h: areaH }), areaW))
+  const cols = labelWraps(node) ? wrapLabel(text, w, fontSize).length : String(text).split('\n').length
   const h = Math.max(lineHeight * cols, lineHeight)
-  return { x: x, y: section ? geo.y + 6 : geo.y + (geo.h - h) / 2, w: w, h: h, fontSize: fontSize, lineHeight: lineHeight }
+
+  const innerX = areaX + insets.left
+  const innerRight = areaX + areaW - insets.right
+  const innerY = areaY + insets.top
+  const innerBottom = areaY + areaH - insets.bottom
+  let x
+  if (insets.align === 'left') x = innerX
+  else if (insets.align === 'right') x = innerRight - w
+  else x = (innerX + innerRight - w) / 2
+  let y
+  if (insets.verticalAlign === 'top') y = innerY
+  else if (insets.verticalAlign === 'bottom') y = innerBottom - h
+  else y = (innerY + innerBottom - h) / 2
+
+  return {
+    x: x,
+    y: y,
+    w: w,
+    h: h,
+    fontSize: fontSize,
+    lineHeight: lineHeight,
+    align: insets.align,
+    verticalAlign: insets.verticalAlign,
+  }
 }
 
 /** 标签的字号与行高（就地编辑框要按它画字，否则输入时和输完后大小不一样）。 */
@@ -643,7 +936,7 @@ function nodeTextFitHeight(node) {
   if (node === null || node === undefined || typeof node !== 'object') return 0
   if (!labelWraps(node)) return 0
   const shape = shapeOf(node)
-  if (shape === 'text' || shape === 'section' || shape === 'image' || shape === 'svg') return 0
+  if (shape === 'text' || shape === 'section' || shape === 'swimlane' || shape === 'image' || shape === 'svg' || shape === 'video') return 0
   const w = numberOr(node.w, FALLBACK_NODE_W)
   const label = typeof node.label === 'string' ? node.label : ''
   if (label.length === 0) return 0
@@ -1721,6 +2014,37 @@ function shapeElement(node, geo, palette, mode) {
       strokeDasharray: pattern !== null ? pattern : '6 3',
     })
   }
+  // swimlane：外框 + 顶栏标题带（startSize）；标题文字由 labelTextBox 画在带内。
+  if (shape === 'swimlane') {
+    const header = Math.min(h, swimlaneStartSize(node))
+    const bodyFill = fill === undefined || fill === null || fill === '' ? '#ffffff' : fill
+    const headerFill = styleGet(style, 'swimlaneFillColor', null) || bodyFill
+    return React.createElement(
+      'g',
+      null,
+      React.createElement('rect', Object.assign({}, common, { x: x, y: y, width: w, height: h, fill: bodyFill })),
+      React.createElement('rect', {
+        x: x,
+        y: y,
+        width: w,
+        height: header,
+        fill: headerFill,
+        stroke: 'none',
+        fillOpacity: common.fillOpacity,
+        pointerEvents: 'none',
+      }),
+      React.createElement('line', {
+        x1: x,
+        y1: y + header,
+        x2: x + w,
+        y2: y + header,
+        stroke: stroke,
+        strokeWidth: strokeWidth,
+        strokeOpacity: common.strokeOpacity,
+        pointerEvents: 'none',
+      }),
+    )
+  }
   // 图片内容节点（svg 标记 / 位图 data URI）：节点框里画的就是 `image=` 那一段。
   //
   // 为什么用 <image href="data:..."> 而不是把标记内联进画布 DOM：
@@ -1730,8 +2054,15 @@ function shapeElement(node, geo, palette, mode) {
   //     → canvas）也走得通 —— 内部图片是内嵌的，不涉及任何外部请求。
   // imageAspect=1 = 等比缩放居中（drawio 的缺省语义），0/缺省 = 拉伸铺满节点框。
   // 位图缺省写 imageAspect=1；svg 缺省写 0 —— 见 style-kernel。
+  // 有标签且 labelPosition 非中心时，图只画在对侧区域，避免与字叠在一起。
   if (shape === 'svg' || shape === 'image') {
     const href = imageValueFromStyle(style)
+    const imgRect = imageContentRect(node, geo)
+    const ix = imgRect.x
+    const iy = imgRect.y
+    const iw = imgRect.w
+    const ih = imgRect.h
+    const hasLabel = nodeShowsLabel(node) && typeof node.label === 'string' && node.label.length > 0
     // svg：百分号编码解得开、或 base64 交给浏览器；image：必须是认得出的位图 data URI。
     // 会掉进占位分支的是**写坏的那种**：编码截断 / 空 image= —— 空白不如给个可点占位框。
     const usable =
@@ -1740,35 +2071,41 @@ function shapeElement(node, geo, palette, mode) {
         ? isRasterDataUri(href)
         : svgMarkupFromStyle(style) !== null || href.indexOf(';base64,') > 0)
     if (usable === false) {
-      return React.createElement(
-        'g',
-        null,
-        React.createElement('rect', { x: x, y: y, width: w, height: h, fill: 'transparent', stroke: 'none', pointerEvents: 'all' }),
+      const kids = [
+        React.createElement('rect', { key: 'hit', x: x, y: y, width: w, height: h, fill: 'transparent', stroke: 'none', pointerEvents: 'all' }),
         React.createElement('rect', {
-          x: x + 0.5,
-          y: y + 0.5,
-          width: Math.max(1, w - 1),
-          height: Math.max(1, h - 1),
+          key: 'frame',
+          x: ix + 0.5,
+          y: iy + 0.5,
+          width: Math.max(1, iw - 1),
+          height: Math.max(1, ih - 1),
           fill: 'none',
           stroke: stroke,
           strokeWidth: 1,
           strokeDasharray: '3 3',
           pointerEvents: 'none',
         }),
-        React.createElement(
-          'text',
-          {
-            x: x + w / 2,
-            y: y + h / 2,
-            textAnchor: 'middle',
-            dominantBaseline: 'middle',
-            fontSize: Math.max(8, Math.min(12, h / 4)),
-            fill: stroke,
-            pointerEvents: 'none',
-          },
-          shape === 'image' ? '图片' : 'SVG',
-        ),
-      )
+      ]
+      // 有真实标签时不画"图片/SVG"占位字，免得与标签叠字。
+      if (!hasLabel) {
+        kids.push(
+          React.createElement(
+            'text',
+            {
+              key: 'ph',
+              x: ix + iw / 2,
+              y: iy + ih / 2,
+              textAnchor: 'middle',
+              dominantBaseline: 'middle',
+              fontSize: Math.max(8, Math.min(12, ih / 4)),
+              fill: stroke,
+              pointerEvents: 'none',
+            },
+            shape === 'image' ? '图片' : 'SVG',
+          ),
+        )
+      }
+      return React.createElement('g', null, kids)
     }
     const fit = styleGet(style, 'imageAspect', shape === 'image' ? '1' : '0') === '1'
     return React.createElement(
@@ -1777,10 +2114,10 @@ function shapeElement(node, geo, palette, mode) {
       // 透明命中框垫在下面：图形自己有透明区域时，整块节点框仍然是可点/可拖的。
       React.createElement('rect', { x: x, y: y, width: w, height: h, fill: 'transparent', stroke: 'none', pointerEvents: 'all' }),
       React.createElement('image', {
-        x: x,
-        y: y,
-        width: w,
-        height: h,
+        x: ix,
+        y: iy,
+        width: iw,
+        height: ih,
         href: href,
         // 两个都写：现代浏览器认 SVG2 的 href，老一点的 SVG 渲染器（以及某些导出工具）
         // 只认 xlink:href。少写一个的代价是"导出的 SVG 在别处打开时图没了"。
@@ -1864,6 +2201,7 @@ function clampNumber(value, lo, hi) {
  * @returns {{minX:number,minY:number,maxX:number,maxY:number}|null} 没有文字就是 null
  */
 function labelPaintBounds(node, geo) {
+  if (!nodeShowsLabel(node)) return null
   const label = typeof node.label === 'string' ? node.label : ''
   if (label.length === 0) return null
   const style = typeof node.style === 'string' ? node.style : ''
@@ -1877,12 +2215,13 @@ function labelPaintBounds(node, geo) {
     const w = textWidth(lines[i], fontSize)
     if (w > widest) widest = w
   }
-  // 渲染是"以节点中心为锚、多行整体居中"：首行基线 = 中心 - (行数-1)*行高/2。
-  const cx = geo.x + geo.w / 2
-  const first = geo.y + geo.h / 2 - ((lines.length - 1) * lineHeight) / 2
+  // 与 renderDiagram 同一套锚点：align=left 从 box.x 起算，center/right 对称。
+  const align = box.align === 'left' || box.align === 'right' ? box.align : 'center'
+  const cx = align === 'left' ? box.x : align === 'right' ? box.x + box.w : box.x + box.w / 2
+  const first = box.y + lineHeight / 2
   return {
-    minX: cx - widest / 2,
-    maxX: cx + widest / 2,
+    minX: align === 'left' ? cx : align === 'right' ? cx - widest : cx - widest / 2,
+    maxX: align === 'left' ? cx + widest : align === 'right' ? cx : cx + widest / 2,
     minY: first - lineHeight / 2,
     maxY: first + (lines.length - 1) * lineHeight + lineHeight / 2,
   }
@@ -2109,6 +2448,8 @@ const SHAPE_LIBRARY = [
   { shape: 'svg', label: 'SVG 图形' },
   // 内嵌位图（png/jpeg/gif/webp）：复制粘贴 / 拖放进画布；落盘同样是 shape=image + data URI。
   { shape: 'image', label: '图片' },
+  // 视频播放器：海报落盘为 svg image；帧/源片在旁路 *.media/<clip>/。
+  { shape: 'video', label: '视频' },
 ]
 
 /**
@@ -2119,9 +2460,10 @@ const SHAPE_LIBRARY = [
  */
 function shapeFamilyOf(shape) {
   if (shape === 'text') return 'text'
-  if (shape === 'section') return 'section'
+  if (shape === 'section' || shape === 'swimlane') return 'section'
   if (shape === 'svg') return 'svg'
   if (shape === 'image') return 'image'
+  if (shape === 'video') return 'video'
   return 'shape'
 }
 
@@ -2188,6 +2530,7 @@ const RAIL_FAMILIES = [
   { family: 'section', shape: 'section', label: '分区', icon: 'section' },
   { family: 'svg', shape: 'svg', label: 'SVG 图形', icon: 'image' },
   { family: 'image', shape: 'image', label: '图片', icon: 'photo' },
+  { family: 'video', shape: 'video', label: '视频', icon: 'video' },
   { family: 'edge', shape: 'rounded', label: '线条', icon: 'edge' },
 ]
 
@@ -2240,6 +2583,13 @@ function railIcon(kind) {
       React.createElement('rect', { key: 'f', x: 4, y: 4, width: 16, height: 16, rx: 2 }),
       React.createElement('circle', { key: 's', cx: 9.5, cy: 9, r: 1.6 }),
       React.createElement('path', { key: 'm', d: 'M5 17l4.5-5 3 3.5 2-2.5L19 17' }),
+    ])
+  }
+  if (kind === 'video') {
+    // 视频：圆角屏 + 播放三角。
+    return svg([
+      React.createElement('rect', { key: 'f', x: 3, y: 6, width: 18, height: 12, rx: 2 }),
+      React.createElement('path', { key: 'p', d: 'M10 9.5 L10 14.5 L15 12 Z', fill: 'currentColor', stroke: 'none' }),
     ])
   }
   if (kind === 'edge') {
@@ -2451,7 +2801,7 @@ function buildGeometry(doc) {
     const n = doc.nodes[i]
     if (isHiddenCell(hidden, n)) continue
     const geo = nodeBoxOf(n)
-    const box = { id: n.id, node: n, geo: geo, label: typeof n.label === 'string' ? n.label : n.id, storedH: geo.stored }
+    const box = { id: n.id, node: n, geo: geo, label: nodeShowsLabel(n) && typeof n.label === 'string' ? n.label : nodeShowsLabel(n) ? n.id : '', storedH: geo.stored }
     boxes.push(box)
     byId[n.id] = box
     if (geo.x < minX) minX = geo.x
@@ -3261,6 +3611,413 @@ function encodeExportPng(node, output) {
     image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('导出图像加载失败')) }
     image.src = url
   })
+}
+
+/** 将绘制结果落进当前文档：原图保留，在右侧新建 SVG；调用方负责一次撤销记录。 */
+function applyImageTraceToDoc(doc, source, svg) {
+  const node = doc.nodes.find((n) => n.id === source.id)
+  if (!node || imageValueFromStyle(node.style || '') !== source.image) throw new Error('原图已更改或删除，请重新选择图片')
+  if (!filterEditableIds(doc, [node.id]).includes(node.id)) throw new Error('原图所在图层已锁定')
+  const used = new Set(doc.nodes.concat(doc.edges, doc.layers || [], doc.labels || []).map((cell) => String(cell.id)))
+  let index = 1
+  while (used.has('n' + index)) index += 1
+  const output = Object.assign({}, node, { id: 'n' + index, x: node.x + node.w + 24 })
+  output.style = styleWithSvgMarkup(output.style || '', svg, styleGet(node.style || '', 'imageAspect', '1'))
+  doc.nodes.push(output)
+  ensureDrawOrder(doc)
+  return output.id
+}
+
+/** Drawing playback uses actual connected regions; it never changes the saved SVG. */
+function traceDrawingLayers(drawing, count) {
+  const paths = drawing.fills.map(() => '')
+  for (let i = 0; i < Math.min(count, drawing.steps.length); i += 1) {
+    const step = drawing.steps[i]
+    paths[step.layer] += step.d
+  }
+  return paths
+}
+
+function createTraceDrawingPlayback(options) {
+  const total = options.total
+  const duration = options.duration || (total < 8 ? Math.max(800, total * 250) : Math.max(3500, Math.min(14000, 2000 + Math.sqrt(total) * 240)))
+  const raf = options.raf || ((fn) => requestAnimationFrame(fn))
+  const caf = options.caf || ((id) => cancelAnimationFrame(id))
+  const now = options.now || (() => performance.now())
+  let animation = null
+  let anchor = 0
+  let elapsed = 0
+  let count = 0
+  let status = 'paused'
+  let disposed = false
+  let lastPaint = -Infinity
+  // Give the first large regions more screen time, then accelerate through tiny details.
+  const countAt = (time) => Math.floor(total * Math.min(1, time / duration) ** 2)
+  const cancel = () => { if (animation !== null) caf(animation); animation = null }
+  const emit = () => options.onProgress({ count, total, status })
+  function finish() {
+    if (disposed || status === 'complete') return
+    cancel()
+    count = total
+    status = 'complete'
+    emit()
+    options.onComplete()
+  }
+  function tick(ts) {
+    animation = null
+    if (disposed || status !== 'playing') return
+    const time = elapsed + ts - anchor
+    if (time >= duration) { finish(); return }
+    const next = countAt(time)
+    if (next !== count && ts - lastPaint >= 50) {
+      count = next
+      lastPaint = ts
+      emit()
+    }
+    animation = raf(tick)
+  }
+  return {
+    resume() {
+      if (disposed || status === 'playing' || status === 'complete') return
+      anchor = now()
+      status = 'playing'
+      emit()
+      animation = raf(tick)
+    },
+    pause() {
+      if (disposed || status !== 'playing') return
+      elapsed = Math.min(duration, elapsed + now() - anchor)
+      count = countAt(elapsed)
+      status = 'paused'
+      cancel()
+      emit()
+    },
+    finish,
+    dispose() { disposed = true; cancel() },
+  }
+}
+
+function TraceDrawingSurface(props) {
+  const total = props.drawing.steps.length
+  const [progress, setProgress] = React.useState({ count: 0, total, status: 'playing' })
+  React.useEffect(() => {
+    const playback = createTraceDrawingPlayback({ total, onProgress: setProgress, onComplete: props.onComplete })
+    playback.resume()
+    return () => playback.dispose()
+  }, [props.id, props.drawing])
+  const paths = traceDrawingLayers(props.drawing, progress.count)
+  return React.createElement('div', { xmlns: 'http://www.w3.org/1999/xhtml', className: 'drawai-trace-surface' },
+    React.createElement('svg', { width: '100%', height: '100%', viewBox: props.drawing.viewBox.join(' '),
+      preserveAspectRatio: props.aspect === '0' ? 'none' : 'xMidYMid meet', 'aria-label': '复刻图绘制过程',
+    }, paths.map((d, index) => d ? React.createElement('path', { key: index, fill: props.drawing.fills[index], fillRule: 'nonzero', d }) : null)),
+    React.createElement('div', { className: 'drawai-trace-progress' },
+      React.createElement('progress', { value: progress.count, max: total, 'aria-label': '绘制进度' }),
+    ),
+  )
+}
+
+/** 选区工具栏「绘制」面板正文（嵌在悬停悬浮卡片里）。 */
+function VideoTracePanel(props) {
+  const panelRef = React.useRef(null)
+  React.useEffect(() => { if (!props.inline) panelRef.current?.focus() }, [])
+  const [options, setOptions] = React.useState(() => Object.assign({ range: 'clip', from: 0, end: 5, fps: 12, resolution: '480', width: 1024,
+    level: 'medium', preset: 'default', colors: 12, removeBg: false }, props.initialOptions || props.job && props.job.options || {}))
+  const job = props.job
+  const busy = job && job.busy
+  const changeOptions = (patch) => {
+    const next = Object.assign({}, options, patch)
+    setOptions(next)
+    if (props.onOptionsChange) props.onOptionsChange(next)
+  }
+  const field = (key, label, choices, min, max, step) => React.createElement('label', { className: 'drawai-export-field' },
+    React.createElement('span', null, label), React.createElement(choices ? 'select' : 'input', {
+      'aria-label': label, value: options[key], disabled: busy, type: choices ? undefined : 'number', min, max, step,
+      onChange: (event) => changeOptions({ [key]: choices || event.target.value === '' ? event.target.value : Number(event.target.value) }),
+    }, choices ? choices.map(([value, text]) => React.createElement('option', { key: value, value }, text)) : undefined))
+  let estimate = '填写范围后可估算帧数；完整视频的实际时长将在开始时读取。'
+  let invalid = ''
+  try {
+    const knownDuration = Number(props.source && props.source.duration)
+    const end = options.end === '' ? knownDuration : Number(options.end)
+    const duration = knownDuration > 0 ? knownDuration : (options.range === 'clip' && end > 0 ? end : Math.max(1, Number(options.from) + 1))
+    const plan = videoTracePlan(options, duration, Number(props.source?.w) || 1920, Number(props.source?.h) || 1080)
+    if (knownDuration > 0 || (options.range === 'clip' && options.end !== '')) {
+      estimate = '预计 ' + plan.count.toLocaleString() + ' 帧，' + plan.w + '×' + plan.h + 'px。' + (knownDuration > 0 ? '' : '实际以源视频尺寸和时长为准。')
+    }
+  } catch (error) { invalid = error.message }
+  return React.createElement('div', { ref: panelRef, tabIndex: props.inline ? undefined : -1, className: props.inline ? 'drawai-video-trace-inline' : 'drawai-video-preview', role: props.inline ? 'group' : 'dialog', 'aria-modal': props.inline ? undefined : true, 'aria-label': '视频分段复刻',
+    style: props.inline ? undefined : { alignItems: 'center', justifyContent: 'center' },
+    onKeyDown: (event) => { event.stopPropagation(); if (event.key === 'Escape') { if (busy) props.onCancel(); else props.onClose() } },
+    onPointerDown: (event) => event.stopPropagation() },
+    React.createElement('div', { className: 'drawai-export-panel', style: props.inline ? undefined : { padding: '20px', width: '360px', maxWidth: '100%', boxSizing: 'border-box', maxHeight: '100%', overflow: 'auto', borderRadius: '12px' } },
+      React.createElement('div', { className: 'drawai-popover-title' }, '视频分段复刻'),
+      field('range', '复刻范围', [['clip', '指定时间范围'], ['all', '完整视频']]),
+      options.range === 'clip' ? field('from', '开始时间（秒）', null, 0, undefined, 'any') : null,
+      options.range === 'clip' ? field('end', '结束时间（秒，留空到结尾）', null, 0, undefined, 'any') : null,
+      field('fps', '帧率（fps）', null, 0.01, undefined, 'any'),
+      field('resolution', '采样画质', [['480', '快速 · 长边 480px'], ['887', '标准 · 长边 887px'], ['1440', '高清 · 长边 1440px'], ['0', '原始尺寸'], ['custom', '自定义长边']]),
+      options.resolution === 'custom' ? field('width', '自定义长边（px）', null, 1, 16384, 1) : null,
+      field('level', '碎片数量', [['low', '低'], ['medium', '中'], ['high', '高']]),
+      field('preset', '画风', [['default', '碎片色块'], ['lineart', '保留线稿'], ['photo', '照片色块'], ['simple', '大块简化']]),
+      field('colors', '颜色数', [[6, '6 色'], [12, '12 色'], [18, '18 色'], [24, '24 色']]),
+      React.createElement('label', { className: 'drawai-export-check' }, React.createElement('input', {
+        type: 'checkbox', checked: options.removeBg, disabled: busy,
+        onChange: (event) => changeOptions({ removeBg: event.target.checked }),
+      }), '去除背景'),
+      React.createElement('div', { className: 'drawai-export-info', role: 'status' }, invalid || estimate),
+      React.createElement('div', { className: 'drawai-export-info' }, '画质、帧率和范围由你决定。提高尺寸、帧率或时长会增加处理时间与文件大小；小视频不放大。原视频保留，结果不含音轨。'),
+      job ? React.createElement('div', { role: job.error ? 'alert' : 'status', 'aria-live': 'polite' }, job.message) : null,
+      busy ? React.createElement('progress', { value: job.done || 0, max: job.total || 1, 'aria-label': '视频复刻进度', style: { width: '100%' } }) : null,
+      job && job.svg ? React.createElement('img', { src: 'data:image/svg+xml,' + encodeURIComponent(job.svg), alt: '最近完成的 SVG 帧', style: { width: '100%', maxHeight: '180px', objectFit: 'contain' } }) : null,
+      React.createElement('div', { className: 'drawai-layer-footer' },
+        props.inline ? null : React.createElement('button', { type: 'button', className: 'drawai-btn', onClick: busy ? props.onCancel : props.onClose }, busy ? '取消复刻' : '关闭'),
+        React.createElement('button', { type: 'button', className: 'drawai-btn drawai-primary-btn', disabled: busy || !!invalid,
+          onClick: () => props.onStart(options) }, job && job.error ? '重新复刻' : '让大肥鱼开始画画！'))))
+}
+
+// 安装监听后才触发 load/seek；超时、取消、解码错误均释放监听器。
+function waitForVideoTraceEvent(video, event, signal, trigger) {
+  return new Promise((resolve, reject) => {
+    let timer
+    const cleanup = () => { clearTimeout(timer); video.removeEventListener(event, done); video.removeEventListener('error', failed); signal.removeEventListener('abort', cancelled) }
+    const done = () => { cleanup(); resolve() }
+    const failed = () => { cleanup(); reject(new Error('视频解码失败，请检查浏览器是否支持此格式')) }
+    const cancelled = () => { cleanup(); reject(new Error('已取消复刻')) }
+    video.addEventListener(event, done, { once: true })
+    video.addEventListener('error', failed, { once: true })
+    signal.addEventListener('abort', cancelled, { once: true })
+    timer = setTimeout(() => { cleanup(); reject(new Error('视频解码超时')) }, 20000)
+    if (signal.aborted) { cancelled(); return }
+    try { trigger() } catch (error) { cleanup(); reject(error) }
+  })
+}
+
+function videoTracePlan(options, duration, w, h) {
+  const from = options.range === 'all' ? 0 : Number(options.from)
+  const end = options.range === 'all' || options.end === '' ? duration :
+    options.end !== undefined ? Number(options.end) : from + Number(options.seconds)
+  const fps = Number(options.fps)
+  const width = options.resolution === undefined || options.resolution === 'custom' ? Number(options.width) : Number(options.resolution)
+  const maxBytes = options.level === 'low' ? 60000 : options.level === 'high' ? 248000 : 120000
+  if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(from) || from < 0 || from >= duration) throw new Error('开始时间须在视频时长内')
+  if (!Number.isFinite(end) || end <= from) throw new Error('结束时间须晚于开始时间')
+  if (!Number.isFinite(fps) || fps <= 0) throw new Error('帧率须为大于零的数值')
+  if (!Number.isInteger(width) || width < 0 || width > 16384) throw new Error('采样长边须为 1–16384px，原始尺寸选项为 0')
+  if (options.resolution === 'custom' && width === 0) throw new Error('自定义长边须大于零')
+  const rawCount = (Math.min(end, duration) - from) * fps
+  // 浮点乘法误差不能凭空多出最后一帧。
+  const count = Math.max(1, Math.ceil(rawCount - Math.min(1e-7, rawCount * Number.EPSILON * 4)))
+  if (!Number.isSafeInteger(count)) throw new Error('预计帧数超出可表示范围')
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) throw new Error('无法读取视频尺寸')
+  const scale = width === 0 ? 1 : Math.min(1, width / Math.max(w, h))
+  const outW = Math.max(1, Math.round(w * scale)), outH = Math.max(1, Math.round(h * scale))
+  if (Math.max(outW, outH) > 16384 || outW * outH > 16000000) throw new Error('单帧处理上限为 1600 万像素、长边 16384px，请选择较小采样尺寸')
+  return { from, fps, count, w: outW, h: outH, maxBytes }
+}
+
+function applyVideoTraceToDoc(doc, source, result) {
+  const node = doc.nodes.find((n) => n.id === source.id)
+  if (!node || videoMetaOf(node)?.clip !== source.clip || videoMetaOf(node)?.kind !== 'raster') throw new Error('原视频已更改或删除')
+  if (!filterEditableIds(doc, [node.id]).includes(node.id)) throw new Error('原视频所在图层已锁定')
+  const used = new Set(doc.nodes.concat(doc.edges, doc.layers || [], doc.labels || []).map((cell) => String(cell.id)))
+  let index = 1
+  while (used.has('n' + index)) index += 1
+  const id = 'n' + index
+  const output = Object.assign({}, node, { id, x: node.x + node.w + 24, label: (node.label || '视频') + ' · SVG 复刻',
+    data: Object.assign({}, node.data, videoDataForNew(result.clip, result.w, result.h), { mediaFps: String(result.fps) }),
+    style: styleWithSvgMarkup(node.style || '', result.poster, '1') })
+  doc.nodes.push(output)
+  ensureDrawOrder(doc)
+  return id
+}
+
+/** 把当前帧放到原视频右侧，尺寸与视频节点一致，可撤销。SVG 帧保留原标记，避免栅格化缝隙。 */
+function placeVideoStill(doc, sourceId, still) {
+  const node = doc.nodes.find((n) => n.id === sourceId)
+  if (!node || !isVideoNodeData(node.data)) throw new Error('原视频已更改或删除')
+  if (!filterEditableIds(doc, [node.id]).includes(node.id)) throw new Error('原视频所在图层已锁定')
+  const used = new Set(doc.nodes.concat(doc.edges, doc.layers || [], doc.labels || []).map((cell) => String(cell.id)))
+  let index = 1
+  while (used.has('n' + index)) index += 1
+  const output = {
+    id: 'n' + index, label: '', x: node.x + node.w + 24, y: node.y, w: node.w, h: node.h,
+    style: still.kind === 'svg' ? styleWithSvgMarkup('', still.markup, '1') : styleWithImageDataUri('', still.png, '1'),
+  }
+  if (node.layer) output.layer = node.layer
+  if (node.parent) output.parent = node.parent
+  doc.nodes.push(output)
+  ensureDrawOrder(doc)
+  return output.id
+}
+
+function videoTraceFingerprint(sourceCanvas) {
+  try {
+    const sample = document.createElement('canvas')
+    sample.width = 32
+    sample.height = 18
+    const ctx = sample.getContext('2d')
+    if (!ctx || typeof ctx.drawImage !== 'function' || typeof ctx.getImageData !== 'function') return ''
+    ctx.drawImage(sourceCanvas, 0, 0, 32, 18)
+    const data = ctx.getImageData(0, 0, 32, 18).data
+    const bytes = new Uint8Array(32 * 18)
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = (data[i * 4] * 3 + data[i * 4 + 1] * 4 + data[i * 4 + 2]) / 8
+    let bin = ''
+    for (let i = 0; i < bytes.length; i += 1) bin += String.fromCharCode(bytes[i])
+    return btoa(bin)
+  } catch (error) {
+    return ''
+  }
+}
+
+function ImageTracePanel(props) {
+  const initial = props.initialOptions || {}
+  const [level, setLevel] = React.useState(initial.level || 'medium')
+  const [preset, setPreset] = React.useState(initial.preset || 'default')
+  const [colors, setColors] = React.useState(String(initial.colors || 12))
+  const [removeBg, setRemoveBg] = React.useState(initial.removeBg === true)
+  const [state, setState] = React.useState({ busy: false, error: '' })
+  const alive = React.useRef(true)
+  React.useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
+  const change = (key, setter, value) => {
+    setter(value); setState({ busy: false, error: '' })
+    if (props.onOptionsChange) props.onOptionsChange(Object.assign({ level, preset, colors: Number(colors), removeBg }, { [key]: key === 'colors' ? Number(value) : value }))
+  }
+  const keyFor = (label) => ({ '碎片数量': 'level', '画风': 'preset', '颜色数': 'colors' })[label]
+  const choice = (label, value, options, setter) => React.createElement('label', { className: 'drawai-export-field' },
+    React.createElement('span', null, label), React.createElement('select', {
+      'aria-label': label, value, disabled: state.busy, onChange: (event) => change(keyFor(label), setter, event.target.value),
+    }, options.map(([key, text]) => React.createElement('option', { key, value: key }, text))))
+  return React.createElement('div', { className: 'drawai-export-panel' },
+    React.createElement('div', { className: 'drawai-popover-title' }, '图像绘制'),
+    choice('碎片数量', level, [['low', '低 · 较少碎片'], ['medium', '中 · 适中碎片'], ['high', '高 · 较多碎片']], setLevel),
+    choice('画风', preset, [['default', '碎片色块'], ['lineart', '保留线稿'], ['photo', '照片色块'], ['simple', '大块简化']], setPreset),
+    choice('颜色数', colors, [['6', '6 色'], ['12', '12 色'], ['18', '18 色'], ['24', '24 色']], setColors),
+    React.createElement('label', { className: 'drawai-export-check' },
+      React.createElement('input', { type: 'checkbox', checked: removeBg, disabled: state.busy, 'aria-label': '去除背景', onChange: (event) => change('removeBg', setRemoveBg, event.target.checked) }), '去除背景'),
+    React.createElement('div', { className: 'drawai-export-info' }, '先分析原图，再从大色块到细节逐步展示复刻过程；原图保留，结果在右侧新建 SVG。'),
+    state.error ? React.createElement('div', { role: 'alert', className: 'drawai-export-info' }, state.error) : null,
+    React.createElement('div', { className: 'drawai-layer-footer' },
+      React.createElement('button', { type: 'button', className: 'drawai-btn drawai-primary-btn', disabled: state.busy, onClick: async () => {
+        if (state.busy) return
+        setState({ busy: true, error: '' })
+        try {
+          const result = await props.onGenerate({ level, preset, colors: Number(colors), removeBg })
+          await props.onApply(result)
+          if (alive.current) setState({ busy: false, error: '' })
+        } catch (error) {
+          if (alive.current) setState({ busy: false, error: String(error.message || error) })
+        }
+      } }, state.busy ? '大肥鱼正在分析原图…' : '让大肥鱼开始画画！')),
+  )
+}
+
+/** 选区工具栏的共享悬停卡片：图片绘制、视频绘制和导出复用同一交互。 */
+function ToolbarPopover(props) {
+  const detailsRef = React.useRef(null)
+  const panelRef = React.useRef(null)
+  const closeTimerRef = React.useRef(null)
+  const disabled = props.disabled === true
+  const label = props.label || '绘制'
+  const positionPanel = () => {
+    const details = detailsRef.current
+    const panel = panelRef.current
+    if (details === null || panel === null || !details.open || disabled) return
+    if (typeof panel.showPopover === 'function' && !panel.matches(':popover-open')) panel.showPopover()
+    const anchor = details.getBoundingClientRect()
+    const viewportWidth = document.documentElement.clientWidth
+    const viewportHeight = document.documentElement.clientHeight
+    panel.style.width = Math.min(320, viewportWidth - 24) + 'px'
+    panel.style.maxHeight = Math.max(120, viewportHeight - 24) + 'px'
+    const height = panel.getBoundingClientRect().height
+    panel.style.left = Math.max(12, Math.min(anchor.left - 12, viewportWidth - panel.offsetWidth - 12)) + 'px'
+    const above = anchor.top - height - 12
+    const below = anchor.bottom + 12
+    panel.style.top = Math.max(12, above >= 12 ? above : Math.min(below, viewportHeight - height - 12)) + 'px'
+  }
+  const close = () => {
+    if (closeTimerRef.current !== null) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null }
+    if (detailsRef.current !== null) detailsRef.current.open = false
+    const panel = panelRef.current
+    if (panel !== null && typeof panel.hidePopover === 'function' && panel.matches(':popover-open')) panel.hidePopover()
+  }
+  const keepOpen = () => {
+    if (disabled) return
+    if (closeTimerRef.current !== null) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null }
+    if (detailsRef.current !== null) { detailsRef.current.open = true; positionPanel() }
+  }
+  const scheduleClose = () => {
+    const active = document.activeElement
+    if (props.renderPanel && panelRef.current && active && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName) && panelRef.current.contains(active)) return
+    if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current)
+    closeTimerRef.current = setTimeout(close, 220)
+  }
+  React.useEffect(() => {
+    const onOutside = (event) => {
+      if (detailsRef.current !== null && !detailsRef.current.contains(event.target)) close()
+    }
+    document.addEventListener('pointerdown', onOutside, true)
+    window.addEventListener('resize', close)
+    return () => {
+      document.removeEventListener('pointerdown', onOutside, true)
+      window.removeEventListener('resize', close)
+      if (closeTimerRef.current !== null) clearTimeout(closeTimerRef.current)
+    }
+  }, [])
+  const icon = props.icon || React.createElement('svg', { width: 22, height: 22, viewBox: '0 0 24 24', 'aria-hidden': true },
+    React.createElement('path', { d: 'M4 17.5V20h2.5L17 9.5 14.5 7 4 17.5z', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinejoin: 'round' }),
+    React.createElement('path', { d: 'M13.2 8.3l2.5 2.5', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' }),
+    React.createElement('path', { d: 'M4 4h7M4 8h4', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' }))
+  return React.createElement('details', {
+    ref: detailsRef, className: 'drawai-color-palette' + (disabled ? ' disabled' : ''), name: props.group,
+    onPointerEnter: keepOpen, onPointerLeave: scheduleClose,
+    onToggle: (event) => {
+      if (event.target !== event.currentTarget) return
+      if (disabled) { event.currentTarget.open = false; return }
+      if (event.currentTarget.open) positionPanel()
+      else close()
+    },
+  },
+    React.createElement('summary', {
+      'aria-label': label, 'aria-disabled': disabled,
+      title: disabled ? props.disabledTitle || '请先导入图片文件后再绘制' : undefined,
+      onClick: (event) => { event.preventDefault(); if (!disabled) { keepOpen() } },
+      onFocus: keepOpen,
+    },
+      React.createElement('span', { className: 'drawai-tool-icon' }, icon,
+        React.createElement('span', { className: 'drawai-color-caret' }, '⌃')),
+      React.createElement('span', { className: 'drawai-color-label' }, label)),
+    disabled ? null : React.createElement('div', {
+      ref: panelRef, popover: 'manual', className: 'drawai-palette-panel', role: 'group', 'aria-label': label + '面板',
+      onPointerEnter: keepOpen, onPointerLeave: scheduleClose,
+      onKeyDown: (event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() } },
+    }, props.renderPanel ? props.renderPanel(close) : React.createElement(ImageTracePanel, {
+      key: props.source && props.source.id, source: props.source,
+      onGenerate: (options) => props.onGenerate(props.source, options),
+      onApply: (result) => { props.onApply(props.source, result); close() },
+    })),
+  )
+}
+
+const ImageTraceControl = ToolbarPopover
+
+function VideoTraceStatusCard(props) {
+  const [collapsed, setCollapsed] = React.useState(false)
+  const job = props.job
+  const percent = Math.min(100, Math.round((job.done || 0) / Math.max(1, job.total || 1) * 100))
+  return React.createElement('section', { className: 'drawai-video-task-card', role: 'region', 'aria-label': '视频复刻任务',
+    onPointerDown: (event) => event.stopPropagation(), onDoubleClick: (event) => event.stopPropagation(), onKeyDown: (event) => event.stopPropagation(),
+  }, React.createElement('div', { className: 'drawai-trace-card-heading' },
+    React.createElement('span', null, job.busy ? '视频复刻 · ' + percent + '%' : job.error ? '视频复刻失败' : '视频复刻'),
+    React.createElement('div', { className: 'drawai-trace-card-actions' },
+      job.busy ? React.createElement('button', { type: 'button', className: 'drawai-trace-pin', onClick: props.onCancel }, '取消') :
+        React.createElement('button', { type: 'button', className: 'drawai-trace-pin', onClick: props.onClose }, '关闭'),
+      React.createElement('button', { type: 'button', className: 'drawai-trace-pin', 'aria-label': collapsed ? '展开复刻进度' : '收起复刻进度', 'aria-expanded': !collapsed,
+        onClick: () => setCollapsed(!collapsed) }, collapsed ? '展开' : '收起'))),
+    job.busy ? React.createElement('progress', { value: job.done || 0, max: job.total || 1, 'aria-label': '视频复刻进度' }) : null,
+    collapsed ? null : React.createElement('div', { className: 'drawai-video-task-detail' },
+      React.createElement('div', { role: job.error ? 'alert' : 'status', 'aria-live': 'polite' }, job.message),
+      job.busy && job.total > 1 ? React.createElement('small', null, (job.done || 0).toLocaleString() + ' / ' + job.total.toLocaleString() + ' 帧') : null,
+      job.error && job.options ? React.createElement('button', { type: 'button', className: 'drawai-btn', onClick: props.onRetry }, '重试复刻') : null))
 }
 
 function ExportPanel(props) {
@@ -4814,7 +5571,22 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
         groupProps.onPointerLeave = () => ui.onNodePointerLeave(node.id)
       }
     }
-    const groupChildren = [shapeElement(node, geo, colorOf(node, mode), mode)]
+    const drawing = ui && ui.traceDrawing && ui.traceDrawing.id === node.id ? ui.traceDrawing : null
+    const paintNode = drawing ? Object.assign({}, node, { style: styleWithSvgMarkup(node.style || '', '<svg xmlns="http://www.w3.org/2000/svg"/>', '1') }) : node
+    const groupChildren = [shapeElement(paintNode, geo, colorOf(node, mode), mode)]
+    if (drawing) {
+      groupChildren.push(React.createElement('foreignObject', {
+        key: 'trace-drawing', x: geo.x, y: geo.y, width: geo.w, height: geo.h,
+      }, React.createElement(TraceDrawingSurface, { key: node.id, id: node.id, drawing: drawing.drawing,
+        aspect: styleGet(node.style || '', 'imageAspect', '1'), onComplete: () => ui.onTraceDrawingComplete(node.id) })))
+    }
+    if (ui && ui.videoController && isVideoNodeData(node.data)) {
+      groupChildren.push(React.createElement('foreignObject', {
+        key: 'video-surface', x: geo.x, y: geo.y, width: geo.w, height: geo.h,
+      }, React.createElement(VideoSurface, { controller: ui.videoController, node,
+        meta: videoMetaOf(node), poster: videoPosterOf(node),
+        onPlay: () => { if (ui.onVideoPlay) ui.onVideoPlay(node.id) } })))
+    }
     // 单选一个节点时给 8 个方向的缩放手柄。
     if (selected && ui !== undefined && ui !== null && ui.singleSelectedNodeId === node.id && typeof ui.onResizePointerDown === 'function') {
       const dirs = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
@@ -4860,23 +5632,21 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     // 画出来的标签会从它底下透出来，两层字叠在一起。以前没这问题只是因为那个单行 input
     // 带白底、把标签盖住了 —— 换成透明 textarea 之后必须显式让位。
     const editingHere = ui !== undefined && ui !== null && ui.editingNodeId === node.id
-    const labelStyle = typeof node.style === 'string' ? node.style : ''
-    const labelFontSize = styleNumber(labelStyle, 'fontSize', FSIZE)
-    const labelFill = colorOf(node, mode).font
-    const boxText = labelTextBox({ node: node, geo: geo, fontSize: labelFontSize })
-    const lines = labelWraps(node) ? wrapLabel(box.label, boxText.w, labelFontSize) : String(box.label).split('\n')
-    const lineHeight = labelLineHeight(labelFontSize)
-    // 分区标题贴顶左（飞书分区名）；其它形状仍居中。
-    const isSectionLabel = shapeOf(node) === 'section'
-    const cx = isSectionLabel ? geo.x + 10 : geo.x + geo.w / 2
-    const first = isSectionLabel
-      ? geo.y + 6 + lineHeight / 2
-      : geo.y + geo.h / 2 - ((lines.length - 1) * lineHeight) / 2
-    const spans = []
-    for (let li = 0; li < lines.length; li += 1) {
-      spans.push(React.createElement('tspan', { key: 'l' + li, x: cx, dy: li === 0 ? 0 : lineHeight }, lines[li]))
-    }
-    if (!editingHere) {
+    if (box.label && !editingHere) {
+      const labelStyle = typeof node.style === 'string' ? node.style : ''
+      const labelFontSize = styleNumber(labelStyle, 'fontSize', FSIZE)
+      const labelFill = colorOf(node, mode).font
+      const boxText = labelTextBox({ node: node, geo: geo, fontSize: labelFontSize })
+      const lines = labelWraps(node) ? wrapLabel(box.label, boxText.w, labelFontSize) : String(box.label).split('\n')
+      const lineHeight = labelLineHeight(labelFontSize)
+      const labelAlign = boxText.align === 'left' || boxText.align === 'right' ? boxText.align : 'center'
+      const cx = labelAlign === 'left' ? boxText.x : labelAlign === 'right' ? boxText.x + boxText.w : boxText.x + boxText.w / 2
+      const textAnchor = labelAlign === 'left' ? 'start' : labelAlign === 'right' ? 'end' : 'middle'
+      const first = boxText.y + lineHeight / 2
+      const spans = []
+      for (let li = 0; li < lines.length; li += 1) {
+        spans.push(React.createElement('tspan', { key: 'l' + li, x: cx, dy: li === 0 ? 0 : lineHeight }, lines[li]))
+      }
       groupChildren.push(
         React.createElement(
           'text',
@@ -4884,10 +5654,8 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             key: 'label-' + i,
             x: cx,
             y: first,
-            textAnchor: isSectionLabel ? 'start' : 'middle',
+            textAnchor: textAnchor,
             dominantBaseline: 'middle',
-            // 渲染出来的标签带上节点 id：一是自测能精确定位"哪个节点的标签在不在"，
-            // 二是排查"文字重叠 / 没画出来"时一眼能看出是哪一格。
             'data-node-id': node.id,
             fontSize: labelFontSize,
             fontFamily: FONT,
@@ -5393,6 +6161,9 @@ function isTextEntry(node) {
  */
 function canvasOwnsKeyboard(event, root, active) {
   const target = event === null || event === undefined ? null : event.target
+  for (const item of [target, active]) {
+    if (item && typeof item.closest === 'function' && item.closest('.drawai-video-controls,.drawai-video-chrome,.drawai-video-preview')) return false
+  }
   if (isTextEntry(target)) return false
   if (isTextEntry(active)) return false
   if (active === null || active === undefined) return true
@@ -5414,6 +6185,7 @@ function claimCanvasKeyboard(root, target) {
   if (root === null || root === undefined || typeof root.focus !== 'function') return
   if (isTextEntry(target)) return
   if (target !== null && target !== undefined && typeof target.closest === 'function') {
+    if (target.closest('.drawai-video-controls,.drawai-video-chrome,.drawai-video-preview') !== null) return
     if (target.closest('.drawai-edit') !== null) return
   }
   try {
@@ -5442,6 +6214,8 @@ function cloneClipNode(node) {
   // （数据是 drawio 用户对象上的属性，丢了 drawio 那边就查不到了）。
   if (typeof node.layer === 'string' && node.layer.length > 0) copy.layer = node.layer
   if (node.data !== undefined && node.data !== null) copy.data = copyData(node.data)
+  if (Number.isFinite(node.labelOffsetX)) copy.labelOffsetX = node.labelOffsetX
+  if (Number.isFinite(node.labelOffsetY)) copy.labelOffsetY = node.labelOffsetY
   return copy
 }
 
@@ -5764,6 +6538,12 @@ function CanvasView(props) {
   const placeToolState = React.useState(null)
   const placeTool = placeToolState[0]
   const setPlaceTool = placeToolState[1]
+  const pendingVideoRef = React.useRef(null)
+  const videoImportsRef = React.useRef(new Set())
+  React.useEffect(() => () => {
+    pendingVideoRef.current = null
+    for (const controller of videoImportsRef.current || []) controller.abort()
+  }, [target, active])
   // 线条族放置：线型 kind（rounded/sharp/straight/curved）；与 placeTool 互斥。
   const placeEdgeKindState = React.useState(null)
   const placeEdgeKind = placeEdgeKindState[0]
@@ -5779,7 +6559,7 @@ function CanvasView(props) {
   const setRailOpenFamily = railOpenFamilyState[1]
   const railPanelTimerRef = React.useRef(null)
   const edgeDragRef = React.useRef(null) // { edgeId, kind: 'segment'|'from'|'to', ... }
-  const labelDragRef = React.useRef(null) // 拖边标签 { edgeId, originX, originY, moved }
+  const labelDragRef = React.useRef(null) // 拖连线标签：保存抓取点，避免一次点击就改位置。
   const guidesState = React.useState([]) // 拖动时的对齐辅助线 [{axis,at,from,to}]
   const guides = guidesState[0]
   const setGuides = guidesState[1]
@@ -5826,6 +6606,17 @@ function CanvasView(props) {
    * 回执慢一点同一条请求就会被反复取到（表现是"每 3 秒下载一次 PNG"）。
    */
   const exportHandledRef = React.useRef(null)
+  const mediaRequestRef = React.useRef(null)
+  mediaRequestRef.current = mediaAction
+  const [videoController] = React.useState(() => createVideoController((action, extra) => mediaRequestRef.current(action, extra)))
+  React.useEffect(() => () => videoController.reset(), [videoController, target])
+  React.useEffect(() => { if (!active) videoController.suspend() }, [videoController, active])
+  React.useEffect(() => { videoController.prune(doc === null ? [] : doc.nodes) }, [videoController, doc])
+  React.useEffect(() => {
+    const onVisibility = () => { if (document.hidden) videoController.suspend() }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [videoController])
   /**
    * AI 的「看一眼」请求（`diagram_read {render:true}`）：`{ requestId }`。
    *
@@ -5837,6 +6628,13 @@ function CanvasView(props) {
   const setLookRequest = lookState[1]
   /** 同一个请求只处理一次（轮询每 3 秒一次，不去重会反复渲染）。 */
   const lookHandledRef = React.useRef(null)
+  /**
+   * AI 下发的抽帧计划（`extractFrames {seconds,fps,width}`）：`{ requestId, clip, … }`。
+   *
+   * 视频解码只有浏览器能做（宿主没有解码器），所以宿主把计划挂在 `read` 回执上，这里取走后
+   * 解码视频写 `stills/`，完成后 POST 回 `media-extract-result`。同样按 requestId 去重。
+   */
+  const mediaHandledRef = React.useRef(null)
   // 文档三件套的弹出面板：null | 'new' | 'open' | 'saveAs' | 'renameLayer' | 'find'
   const docMenuState = React.useState(null)
   const docMenu = docMenuState[0]
@@ -5859,6 +6657,11 @@ function CanvasView(props) {
   const pageIndexState = React.useState(0)
   const pageIndex = pageIndexState[0]
   const setPageIndex = pageIndexState[1]
+  React.useEffect(() => () => {
+    pendingVideoRef.current = null
+    for (const controller of videoImportsRef.current || []) controller.abort()
+  }, [pageIndex])
+  React.useEffect(() => { if (placeTool !== 'video') pendingVideoRef.current = null }, [placeTool])
   const pageCountState = React.useState(1)
   const pageCount = pageCountState[0]
   const setPageCount = pageCountState[1]
@@ -5885,6 +6688,184 @@ function CanvasView(props) {
   const previewState = React.useState(null) // 改接端点时的预览线终点 { edgeId, kind, x, y }
   const edgePreview = previewState[0]
   const setEdgePreview = previewState[1]
+  const [traceDrawing, setTraceDrawing] = React.useState(null)
+  const [videoTraceSource, setVideoTraceSource] = React.useState(null)
+  const [videoTraceJob, setVideoTraceJob] = React.useState(null)
+  const videoTraceRun = React.useRef(null)
+  React.useEffect(() => {
+    setVideoTraceSource(null)
+    return () => { videoTraceRun.current?.abort() }
+  }, [target, pageIndex, active])
+  React.useEffect(() => {
+    if (videoTraceSource && (!doc || !doc.nodes.some((node) => node.id === videoTraceSource.id && videoMetaOf(node)?.clip === videoTraceSource.clip))) {
+      videoTraceRun.current?.abort()
+      setVideoTraceSource(null)
+    }
+  }, [doc, videoTraceSource])
+  async function startVideoTrace(options, sourceOverride) {
+    if (videoTraceRun.current || !(sourceOverride || videoTraceSource)) return
+    const source = sourceOverride || videoTraceSource
+    const control = new AbortController()
+    videoTraceRun.current = control
+    const update = (patch) => { if (!control.signal.aborted) setVideoTraceJob((job) => Object.assign({}, job, patch)) }
+    const check = () => { if (control.signal.aborted) throw new Error('已取消复刻') }
+    // 捕获本次画布的路径，切换画布后清理仍针对原任务。
+    const request = async (action, extra) => {
+      const pending = new AbortController()
+      // start 要取得清理令牌后才能取消；清理/释放请求也不跟随任务取消。
+      const cancellable = ['media-source-bytes', 'media-trace-frame', 'media-trace-frame-chunk', 'media-trace-finish'].includes(action)
+      const abort = () => pending.abort()
+      const timer = action === 'media-trace-frame' ? null : setTimeout(abort, 60000)
+      if (cancellable) control.signal.addEventListener('abort', abort, { once: true })
+      if (cancellable && control.signal.aborted) pending.abort()
+      try {
+        const raw = await fetch(SAVE_ENDPOINT, { method: 'POST', headers: { 'content-type': 'application/json', [SAVE_HEADER]: '1' }, signal: pending.signal,
+          body: JSON.stringify(Object.assign({ action, sessionId, path: target }, extra)) })
+        const result = await raw.json()
+        if (!raw.ok || !result || !result.ok) throw new Error(result?.error || '视频复刻请求失败')
+        return result
+      } finally { clearTimeout(timer); control.signal.removeEventListener('abort', abort) }
+    }
+    let pack = null, blobUrl = null, committed = false, currentFrame = -1
+    const pendingFrames = []
+    const video = document.createElement('video')
+    video.muted = true; video.playsInline = true; video.preload = 'auto'
+    setVideoTraceJob({ busy: true, done: 0, total: 1, message: '正在读取视频…', options })
+    videoController.suspend()
+    try {
+      const bytesResult = await request('media-source-bytes', { clip: source.clip })
+      check()
+      const binary = atob(bytesResult.base64), bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+      blobUrl = URL.createObjectURL(new Blob([bytes], { type: bytesResult.mime || 'video/mp4' }))
+      await waitForVideoTraceEvent(video, 'loadeddata', control.signal, () => { video.src = blobUrl; video.load() })
+      const plan = videoTracePlan(options, video.duration, video.videoWidth, video.videoHeight)
+      pack = await request('media-trace-start', { fps: plan.fps, count: plan.count, w: plan.w, h: plan.h, maxBytes: plan.maxBytes, sourceClip: source.clip, sourceOffset: plan.from })
+      check()
+      update({ total: plan.count, message: '计划绘制 ' + plan.count.toLocaleString() + ' 帧，' + plan.w + '×' + plan.h + 'px…' })
+      const canvas = document.createElement('canvas')
+      canvas.width = plan.w; canvas.height = plan.h
+      const context = canvas.getContext('2d')
+      if (!context) throw new Error('浏览器无法创建画面缓冲区')
+      // 在途帧数与宿主 Worker 池对齐，避免多核时空转。
+      const VIDEO_TRACE_PIPELINE = Math.max(1, Math.min(4, Number(pack.poolSize) || 4))
+      let poster = '', reduced = 0, completed = 0
+      for (let i = 0; i < plan.count; i += 1) {
+        currentFrame = i
+        check()
+        const time = Math.min(video.duration - 0.001, plan.from + i / plan.fps)
+        update({ total: plan.count, message: '正在抽取第 ' + (i + 1) + '/' + plan.count + ' 帧…' })
+        if (Math.abs(video.currentTime - time) > 0.00001) await waitForVideoTraceEvent(video, 'seeked', control.signal, () => { video.currentTime = time })
+        check()
+        context.drawImage(video, 0, 0, plan.w, plan.h)
+        const fingerprint = typeof videoTraceFingerprint === 'function' ? videoTraceFingerprint(canvas) : ''
+        const auth = { clip: pack.clip, token: pack.token, index: i }
+        const png = await new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('画面导出失败，请降低采样尺寸')), 'image/png'))
+        check()
+        let pngBase64
+        if (png.size <= 1024 * 1024) pngBase64 = await readVideoChunk(png, control.signal)
+        else for (let offset = 0; offset < png.size; offset += 1024 * 1024) {
+          check()
+          const base64 = await readVideoChunk(png.slice(offset, offset + 1024 * 1024), control.signal)
+          await request('media-trace-frame-chunk', Object.assign({}, auth, { offset, base64 }))
+        }
+        check()
+        update({ message: '正在绘制第 ' + (i + 1) + '/' + plan.count + ' 帧…（流水线 ' + Math.min(VIDEO_TRACE_PIPELINE, plan.count) + '）' })
+        const frameIndex = i
+        // 用 allSettled 形态收进队列，避免尚未 await 的失败变成未处理拒绝。
+        pendingFrames.push(request('media-trace-frame', Object.assign({}, options, auth, { pngBase64, fingerprint })).then(
+          (result) => {
+            completed += 1
+            if (frameIndex === 0) poster = result.svg
+            if (result.detailReduced) reduced += 1
+            update({ done: completed, svg: result.svg, message: '已完成 ' + completed + '/' + plan.count + ' 帧…' })
+            return { ok: true, result }
+          },
+          (error) => ({ ok: false, error, frameIndex }),
+        ))
+        if (pendingFrames.length >= VIDEO_TRACE_PIPELINE) {
+          const settled = await pendingFrames.shift()
+          if (!settled.ok) { currentFrame = settled.frameIndex; throw settled.error }
+        }
+      }
+      while (pendingFrames.length) {
+        const settled = await pendingFrames.shift()
+        if (!settled.ok) { currentFrame = settled.frameIndex; throw settled.error }
+      }
+      check()
+      const finished = await request('media-trace-finish', { clip: pack.clip, token: pack.token })
+      check()
+      if (finished.manifest.frames.length !== plan.count) throw new Error('输出帧数不完整')
+      if (!docRef.current) throw new Error('画布已关闭')
+      let id
+      applyLocal((next) => { id = applyVideoTraceToDoc(next, source, Object.assign({}, plan, { clip: pack.clip, poster })) })
+      committed = true
+      setSelectedIds([id])
+      update({ busy: false, message: '复刻完成：' + plan.count + ' 帧，' + (plan.count / plan.fps).toFixed(2) + ' 秒。' +
+        (reduced ? reduced + ' 帧因字符预算降低了细节。' : '') + '可在画布播放或导出（可撤销）。' })
+      setSaveNote('大肥鱼画完啦！已生成 SVG 视频（可撤销）')
+      request('media-trace-release', { clip: pack.clip, token: pack.token }).catch(() => {})
+    } catch (error) {
+      let cleanupError = ''
+      if (pack && !committed) {
+        try { await request('media-trace-discard', { clip: pack.clip, token: pack.token }) }
+        catch { cleanupError = '临时媒体清理失败，可用媒体清理菜单清除未引用素材。' }
+      }
+      setVideoTraceJob({ busy: false, error: !control.signal.aborted, options,
+        message: (control.signal.aborted ? '已取消复刻。' : (currentFrame >= 0 ? '第 ' + (currentFrame + 1) + ' 帧失败：' : '') + String(error.message || error)) + cleanupError })
+    } finally {
+      while (pendingFrames.length) await pendingFrames.shift().catch(() => {})
+      video.pause(); video.removeAttribute('src'); video.load()
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+      if (videoTraceRun.current === control) videoTraceRun.current = null
+    }
+  }
+  React.useEffect(() => {
+    if (!traceDrawing) return
+    const node = doc && doc.nodes.find((n) => n.id === traceDrawing.id)
+    if (!active || !node || svgMarkupFromStyle(node.style || '') !== traceDrawing.svg) setTraceDrawing(null)
+  }, [doc, active, traceDrawing])
+  React.useEffect(() => { setTraceDrawing(null) }, [target])
+  async function generateImageTrace(source, options) {
+    if (!source || typeof source.image !== 'string' || !isRasterDataUri(source.image)) throw new Error('请重新选择图片')
+    setSaveNote('大肥鱼正在分析原图，准备绘制色块…')
+    try {
+      const raw = await fetch(SAVE_ENDPOINT, {
+        method: 'POST', headers: { 'content-type': 'application/json', [SAVE_HEADER]: '1' },
+        body: JSON.stringify(Object.assign({ action: 'trace-node-image', sessionId, image: source.image }, options)),
+      })
+      const result = await raw.json()
+      if (!raw.ok || !result || result.ok !== true) throw new Error(result && result.error || '绘制请求失败')
+      return result
+    } catch (error) {
+      setSaveNote('绘制失败：' + (error.message || String(error)))
+      throw error
+    }
+  }
+
+  function applyImageTrace(source, result) {
+    if (!source) throw new Error('请重新选择图片')
+    const current = docRef.current
+    const node = current && current.nodes.find((n) => n.id === source.id)
+    if (!node || imageValueFromStyle(node.style || '') !== source.image) throw new Error('原图已更改或删除，请重新选择图片')
+    if (!filterEditableIds(current, [node.id]).includes(node.id)) throw new Error('原图所在图层已锁定')
+    let id
+    applyLocal((next) => { id = applyImageTraceToDoc(next, source, result.svg) })
+    setSelectedIds([id])
+    if (result.drawing && result.drawing.steps.length > 0) {
+      setTraceDrawing({ id, svg: result.svg, drawing: result.drawing, metrics: result.metrics })
+      setSaveNote('大肥鱼开始画画！正在从大色块到细节逐步展示复刻图…')
+    } else {
+      setTraceDrawing(null)
+      setSaveNote('大肥鱼画完啦！已绘制为 SVG（可撤销）')
+    }
+  }
+
+  function finishTraceDrawing(id) {
+    if (!traceDrawing || traceDrawing.id !== id) return
+    setTraceDrawing(null)
+    setSaveNote('大肥鱼画完啦！' + traceDrawing.metrics.fragments + ' 个碎片，' + traceDrawing.metrics.svgChars + ' 字符（可撤销）')
+  }
 
   function nodeById(id) {
     const current = docRef.current
@@ -6140,7 +7121,14 @@ function CanvasView(props) {
         headers: { 'content-type': 'application/json', [SAVE_HEADER]: '1' },
         // createOnly：另存为的目标**不该已存在**，已存在就让宿主返回 409，
         // 绝不静默覆盖别人的文件 —— 想改那个文件请用「打开」进去。
-        body: JSON.stringify({ sessionId: sessionId, path: withExt, createOnly: true, doc: snapshot }),
+        body: JSON.stringify({
+          sessionId: sessionId,
+          path: withExt,
+          createOnly: true,
+          doc: snapshot,
+          // 成对带走 *.media（宿主按 fromPath → 新主名复制旁路包）。
+          ...(hasPath ? { fromPath: target } : {}),
+        }),
       })
     } catch (error) {
       setFileList({ files: null, error: '保存请求失败：' + (error && error.message ? error.message : String(error)) })
@@ -6165,6 +7153,49 @@ function CanvasView(props) {
     setNewName('')
     setFileList(null)
     setSaveNote('已另存为 ' + withExt + '（revision ' + payload.revision + '）')
+  }
+
+  /** 旁路媒体 API（同源 POST，与保存同一信任围栏）。 */
+  async function mediaAction(action, extra, options) {
+    if (client === null || !hasPath) {
+      setSaveNote('请先保存画布到工作区，再使用视频媒体功能')
+      return null
+    }
+    const body = Object.assign({ action: action, sessionId: sessionId, path: target }, extra || {})
+    let raw = null
+    try {
+      raw = await fetch(SAVE_ENDPOINT, {
+        method: 'POST',
+        signal: options && options.signal,
+        headers: { 'content-type': 'application/json', [SAVE_HEADER]: '1' },
+        body: JSON.stringify(body),
+      })
+    } catch (error) {
+      setSaveNote('媒体请求失败：' + (error && error.message ? error.message : String(error)))
+      return null
+    }
+    let payload = null
+    try {
+      payload = await raw.json()
+    } catch (error) {
+      setSaveNote('媒体返回不是 JSON（HTTP ' + raw.status + '）')
+      return null
+    }
+    if (payload === null || payload.ok !== true) {
+      setSaveNote(String(payload !== null && payload.error ? payload.error : '媒体操作失败'))
+      return null
+    }
+    return payload
+  }
+
+  async function ensureMediaClip(clip, opts) {
+    return mediaAction('media-ensure', {
+      clip: clip,
+      kind: opts && opts.kind === 'raster' ? 'raster' : 'svg',
+      fps: opts && opts.fps,
+      w: opts && opts.w,
+      h: opts && opts.h,
+    })
   }
 
   async function reportFocus() {
@@ -6764,7 +7795,7 @@ function CanvasView(props) {
     const node = nodeById(id)
     const svg = svgRef.current
     const canvas = canvasRef.current
-    if (node === null || svg === null || canvas === null) return
+    if (node === null || svg === null || canvas === null || !nodeShowsLabel(node)) return
     const ctm = svg.getScreenCTM()
     if (ctm === null) return
     const rect = canvas.getBoundingClientRect()
@@ -6780,6 +7811,15 @@ function CanvasView(props) {
   function onNodeDoubleClick(id, event) {
     event.preventDefault()
     event.stopPropagation()
+    const node = nodeById(id)
+    // 双击打开大预览，播放入口与工具条共用同一控制器。
+    if (node !== null && isVideoNodeData(node.data)) {
+      startVideoPlayback(node).then(() => {
+        if (videoController.get(id).kind) videoController.configure(id, { expanded: true })
+      })
+      return
+    }
+    if (node !== null && !nodeShowsLabel(node)) return
     openNodeEditor(id)
   }
 
@@ -6949,7 +7989,8 @@ function CanvasView(props) {
     if (labelDrag !== null) {
       const at = toUserSpace(event)
       if (at === null) return
-      if (labelDrag.moved === false && Math.abs(at.x - labelDrag.originX) + Math.abs(at.y - labelDrag.originY) > 3) labelDrag.moved = true
+      const distance = Math.abs(at.x - labelDrag.originX) + Math.abs(at.y - labelDrag.originY)
+      if (labelDrag.moved === false && distance > 3) labelDrag.moved = true
       if (labelDrag.moved) moveEdgeLabel(labelDrag.edgeId, at)
       return
     }
@@ -7512,22 +8553,29 @@ function CanvasView(props) {
   function freshNode(id, shape, styleName, userX, userY, label) {
     const isText = shape === 'text'
     const isSvg = shape === 'svg'
+    const isVideo = shape === 'video'
     const isSection = shape === 'section'
-    // svg 节点的内容是一张图、标签通常是空的 —— 不给它塞"新节点"三个字（那会压在图上）。
+    // svg/video 节点的内容是一张图、标签通常是空的 —— 不给它塞"新节点"三个字（那会压在图上）。
     // 分区默认叫「分区」（飞书式区块标题），可双击改名。
-    const text = typeof label === 'string' ? label : isText ? '文字' : isSvg ? '' : isSection ? '分区' : '新节点'
+    const text = typeof label === 'string' ? label : isText ? '文字' : isSvg || isVideo ? '' : isSection ? '分区' : '新节点'
     // 形状与配色都落成 drawio 的 style 键：rect/plain 落成空串（= drawio 的 defaultVertexStyle）。
     // 文字**不吃配色**：它的样式就是 drawio 的 defaultTextStyle（无边框无底色），
     // 往上盖 fillColor/strokeColor 只会让文件与 drawio 不一致，画面上也什么都看不出来。
-    // svg 同理：图片不受 fillColor/strokeColor 影响，颜色要写在标记自己身上。
+    // svg/video 同理：图片不受 fillColor/strokeColor 影响，颜色要写在标记自己身上。
     // 分区自带淡底虚线样式，也不盖调色板（否则看起来像普通色块矩形）。
     const base =
-      isText || isSvg || isSection ? styleWithNodeShape('', shape) : styleWithColorName(styleWithNodeShape('', shape), styleName)
-    const style = isSvg ? styleWithSvgMarkup(base, DEFAULT_SVG_MARKUP) : base
+      isText || isSvg || isVideo || isSection
+        ? styleWithNodeShape('', shape)
+        : styleWithColorName(styleWithNodeShape('', shape), styleName)
+    const style = isSvg
+      ? styleWithSvgMarkup(base, DEFAULT_SVG_MARKUP)
+      : isVideo
+        ? styleWithSvgMarkup(base, DEFAULT_VIDEO_POSTER)
+        : base
     // svg 节点放下来是**正方形**：图形多半是方的，用文字尺寸（130×60）会把图标压扁。
-    // 分区要大一圈，才能当区块用。
-    const w = isSvg ? NEW_SVG_SIZE : isSection ? NEW_SECTION_W : NEW_NODE_W
-    const h = isSvg ? NEW_SVG_SIZE : isSection ? NEW_SECTION_H : NEW_NODE_H
+    // video 缺省 16:9；分区要大一圈，才能当区块用。
+    const w = isVideo ? NEW_VIDEO_W : isSvg ? NEW_SVG_SIZE : isSection ? NEW_SECTION_W : NEW_NODE_W
+    const h = isVideo ? NEW_VIDEO_H : isSvg ? NEW_SVG_SIZE : isSection ? NEW_SECTION_H : NEW_NODE_H
     const node = {
       id: id,
       label: text,
@@ -7537,10 +8585,13 @@ function CanvasView(props) {
       w: w,
       h: h,
     }
+    if (isVideo) {
+      node.data = videoDataForNew(allocateClientClipId(docRef.current), w, h)
+    }
     // 与 autoHeightPass 同一套规则：新建时就落成撑开后的高度，
     // 免得"新节点先按原样画一帧、再被自动长高"多出一步莫名其妙的撤销历史。
     // 分区不自动长高（它是容器框，标题一行就够）。
-    if (isSection === false) {
+    if (isSection === false && isVideo === false) {
       const fit = nodeTextFitHeight(node)
       if (fit > node.h) node.h = snapTo(fit, GRID)
     }
@@ -7559,6 +8610,13 @@ function CanvasView(props) {
     if (shape === 'image') {
       setPlaceTool(null)
       openImageFilePicker({ at: { x: userX, y: userY } })
+      return
+    }
+    if (shape === 'video') {
+      const file = pendingVideoRef.current
+      pendingVideoRef.current = null
+      if (file) { setPlaceTool(null); insertVideoFiles([file], userX, userY) }
+      else openVideoFilePicker()
       return
     }
     const id = nextNodeId(current)
@@ -7676,12 +8734,6 @@ function CanvasView(props) {
     })
   }
 
-  /**
-   * 按住**线上的文字**：选中这条线，并准备拖动它（drawio 的标签手柄行为）。
-   *
-   * 只是"按住"还不算拖：指针真的移动了才开始写位置（否则一次普通的点选也会改文档）。
-   * 不 preventDefault —— 双击改标签要靠浏览器把 dblclick 送到这个元素上。
-   */
   function onEdgeLabelPointerDown(edgeId, event) {
     if (event.button !== 0) return
     setSelectedIds([edgeId])
@@ -8529,6 +9581,86 @@ function CanvasView(props) {
     input.click()
   }
 
+  function openVideoFilePicker() {
+    if (!hasPath) { setSaveNote('请先保存画布，再导入视频'); return }
+    if (activeLayerLocked()) { setSaveNote('当前图层已锁定'); return }
+    const control = new AbortController()
+    if (!videoImportsRef.current) videoImportsRef.current = new Set()
+    videoImportsRef.current.add(control)
+    const input = document.createElement('input')
+    input.type = 'file'; input.accept = '.mp4,.webm,.mov,.mkv,video/mp4,video/webm,video/quicktime,video/x-matroska'
+    input.style.display = 'none'
+    const cleanup = () => { input.remove(); videoImportsRef.current.delete(control); control.signal.removeEventListener('abort', cleanup) }
+    input.oncancel = cleanup
+    control.signal.addEventListener('abort', cleanup, { once: true })
+    input.onchange = () => {
+      const file = input.files && input.files[0]
+      cleanup()
+      if (!file || control.signal.aborted) return
+      if (!videoFileExtension(file) || file.size <= 0 || file.size > VIDEO_FILE_MAX_BYTES) { setSaveNote('请选择 48MB 以内的 MP4 / WebM / MOV / MKV 视频'); return }
+      pendingVideoRef.current = file
+      setPlaceEdgeKind(null); setSelectedIds([]); setPlaceTool('video'); setMenu(null)
+      setSaveNote('已选择「' + file.name + '」，点击画布放置视频（Esc 取消）')
+    }
+    document.body.appendChild(input); input.click()
+  }
+
+  async function insertVideoFiles(files, userX, userY) {
+    if (!hasPath || !docRef.current) { setSaveNote('请先保存画布，再导入视频'); return }
+    if (activeLayerLocked()) { setSaveNote('当前图层已锁定'); return }
+    const control = new AbortController(), layerId = activeLayerId
+    if (!videoImportsRef.current) videoImportsRef.current = new Set()
+    videoImportsRef.current.add(control)
+    const check = () => {
+      if (control.signal.aborted || !docRef.current) throw new Error('已取消视频导入')
+      const layer = (docRef.current.layers || []).find((item) => item.id === layerId)
+      if (layerId !== null && !layer) throw new Error('目标图层已删除')
+      if (layer && layer.locked) throw new Error('目标图层已锁定')
+    }
+    const api = async (action, extra) => {
+      const pending = new AbortController(), abort = () => pending.abort()
+      const cancellable = action === 'media-upload-chunk' || action === 'media-upload-finish'
+      const timer = setTimeout(abort, 60000)
+      if (cancellable) control.signal.addEventListener('abort', abort, { once: true })
+      if (cancellable && control.signal.aborted) pending.abort()
+      try {
+        const result = await mediaAction(action, extra, { signal: pending.signal })
+        if (!result) throw new Error('视频上传失败，请重试')
+        return result
+      } finally { clearTimeout(timer); control.signal.removeEventListener('abort', abort) }
+    }
+    let result = null, committed = false
+    try {
+      for (let i = 0; i < files.length; i++) {
+        result = null; committed = false; check()
+        setSaveNote('正在读取视频「' + files[i].name + '」…')
+        const metadata = await readVideoFile(files[i], control.signal)
+        result = await uploadVideoFile(files[i], metadata, api, control.signal, (done, total) => {
+          if (!control.signal.aborted) setSaveNote('正在导入「' + files[i].name + '」 ' + Math.round(done / total * 100) + '%…')
+        })
+        check()
+        let id
+        applyLocal((next) => { id = applyImportedVideoToDoc(next, result, { x: userX + i * GRID * 2, y: userY + i * GRID * 2 }, layerId) })
+        committed = true; setSelectedIds([id]); setMenu(null)
+        api('media-upload-release', { clip: result.clip, token: result.token }).catch(() => {})
+      }
+      setSaveNote('已导入 ' + files.length + ' 个视频（可播放或绘制复刻，可撤销）')
+    } catch (error) {
+      let cleanupError = ''
+      if (result && !committed) {
+        try { await api('media-upload-discard', { clip: result.clip, token: result.token }) }
+        catch { cleanupError = '；临时媒体清理失败，可用媒体清理菜单清除未引用素材' }
+      }
+      setSaveNote((control.signal.aborted ? '已取消视频导入' : '视频导入失败：' + (error.message || error)) + cleanupError)
+    } finally { videoImportsRef.current.delete(control) }
+  }
+
+  function insertMediaFiles(files, userX, userY) {
+    const images = files.filter((file) => !videoFileExtension(file)), videos = files.filter((file) => videoFileExtension(file))
+    if (images.length) insertImageFiles(images, userX, userY)
+    if (videos.length) insertVideoFiles(videos, userX + (images.length ? GRID * 2 : 0), userY + (images.length ? GRID * 2 : 0))
+  }
+
   /** 方向键微移：默认一格（10px），Shift = 1px；连续按合并进同一次撤销。 */
   function nudgeSelectionByKey(key, shift) {
     const step = shift === true ? 1 : GRID
@@ -8699,17 +9831,18 @@ function CanvasView(props) {
     }
   }, [selectedIds])
 
-  // 系统剪贴板粘贴：有图片就落成 image 节点；否则回落到画布内剪贴板（节点/边）。
+  // 系统剪贴板粘贴：识别图片与视频文件；否则回落到画布内剪贴板（节点/边）。
   React.useEffect(() => {
     function onPaste(event) {
+      if (!active) return
       if (!canvasOwnsKeyboard(event, rootRef.current, document.activeElement)) return
       if (editing !== null) return
       if (isTextEntry(document.activeElement)) return
-      const files = imageFilesFromDataTransfer(event.clipboardData)
+      const files = mediaFilesFromDataTransfer(event.clipboardData)
       if (files.length > 0) {
         event.preventDefault()
         const at = viewportCenterUser()
-        insertImageFiles(files, at.x, at.y)
+        insertMediaFiles(files, at.x, at.y)
         return
       }
       if (clipboard !== null) {
@@ -8719,7 +9852,7 @@ function CanvasView(props) {
     }
     window.addEventListener('paste', onPaste, true)
     return () => window.removeEventListener('paste', onPaste, true)
-  }, [editing, selectedIds, activeLayerId])
+  }, [editing, selectedIds, activeLayerId, active, target, pageIndex, hasPath])
 
   React.useEffect(() => {
     return () => {
@@ -8988,6 +10121,33 @@ function CanvasView(props) {
         setSelectedIds([])
         setLookRequest({ requestId: wantLook.requestId })
       }
+      // AI 下发的抽帧计划（宿主挂在 read 回执上）：在浏览器里解码视频、按计划写 stills/，
+      // 完成后 POST 回 media-extract-result。同一条 requestId 只跑一次（抽帧要几十秒，轮询不停）。
+      const wantExtract = payload.media
+      if (
+        wantExtract !== null &&
+        typeof wantExtract === 'object' &&
+        typeof wantExtract.requestId === 'string' &&
+        mediaHandledRef.current !== wantExtract.requestId
+      ) {
+        const liveNodes = docRef.current !== null && Array.isArray(docRef.current.nodes) ? docRef.current.nodes : []
+        let videoNode = null
+        for (let ni = 0; ni < liveNodes.length; ni += 1) {
+          const vm = videoMetaOf(liveNodes[ni])
+          if (vm !== null && vm.clip === wantExtract.clip) {
+            videoNode = liveNodes[ni]
+            break
+          }
+        }
+        // 节点还没到手上（比如刚 importMedia，文档还没轮询回来）→ 这次不标记，下次再试。
+        if (videoNode !== null) {
+          mediaHandledRef.current = wantExtract.requestId
+          setSaveNote('按 AI 计划抽帧：' + wantExtract.seconds + 's @' + wantExtract.fps + 'fps …')
+          extractStillsFromVideo(videoNode, wantExtract).catch((error) => {
+            setSaveNote('抽帧失败：' + (error && error.message ? error.message : String(error)))
+          })
+        }
+      }
       if (parsed.error !== undefined) {
         setStatus({ kind: 'error', path: absolute, error: parsed.error, absolute: absolute })
         return
@@ -9117,6 +10277,10 @@ function CanvasView(props) {
     connectHover: connectHover,
     connectPreview: connectPreview,
     edgePreview: edgePreview,
+    videoController: videoController,
+    onVideoPlay: (id) => { setSelectedIds([id]); setMenu(null) },
+    traceDrawing,
+    onTraceDrawingComplete: finishTraceDrawing,
     onNodePointerDown: onNodePointerDown,
     onNodePointerUp: onNodePointerUp,
     onNodePointerEnter: onNodePointerEnter,
@@ -9187,7 +10351,7 @@ function CanvasView(props) {
     for (let i = 0; i < SHAPE_LIBRARY.length; i += 1) {
       const entry = SHAPE_LIBRARY[i]
       // 位图不能空手换形（没有 data URI = 空框）；粘贴 / 拖入 / 侧栏选文件才是入口。
-      if (entry.shape === 'image') continue
+      if (entry.shape === 'image' || entry.shape === 'video') continue
       // node 与 palette 必须来自同一个 colorOf —— shapeElement 的描边取自 style，填充取自 palette，
       // 只传 palette 不传 style 的话，缩略图会变成"默认填充 + 主题描边"。
       // svg 缩略图用**放下来会得到的那张占位图**（所见即所得）；它的颜色写在标记自己身上。
@@ -9232,6 +10396,12 @@ function CanvasView(props) {
     if (doc === null) return
     const shape = defaultShapeOfFamily(family, menuShape)
     const targets = railReplaceTargets()
+    if (family === 'video') {
+      pendingVideoRef.current = null
+      setPlaceTool(null); setPlaceEdgeKind(null); setRailOpenFamily(null)
+      openVideoFilePicker()
+      return
+    }
     // 线条族：悬停出四种线型；点击武装放置（空白单击或拖拽定起终点）；选中连线时打开气泡换线型。
     if (family === 'edge') {
       if (placeEdgeKind !== null) {
@@ -9423,7 +10593,221 @@ function CanvasView(props) {
     )
   }
 
-  /** 右侧常驻元素条：多变体族悬停出同族；最后一级悬停只出名称气泡。 */
+  function startVideoPlayback(node) {
+    const meta = videoMetaOf(node)
+    return meta === null ? Promise.resolve() : videoController.play(node, meta)
+  }
+
+  /**
+   * 抽帧：把 clip 的源视频用 `<video>` + canvas 解成 `stills/NNNN.png`。
+   *
+   * 两种调用：
+   *   - `extractStillsFromVideo(node, { requestId, from, seconds, fps, width, max })` —— AI 下发的计划
+   *     （宿主挂在 `read` 回执上）：按 `from + i/fps` 均匀采 `seconds` 秒，缩放到底宽 `width`
+   *     （4K 源原样写盘会把 stills/ 撑到 GB 级），完成后回执 `media-extract-result`。
+   *   - `extractStillsFromVideo(node, every, max)` —— 工具栏「抽帧」按钮的老路径：t = i/12、步长 every。
+   */
+  async function extractStillsFromVideo(node, planOrEvery, legacyMax) {
+    const meta = videoMetaOf(node)
+    if (meta === null) return
+    const plan =
+      planOrEvery !== null && typeof planOrEvery === 'object'
+        ? {
+            requestId: typeof planOrEvery.requestId === 'string' ? planOrEvery.requestId : '',
+            from: Math.max(0, Number(planOrEvery.from) || 0),
+            seconds: Math.max(0, Number(planOrEvery.seconds) || 0),
+            fps: Math.max(0.1, Math.min(60, Number(planOrEvery.fps) || DEFAULT_MEDIA_FPS)),
+            width: Math.max(16, Math.min(2048, Math.round(Number(planOrEvery.width) || 480))),
+            max: Math.max(1, Math.min(1200, Math.floor(Number(planOrEvery.max) || 360))),
+          }
+        : null
+    const src = await mediaAction('media-source-bytes', { clip: meta.clip })
+    if (src === null) return
+    const bin = atob(src.base64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i)
+    const blobUrl = URL.createObjectURL(new Blob([bytes], { type: src.mime || 'video/webm' }))
+    const video = document.createElement('video')
+    video.src = blobUrl
+    video.muted = true
+    video.playsInline = true
+    await new Promise((resolve, reject) => {
+      video.onloadeddata = () => resolve()
+      video.onerror = () => reject(new Error('video load failed'))
+    })
+    const duration = Number.isFinite(video.duration) ? video.duration : 0
+    // 采样时刻：计划路径按 fps 均匀采；老路径 t = i/12、步长 step。
+    const times = []
+    if (plan !== null && plan.seconds > 0) {
+      const count = Math.min(plan.max, Math.max(1, Math.ceil(plan.seconds * plan.fps)))
+      for (let i = 0; i < count; i += 1) {
+        const t = plan.from + i / plan.fps
+        if (duration > 0 && t > duration - 0.02) break
+        times.push(Math.max(0, duration > 0 ? Math.min(duration - 0.01, t) : 0))
+      }
+    } else {
+      const step = Math.max(1, Math.floor(Number(planOrEvery) || 1))
+      const limit = Math.max(1, Math.floor(Number(legacyMax) || 24))
+      const fpsGuess = 12
+      for (let i = 0; times.length < limit; i += step) {
+        const t = duration > 0 ? Math.min(duration - 0.01, i / fpsGuess) : 0
+        times.push(t)
+        if (duration <= 0) break
+        if (t >= duration - 0.02) break
+      }
+    }
+    // 计划路径缩放到底宽 width（高度按源比例）；老路径沿用源尺寸。
+    const canvas = document.createElement('canvas')
+    if (plan !== null) {
+      const srcW = Math.max(1, video.videoWidth || plan.width)
+      const srcH = Math.max(1, video.videoHeight || Math.round((plan.width * 9) / 16))
+      canvas.width = plan.width
+      canvas.height = Math.max(1, Math.round((plan.width * srcH) / srcW))
+    } else {
+      canvas.width = Math.max(1, video.videoWidth || 320)
+      canvas.height = Math.max(1, video.videoHeight || 180)
+    }
+    const ctx2d = canvas.getContext('2d')
+    let written = 0
+    let failure = ''
+    for (let i = 0; i < times.length; i += 1) {
+      video.currentTime = times[i]
+      await new Promise((resolve) => {
+        video.onseeked = () => resolve()
+      })
+      ctx2d.drawImage(video, 0, 0, canvas.width, canvas.height)
+      const dataUrl = canvas.toDataURL('image/png')
+      const b64 = dataUrl.replace(/^data:image\/png;base64,/, '')
+      const ok = await mediaAction('media-write-still', { clip: meta.clip, index: i, pngBase64: b64 })
+      if (ok === null) {
+        failure = '第 ' + i + ' 帧写盘失败'
+        break
+      }
+      written += 1
+      if (plan !== null && (i % 10 === 0 || i === times.length - 1)) setSaveNote('抽帧 ' + written + '/' + times.length + ' …')
+    }
+    try {
+      URL.revokeObjectURL(blobUrl)
+    } catch (error) {
+      // ignore
+    }
+    if (plan !== null && plan.requestId.length > 0) {
+      await mediaAction('media-extract-result', { requestId: plan.requestId, written: written, error: failure })
+    }
+    setSaveNote(
+      '已抽取 ' + written + ' 帧到 stills/，可用 AI traceFrame 转 SVG' + (failure.length > 0 ? '（' + failure + '）' : ''),
+    )
+  }
+
+  async function encodeSvgFramesToWebm(node) {
+    const meta = videoMetaOf(node)
+    if (meta === null) return
+    const info = await mediaAction('media-manifest', { clip: meta.clip })
+    if (info === null || info.missing) return
+    const frames = Array.isArray(info.manifest.frames) ? info.manifest.frames : []
+    if (frames.length === 0) {
+      setSaveNote('没有 SVG 帧可编码')
+      return
+    }
+    if (typeof MediaRecorder === 'undefined') {
+      setSaveNote('当前浏览器不支持 MediaRecorder，无法编码 webm')
+      return
+    }
+    const w = Math.max(2, Math.round(Number(node.w) || 320))
+    const h = Math.max(2, Math.round(Number(node.h) || 180))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx2d = canvas.getContext('2d')
+    const stream = canvas.captureStream(Math.max(1, meta.fps))
+    let audio = null, audioUrl = null, audioContext = null, recorder = null
+    try {
+      const signal = new AbortController().signal
+      const offset = Number(info.manifest.sourceOffset) || 0
+      if (info.hasSource) {
+        const AudioContextType = window.AudioContext || window.webkitAudioContext
+        if (!AudioContextType) throw new Error('当前浏览器不支持带音频导出')
+        // 在用户点击导出时解锁音频上下文；仅连接录制流，不向扬声器输出。
+        audioContext = new AudioContextType()
+        await audioContext.resume()
+        const source = await mediaAction('media-source-bytes', { clip: meta.clip })
+        if (!source) throw new Error('无法读取导出音频来源')
+        audioUrl = URL.createObjectURL(new Blob([Uint8Array.from(atob(source.base64), (c) => c.charCodeAt(0))], { type: source.mime }))
+        audio = document.createElement('audio'); audio.preload = 'auto'
+        await waitForVideoTraceEvent(audio, 'loadeddata', signal, () => { audio.src = audioUrl; audio.load() })
+        if (offset > 0) await waitForVideoTraceEvent(audio, 'seeked', signal, () => { audio.currentTime = offset })
+        const destination = audioContext.createMediaStreamDestination()
+        audioContext.createMediaElementSource(audio).connect(destination)
+        destination.stream.getAudioTracks().forEach((track) => stream.addTrack(track))
+      }
+      const drawFrame = async (i) => {
+        const fr = await mediaAction('media-frame', { clip: meta.clip, index: i })
+        if (!fr) throw new Error('无法读取第 ' + (i + 1) + ' 帧')
+        const img = new Image()
+        await new Promise((resolve, reject) => {
+          img.onload = resolve; img.onerror = () => reject(new Error('frame image failed'))
+          img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(fr.svg)
+        })
+        ctx2d.fillStyle = '#000'; ctx2d.fillRect(0, 0, w, h); ctx2d.drawImage(img, 0, 0, w, h)
+      }
+      await drawFrame(0)
+      recorder = new MediaRecorder(stream, { mimeType: 'video/webm' })
+      const chunks = []
+      recorder.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) chunks.push(ev.data) }
+      const done = new Promise((resolve, reject) => { recorder.onstop = resolve; recorder.onerror = (event) => reject(event.error || new Error('录制失败')) })
+      // 立即挂接错误处理，避免录制过程中出现未处理拒绝。
+      done.catch(() => {})
+      if (audio) await audio.play()
+      recorder.start()
+      const started = performance.now(), duration = frames.length / meta.fps
+      let drawn = 0, lastTime = -1, lastProgress = started
+      while (true) {
+        if (audio && audio.error) throw new Error('音频解码失败，导出已中止')
+        const elapsed = audio && !audio.ended ? Math.max(0, audio.currentTime - offset) : (performance.now() - started) / 1000
+        if (elapsed !== lastTime) { lastTime = elapsed; lastProgress = performance.now() }
+        if (performance.now() - lastProgress > 15000) throw new Error('音频播放无响应，导出已中止')
+        if (elapsed >= duration) break
+        const i = Math.min(frames.length - 1, Math.floor(elapsed * meta.fps))
+        if (i !== drawn) { await drawFrame(i); drawn = i }
+        await new Promise((resolve) => setTimeout(resolve, Math.max(4, 500 / meta.fps)))
+      }
+      recorder.stop(); if (audio) audio.pause()
+      await done
+      const url = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }))
+      const a = document.createElement('a'); a.href = url
+      a.download = (typeof target === 'string' ? target.replace(/\.drawio$/i, '') : 'clip') + '-' + meta.clip + '.webm'
+      a.click(); URL.revokeObjectURL(url)
+      setSaveNote('已导出 webm（浏览器下载' + (audio ? '，含原视频音频' : '') + '）')
+    } finally {
+      if (recorder && recorder.state !== 'inactive') recorder.stop()
+      stream.getTracks().forEach((track) => track.stop())
+      if (audio) { audio.pause(); audio.removeAttribute('src'); audio.load() }
+      if (audioUrl) URL.revokeObjectURL(audioUrl)
+      if (audioContext) await audioContext.close()
+    }
+  }
+
+  async function grabVideoStill(node) {
+    const meta = videoMetaOf(node)
+    if (!meta) throw new Error('视频缺少媒体信息，请重新导入')
+    const before = videoController.get(node.id)
+    if (before.status === 'loading') throw new Error('正在加载视频')
+    const needLoad = !before.kind || before.status === 'idle' || before.status === 'error'
+    if (needLoad) await videoController.play(node, meta)
+    let shot = null
+    let lastError = null
+    for (let i = 0; i < 50; i += 1) {
+      const state = videoController.get(node.id)
+      if (state.status === 'error') throw new Error(state.error || '无法读取视频')
+      try { shot = videoController.still(node.id); break }
+      catch (error) { lastError = error; await new Promise((resolve) => setTimeout(resolve, 60)) }
+    }
+    if (!shot) throw lastError || new Error('无法读取当前画面')
+    if (needLoad && videoController.get(node.id).status === 'playing') videoController.pause(node.id)
+    applyLocal((next) => placeVideoStill(next, node.id, shot))
+    setSaveNote(shot.kind === 'svg' ? '已把当前 SVG 帧抽到右侧' : '已把当前帧抽成右侧的图像节点')
+  }
+
   function renderSelectionToolbar() {
     if (doc === null || view === null || editing !== null || menu !== null || placeEdgeKind !== null || placeTool !== null) return null
     const ids = filterEditableIds(doc, selectedIds)
@@ -9443,6 +10827,57 @@ function CanvasView(props) {
     const top = (bounds.y - view.y) * scale
     const bottom = (bounds.y + bounds.h - view.y) * scale
     const width = Math.min(460, Math.max(0, size.w - 16))
+    if (nodes.length === 1 && edges.length === 0 && isVideoNodeData(nodes[0].data)) {
+      const node = nodes[0]
+      const meta = videoMetaOf(node)
+      const mediaWidth = Math.min(meta && meta.kind === 'raster' ? 300 : 220, Math.max(0, size.w - 16))
+      const position = { width: mediaWidth + 'px',
+        left: clampNumber(center - mediaWidth / 2, 8, Math.max(8, size.w - mediaWidth - 8)) + 'px',
+        top: clampNumber(top >= 84 ? top - 72 : bottom + 12, 8, Math.max(8, size.h - 72)) + 'px' }
+      const reportError = (error) => setSaveNote('媒体操作失败：' + (error.message || String(error)))
+      const actions = [
+        { label: '绘制复刻…', primary: true, mediaKind: 'raster', disabled: () => !hasPath || !meta || meta.kind !== 'raster' || videoTraceRun.current !== null,
+          run: () => { setVideoTraceSource({ id: node.id, clip: meta.clip, w: Number(node.data.mediaW), h: Number(node.data.mediaH),
+            duration: Number(node.data.mediaDuration) || videoController.get(node.id).duration }); setVideoTraceJob(null) } },
+        { label: '抽帧', grab: true, disabled: (state) => state.status === 'loading', run: () => grabVideoStill(node) },
+        { label: '导出 SVG 视频', export: true, mediaKind: 'svg', disabled: () => !hasPath || !meta || meta.kind !== 'svg', run: async () => {
+          if (!meta) return
+          const result = await mediaAction('media-pack-svgvideo', { clip: meta.clip })
+          if (result) setSaveNote('已导出 ' + result.path)
+        } },
+        { label: '导出 WebM', export: true, mediaKind: 'svg', disabled: () => !hasPath || !meta || meta.kind !== 'svg', run: () => encodeSvgFramesToWebm(node) },
+        { label: '导出源视频', export: true, mediaKind: 'raster', disabled: () => !hasPath || !meta || meta.kind !== 'raster', run: async () => {
+          if (!meta) return
+          const result = await mediaAction('media-export-source', { clip: meta.clip })
+          if (result) setSaveNote('已导出源视频 ' + result.path)
+        } },
+      ]
+      return React.createElement('div', { className: 'drawai-selection-toolbar drawai-video-toolbar', style: position },
+        React.createElement(VideoControls, { compact: true, controller: videoController, node, meta, actions, onError: reportError,
+          renderDraw: (action, state, icon) => React.createElement(ToolbarPopover, {
+            key: 'video-draw-' + node.id, label: '绘制复刻', icon, group: 'drawai-video-' + uid,
+
+            disabled: action.disabled(state), disabledTitle: '请先保存画布，或等待当前复刻完成',
+            renderPanel: (close) => React.createElement(VideoTracePanel, { inline: true, source: {
+              id: node.id, clip: meta.clip, w: Number(node.data.mediaW), h: Number(node.data.mediaH),
+              duration: Number(node.data.mediaDuration) || videoController.get(node.id).duration,
+            }, onClose: close, onStart: (options) => {
+              const source = { id: node.id, clip: meta.clip, w: Number(node.data.mediaW), h: Number(node.data.mediaH),
+                duration: Number(node.data.mediaDuration) || videoController.get(node.id).duration }
+              close(); setVideoTraceSource(source); startVideoTrace(options, source)
+            } }),
+          }),
+          renderExport: (items, state, run, icon) => React.createElement(ToolbarPopover, {
+            key: 'video-export-' + node.id, label: '导出', icon, group: 'drawai-video-' + uid,
+            disabled: items.every((action) => action.disabled(state)), disabledTitle: '请先保存画布后再导出',
+            renderPanel: (close) => React.createElement('div', { className: 'drawai-video-export-options' },
+              React.createElement('div', { className: 'drawai-popover-title' }, '导出视频'),
+              items.map((action) => React.createElement('button', { key: action.label, type: 'button', className: 'drawai-choice-button',
+                disabled: action.disabled(state), onClick: () => { close(); run(action) },
+              }, action.label))),
+          }),
+        }))
+    }
     const styleOf = (cell) => typeof cell.style === 'string' ? cell.style : ''
     // 每个对象只更新本次指定的键，混合选区保留各自其余样式。
     const patch = (change, targets = ids, coalesceKey) => applyLocal((next) => {
@@ -9489,6 +10924,18 @@ function CanvasView(props) {
       })
     }
     const controls = []
+    if (nodes.length === 1 && edges.length === 0 && !isVideoNodeData(nodes[0].data) &&
+      (nodeShapeFromStyle(styleOf(nodes[0])) === 'image' ||
+        (styleGet(styleOf(nodes[0]), 'shape', '') === 'image' && !isSvgDataUri(imageValueFromStyle(styleOf(nodes[0])))))) {
+      const image = imageValueFromStyle(styleOf(nodes[0]))
+      const canTrace = isRasterDataUri(image)
+      controls.push(React.createElement(ImageTraceControl, {
+        key: 'image-trace-' + nodes[0].id, group: 'drawai-colors-' + uid,
+
+        source: { id: nodes[0].id, image: canTrace ? image : '' },
+        disabled: !canTrace, onGenerate: generateImageTrace, onApply: applyImageTrace,
+      }))
+    }
     if (nodes.length > 0) {
       // 只有基础图形之间可以直接换形；SVG/图片/文字/分区保留自身类别。
       const canChangeShape = nodes.every((n) => isBasicShapeStyle(styleOf(n)))
@@ -9502,12 +10949,17 @@ function CanvasView(props) {
             }
           }
         })))
-      const filled = nodes.filter((n) => !['text', 'svg', 'image'].includes(nodeShapeFromStyle(styleOf(n))))
+      const filled = nodes.filter((n) => {
+        if (isVideoNodeData(n.data)) return false
+        return !['text', 'svg', 'image'].includes(nodeShapeFromStyle(styleOf(n)))
+      })
       if (filled.length > 0) controls.push(color('填充', 'fillColor', filled, '#ffffff'))
     }
-    controls.push(color('描边', 'strokeColor', cells, '#000000'))
-    controls.push(color('字色', 'fontColor', cells, '#000000'))
-    controls.push(select('字号', uniform(cells, (cell) => String(styleGet(styleOf(cell), 'fontSize', edges.indexOf(cell) >= 0 ? '10' : '12'))),
+    const strokeCells = cells.filter((cell) => edges.includes(cell) || (!isVideoNodeData(cell.data) && !['text', 'svg', 'image'].includes(nodeShapeFromStyle(styleOf(cell)))))
+    if (strokeCells.length) controls.push(color('描边', 'strokeColor', strokeCells, '#000000'))
+    const labelCells = cells.filter((cell) => edges.includes(cell) || nodeShowsLabel(cell))
+    if (labelCells.length > 0) controls.push(color('字色', 'fontColor', labelCells, '#000000'))
+    if (labelCells.length > 0) controls.push(select('字号', uniform(labelCells, (cell) => String(styleGet(styleOf(cell), 'fontSize', edges.indexOf(cell) >= 0 ? '10' : '12'))),
       [10, 12, 14, 18, 24, 36, 48, 72].map((n) => [String(n), String(n)]), (value) => patch({ fontSize: value }),
       React.createElement('label', { className: 'drawai-font-custom' }, '自定义字号',
       React.createElement('input', { type: 'number', min: 8, max: 72, 'aria-label': '字号', placeholder: '混合',
@@ -9927,27 +11379,35 @@ function CanvasView(props) {
       const nodeTargets = styleTargets(selectedIds, menu.id, (id) => nodeById(id) !== null)
       rows.push(menuTitle('节点：' + label + (nodeTargets.length > 1 ? '（共 ' + nodeTargets.length + ' 个）' : '')))
       // 换形走右侧常驻元素条（悬停/选中后点同族形状）；右键只留配色/字色/字号与动作。
-      const isTextNode = nodeShapeFromStyle(nodeStyle) === 'text'
       const currentShape = nodeShapeFromStyle(nodeStyle)
-      rows.push.apply(
+      const showsLabel = node !== null && nodeShowsLabel(node)
+      const labelOnlyColor = showsLabel && ['text', 'svg'].includes(currentShape)
+      if (showsLabel) rows.push.apply(
         rows,
         menuSelectRow([
           {
             key: 'color',
-            label: isTextNode ? '字色' : '配色',
+            label: labelOnlyColor ? '字色' : '配色',
             value: styleSummary(nodeStyle, 'color'),
-            hint: isTextNode ? '独立文字只有字色可换' : '填充与描边',
+            hint: labelOnlyColor ? '标签文字的颜色' : '填充与描边',
             body: swatchRow(
               (color) => {
-                updateNode(nodeTargets, { style: isTextNode ? styleWithTextColorName(nodeStyle, color) : styleWithColorName(nodeStyle, color) })
+                applyLocal((next) => {
+                  for (const target of next.nodes) {
+                    if (!nodeTargets.includes(target.id)) continue
+                    const nodeStyle = target.style || ''
+                    target.style = labelOnlyColor ? styleWithTextColorName(nodeStyle, color) : styleWithColorName(nodeStyle, color)
+                  }
+                })
                 closeSelect()
               },
-              isTextNode ? textColorNameFromStyle(nodeStyle) : colorNameFromStyle(nodeStyle),
+              labelOnlyColor ? textColorNameFromStyle(nodeStyle) : colorNameFromStyle(nodeStyle),
+              labelOnlyColor ? 'font' : undefined,
             ),
           },
           // 字色：普通节点也能改标签颜色（`fontColor` 键）。独立文字上面那一类已经是字色了，
           // 再给一类就是同一件事的两个入口 —— 所以只对"有填充描边"的元素出现。
-          ...(isTextNode
+          ...(labelOnlyColor
             ? []
             : [
                 {
@@ -9979,9 +11439,9 @@ function CanvasView(props) {
         React.createElement(
           'div',
           { className: 'drawai-menu-row' },
-          React.createElement('button', { className: 'drawai-btn', onClick: () => openNodeEditor(menu.id) }, '改标签'),
+          showsLabel ? React.createElement('button', { className: 'drawai-btn', onClick: () => openNodeEditor(menu.id) }, '改标签') : null,
           // 仅编辑已有 SVG 内容；右键不提供跨类别创建或转换入口。
-          currentShape === 'svg' ? React.createElement(
+          currentShape === 'svg' && isVideoNodeData(node.data) === false ? React.createElement(
             'button',
             {
               className: 'drawai-btn',
@@ -9989,6 +11449,35 @@ function CanvasView(props) {
             },
             'SVG 内容…',
           ) : null,
+          isVideoNodeData(node.data)
+            ? React.createElement(
+                'button',
+                {
+                  className: 'drawai-btn',
+                  onClick: async () => {
+                    setMenu(null)
+                    const meta = videoMetaOf(node)
+                    if (meta === null) return
+                    const r = await mediaAction('media-export-source', { clip: meta.clip })
+                    if (r !== null) setSaveNote('已导出源视频 ' + r.path)
+                  },
+                },
+                '导出源视频…',
+              )
+            : null,
+          isVideoNodeData(node.data)
+            ? React.createElement(
+                'button',
+                {
+                  className: 'drawai-btn',
+                  onClick: async () => {
+                    setMenu(null)
+                    await startVideoPlayback(node)
+                  },
+                },
+                '播放视频',
+              )
+            : null,
           currentShape === 'section'
             ? React.createElement(
                 'button',
@@ -10455,7 +11944,7 @@ function CanvasView(props) {
           { className: 'drawai-pick' },
           shapeGrid(
             (shape) => {
-              if (shape === 'text' || shape === 'svg' || shape === 'image') return
+              if (shape === 'text' || shape === 'svg' || shape === 'image' || shape === 'video') return
               patchPrefs({ defaultShape: shape })
             },
             { color: prefs.defaultColor || menuStyle, current: prefs.defaultShape || menuShape },
@@ -10829,6 +12318,27 @@ function CanvasView(props) {
             disabled: empty || (hasPath && !canSave),
           }),
           ...(hasPath ? [item('另存为…', openSaveAsPanel, { group: 'save', disabled: empty })] : []),
+          ...(hasPath
+            ? [
+                item('导出画布包…', async () => {
+                  const r = await mediaAction('media-pack-bundle', {})
+                  if (r !== null) setSaveNote('已导出画布包 ' + r.path)
+                }, { group: 'bundle', hint: '打包 .drawio + *.media 为 .drawai.zip' }),
+                item('导入画布包…', async () => {
+                  const file = typeof window !== 'undefined' ? window.prompt('工作区内的 .drawai.zip / .zip 路径', '') : null
+                  if (typeof file !== 'string' || file.trim().length === 0) return
+                  const r = await mediaAction('media-unpack-bundle', { file: file.trim() })
+                  if (r !== null) {
+                    setSaveNote('已导入 ' + r.path)
+                    if (typeof onOpenTab === 'function') onOpenTab(r.path)
+                  }
+                }, { group: 'bundle', hint: '解压 zip 得到 .drawio + *.media' }),
+                item('清理未引用媒体', async () => {
+                  const r = await mediaAction('media-cleanup', { doc: docRef.current })
+                  if (r !== null) setSaveNote('已清理 ' + (Array.isArray(r.removed) ? r.removed.length : 0) + ' 个未引用 clip')
+                }, { group: 'bundle', hint: '删除 *.media 里没有节点引用的 clip' }),
+              ]
+            : []),
           item('重新载入', () => setNonce((n) => n + 1), { group: 'reload', disabled: empty }),
         ],
       },
@@ -11011,17 +12521,20 @@ function CanvasView(props) {
           if (event.button === 1) event.preventDefault()
         },
         onDragOver: (event) => {
-          if (imageFilesFromDataTransfer(event.dataTransfer).length === 0) return
+          if (!hasMediaFileDrag(event.dataTransfer)) return
           event.preventDefault()
           event.dataTransfer.dropEffect = 'copy'
         },
         onDrop: (event) => {
-          const files = imageFilesFromDataTransfer(event.dataTransfer)
-          if (files.length === 0) return
+          const files = mediaFilesFromDataTransfer(event.dataTransfer)
+          if (files.length === 0) {
+            if (hasMediaFileDrag(event.dataTransfer)) event.preventDefault()
+            return
+          }
           event.preventDefault()
           const point = toUserSpace(event)
           const at = point === null ? viewportCenterUser() : point
-          insertImageFiles(files, at.x, at.y)
+          insertMediaFiles(files, at.x, at.y)
         },
       },
       canvasChildren,
@@ -11056,6 +12569,14 @@ function CanvasView(props) {
     // 4) 工作栏的下拉与「打开/新建/另存为」面板：挂在 root 上（不在画布里），
     //    否则插进标签条之后它们的参照系会算成画布上方的负坐标，被 overflow:hidden 裁掉。
     renderDocMenu(),
+    videoTraceSource && videoTraceJob ? React.createElement(VideoTraceStatusCard, { job: videoTraceJob,
+      onRetry: () => startVideoTrace(videoTraceJob.options, videoTraceSource), onCancel: () => {
+        setVideoTraceJob((job) => Object.assign({}, job, { message: '正在取消并清理临时帧…' }))
+        videoTraceRun.current?.abort()
+      },
+      onClose: () => { setVideoTraceSource(null); setVideoTraceJob(null) } }) : null,
+    React.createElement(VideoPreview, { controller: videoController, nodes: doc === null ? [] : doc.nodes,
+      metaOf: videoMetaOf, posterOf: videoPosterOf }),
     React.createElement('div', { className: 'drawai-note' }, note),
   )
 }
@@ -11364,6 +12885,18 @@ exports.__routeInternals = {
   layerPreviewDoc: layerPreviewDoc,
   LayersPanel: LayersPanel,
   ExportPanel: ExportPanel,
+  ImageTracePanel: ImageTracePanel,
+  VideoTracePanel: VideoTracePanel,
+  VideoTraceStatusCard: VideoTraceStatusCard,
+  videoTracePlan: videoTracePlan,
+  waitForVideoTraceEvent: waitForVideoTraceEvent,
+  applyVideoTraceToDoc: applyVideoTraceToDoc,
+  ImageTraceControl: ImageTraceControl,
+  ToolbarPopover: ToolbarPopover,
+  applyImageTraceToDoc: applyImageTraceToDoc,
+  traceDrawingLayers: traceDrawingLayers,
+  createTraceDrawingPlayback: createTraceDrawingPlayback,
+  TraceDrawingSurface: TraceDrawingSurface,
   exportDocument: exportDocument,
   exportGeometry: exportGeometry,
   exportOutputSize: exportOutputSize,
@@ -11393,6 +12926,7 @@ exports.__routeInternals = {
   nodeTextFitHeight: nodeTextFitHeight,
   nodeBoxOf: nodeBoxOf,
   labelTextBox: labelTextBox,
+  imageContentRect: imageContentRect,
   labelTextWidth: labelTextWidth,
   labelWraps: labelWraps,
   labelLineHeight: labelLineHeight,
@@ -11478,6 +13012,12 @@ exports.__routeInternals = {
   collectClipboard: collectClipboard,
   pasteInto: pasteInto,
   imageFilesFromDataTransfer: imageFilesFromDataTransfer,
+  mediaFilesFromDataTransfer: mediaFilesFromDataTransfer,
+  hasMediaFileDrag: hasMediaFileDrag,
+  videoFileExtension: videoFileExtension,
+  readVideoFile: readVideoFile,
+  uploadVideoFile: uploadVideoFile,
+  applyImportedVideoToDoc: applyImportedVideoToDoc,
   fitImageNodeSize: fitImageNodeSize,
   IMAGE_PASTE_MAX_SIDE: IMAGE_PASTE_MAX_SIDE,
   IMAGE_PASTE_MAX_BYTES: IMAGE_PASTE_MAX_BYTES,

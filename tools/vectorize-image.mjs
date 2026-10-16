@@ -14,6 +14,7 @@
  *        [--min-area 10] [--min-region-area 0]
  *        [--protect-luma 110] [--majority-contrast 40]
  *        [--bg-bright 238] [--bg-tol 10] [--bg-color #ffffff]
+ *        --remove-bg true|false
  *        [--seeds 3] [--budget 50000]
  *        [--out-style <输出.style.txt>] [--out-labels <标签图.json>]
  */
@@ -67,12 +68,20 @@ const cliOpts = {
   bgBright: optNum('bg-bright'),
   bgTol: optNum('bg-tol'),
   bgColor: argv.indexOf('--bg-color') >= 0 ? arg('bg-color', TRACE_DEFAULTS.bgColor) : undefined,
+  removeBg: argv.indexOf('--remove-bg') >= 0 ? arg('remove-bg', null) : undefined,
+  bgSolidTol: optNum('bg-solid-tol'),
+  bgSolidBorderRatio: optNum('bg-solid-border-ratio'),
   seeds: optNum('seeds'),
   maxBytes: optNum('budget'),
   includeLabels: OUT_LABELS !== null,
 }
 for (const key of Object.keys(cliOpts)) {
   if (cliOpts[key] === undefined) delete cliOpts[key]
+}
+if (cliOpts.removeBg === undefined || cliOpts.removeBg === null || cliOpts.removeBg === true) {
+  // arg() 在缺值时返回 true（flag 形态）—— 必须写成 --remove-bg true|false
+  console.error('必须显式传 --remove-bg true 或 --remove-bg false（不再支持 auto / 省略）')
+  process.exit(2)
 }
 const out = traceRasterToSvg(raster, cliOpts)
 const traceMs = Date.now() - t1

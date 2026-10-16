@@ -316,7 +316,11 @@ console.log('\ndiagram_read 的输出 schema 必须声明返回体里所有字�
       ok(edgeProps[field] !== undefined, 'edges schema 声明了 ' + field)
     }
     const nodeProps = readSchema.properties.nodes.items.properties
-    for (const field of ['id', 'label', 'shape', 'style', 'layer', 'svg']) {
+    for (const field of [
+      'id', 'label', 'shape', 'style', 'layer', 'svg', 'image', 'fontColor', 'parent',
+      // 视频节点摘要：漏声明会让画布里一旦有视频，diagram_read 整次被判非法输出
+      'mediaKind', 'mediaClip', 'fps', 'posterFrame', 'frameCount', 'duration', 'hasSource', 'mediaMissing',
+    ]) {
       ok(nodeProps[field] !== undefined, 'nodes schema 声明了 ' + field)
     }
     const layerProps = readSchema.properties.layers.items.properties
@@ -342,6 +346,21 @@ console.log('\ndiagram_read 的输出 schema 必须声明返回体里所有字�
   ok(out.edges[0].dash === 'dashed' && out.edges[0].arrow === 'both' && out.edges[0].color === '#b85450', '带回的边画法确实是设过的值')
   // 派生字段只是给人/模型看的名字，文档的真相在 style 串里 —— 两者必须同时给得出来。
   ok(styleGet(out.edges[0].style, 'dashed', null) === '1' && styleGet(out.edges[0].style, 'startArrow', null) === 'classic', 'read 的 style 串里能直接看到 drawio 键')
+
+  // 视频节点会往 nodes[] 塞 mediaKind/mediaClip/fps/… —— 漏声明同样踩 additionalProperties:false。
+  await apply([{ op: 'addNode', shape: 'video', x: 40, y: 40, as: 'vid', fps: 12 }])
+  const videoOut = await readTool.execute({ path: 'doc.drawio' }, exec)
+  const videoNode = videoOut.nodes.filter((n) => n.shape === 'video')[0]
+  ok(videoNode !== undefined, 'read 能看到 video 节点')
+  ok(typeof videoNode.mediaClip === 'string' && videoNode.mediaClip.length > 0, 'video 带回 mediaClip')
+  ok(videoNode.mediaKind === 'svg' && videoNode.fps === 12, 'video 带回 mediaKind/fps')
+  ok(typeof videoNode.frameCount === 'number' && typeof videoNode.hasSource === 'boolean', 'video 带回 frameCount/hasSource')
+  let videoUndeclared = []
+  for (const n of videoOut.nodes) for (const k of Object.keys(n)) if (declaredNode[k] === undefined) videoUndeclared.push('nodes[].' + k)
+  ok(videoUndeclared.length === 0, '视频节点字段全部在 schema 里（未声明：' + (videoUndeclared.join(', ') || '无') + '）')
+  const applySchema = applyTool.output && applyTool.output.schema ? applyTool.output.schema : null
+  ok(applySchema !== null && applySchema.properties.media !== undefined, 'diagram_apply 声明了 media 回执字段')
+  ok(applySchema.properties.trace.items.properties.frame !== undefined, 'diagram_apply.trace 声明了 frame（traceFrame 回执）')
 }
 
 console.log('\n图层：AI 至少要知道"东西在哪几层、哪一层用户看不见"')

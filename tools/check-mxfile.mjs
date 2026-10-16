@@ -89,7 +89,7 @@ const plain = parseMxfile(PLAIN)
   for (const n of plain.doc.nodes) byId[n.id] = n
   ok(plain.doc.version === 2, '导入结果就是 v2 文档（version=2）')
   ok(plain.doc.nodes.length === 3, '三个顶点：容器 / 子节点 / 图片形状（实际 ' + plain.doc.nodes.length + '）')
-  ok(byId.cont1 !== undefined && byId.cont1.label === '分组 容器', '<object> 包装的 id 与 label 都取到了（label=' + JSON.stringify(byId.cont1 && byId.cont1.label) + '）')
+  ok(byId.cont1 !== undefined && byId.cont1.label === '分组\n容器', '<object> 包装的 id 与 label 都取到了，<br> 折成换行（label=' + JSON.stringify(byId.cont1 && byId.cont1.label) + '）')
   ok(byId.cont1.x === 100 && byId.cont1.y === 50 && byId.cont1.w === 400 && byId.cont1.h === 300, '容器几何正确（' + [byId.cont1.x, byId.cont1.y, byId.cont1.w, byId.cont1.h].join(',') + '）')
   // 子单元在 drawio 里是**相对父级**的：20,30 + 容器 100,50 = 120,80
   ok(byId.child1.x === 120 && byId.child1.y === 80, '容器的子单元坐标被换算成绝对坐标（120,80）')
@@ -677,6 +677,40 @@ console.log('\n[10] 图层（v1：读出来、显示/隐藏、新建、新单元
   // 没有 layers 的文档（老模型 / 空文档）→ 仍然写缺省的单图层
   const plain = buildMxfile({ version: 2, meta: {}, nodes: [{ id: 'n1', label: 'A', style: '', x: 0, y: 0, w: 80, h: 40 }], edges: [] })
   ok(plain.text.indexOf('<mxCell id="1" parent="0" />') > 0 && plain.text.indexOf('parent="1"') > 0, '没有图层信息时退回缺省的单图层写法')
+}
+
+console.log('\n[HTML 标签纯文本折算] &nbsp; / br / table')
+{
+  const htmlLabels = `<mxfile host="test">
+  <diagram name="Page-1">
+    <mxGraphModel>
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="nbsp1" value="插件类型&amp;nbsp;&amp;nbsp;插件名字" style="text;html=1;" parent="1" vertex="1">
+          <mxGeometry x="0" y="0" width="200" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="br1" value="第一行&lt;br&gt;第二行" style="text;html=1;" parent="1" vertex="1">
+          <mxGeometry x="0" y="50" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="tbl1" value="&lt;table&gt;&lt;tr&gt;&lt;td&gt;类型&lt;/td&gt;&lt;td&gt;名字&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;out&lt;/td&gt;&lt;td&gt;wav&lt;/td&gt;&lt;/tr&gt;&lt;/table&gt;" style="text;html=1;" parent="1" vertex="1">
+          <mxGeometry x="0" y="100" width="200" height="60" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>`
+  const parsed = parseMxfile(htmlLabels)
+  const byId = {}
+  for (const n of parsed.doc.nodes) byId[n.id] = n
+  ok(byId.nbsp1.label.indexOf('&nbsp;') < 0, '&nbsp; 不再作为字面量留下：' + JSON.stringify(byId.nbsp1.label))
+  ok(byId.nbsp1.label === '插件类型\u00A0\u00A0插件名字' || byId.nbsp1.label === '插件类型  插件名字' || /^插件类型\s+插件名字$/.test(byId.nbsp1.label),
+    '&nbsp; 解码成空白：' + JSON.stringify(byId.nbsp1.label))
+  ok(byId.br1.label === '第一行\n第二行', '<br> 折成换行：' + JSON.stringify(byId.br1.label))
+  ok(byId.tbl1.label.indexOf('类型') >= 0 && byId.tbl1.label.indexOf('名字') >= 0 && byId.tbl1.label.indexOf('out') >= 0,
+    '表格单元格文本都在：' + JSON.stringify(byId.tbl1.label))
+  ok(/\n/.test(byId.tbl1.label) || /\s/.test(byId.tbl1.label), '表格粗折算保留行或列间距：' + JSON.stringify(byId.tbl1.label))
+  ok(parsed.notes.some((n) => /HTML 标签按纯文本/.test(n)), 'notes 仍说明 HTML 按纯文本')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
