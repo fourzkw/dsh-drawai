@@ -79,7 +79,7 @@ assert.ok(adaptiveThresholds.low.target <= adaptiveThresholds.medium.target && a
 const referenceRaster = decodePng(readFileSync(new URL('./fixtures/image-trace-reference.png', import.meta.url)))
 const calibrated = { low: [899, 320, 569], medium: [1227, 400, 711], high: [1467, 499, 887] }
 for (const [level, [fragments, width, height]] of Object.entries(calibrated)) {
-  const traced = traceRasterForToolbar(referenceRaster, { level, colors: 12, removeBg: false })
+  const traced = traceRasterForToolbar(referenceRaster, { level, colors: 12, removeBg: false, adaptiveDarkColors: false })
   assert.equal(traced.metrics.fragments, fragments, `${level} 保持已目视验证的参考碎片密度`)
   assert.deepEqual(traced.metrics.work, { width, height, scale: 1 })
   assert.equal(traced.metrics.optionsApplied.epsilon, 2)
@@ -137,6 +137,23 @@ assert.equal((await request({ ...requestBody, sessionId: 'missing' })).status, 4
 assert.equal((await request({ ...requestBody, level: 'invalid' })).status, 400)
 assert.equal((await request({ ...requestBody, image: 'https://example.com/image.png' })).status, 400)
 assert.equal((await request(requestBody, {})).status, 403)
+// A valid PNG ancillary text chunk makes the encoded source exceed 4MiB,
+// without making the trace itself costly or relying on invalid trailing bytes.
+const pngBytes = Buffer.from(image.split(',')[1], 'base64')
+const ancillary = Buffer.alloc(4 * 1024 * 1024 + 12, 65)
+ancillary.writeUInt32BE(ancillary.length - 12, 0)
+ancillary.write('tEXt', 4)
+ancillary.write('description\0', 8)
+let crc = 0xffffffff
+for (const byte of ancillary.subarray(4, -4)) {
+  crc ^= byte
+  for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0)
+}
+ancillary.writeUInt32BE((crc ^ 0xffffffff) >>> 0, ancillary.length - 4)
+const largeImage = 'data:image/png;base64,' + Buffer.concat([pngBytes.subarray(0, -12), ancillary, pngBytes.subarray(-12)]).toString('base64')
+const largeTrace = await request({ ...requestBody, image: largeImage })
+assert.equal(largeTrace.status, 200, 'image drawing accepts encoded sources exceeding 4MiB')
+assert.equal(largeTrace.payload.svg, generated.payload.svg, 'large metadata does not alter drawn pixels')
 
 // 通过真实客户端组合源码执行面板与文档变更：一键生成并落盘（始终保留原图）。
 const slots = []
@@ -172,6 +189,12 @@ nodes = render()
 await button(nodes, '让大肥鱼开始画画！').props.onClick()
 assert.equal(options.level, 'high')
 assert.equal(applied.result.svg, generated.payload.svg)
+let enqueuedOptions
+props.onEnqueue = (value) => { enqueuedOptions = value }
+props.onGenerate = () => assert.fail('queued submission must not start a second immediate calculation')
+await button(render(), '加入绘制队列').props.onClick()
+assert.equal(enqueuedOptions.level, 'high', 'queue captures the selected drawing options')
+delete props.onEnqueue
 
 const doc = { nodes: [{ id: 'a', x: 10, y: 20, w: 100, h: 80, layer: 'L1', style: styleWithImageDataUri('', image) }], edges: [], layers: [{ id: 'L1', name: '图片' }], meta: {} }
 const copy = structuredClone(doc)

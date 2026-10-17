@@ -42,7 +42,7 @@ const MXFILE_PATH = 'src/mxfile.js'
  * 抛 MODULE_NOT_FOUND —— 而那一刻插件已经"装好了"，报错在启动期，很难联想到构建。
  * 所以新增这类模块时：源文件放 src/、在这里登记一行，构建器同时做存在性校验。
  */
-const HOST_ONLY_MODULES = ['src/raster.js', 'src/trace-image.js', 'src/media.js', 'src/video-trace-worker.js', 'src/video-trace-pool.js']
+const HOST_ONLY_MODULES = ['src/raster.js', 'src/trace-image.js', 'src/media.js', 'src/video-trace-worker.js', 'src/video-trace-pool.js', 'src/video-export.js', 'src/performance-log.js', 'src/performance-metrics.js', 'src/video-trace-reuse.js']
 
 
 /**
@@ -99,7 +99,11 @@ export function composeClientBody() {
   const cut = source.indexOf(CLIENT_SOURCE_START)
   const body = cut < 0 ? source : source.slice(cut)
   const player = readFileSync('src/video-player.js', 'utf8').replace(/^export \{[^\n]+\}\s*$/m, '')
-  return kernelInline() + '\n\nconst videoPlayer = (() => {\n' + player +
+  const sessions = readFileSync('src/canvas-sessions.js', 'utf8').replace(/^export \{[^\n]+\}\s*$/m, '')
+  const timing = readFileSync('src/performance-metrics.js', 'utf8').replace(/^export /gm, '')
+  const queue = readFileSync('src/drawing-queue.js', 'utf8').replace(/^export /gm, '')
+  return kernelInline() + '\n\n' + timing + '\n\n' + queue + '\nconst drawingQueue = createDrawingQueue()\n\nconst canvasSessions = (() => {\n' + sessions +
+    '\nreturn createCanvasSessionStore({ onClose: (sessionId, path) => drawingQueue.closeScope(sessionId, path), onDispose: () => drawingQueue.dispose(), onApplied: (id) => drawingQueue.applied(id), onSaved: (id) => drawingQueue.saved(id), onRestore: (id) => drawingQueue.restore(id) })\n})()\n\nconst videoPlayer = (() => {\n' + player +
     '\nreturn { createVideoController, VideoSurface, VideoControls, VideoPreview }\n})()\n\n' + body
 }
 

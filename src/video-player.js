@@ -14,6 +14,7 @@ function createVideoController(request, environment = {}) {
   let generation = 0
   let animation = null
   let element = null
+  let elementPositioned = false
   let anchor = 0
   let anchorTime = 0
   const idle = Object.freeze({ status: 'idle', time: 0, duration: 0, index: 0, loop: true, muted: false, fit: 'contain', expanded: false })
@@ -95,7 +96,7 @@ function createVideoController(request, environment = {}) {
     cancel()
     const state = get(id)
     if (element) {
-      patch(id, { time: element.currentTime })
+      if (elementPositioned) patch(id, { time: element.currentTime })
       element.pause()
     }
     if (state.status === 'playing' && state.kind === 'svg') {
@@ -142,7 +143,7 @@ function createVideoController(request, environment = {}) {
       seekAudio(state, anchorTime)
       if (state.audio) { state.audio.muted = state.muted; playElement(id, state.audio) }
       animation = raf(tick)
-    } else if (element) {
+    } else if (element && elementPositioned) {
       playElement(id, element)
     }
   }
@@ -154,6 +155,15 @@ function createVideoController(request, environment = {}) {
         patch(id, { status: 'paused', error: '播放失败，请点击重试：' + error.message })
       }
     })
+  }
+  function positionElement(id, video) {
+    if (video.readyState < 1 || elementPositioned) return
+    const duration = Number.isFinite(video.duration) ? video.duration : 0
+    const time = duration > 0 ? Math.min(get(id).time, duration) : get(id).time
+    video.currentTime = time
+    elementPositioned = true
+    patch(id, { duration, time })
+    if (get(id).status === 'playing') playElement(id, video)
   }
   async function play(node, meta) {
     const id = node.id
@@ -314,30 +324,36 @@ function createVideoController(request, environment = {}) {
     },
     attach(id, video) {
       if (id !== activeId) return
+      if (element === video) return
+      if (element) {
+        const previous = element
+        if (elementPositioned) patch(id, { time: previous.currentTime })
+        element = null
+        previous.pause()
+      }
       element = video
+      elementPositioned = false
       if (!video) return
       video.loop = get(id).loop
       video.muted = get(id).muted
-      if (video.readyState >= 1) {
-        patch(id, { duration: Number.isFinite(video.duration) ? video.duration : 0 })
-        video.currentTime = Math.min(get(id).time, get(id).duration)
-      }
-      if (get(id).status === 'playing') playElement(id, video)
+      positionElement(id, video)
     },
     detach(id, video) {
       if (id !== activeId || element !== video || !video) return
-      patch(id, { time: video.currentTime })
+      if (elementPositioned) patch(id, { time: video.currentTime })
       element = null
+      elementPositioned = false
       video.pause()
     },
     mediaEvent(id, video, type) {
       if (id !== activeId || element !== video) return
       const s = get(id)
       if (type === 'loadedmetadata') {
-        patch(id, { duration: Number.isFinite(video.duration) ? video.duration : 0 })
-        video.currentTime = Math.min(get(id).time, get(id).duration)
+        positionElement(id, video)
       } else if (type === 'error') {
         patch(id, { status: 'error', error: '视频解码失败，请检查文件格式后重试' })
+      } else if (!elementPositioned) {
+        return
       } else if (type === 'ended') {
         patch(id, { status: 'ended', time: video.currentTime })
       } else if (type === 'timeupdate' || type === 'pause' || type === 'play') {

@@ -1,11 +1,14 @@
+import { createMediaPerformance } from '../src/performance-metrics.js'
+import { createDrawingQueue } from '../src/drawing-queue.js'
 import assert from 'node:assert/strict'
-import { mkdtempSync, existsSync, rmSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, existsSync, rmSync, readFileSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, relative, isAbsolute } from 'node:path'
 import { composeClientBody } from './build.mjs'
 import { svgMarkupFromStyle } from '../src/style-kernel.js'
 import { packSvgVideoZip, parseZip, readManifest, unpackSvgVideoZip } from '../src/media.js'
 import { traceRasterForToolbar } from '../src/trace-image.js'
+import { createCanvasSessionStore } from '../src/canvas-sessions.js'
 import { deflateSync } from 'node:zlib'
 import * as plugin from '../lib/index.js'
 
@@ -136,6 +139,8 @@ assert.ok(cancelled)
 }
 
 const root = mkdtempSync(join(tmpdir(), 'drawai-video-trace-'))
+const previousPerf = process.env.DRAWAI_PERF
+process.env.DRAWAI_PERF = '1'
 let route
 plugin.apply({ tools: { register() { return () => {} } }, webServer: { register(r) { route = r; return () => {} } },
   fs: { async resolve(p, options) { return { path: resolve(options?.cwd || root, p) } }, processPath(t) { return t.path },
@@ -213,11 +218,11 @@ try {
   const accelFrame = { token: accel.token, clip: accel.clip, pngBase64, level: 'medium', preset: 'default', colors: 6, removeBg: false }
   const same0 = (await request('media-trace-frame', { ...accelFrame, index: 0, fingerprint: still })).payload
   const same1 = (await request('media-trace-frame', { ...accelFrame, index: 1, fingerprint: still })).payload
-  assert.equal(same0.ok && same1.ok && same1.reused === true && same1.svg === same0.svg, true, 'near-identical frames reuse the previous SVG')
+  assert.equal(same0.ok && same1.ok && same1.reused === true && same1.svg === same0.svg, true, 'identical PNGs with matching parameters reuse the previous SVG')
   const shared = (await request('media-trace-frame', { ...accelFrame, index: 2, fingerprint: near })).payload
-  assert.equal(shared.ok && shared.reused !== true && shared.paletteShared === true, true, 'small changes keep the previous palette')
+  assert.equal(shared.ok && shared.reused === true && shared.paletteShared === false, true, 'legacy gray fingerprint hints do not affect exact reuse')
   const changed = (await request('media-trace-frame', { ...accelFrame, index: 3, fingerprint: far })).payload
-  assert.equal(changed.ok && changed.reused !== true && changed.paletteShared !== true, true, 'a scene change reclusters colors')
+  assert.equal(changed.ok && changed.reused === true && changed.paletteShared === false, true, 'a contradictory legacy fingerprint cannot invalidate identical PNG content')
   await request('media-trace-discard', { token: accel.token, clip: accel.clip })
   assert.equal(finish.payload.manifest.frames.length, 2)
   assert.equal(finish.payload.manifest.duration, 2 / 12)
@@ -252,13 +257,28 @@ try {
   const clientSource = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
   const runSource = clientSource.slice(clientSource.indexOf('  async function startVideoTrace('), clientSource.indexOf('  React.useEffect(() => {\n    if (!traceDrawing)'))
   assert.ok(runSource.includes('media-trace-finish'))
-  assert.ok(runSource.includes('VIDEO_TRACE_PIPELINE') && runSource.includes('pack.poolSize') && runSource.includes('videoTraceFingerprint'), 'client aligns pipeline depth with the pool and sends a frame fingerprint')
+  assert.ok(runSource.includes('VIDEO_TRACE_PIPELINE') && runSource.includes('pack.poolSize') && !runSource.includes('fingerprint'), 'client aligns pipeline depth with the pool without approximate fingerprints')
   async function runWorkflow(mode) {
     mkdirSync(join(root, 'demo.media', 'source'), { recursive: true })
     writeFileSync(join(root, 'demo.media', 'source', 'source.mp4'), Buffer.from('source-with-audio'))
     const documentState = structuredClone(original), before = structuredClone(documentState)
-    const docRef = { current: documentState }, videoTraceRun = { current: null }, history = [], times = [], discarded = [], pendingCalls = []
-    let state, selected, revoked = 0, taskClip
+    const drawingQueue = createDrawingQueue()
+    const canvasSessions = createCanvasSessionStore({ onApplied: (id) => drawingQueue.applied(id), onSaved: (id) => drawingQueue.saved(id) })
+    const docRef = { current: documentState }, videoTraceRun = canvasSessions.task('s', 'demo.drawio', 0), history = [], times = [], discarded = [], pendingCalls = []
+    let state, selected, revoked = 0, taskClip, pauseCheck, pauseError
+    const receive = () => {
+      state = videoTraceRun.job
+      canvasSessions.consume(videoTraceRun, ({ source, output, taskId }) => {
+        const next = structuredClone(docRef.current)
+        const id = applyVideoTraceToDoc(next, source, output)
+        if (taskId) next.nodes.find((node) => node.id === id).data.drawaiTaskId = taskId
+        history.push(structuredClone(docRef.current))
+        docRef.current = next
+        selected = [id]
+      })
+      if (videoTraceRun.pendingSave) canvasSessions.acknowledge(videoTraceRun, docRef.current)
+    }
+    let unsubscribe = canvasSessions.subscribe(videoTraceRun, receive)
     class FakeVideo extends EventTarget {
       duration = 10; videoWidth = 1; videoHeight = 1; position = 0
       get currentTime() { return this.position }
@@ -269,8 +289,11 @@ try {
     }
     const video = new FakeVideo()
     const environment = {
-      videoTraceRun, videoTraceSource: { id: 'n1', clip: 'source' }, docRef,
-      setVideoTraceJob(value) { state = typeof value === 'function' ? value(state) : value },
+      createMediaPerformance,
+      drawingQueue, pageIndex: 0,
+      canvasSessions, videoTraceRun, videoTraceSource: { id: 'n1', clip: 'source' }, docRef,
+      setVideoTraceSource(source) { canvasSessions.update(videoTraceRun, { source }) },
+      setVideoTraceJob(value) { canvasSessions.update(videoTraceRun, { job: typeof value === 'function' ? value(videoTraceRun.job) : value }) },
       setSaveNote() {}, setSelectedIds(value) { selected = value },
       applyLocal(mutate) { const next = structuredClone(docRef.current); mutate(next); history.push(structuredClone(docRef.current)); docRef.current = next },
       videoController: { suspend() {} }, target: 'demo.drawio', sessionId: 's', SAVE_ENDPOINT: '/save', SAVE_HEADER: 'x-drawai-save',
@@ -283,6 +306,18 @@ try {
       async readVideoChunk(blob) { return Buffer.from(await blob.arrayBuffer()).toString('base64') },
       fetch(url, init) {
         const body = JSON.parse(init.body)
+        if (mode === 'queued-pause' && body.action === 'media-trace-frame' && body.index === 0) {
+          const id = drawingQueue.list()[0].id
+          drawingQueue.pause(id)
+          pauseCheck = (async () => {
+            const until = Date.now() + 10000
+            while (drawingQueue.list()[0].status !== 'paused' && Date.now() < until) await new Promise((done) => setTimeout(done, 5))
+            assert.equal(drawingQueue.list()[0].status, 'paused')
+            assert.equal(times.length, 1, 'pause stops extraction after draining the in-flight first frame')
+            drawingQueue.resume(id)
+          })().catch((error) => { pauseError = error; drawingQueue.resume(id) })
+        }
+        if (mode === 'detached' && body.action === 'media-trace-frame') unsubscribe()
         const response = (payload, status = 200) => ({ ok: status === 200, status, async json() { return payload } })
         if (body.action === 'media-source-bytes') return Promise.resolve(response({ ok: true, base64: 'AA==', mime: 'video/mp4' }))
         if (body.action === 'media-trace-frame' && body.index === 1 && mode === 'failure') return Promise.resolve(response({ ok: false, error: '模拟绘制失败' }, 500))
@@ -296,13 +331,34 @@ try {
         return call
       },
     }
-    const run = new Function(...Object.keys(environment), runSource + '\nreturn startVideoTrace')(...Object.values(environment))
-    await run({ from: 2, seconds: 0.5, fps: 6, width: 320, level: 'low', preset: 'default', colors: 6, removeBg: false })
+    const enqueueSource = clientSource.slice(clientSource.indexOf('  function enqueueVideoTrace('), clientSource.indexOf('  async function startVideoTrace('))
+    const { run, enqueue } = new Function(...Object.keys(environment), enqueueSource + runSource + '\nreturn { run: startVideoTrace, enqueue: enqueueVideoTrace }')(...Object.values(environment))
+    const options = { from: 2, seconds: 0.5, fps: 6, width: 320, level: 'low', preset: 'default', colors: 6, removeBg: false }
+    if (mode === 'queued' || mode === 'queued-pause') {
+      const queued = enqueue(options, { id: 'n1', clip: 'source' })
+      const until = Date.now() + 10000
+      while (!['succeeded', 'failed'].includes(drawingQueue.list()[0].status) && Date.now() < until) await new Promise((done) => setTimeout(done, 5))
+      assert.equal(drawingQueue.list()[0].status, 'succeeded', drawingQueue.list()[0].error)
+      assert.equal(docRef.current.nodes.find((node) => node.id === selected[0]).data.drawaiTaskId, queued.id)
+      if (pauseCheck) await pauseCheck
+      if (pauseError) throw pauseError
+    } else await run(options)
     await Promise.all(pendingCalls)
+    if (mode === 'detached') {
+      assert.deepEqual(docRef.current, before, 'an unmounted view is never mutated by a background completion')
+      assert.equal(history.length, 0)
+      assert.equal(videoTraceRun.job.busy, false, 'drawing completes while no progress UI is subscribed')
+      assert.ok(videoTraceRun.result, 'complete media awaits the original canvas')
+      const restored = canvasSessions.task('s', 'demo.drawio', 0)
+      assert.equal(restored, videoTraceRun)
+      unsubscribe = canvasSessions.subscribe(restored, receive)
+      receive()
+      assert.equal(history.length, 1, 'returning to the original canvas inserts the result exactly once')
+    }
     assert.equal(videoTraceRun.current, null)
     assert.equal(revoked, 1, 'always releases decoder blob URL')
     assert.equal(state.busy, false)
-    if (mode === 'success' || mode === 'chunked') {
+    if (mode === 'success' || mode === 'chunked' || mode === 'detached' || mode === 'queued' || mode === 'queued-pause') {
       assert.equal(history.length, 1, 'complete workflow is one undo operation')
       assert.deepEqual(history[0], before)
       assert.equal(docRef.current.nodes.length, 2)
@@ -331,10 +387,24 @@ try {
       assert.ok(!existsSync(join(root, 'demo.media', taskClip)))
       assert.match(state.message, mode === 'cancel' ? /已取消/ : /第 2 帧失败/)
     }
+    unsubscribe()
+    drawingQueue.dispose()
   }
   await runWorkflow('success')
+  await runWorkflow('queued')
+  await runWorkflow('queued-pause')
   await runWorkflow('chunked')
+  await runWorkflow('detached')
   await runWorkflow('cancel')
   await runWorkflow('failure')
+  const reports = readdirSync(join(root, '.drawai-cache', 'performance')).map((name) => JSON.parse(readFileSync(join(root, '.drawai-cache', 'performance', name), 'utf8')))
+  const complete = reports.find((report) => report.status === 'done' && report.stages['browser.pngEncode'])
+  assert.ok(complete, 'actual client and host aggregate into the same scoped report')
+  assert.ok(complete.stages['browser.request.media-trace-frame'].count > 0, 'request stage names preserve hyphens')
+  assert.ok(complete.stages['worker.pngDecode'].count > 0)
+  assert.ok(complete.counters.frames > 0 && complete.peaks.hostRssBytes > 0)
   console.log('check-video-trace: OK (plans, controls, decoding cancellation, scoped jobs, complete SVG sequence, export, source preservation)')
-} finally { rmSync(root, { recursive: true, force: true }) }
+} finally {
+  if (previousPerf === undefined) delete process.env.DRAWAI_PERF; else process.env.DRAWAI_PERF = previousPerf
+  rmSync(root, { recursive: true, force: true })
+}

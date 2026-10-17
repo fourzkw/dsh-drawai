@@ -177,6 +177,37 @@ console.log('Video playback controller')
   check(largeVideo.currentTime === 2.35 && c.get('r').status === 'playing', 'moving into the preview preserves position and ignores stale detach')
   c.seek('r', 3)
   check(largeVideo.currentTime === 3, 'seeking controls the currently attached preview element')
+  // React may attach the incoming surface before cleaning up the outgoing one.
+  // A fresh browser video has no metadata and emits zero-time events on startup.
+  largeVideo.currentTime = 3.25
+  const inlineVideo = { ...video, currentTime: 0, readyState: 0 }
+  const playsBeforeTransfer = plays
+  c.configure('r', { expanded: false })
+  c.attach('r', inlineVideo)
+  c.mediaEvent('r', inlineVideo, 'timeupdate')
+  c.mediaEvent('r', inlineVideo, 'pause')
+  c.detach('r', largeVideo)
+  check(c.get('r').time === 3.25 && c.get('r').status === 'playing' && plays === playsBeforeTransfer,
+    'leaving preview captures the latest position and waits for metadata without accepting startup events')
+  inlineVideo.readyState = 1
+  c.mediaEvent('r', inlineVideo, 'loadedmetadata')
+  check(inlineVideo.currentTime === 3.25 && plays === playsBeforeTransfer + 1,
+    'inline playback restores position before resuming after metadata loads')
+  inlineVideo.currentTime = 3.5
+  c.pause('r')
+  c.configure('r', { expanded: true })
+  c.detach('r', inlineVideo)
+  const pausedPreview = { ...video, currentTime: 0, readyState: 0 }
+  c.attach('r', pausedPreview)
+  c.mediaEvent('r', pausedPreview, 'play')
+  pausedPreview.readyState = 1
+  const playsBeforeMetadata = plays
+  c.mediaEvent('r', pausedPreview, 'loadedmetadata')
+  check(pausedPreview.currentTime === 3.5 && c.get('r').status === 'paused' && plays === playsBeforeMetadata,
+    'entering preview while paused restores position without autoplay')
+  await c.play(node('r', 'raster'), meta('r', 'raster'))
+  c.detach('r', pausedPreview)
+  c.attach('r', largeVideo)
   largeVideo.videoWidth = 16
   largeVideo.videoHeight = 9
   const previousDocument = globalThis.document
@@ -275,6 +306,7 @@ console.log('Video playback controller')
     { label: '绘制复刻…', primary: true, mediaKind: 'raster', disabled: () => false, run() { drawn++ } },
     { label: '导出 SVG 视频', export: true, mediaKind: 'svg', disabled: () => false, run() { exportedVideo++ } },
     { label: '导出 WebM', export: true, mediaKind: 'svg', disabled: () => false, run() {} },
+    { label: '导出 MP4', export: true, disabled: () => false, run() {} },
     { label: '导出源视频', export: true, mediaKind: 'raster', disabled: () => false, run() { exportedVideo++ } },
   ]
   const compactRaster = flatten(VideoControls({ ...props, compact: true, meta: meta('ui', 'raster'), actions, onError(error) { throw error } }))
@@ -286,9 +318,11 @@ console.log('Video playback controller')
   await withGrab.find((n) => n.type === 'button' && n.props['aria-label'] === '抽帧').props.onClick()
   check(grabbed === 1, 'grab-frame button runs the still-to-image action')
   check(compactRaster.some((n) => n.children.includes('导出源视频')) && !compactRaster.some((n) => n.children.includes('导出 SVG 视频')), 'raster export menu only shows relevant actions')
+  check(compactRaster.some((n) => n.children.includes('导出 MP4')), 'raster videos expose MP4 export')
   await compactRaster.find((n) => n.type === 'button' && n.props['aria-label'] === '绘制复刻').props.onClick()
   check(drawn === 1, 'compact primary action invokes the existing drawing workflow')
   const compactSvg = flatten(VideoControls({ ...props, compact: true, actions, onError(error) { throw error } }))
+  check(compactSvg.some((n) => n.children.includes('导出 MP4')), 'SVG videos expose MP4 export')
   check(!compactSvg.some((n) => n.children.includes('绘制复刻')) && compactSvg.some((n) => n.children.includes('导出 SVG 视频')) && compactSvg.some((n) => n.children.includes('导出 WebM')) && !compactSvg.some((n) => n.children.includes('导出源视频')), 'SVG toolbar hides unsupported drawing and source export actions')
   let closed = false
   await compactSvg.find((n) => n.type === 'button' && n.children.includes('导出 SVG 视频')).props.onClick({ currentTarget: { closest() { return { set open(value) { closed = value === false } } } } })

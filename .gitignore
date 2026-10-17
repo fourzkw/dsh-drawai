@@ -12,6 +12,7 @@ node_modules/
 
 # 本机画布 / 自检素材（不进仓库；根目录只留 demo.drawio）
 _local/
+.drawai-cache/
 
 # 自检输出、下载素材和临时工具（历史目录；新素材统一放 _local/）
 /artifacts/
@@ -35,3 +36,6 @@ desktop.ini
 *.drawio
 !demo.drawio
 !docs/**/*.drawio
+
+# 视频旁路媒体包（<画布>.media/，逐帧 SVG 由画布侧生成，体积大，不进仓库）
+*.media/

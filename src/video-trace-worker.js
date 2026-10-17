@@ -2,12 +2,32 @@
 import { parentPort, workerData } from 'node:worker_threads'
 import { decodeRaster } from './raster.js'
 import { traceRasterForToolbar } from './trace-image.js'
+import { createPerformanceMetrics } from './performance-metrics.js'
+import { checkVideoPalette } from './video-trace-reuse.js'
 
 async function tracePng(png, rawOptions) {
+  const timing = rawOptions.profile === true ? createPerformanceMetrics() : null
+  const decodeDone = timing?.start('pngDecode')
   const raster = await decodeRaster(Buffer.from(png))
+  decodeDone?.()
+  if (raster.width * raster.height > 16000000) throw new Error('图片超过 1600 万像素，请先缩小图片')
+  if (rawOptions.mode === 'image') {
+    const result = traceRasterForToolbar(raster, { ...rawOptions, includeDrawing: true,
+      onTiming: timing ? (name, ms) => timing.add(name, ms) : undefined })
+    return { ok: true, ...result, rasterSize: { width: raster.width, height: raster.height },
+      ...(timing ? { performance: timing.snapshot() } : {}) }
+  }
   const { width, height, ...options } = rawOptions
   if (raster.width !== width || raster.height !== height) throw new Error('帧尺寸与任务不一致')
+  let paletteCheck = null
   const result = traceRasterForToolbar(raster, { ...options, allowEmpty: true, onlySelectedLevel: true,
+    paletteValidator: (work, foreground, palette) => {
+      const checked = timing?.start('paletteValidation')
+      paletteCheck = checkVideoPalette(work, foreground, palette)
+      checked?.()
+      return paletteCheck.accepted
+    },
+    onTiming: timing ? (name, ms) => timing.add(name, ms) : undefined,
     maxLongSide: Math.max(width, height) })
   const hexes = Array.isArray(result.metrics.palette) ? result.metrics.palette : []
   const used = options.removeBg ? hexes.slice(1) : hexes
@@ -15,7 +35,9 @@ async function tracePng(png, rawOptions) {
     const h = String(hex).replace('#', '')
     return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
   }).filter((rgb) => rgb.length === 3 && rgb.every((n) => Number.isInteger(n)))
-  return { ok: true, svg: result.svg, detailReduced: result.metrics.detailReduced, work: result.metrics.work, palette }
+  return { ok: true, svg: result.svg, detailReduced: result.metrics.detailReduced, work: result.metrics.work, palette,
+    paletteShared: paletteCheck?.accepted === true, paletteReuseReason: paletteCheck?.reason || 'fresh-palette',
+    ...(timing ? { performance: timing.snapshot() } : {}) }
 }
 
 async function handle(message) {

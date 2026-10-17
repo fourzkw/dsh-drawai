@@ -1,74 +1,93 @@
+import { createMediaPerformance } from '../src/performance-metrics.js'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
-const start = source.indexOf('  async function encodeSvgFramesToWebm(')
-const body = source.slice(start, source.indexOf('  function renderSelectionToolbar(', start))
+const start = source.indexOf('  async function encodeVideoToFile(')
+const body = source.slice(start, source.indexOf('  async function grabVideoStill(', start))
 
-async function run(hasAudio, rejectPlayback = false) {
-  let clock = 0, created = 0, closed = false, connected = false, downloaded = false, note = '', recorder
-  const seeks = [], revoked = [], frames = [], tracks = [{ kind: 'video', stop() { this.stopped = true } }]
-  const audioTrack = { kind: 'audio', stop() { this.stopped = true } }
-  const audio = new class extends EventTarget {
-    time = 0; ended = false; paused = true
-    get currentTime() { return this.time }
-    set currentTime(value) { this.time = value; seeks.push(value); queueMicrotask(() => this.dispatchEvent(new Event('seeked'))) }
-    load() { if (this.src) queueMicrotask(() => this.dispatchEvent(new Event('loadeddata'))) }
-    async play() { if (rejectPlayback) throw new Error('play blocked'); this.paused = false }
-    pause() { this.paused = true }
-    removeAttribute() { this.src = '' }
-  }()
-  const stream = { addTrack(track) { tracks.push(track) }, getTracks() { return tracks } }
-  const context = { fillRect() {}, drawImage() {} }
-  const canvas = { getContext: () => context, captureStream: () => stream }
-  class AudioContext {
-    async resume() {}
-    createMediaStreamDestination() { return { stream: { getAudioTracks: () => [audioTrack] } } }
-    createMediaElementSource(element) { assert.equal(element, audio); return { connect() { connected = true } } }
-    async close() { closed = true }
-  }
-  class MediaRecorder {
-    state = 'inactive'
-    constructor(value) { assert.equal(value, stream); recorder = this }
-    start() { this.state = 'recording'; assert.equal(tracks.length, hasAudio ? 2 : 1) }
-    stop() { this.state = 'inactive'; this.ondataavailable?.({ data: new Blob(['webm']) }); this.onstop?.() }
-  }
+async function run(kind = 'svg', mode = 'success', format = 'mp4') {
+  const count = 8, fps = 30, rendered = [], committed = [], actions = [], offsets = new Map(), downloads = [], revoked = []
+  let clock = 0, note = '', canvas, encoded, polls = 0, drawIndex = -1
   const environment = {
-    videoMetaOf: () => ({ clip: 'traced', fps: 10 }), target: 'demo.drawio',
-    async mediaAction(action, options) {
-      if (action === 'media-manifest') return { hasSource: hasAudio, manifest: { frames: Array(4).fill({}), sourceOffset: 2 } }
-      if (action === 'media-source-bytes') return { base64: 'AA==', mime: 'video/mp4' }
-      frames.push(options.index); return { svg: '<svg/>' }
+    createMediaPerformance,
+    videoMetaOf: () => ({ clip: 'traced', kind, fps }), target: 'folder/demo.drawio',
+    async mediaAction(action, args) {
+      actions.push(action)
+      if (action === 'media-manifest') return { hasSource: true, manifest: { source: mode === 'native' ? 'source.mp4' : null } }
+      if (action === 'media-export-source') return { path: 'exported.mp4' }
+      if (action === 'media-video-export-start') {
+        if (mode === 'missing-ffmpeg') throw new Error('未找到 FFmpeg')
+        return { token: 'token', count: kind === 'svg' ? count : 0, fps, w: 642, h: 360 }
+      }
+      if (action === 'media-frame') {
+        // Deliberately slower than 30fps: no frame may be skipped or repeated.
+        clock += 140; rendered.push(args.index); drawIndex = args.index
+        if (mode === 'frame-error' && args.index === 2) throw new Error('frame read failed')
+        return { svg: '<svg/>' }
+      }
+      if (action === 'media-video-export-chunk') {
+        assert.equal(args.index, committed.length)
+        assert.equal(args.offset, offsets.get(args.index) || 0)
+        const bytes = Buffer.from(args.base64, 'base64')
+        assert.ok(bytes.length <= 1024 * 1024)
+        offsets.set(args.index, args.offset + bytes.length)
+        return { received: args.offset + bytes.length }
+      }
+      if (action === 'media-video-export-frame') { committed.push(args.index); return {} }
+      if (action === 'media-video-export-finish') return { status: 'encoding', encoded: 0 }
+      if (action === 'media-video-export-status') {
+        if (++polls < 2) return { status: 'encoding', encoded: 4 }
+        return { status: mode === 'encode-error' ? 'error' : 'done', error: 'encoder failed', bytes: 7 }
+      }
+      if (action === 'media-video-export-read') return { offset: mode === 'bad-download' ? 1 : args.offset, total: 7, bytes: 7, base64: Buffer.from('encoded').toString('base64') }
+      if (action === 'media-video-export-discard') return {}
+      throw new Error('unexpected action ' + action)
     },
-    setSaveNote: (value) => { note = value },
-    document: { createElement(type) { return type === 'canvas' ? canvas : type === 'audio' ? audio : { click() { downloaded = true } } } },
-    window: { AudioContext }, MediaRecorder,
-    URL: { createObjectURL() { return 'blob:' + ++created }, revokeObjectURL(url) { revoked.push(url) } },
+    setSaveNote(value) { note = value },
+    document: { createElement(type) {
+      if (type === 'a') return { click() { downloads.push(this.download) } }
+      assert.equal(type, 'canvas', 'offline export does not play audio/video in the browser')
+      canvas = { getContext: () => ({ fillRect() { assert.equal(this.fillStyle, '#fff') }, drawImage() {} }),
+        toBlob(callback) { callback(new Blob([Buffer.alloc(drawIndex === 0 ? 1024 * 1024 + 11 : 11)])) },
+        captureStream() { throw new Error('realtime recording must not be used') } }
+      return canvas
+    } },
     Image: class { set src(value) { queueMicrotask(() => this.onload()) } },
-    performance: { now: () => clock },
-    setTimeout(fn, ms) { clock += ms; if (!audio.paused) audio.time += ms / 1000; queueMicrotask(fn) },
-    async waitForVideoTraceEvent(element, event, signal, trigger) {
-      await new Promise((resolve) => { element.addEventListener(event, resolve, { once: true }); trigger() })
-    },
+    async readVideoChunk(blob) { return Buffer.from(await blob.arrayBuffer()).toString('base64') },
+    URL: { createObjectURL(blob) { encoded = blob; return 'blob:output' }, revokeObjectURL(url) { revoked.push(url) } },
+    setTimeout(fn) { queueMicrotask(fn) },
   }
-  const encode = new Function(...Object.keys(environment), body + '\nreturn encodeSvgFramesToWebm')(...Object.values(environment))
-  if (rejectPlayback) await assert.rejects(encode({ w: 320, h: 180 }), /play blocked/)
-  else await encode({ w: 320, h: 180 })
-  assert.ok(tracks.every((track) => track.stopped), 'all capture tracks are stopped')
-  assert.equal(downloaded, !rejectPlayback)
-  if (hasAudio) {
-    assert.ok(seeks.includes(2), 'audio begins at the selected segment offset')
-    assert.ok(connected && closed && audio.paused && audio.src === '', 'audio graph and element are cleaned up')
+  const encode = new Function(...Object.keys(environment), body + '\nreturn encodeVideoToFile')(...Object.values(environment))
+  if (mode.includes('error') || mode === 'bad-download' || mode === 'missing-ffmpeg') {
+    await assert.rejects(encode({ w: 32, h: 18 }, format), /failed|不完整|FFmpeg/)
+    assert.equal(downloads.length, 0)
+    if (mode !== 'missing-ffmpeg') assert.equal(actions.at(-1), 'media-video-export-discard', 'all failures release uploaded frames and temporary output')
+    return
   }
-  if (!rejectPlayback) {
-    assert.equal(recorder.state, 'inactive')
-    assert.ok(frames.includes(0) && frames.includes(3), 'recording renders the beginning and end of the sequence')
-    assert.match(note, hasAudio ? /含原视频音频/ : /已导出/)
+  await encode({ w: 32, h: 18 }, format)
+  if (mode === 'native') {
+    assert.deepEqual(actions, ['media-manifest', 'media-export-source'])
+    assert.match(note, /保留源视频画质与音频/)
+    return
   }
-  assert.equal(revoked.length, rejectPlayback ? 1 : hasAudio ? 2 : 1)
+  if (kind === 'svg') {
+    assert.deepEqual(rendered, Array.from({ length: count }, (_, i) => i))
+    assert.deepEqual(committed, rendered, 'every slow frame is acknowledged in order')
+    assert.ok(clock / 1000 > count / fps, 'export may take longer than the video while preserving all frames')
+    assert.equal(offsets.get(0), 1024 * 1024 + 11, 'large PNGs use sequential chunks')
+    assert.equal(canvas.width, 642)
+    assert.match(note, /8 帧，30fps/)
+  } else assert.equal(canvas, undefined, 'source conversion is entirely offline on the host')
+  assert.deepEqual(downloads, ['demo-traced.' + format])
+  assert.equal(encoded.type, 'video/' + format)
+  assert.equal(await encoded.text(), 'encoded')
+  assert.deepEqual(revoked, ['blob:output'])
+  assert.equal(actions.at(-1), 'media-video-export-discard')
 }
-await run(true)
-await run(false)
-await run(true, true)
-assert.ok(!source.includes('function PinnedTraceSettingsCard') && !source.includes('traceCardProps('), 'fixed settings card feature has been removed')
-console.log('check-video-audio: OK (WebM audio track, segment offset, silent legacy clips, playback rejection, cleanup, fixed-card removal)')
+await run()
+await run('svg', 'success', 'webm')
+await run('raster')
+await run('raster', 'native')
+for (const mode of ['frame-error', 'encode-error', 'bad-download', 'missing-ffmpeg']) await run('svg', mode)
+console.log('check-video-audio: OK (offline sequential frames, slow rendering, chunking, MP4/WebM, white background, source passthrough, failure cleanup)')

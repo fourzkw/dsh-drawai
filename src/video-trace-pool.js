@@ -38,8 +38,9 @@ export function createVideoTracePool(options = {}) {
       const worker = idle.pop()
       const item = queue.shift()
       const id = nextId++
+      const dispatched = performance.now()
       if (typeof worker.ref === 'function') worker.ref()
-      busy.set(worker, { id, item })
+      busy.set(worker, { id, item, dispatched, queueWaitMs: dispatched - item.queuedAt })
       try {
         worker.postMessage({ id, png: item.png, options: item.options })
       } catch (error) {
@@ -61,7 +62,7 @@ export function createVideoTracePool(options = {}) {
       idle.push(worker)
     } else worker.terminate().catch(() => {})
     if (!message || message.ok !== true) active.item.reject(new Error((message && message.error) || '复刻失败'))
-    else active.item.resolve(message)
+    else active.item.resolve({ ...message, queueWaitMs: active.queueWaitMs, workerRoundTripMs: performance.now() - active.dispatched })
     pump()
   }
 
@@ -76,7 +77,7 @@ export function createVideoTracePool(options = {}) {
   function run(png, traceOptions, meta = {}) {
     if (closed) return Promise.reject(new Error('复刻线程池已关闭'))
     return new Promise((resolve, reject) => {
-      queue.push({ png, options: traceOptions, resolve, reject, token: meta.token })
+      queue.push({ png, options: traceOptions, resolve, reject, token: meta.token, queuedAt: performance.now() })
       pump()
     })
   }

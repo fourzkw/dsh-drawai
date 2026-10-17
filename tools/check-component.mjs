@@ -451,9 +451,9 @@ console.log('\n启动行为：空舞台（没有"未绑定画布"那一套）')
 {
   // 需求：打开 drawai 画布后**应该为空**，而不是直接冒出一张未绑定画布；
   // 要画布就自己「新建画布…」或「打开…」—— 两个入口都在工作栏里，而工作栏在标签页之上。
-  ok(/const \[tabs, setTabs\] = React\.useState\(\[\]\)/.test(src), '初始 tabs 是空数组（零标签）')
+  ok(/const \[tabs, setTabsState\] = React\.useState\(\(\) => workspace.tabs\)/.test(src), '标签从会话缓存恢复，首次使用为空舞台')
   ok(!/provisional/.test(src), '不再有"占位标签"这一套（那是上一版的补丁）')
-  ok(/const bootstrappedRef = React\.useRef\(false\)/.test(src), '只做一次"开哪个标签"的决定')
+  ok(/const bootstrappedRef = React\.useRef\(workspace.bootstrapped\)/.test(src), '会话恢复时保留初始化决定')
   const boot = src.slice(src.indexOf('if (bootstrappedRef.current) return'), src.indexOf('}, [tabPath])'))
   ok(boot.length > 0, 'CanvasTabs 里有 bootstrap effect')
   ok(/setTabs\(\[\{ key: key, path: tabPath \}\]\)/.test(boot), '地址到了 → 开真文件的标签')
@@ -481,7 +481,7 @@ console.log('\n层级：工作栏在标签页之上')
   // 工作栏（文件/编辑/视图/导出）要排在标签条**前面**渲染 —— 右栏窄，
   // "对当前画布做什么"应该一直在最上面，而"现在看哪张"在它下面。
   const rootStart = src.indexOf("className: 'drawai-root'")
-  const rootEnd = src.indexOf("className: 'drawai-note'", rootStart)
+  const rootEnd = src.indexOf('React.createElement(CopyableStatus', rootStart)
   const block = rootStart >= 0 && rootEnd > rootStart ? src.slice(rootStart, rootEnd) : ''
   const iHead = block.indexOf('head,')
   const iStrip = block.indexOf('props.tabStrip')
@@ -521,6 +521,7 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
       'clearStaleTextSelection',
       'claimCanvasKeyboard',
       'rootRef',
+      'isSelectableTextTarget',
       'return function onRootPointerDown(event) ' + body,
     )(
       docMenuValue,
@@ -531,6 +532,7 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
       (target, button) => calls.push('clear-sel:' + String(button)),
       (root, target) => calls.push('claim-kb'),
       { current: {} },
+      new Function('target', bodyOf('isSelectableTextTarget')),
     )
     fn({ target: target, button: 0 })
     return calls
@@ -539,6 +541,7 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
   // 假事件目标：closest(sel) 命中给定选择器时就返回一个元素，否则 null。
   const targetInside = (sel) => ({ closest: (s) => (s === sel ? { className: sel } : null) })
   const targetOutside = { closest: () => null }
+  ok(runPointer(null, targetInside('.drawai-note,.drawai-err,[data-drawai-text]')).length === 0, '提示文字按下时不清选区、不抢画布焦点')
 
   // `clearStaleTextSelection` + `claimCanvasKeyboard` 每次按下都会被调（在最前面），
   // 下面这些断言看的是**它们之后**发生了什么 —— 所以统一先摘掉那两格。
@@ -1199,7 +1202,12 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
     customColorList: new Function('normalizeCustomColor', 'value', bodyOf('customColorList')).bind(null, new Function('value', bodyOf('normalizeCustomColor'))),
     loadDrawaiPrefs: () => ({ customColors: [] }), patchPrefs: () => {},
     ImageTraceControl: 'image-trace-control',
+    ToolbarPopover: 'toolbar-popover',
+    exportNodeImage: (node, format) => { lineChange = { node, format } },
+    nodeImageExportInfo: new Function('isVideoNodeData', 'imageValueFromStyle', 'isRasterDataUri', 'isSvgDataUri', 'node', bodyOf('nodeImageExportInfo')).bind(null,
+      styleKernel.isVideoNodeData, styleKernel.imageValueFromStyle, styleKernel.isRasterDataUri, styleKernel.isSvgDataUri),
     generateImageTrace: () => {},
+    hasPath: true, enqueueImageTrace: () => {},
     applyImageTrace: () => {},
   })
   context.isBasicShapeStyle = new Function('shapeFamilyOf', 'nodeShapeFromStyle', 'imageValueFromStyle', 'styleGet', 'style', bodyOf('isBasicShapeStyle')).bind(null,
@@ -1243,6 +1251,17 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
       : styleKernel.styleWithNodeShape('', shape)
     context.selectedIds = ['b']
     const drawControl = flatten(render()).find((el) => el.type === 'image-trace-control')
+    const exportControl = flatten(render()).find((el) => el.props.label === '导出图片' || el.props['aria-label'] === '导出图片')
+    ok(Boolean(exportControl) === ['image', 'svg'].includes(shape), shape + ' 按节点类别提供图片导出入口')
+    if (shape === 'svg') {
+      const choices = flatten(exportControl.props.renderPanel(() => {})).filter((el) => el.type === 'button')
+      choices[1].props.onClick()
+      ok(choices.length === 2 && lineChange.node.id === 'b' && lineChange.format === 'png', 'SVG 导出卡片提供 SVG 与 PNG，并将 PNG 请求传给当前节点')
+    }
+    if (shape === 'image') {
+      exportControl.props.onClick()
+      ok(lineChange.node.id === 'b' && lineChange.format === undefined, '位图导出直接下载当前节点原图')
+    }
     if (['svg', 'image', 'text'].includes(shape)) ok(!flatten(render()).some((el) => el.props.label === '描边'), shape + ' 无边框内容节点不显示无效的描边工具')
     ok(Boolean(drawControl) === (shape === 'image'), shape + ' 的工具栏绘制入口按节点类别显示')
     if (shape === 'image') {

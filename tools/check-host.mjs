@@ -2143,5 +2143,18 @@ console.log('\nSVG 内容节点：节点内容就是一段 SVG 标记（drawio �
   ok(/svg/.test(readTool.description), 'diagram_read 的描述里说明了 svg 字段与被省略的 style')
 }
 
+console.log('\n大图画布自动写回使用独立预算')
+{
+  seed(baseDoc())
+  const read = await api({ action: 'read', sessionId: 's1', path: 'doc.drawio' })
+  const doc = read.payload.doc
+  const image = 'data:image/png;base64,' + 'A'.repeat(4 * 1024 * 1024 + 128)
+  doc.nodes[0].style = 'shape=image;image=' + image + ';'
+  const saved = await api({ sessionId: 's1', path: 'doc.drawio', revision: read.payload.revision, doc })
+  ok(saved.status === 200 && saved.payload.ok, '包含超过 4MB 原图的画布自动保存成功')
+  ok(current().nodes[0].style.includes(image), '原图完整保留，保存不会丢弃或截断图片')
+  const control = await api({ action: 'list', sessionId: 's1', padding: image })
+  ok(control.status === 413, '普通控制请求仍受 4MB 限制')
+}
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

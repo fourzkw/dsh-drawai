@@ -580,7 +580,7 @@ console.log('\n层级：工作栏在标签页之上，菜单挂在 root 上')
   // 右栏窄：'对当前画布做什么'（工作栏）要一直在最上面，'现在看哪张'（标签条）在它下面。
   const src = readFileSync(source, 'utf8')
   const rootStart = src.indexOf("className: 'drawai-root'")
-  const rootEnd = src.indexOf("className: 'drawai-note'", rootStart)
+  const rootEnd = src.indexOf('React.createElement(CopyableStatus', rootStart)
   const block = rootStart >= 0 && rootEnd > rootStart ? src.slice(rootStart, rootEnd) : ''
   const iHead = block.indexOf('head,')
   const iStrip = block.indexOf('props.tabStrip')
