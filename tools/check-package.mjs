@@ -47,6 +47,12 @@ try {
   const host = readFileSync(new URL('../lib/index.js', import.meta.url), 'utf8')
   const hostSource = readFileSync(new URL('../src/index.js', import.meta.url), 'utf8')
   check('lib/index.js 含 src/index.js', host.includes(hostSource))
+  for (const name of ['video-export', 'video-export-worker', 'drawing-tasks', 'drawing-runner', 'drawing-results', 'task-coordinator', 'task-patches']) {
+    const source = readFileSync(new URL('../src/' + name + '.js', import.meta.url), 'utf8')
+    const built = readFileSync(new URL('../lib/' + name + '.js', import.meta.url), 'utf8')
+    check('lib/' + name + '.js 与宿主源码一致', built.includes(source))
+  }
+  check('SVG 宿主渲染器没有混进浏览器 bundle', !bundle.includes('@resvg/resvg-js'))
 } catch (error) {
   check('可读取 lib/ 与 src/', false, error && error.message ? error.message : String(error))
 }

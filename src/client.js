@@ -2595,6 +2595,12 @@ function railIcon(kind) {
   if (kind === 'text') {
     return svg(React.createElement('path', { d: 'M6 6.5h12M12 6.5V18' }))
   }
+  if (kind === 'tasks') {
+    return svg([
+      React.createElement('path', { key: 'checks', d: 'M3 6l1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2' }),
+      React.createElement('path', { key: 'rows', d: 'M10 6h11M10 12h11M10 18h11' }),
+    ])
+  }
   if (kind === 'section') {
     // 叠框：分区 / 容器（对应飞书侧栏的重叠矩形）。
     return svg([
@@ -3236,7 +3242,7 @@ function docFilteredToIds(doc, ids) {
 
 /** 本机偏好（不进文件）：网格、默认形状/配色。 */
 const DRAWAI_PREFS_KEY = 'dsh-drawai.prefs'
-const DEFAULT_DRAWAI_PREFS = { showGrid: true, defaultShape: 'rounded', defaultColor: 'blue' }
+const DEFAULT_DRAWAI_PREFS = { showGrid: true, showTaskList: false, defaultShape: 'rounded', defaultColor: 'blue' }
 
 const STANDARD_COLORS = [
   ['#ffffff', '白'], ['#f5f5f5', '浅灰'], ['#e1d5e7', '浅紫'], ['#eff4ff', '冰蓝'],
@@ -3757,7 +3763,9 @@ function VideoTracePanel(props) {
   const [options, setOptions] = React.useState(() => Object.assign({ range: 'clip', from: 0, end: 5, fps: 12, resolution: '480', width: 1024,
     level: 'medium', preset: 'default', colors: 12, removeBg: false }, props.initialOptions || props.job && props.job.options || {}))
   const job = props.job
-  const busy = job && job.busy
+  const [submitting, setSubmitting] = React.useState(false)
+  const [submitError, setSubmitError] = React.useState('')
+  const busy = submitting || job && job.busy
   const changeOptions = (patch) => {
     const next = Object.assign({}, options, patch)
     setOptions(next)
@@ -3801,12 +3809,18 @@ function VideoTracePanel(props) {
       React.createElement('div', { className: 'drawai-export-info', role: 'status' }, invalid || estimate),
       React.createElement('div', { className: 'drawai-export-info' }, '画质、帧率和范围由你决定。提高尺寸、帧率或时长会增加处理时间与文件大小；小视频不放大。原视频保留，结果不含音轨。'),
       job ? React.createElement('div', { role: job.error ? 'alert' : 'status', 'aria-live': 'polite' }, job.message) : null,
+      submitError ? React.createElement('div', { role: 'alert', className: 'drawai-err' }, submitError) : null,
       busy ? React.createElement('progress', { value: job.done || 0, max: job.total || 1, 'aria-label': '视频复刻进度', style: { width: '100%' } }) : null,
       job && job.svg ? React.createElement('img', { src: 'data:image/svg+xml,' + encodeURIComponent(job.svg), alt: '最近完成的 SVG 帧', style: { width: '100%', maxHeight: '180px', objectFit: 'contain' } }) : null,
       React.createElement('div', { className: 'drawai-layer-footer' },
         props.inline ? null : React.createElement('button', { type: 'button', className: 'drawai-btn', onClick: busy ? props.onCancel : props.onClose }, busy ? '取消复刻' : '关闭'),
         React.createElement('button', { type: 'button', className: 'drawai-btn drawai-primary-btn', disabled: busy || !!invalid,
-          onClick: () => props.onStart(options) }, job && job.error ? '重新复刻' : props.queued ? '加入绘制队列' : '让大肥鱼开始画画！'))))
+          onClick: async () => {
+            setSubmitting(true); setSubmitError('')
+            try { await props.onStart(options) }
+            catch (error) { setSubmitError(String(error.message || error)) }
+            finally { setSubmitting(false) }
+          } }, job && job.error ? '重新复刻' : props.queued ? '加入绘制队列' : '让大肥鱼开始画画！'))))
 }
 
 // 安装监听后才触发 load/seek；超时、取消、解码错误均释放监听器。
@@ -4012,7 +4026,7 @@ function ToolbarPopover(props) {
     }, props.renderPanel ? props.renderPanel(close) : React.createElement(ImageTracePanel, {
       key: props.source && props.source.id, source: props.source,
       onGenerate: (options) => props.onGenerate(props.source, options),
-      onEnqueue: props.onEnqueue ? (options) => { const job = props.onEnqueue(props.source, options); close(); return job } : undefined,
+      onEnqueue: props.onEnqueue ? async (options) => { const job = await props.onEnqueue(props.source, options); close(); return job } : undefined,
       onApply: (result) => { props.onApply(props.source, result); close() },
     })),
   )
@@ -4038,6 +4052,29 @@ function VideoTraceStatusCard(props) {
       React.createElement('div', { role: job.error ? 'alert' : 'status', 'aria-live': 'polite' }, job.message),
       job.busy && job.total > 1 ? React.createElement('small', null, (job.done || 0).toLocaleString() + ' / ' + job.total.toLocaleString() + ' 帧') : null,
       job.error && job.options ? React.createElement('button', { type: 'button', className: 'drawai-btn', onClick: props.onRetry }, '重试复刻') : null))
+}
+
+function VideoExportJobs(props) {
+  const [collapsed, setCollapsed] = React.useState(false)
+  if (!props.jobs.length) return null
+  const button = (label, onClick) => React.createElement('button', { type: 'button', className: 'drawai-trace-pin', onClick }, label)
+  return React.createElement('section', { className: 'drawai-video-task-card', role: 'region', 'aria-label': '后台视频导出',
+    style: { top: 68, bottom: 'auto', left: 12, right: 'auto', width: 320, maxHeight: '45%', overflow: 'auto' },
+    onPointerDown: (event) => event.stopPropagation(), onDoubleClick: (event) => event.stopPropagation(), onKeyDown: (event) => event.stopPropagation(),
+  }, React.createElement('div', { className: 'drawai-trace-card-heading' },
+    React.createElement('strong', null, '后台导出 · ' + props.jobs.length),
+    button(collapsed ? '展开' : '收起', () => setCollapsed(!collapsed))),
+  collapsed ? null : props.jobs.map((job) => React.createElement('div', { key: job.token, className: 'drawai-video-task-detail' },
+    React.createElement('strong', null, job.clip + ' · ' + job.format.toUpperCase() + ' · ' +
+      ({ rendering: '正在渲染', encoding: '正在编码', done: '已保存', error: '导出失败' }[job.status] || job.status)),
+    ['rendering', 'encoding'].includes(job.status) ? React.createElement('small', null,
+      (job.status === 'rendering' ? job.received : job.encoded) + (job.count ? '/' + job.count : '') + ' 帧；切换页面后仍会继续') : null,
+    job.path ? React.createElement('small', { style: { overflowWrap: 'anywhere', userSelect: 'text' } }, '已保存：' + job.path) : null,
+    job.error ? React.createElement('div', { className: 'drawai-err', role: 'alert' }, job.error) : null,
+    React.createElement('div', { className: 'drawai-trace-card-actions' },
+      job.error ? button('复制错误', () => writeClipboardText(job.error).catch(() => {})) : null,
+      job.status === 'done' ? button('下载文件', () => props.onDownload(job)) : null,
+      button(['done', 'error'].includes(job.status) ? '移除记录' : '取消导出', () => props.onDiscard(job))))))
 }
 
 function DrawingQueuePanel(props) {
@@ -6733,6 +6770,42 @@ function CanvasView(props) {
   mediaRequestRef.current = mediaAction
   const [videoController] = React.useState(() => createVideoController((action, extra) => mediaRequestRef.current(action, extra)))
   const videoExportRun = React.useRef(false)
+  const [videoExportJobs, setVideoExportJobs] = React.useState([])
+  const [backgroundDrawingJobs, setBackgroundDrawingJobs] = React.useState([])
+  const [backgroundQueueError, setBackgroundQueueError] = React.useState('')
+  React.useEffect(() => {
+    if (!client || !hasPath || !active) return
+    let alive = true, timer, fetching = false
+    const poll = async () => {
+      if (!alive || fetching) return
+      fetching = true
+      try {
+        const result = await mediaAction('drawing-task-list', {}, { throwOnError: true })
+        if (alive) { setBackgroundDrawingJobs(result.jobs || []); setBackgroundQueueError('') }
+      } catch (error) { if (alive) setBackgroundQueueError('任务状态暂时无法更新：' + String(error.message || error)) }
+      finally { fetching = false; if (alive) timer = setTimeout(poll, document.hidden ? 8000 : 1500) }
+    }
+    const resume = () => { if (!document.hidden) { clearTimeout(timer); poll() } }
+    poll(); document.addEventListener('visibilitychange', resume)
+    return () => { alive = false; clearTimeout(timer); document.removeEventListener('visibilitychange', resume) }
+  }, [client, sessionId, target, hasPath, active])
+  React.useEffect(() => {
+    if (!client || !hasPath || !active) return
+    let alive = true, timer, fetching = false
+    const poll = async () => {
+      if (!alive || fetching) return
+      fetching = true
+      try {
+        const result = await mediaAction('media-video-export-list', {}, { throwOnError: true })
+        if (alive && Array.isArray(result?.jobs)) setVideoExportJobs(result.jobs)
+      } catch { /* Keep the last known progress while disconnected. */ }
+      finally { fetching = false; if (alive) timer = setTimeout(poll, 1500) }
+    }
+    const resume = () => { if (!document.hidden) { clearTimeout(timer); poll() } }
+    setVideoExportJobs([]); poll()
+    document.addEventListener('visibilitychange', resume)
+    return () => { alive = false; clearTimeout(timer); document.removeEventListener('visibilitychange', resume) }
+  }, [client, sessionId, target, hasPath, active])
   React.useEffect(() => () => videoController.reset(), [videoController, target])
   React.useEffect(() => { if (!active) videoController.suspend() }, [videoController, active])
   React.useEffect(() => { videoController.prune(doc === null ? [] : doc.nodes) }, [videoController, doc])
@@ -6782,6 +6855,12 @@ function CanvasView(props) {
   const pageIndex = pageIndexState[0]
   const setPageIndex = pageIndexState[1]
   React.useEffect(() => { canvasSessions.workspace(sessionId).pages[target] = pageIndex }, [sessionId, target, pageIndex])
+  const handledPageRequest = React.useRef(null)
+  React.useEffect(() => {
+    if (props.pageRequest && active && props.pageRequest !== handledPageRequest.current) {
+      handledPageRequest.current = props.pageRequest; switchPage(props.pageRequest.page)
+    }
+  }, [props.pageRequest, active])
   React.useEffect(() => () => {
     pendingVideoRef.current = null
     for (const controller of videoImportsRef.current || []) controller.abort()
@@ -6795,6 +6874,7 @@ function CanvasView(props) {
   const prefs = prefsState[0]
   const setPrefs = prefsState[1]
   const showGrid = prefs.showGrid !== false
+  const showTaskList = prefs.showTaskList === true
   function patchPrefs(patch) {
     const next = Object.assign({}, prefs, patch === undefined || patch === null ? {} : patch)
     setPrefs(next)
@@ -6814,6 +6894,18 @@ function CanvasView(props) {
   const edgePreview = previewState[0]
   const setEdgePreview = previewState[1]
   const [traceDrawing, setTraceDrawing] = React.useState(null)
+  const autoReplayTasks = React.useRef(new Set())
+  React.useEffect(() => {
+    if (!active || !doc) return
+    for (const taskId of autoReplayTasks.current) {
+      const node = doc.nodes.find((item) => item.data?.drawaiTaskId === taskId)
+      if (!node) continue
+      autoReplayTasks.current.delete(taskId)
+      mediaAction('drawing-task-result', { taskId }, { throwOnError: true }).then((result) => {
+        if (result.output.drawing?.steps.length) setTraceDrawing({ id: node.id, svg: result.output.svg, drawing: result.output.drawing, metrics: result.output.metrics })
+      }).catch((error) => setSaveNote('绘制结果已保存，回放加载失败：' + String(error.message || error)))
+    }
+  }, [active, doc])
   const videoTraceRun = canvasSessions.task(sessionId, target, pageIndex)
   const [, refreshVideoTrace] = React.useState(0)
   React.useEffect(() => canvasSessions.subscribe(videoTraceRun, () => refreshVideoTrace((value) => value + 1)), [videoTraceRun])
@@ -6855,23 +6947,50 @@ function CanvasView(props) {
     }
   }
   React.useEffect(applyPendingVideoTrace, [doc, videoTraceRun, videoTraceRun.result, status.kind])
-  function enqueueVideoTrace(options, source) {
-    const job = drawingQueue.enqueue({ scope: { sessionId: sessionId || '', path: target, page: pageIndex }, kind: 'video',
-      label: '视频 · ' + source.id, source, options }, (context, frozenSource, frozenOptions) => startVideoTrace(frozenOptions, frozenSource, context))
-    setSaveNote('已加入绘制队列，可继续添加图片或视频')
-    return job
+  async function submitBackgroundDrawing(kind, source, options) {
+    await saveNow()
+    if (dirtyRef.current || saveInFlightRef.current) throw new Error('画布自动保存未完成，请稍后重试')
+    const result = await mediaAction('drawing-task-start', { kind, sourceId: source.id, options,
+      page: pageIndex, revision: revisionRef.current }, { throwOnError: true })
+    setBackgroundDrawingJobs((jobs) => jobs.filter((job) => job.id !== result.job.id).concat(result.job))
+    if (kind === 'image') autoReplayTasks.current.add(result.job.id)
+    setSaveNote('已加入后台队列，切换或关闭网页后仍会继续')
+    return result.job
   }
-  function enqueueImageTrace(source, options) {
-    const job = drawingQueue.enqueue({ scope: { sessionId: sessionId || '', path: target, page: pageIndex }, kind: 'image',
-      label: '图片 · ' + source.id, source, options }, async (context, frozenSource, frozenOptions) => {
-      context.update({ message: '正在分析并绘制图片…' })
-      const output = await generateImageTrace(frozenSource, frozenOptions)
-      if (context.signal.aborted) throw new Error('已取消绘制')
-      context.ready()
-      canvasSessions.publish(videoTraceRun, { kind: 'image', taskId: context.id, source: frozenSource, output })
-    })
-    setSaveNote('已加入绘制队列，可继续添加图片或视频')
-    return job
+  async function enqueueVideoTrace(options, source) {
+    return submitBackgroundDrawing('video', source, options)
+  }
+  async function enqueueImageTrace(source, options) {
+    return submitBackgroundDrawing('image', source, options)
+  }
+  async function backgroundTaskCommand(job, command, value) {
+    if (job.export) {
+      if (command === 'download') return downloadVideoExport(job)
+      if (command === 'retry-export') {
+        const result = await mediaAction('media-video-export-start', { clip: job.clip, format: job.format }, { throwOnError: true })
+        setVideoExportJobs((jobs) => jobs.concat(result)); return
+      }
+      await mediaAction('media-video-export-discard', { clip: job.clip, token: job.token }, { throwOnError: true })
+      setVideoExportJobs((jobs) => jobs.filter((item) => item.token !== job.token)); return
+    }
+    if (command === 'locate') {
+      const node = docRef.current?.nodes.find((item) => item.data?.drawaiTaskId === job.id)
+      if (!node) throw new Error('结果尚未同步到当前页，请稍后重试或打开原页面')
+      setSelectedIds([node.id]); setViewOverride(null)
+      if (job.kind === 'image') {
+        const result = await mediaAction('drawing-task-result', { taskId: job.id }, { throwOnError: true })
+        if (result.output.drawing?.steps.length) setTraceDrawing({ id: node.id, svg: result.output.svg, drawing: result.output.drawing, metrics: result.output.metrics })
+      }
+      return
+    }
+    if (['apply', 'undo'].includes(command)) {
+      await saveNow()
+      if (dirtyRef.current) throw new Error('请等待当前编辑自动保存成功后重试')
+    }
+    await mediaAction('drawing-task-command', { taskId: job.id, command, value }, { throwOnError: true })
+    const result = await mediaAction('drawing-task-list', {}, { throwOnError: true })
+    setBackgroundDrawingJobs(result.jobs || [])
+    if (['apply', 'undo'].includes(command)) setNonce((value) => value + 1)
   }
   async function startVideoTrace(options, sourceOverride, queueContext) {
     if (videoTraceRun.current || videoTraceRun.result || videoTraceRun.pendingSave || !(sourceOverride || videoTraceSource)) {
@@ -7123,6 +7242,15 @@ function CanvasView(props) {
   }
 
   /** 服务端推来新版本时清空历史 —— 否则一次撤销会把别人（或 AI）刚写的改动悄悄顶掉。 */
+  function mergeBackgroundHistory(patch) {
+    for (const document of historyRef.current.past.concat(historyRef.current.future)) applyTaskPatches(document, patch)
+    if (docRef.current) {
+      const next = applyTaskPatches(cloneDoc(docRef.current), patch)
+      docRef.current = next; setDoc(next)
+    }
+    lastCoalesceRef.current = null
+  }
+
   function resetHistory() {
     historyRef.current.past.length = 0
     historyRef.current.future.length = 0
@@ -7726,10 +7854,9 @@ function CanvasView(props) {
     if (response === null || response.ok !== true) {
       const message = String(response !== null && response.error ? response.error : 'unknown')
       if (message === 'revision conflict') {
-        reportSaveError('自动保存遇到版本冲突，正在重新载入画布')
-        // 别人改了这份文件（drawio、AI、别的编辑器都算）：不重试、不覆盖，
-        // 下一次轮询就会把新版本拉回来。
-        setSaveNote('保存被拒：文件已被他处修改，稍后会重新载入')
+        dirtyRef.current = true
+        reportSaveError('自动保存遇到版本冲突，本地编辑已保留')
+        setSaveNote('保存冲突：本地编辑已保留，请先另存副本或处理外部修改')
         return
       }
       dirtyRef.current = true
@@ -7738,6 +7865,7 @@ function CanvasView(props) {
       return
     }
     revisionRef.current = response.revision
+    if (response.backgroundPatch) mergeBackgroundHistory(response.backgroundPatch)
     canvasSessions.acknowledge(videoTraceRun, snapshot)
     // 有边被略过就如实说（两端都没有落点的边写不进文件），别让用户以为"全保存了"。
     const dropped = Array.isArray(response.dropped) ? response.dropped : []
@@ -10322,11 +10450,12 @@ function CanvasView(props) {
      */
     async function pull() {
       let payload = null
+      const requestedRevision = revisionRef.current
       try {
         const raw = await fetch(SAVE_ENDPOINT, {
           method: 'POST',
           headers: { 'content-type': 'application/json', [SAVE_HEADER]: '1' },
-          body: JSON.stringify({ action: 'read', sessionId: sessionId, path: target, page: pageIndex }),
+          body: JSON.stringify({ action: 'read', sessionId: sessionId, path: target, page: pageIndex, revision: requestedRevision }),
           signal: signal,
         })
         payload = await raw.json()
@@ -10419,6 +10548,7 @@ function CanvasView(props) {
         setStatus((prev) => (prev.kind === 'ready' ? prev : { kind: 'ready', path: absolute, error: '', absolute: absolute }))
         return
       }
+      if (revisionRef.current !== requestedRevision) return
       if (loadedDocumentRef.current === videoTraceRun && parsed.doc.revision === revisionRef.current && docRef.current !== null) {
         setStatus((prev) => (prev.kind === 'ready' && prev.absolute === absolute ? prev : { kind: 'ready', path: absolute, error: '', absolute: absolute }))
         return
@@ -10427,7 +10557,8 @@ function CanvasView(props) {
       loadedDocumentRef.current = videoTraceRun
       canvasSessions.restore(videoTraceRun, parsed.doc)
       revisionRef.current = parsed.doc.revision
-      resetHistory()
+      if (payload.backgroundPatch) mergeBackgroundHistory(payload.backgroundPatch)
+      else resetHistory()
       setDoc(parsed.doc)
       if (Number.isFinite(Number(payload.pageCount))) setPageCount(Math.max(1, Number(payload.pageCount)))
       if (Number.isFinite(Number(payload.pageIndex))) setPageIndex(Number(payload.pageIndex))
@@ -10870,6 +11001,13 @@ function CanvasView(props) {
    *   - `extractStillsFromVideo(node, every, max)` —— 工具栏「抽帧」按钮的老路径：t = i/12、步长 every。
    */
   async function extractStillsFromVideo(node, planOrEvery, legacyMax) {
+    if (videoMetaOf(node)?.kind === 'raster') {
+      const options = planOrEvery && typeof planOrEvery === 'object'
+        ? { ...planOrEvery, range: 'segment' }
+        : { range: 'all', fps: DEFAULT_MEDIA_FPS / Math.max(1, Number(planOrEvery) || 1), width: 480, max: legacyMax || 1200 }
+      try { return await submitBackgroundDrawing('extract', node, options) }
+      catch (error) { setSaveNote('后台抽帧失败：' + String(error.message || error)); return }
+    }
     const meta = videoMetaOf(node)
     if (meta === null) return
     const plan =
@@ -10987,68 +11125,28 @@ function CanvasView(props) {
     setSaveNote('正在准备逐帧导出 ' + format.toUpperCase() + '…')
     const pack = await request('media-video-export-start', { format })
     perf.enable(pack.performanceEnabled)
-    const auth = { token: pack.token }
-    try {
-      if (meta.kind === 'svg') {
-        const canvas = document.createElement('canvas')
-        canvas.width = pack.w; canvas.height = pack.h
-        const context = canvas.getContext('2d')
-        if (!context) throw new Error('浏览器无法创建导出画布')
-        const signal = new AbortController().signal
-        // Every index is rendered and acknowledged, even if one frame is slow.
-        for (let i = 0; i < pack.count; i += 1) {
-          const frame = await request('media-frame', { index: i })
-          const image = new Image()
-          await perf.measure('svgImageDecode', () => new Promise((resolve, reject) => {
-            image.onload = resolve; image.onerror = () => reject(new Error('第 ' + (i + 1) + ' 帧解码失败'))
-            image.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(frame.svg)
-          }))
-          const drawDone = perf.start('canvasRender')
-          context.fillStyle = '#fff'; context.fillRect(0, 0, pack.w, pack.h)
-          context.drawImage(image, 0, 0, pack.w, pack.h)
-          drawDone()
-          const png = await perf.measure('pngEncode', () => new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('帧图片导出失败')), 'image/png')))
-          perf.count('pngBytes', png.size)
-          for (let offset = 0; offset < png.size; offset += 1024 * 1024) {
-            const base64 = await perf.measure('base64Encode', () => readVideoChunk(png.slice(offset, offset + 1024 * 1024), signal))
-            await request('media-video-export-chunk', Object.assign({}, auth, { index: i, offset, base64 }))
-          }
-          await request('media-video-export-frame', Object.assign({}, auth, { index: i }))
-          setSaveNote('正在准备导出帧：' + (i + 1) + '/' + pack.count + '（' + pack.fps + 'fps）')
-        }
-      }
-      const encodeDone = perf.start('encodingAndPolling')
-      let status = await request('media-video-export-finish', auth)
-      while (status.status === 'encoding') {
-        setSaveNote('正在编码 ' + format.toUpperCase() + '：' + status.encoded + (pack.count ? '/' + pack.count : '') + ' 帧…')
-        await new Promise((resolve) => setTimeout(resolve, 250))
-        status = await request('media-video-export-status', auth)
-      }
-      encodeDone()
-      if (status.status !== 'done') throw new Error(status.error || '视频编码失败')
-      const downloadDone = perf.start('download')
-      const chunks = []
-      for (let offset = 0; offset < status.bytes;) {
-        const part = await request('media-video-export-read', Object.assign({}, auth, { offset }))
-        const bytes = Uint8Array.from(atob(part.base64), (c) => c.charCodeAt(0))
-        if (part.offset !== offset || !bytes.length || bytes.length !== part.bytes || part.total !== status.bytes) throw new Error('导出文件下载不完整')
-        chunks.push(bytes); offset += bytes.length
-      }
-      downloadDone()
-      const blob = new Blob(chunks, { type: 'video/' + format })
-      if (!blob.size) throw new Error('视频编码结果为空')
-      const url = URL.createObjectURL(blob)
-      try {
-        const anchor = document.createElement('a'); anchor.href = url
-        anchor.download = (typeof target === 'string' ? target.split(/[\/]/).pop().replace(/.drawio$/i, '') : 'clip') + '-' + meta.clip + '.' + format
-        anchor.click()
-      } finally { URL.revokeObjectURL(url) }
-      setSaveNote('已导出 ' + format.toUpperCase() + (pack.count ? '：' + pack.count + ' 帧，' + pack.fps + 'fps' : '') + '（白底，保留原片段音频）')
-    } finally {
-      const report = perf.report()
-      // Release encoded files and uploaded PNGs on both success and failure.
-      await mediaAction('media-video-export-discard', Object.assign({ clip: meta.clip, performance: pack.performanceEnabled ? report : undefined }, auth)).catch(() => {})
+    if (!pack.token) throw new Error('后台导出任务未返回令牌')
+    setVideoExportJobs((jobs) => [pack, ...jobs.filter((job) => job.token !== pack.token)])
+    setSaveNote('已在后台开始导出 ' + format.toUpperCase() + '，完成后自动保存到画布文件旁，可切换标签页或对话')
+  }
+
+  async function downloadVideoExport(job) {
+    const chunks = []
+    for (let offset = 0; offset < job.bytes;) {
+      const part = await mediaAction('media-video-export-read', { clip: job.clip, token: job.token, offset }, { throwOnError: true })
+      const bytes = Uint8Array.from(atob(part.base64), (c) => c.charCodeAt(0))
+      if (part.offset !== offset || !bytes.length || bytes.length !== part.bytes || part.total !== job.bytes) throw new Error('导出文件下载不完整')
+      chunks.push(bytes); offset += bytes.length
     }
+    const blob = new Blob(chunks, { type: job.format === 'gif' ? 'image/gif' : 'video/' + job.format })
+    if (!blob.size) throw new Error('导出文件为空')
+    const url = URL.createObjectURL(blob)
+    try {
+      const anchor = document.createElement('a'); anchor.href = url
+      anchor.download = job.path ? job.path.split(/[\\/]/).pop() : job.clip + '.' + job.format
+      anchor.click()
+    } finally { URL.revokeObjectURL(url) }
+    setSaveNote('已下载 ' + job.format.toUpperCase() + '；后台保存的文件仍然保留')
   }
 
   async function grabVideoStill(node) {
@@ -11110,6 +11208,7 @@ function CanvasView(props) {
           if (result) setSaveNote('已导出 ' + result.path)
         } },
         { label: '导出 MP4', export: true, disabled: () => !hasPath || !meta || videoExportRun.current, run: () => exportVideoFile(node, 'mp4') },
+        { label: '导出 GIF', export: true, disabled: () => !hasPath || !meta || videoExportRun.current, run: () => exportVideoFile(node, 'gif') },
         { label: '导出 WebM', export: true, mediaKind: 'svg', disabled: () => !hasPath || !meta || meta.kind !== 'svg' || videoExportRun.current, run: () => exportVideoFile(node, 'webm') },
         { label: '导出源视频', export: true, mediaKind: 'raster', disabled: () => !hasPath || !meta || meta.kind !== 'raster', run: async () => {
           if (!meta) return
@@ -11126,10 +11225,10 @@ function CanvasView(props) {
             renderPanel: (close) => React.createElement(VideoTracePanel, { inline: true, queued: true, source: {
               id: node.id, clip: meta.clip, w: Number(node.data.mediaW), h: Number(node.data.mediaH),
               duration: Number(node.data.mediaDuration) || videoController.get(node.id).duration,
-            }, onClose: close, onStart: (options) => {
+            }, onClose: close, onStart: async (options) => {
               const source = { id: node.id, clip: meta.clip, w: Number(node.data.mediaW), h: Number(node.data.mediaH),
                 duration: Number(node.data.mediaDuration) || videoController.get(node.id).duration }
-              try { enqueueVideoTrace(options, source); close() } catch (error) { reportError(error) }
+              await enqueueVideoTrace(options, source); close()
             } }),
           }),
           renderExport: (items, state, run, icon) => React.createElement(ToolbarPopover, {
@@ -11356,6 +11455,18 @@ function CanvasView(props) {
         ),
       )
     }
+
+    const activeTaskCount = backgroundDrawingJobs.concat(videoExportJobs).filter((job) =>
+      !['succeeded', 'done', 'cancelled', 'failed', 'error'].includes(job.status)).length
+    chips.push(React.createElement('div', { key: 'tasks-separator', className: 'drawai-rail-sep', style: { marginTop: 'auto' } }),
+      React.createElement('button', {
+        key: 'rail-tasks', type: 'button', className: 'drawai-rail-chip' + (showTaskList ? ' on' : ''),
+        style: { position: 'relative' }, 'aria-label': showTaskList ? '隐藏任务列表' : '展开任务列表', 'aria-expanded': showTaskList,
+        title: '后台任务' + (activeTaskCount ? ' · ' + activeTaskCount + ' 项进行中' : ''),
+        onClick: () => patchPrefs({ showTaskList: !showTaskList }),
+      }, railIcon('tasks'), activeTaskCount ? React.createElement('span', { 'aria-hidden': true,
+        style: { position: 'absolute', top: 0, right: 0, borderRadius: 8, padding: '1px 4px', fontSize: 10, background: 'var(--dsw-alias-brand-primary,#3370ff)', color: '#fff', lineHeight: '14px' },
+      }, activeTaskCount > 99 ? '99+' : activeTaskCount) : null))
 
     const rail = React.createElement(
       'div',
@@ -12860,8 +12971,10 @@ function CanvasView(props) {
     // 4) 工作栏的下拉与「打开/新建/另存为」面板：挂在 root 上（不在画布里），
     //    否则插进标签条之后它们的参照系会算成画布上方的负坐标，被 overflow:hidden 裁掉。
     renderDocMenu(),
-    active ? React.createElement(DrawingQueuePanel, { sessionId, path: target, page: pageIndex,
-      onApply: applyPendingVideoTrace, onSave: saveNow }) : null,
+    active ? React.createElement(BackgroundTaskPanel, { jobs: backgroundDrawingJobs, exports: videoExportJobs,
+      hidden: !showTaskList, onHide: () => patchPrefs({ showTaskList: false }),
+      path: target, page: pageIndex, error: backgroundQueueError, onCommand: backgroundTaskCommand,
+      onOpen: (job) => job.scope.path === target ? switchPage(job.scope.page) : onOpenTab(job.scope.path, job.scope.page) }) : null,
     videoTraceSource && videoTraceJob && !videoTraceRun.queueId ? React.createElement(VideoTraceStatusCard, { job: videoTraceJob,
       onRetry: () => videoTraceRun.result ? applyPendingVideoTrace() : startVideoTrace(videoTraceJob.options, videoTraceSource), onCancel: () => {
         setVideoTraceJob((job) => Object.assign({}, job, { message: '正在取消并清理临时帧…' }))
@@ -12993,12 +13106,14 @@ function CanvasTabs(props) {
   }, [tabPath])
 
   /** 打开一个路径：已经在标签里就切过去，否则新开一个。规则在 openTabIn（可自测）。 */
-  function openPath(path) {
+  function openPath(path, page) {
     const next = openTabIn(tabs, path)
     if (next.active === null) return
     bootstrappedRef.current = true
     workspace.bootstrapped = true
-    if (next.tabs !== tabs) setTabs(next.tabs)
+    if (Number.isInteger(page) && page >= 0) {
+      setTabs(next.tabs.map((tab) => tab.key === next.active ? { ...tab, pageRequest: { page } } : tab))
+    } else if (next.tabs !== tabs) setTabs(next.tabs)
     setActiveKey(next.active)
   }
 
@@ -13076,6 +13191,7 @@ function CanvasTabs(props) {
             React.createElement(CanvasView, {
               sessionId: props.sessionId,
               path: t.path,
+              pageRequest: t.pageRequest,
               active: isActive,
               infoError: '',
               onOpenTab: openPath,

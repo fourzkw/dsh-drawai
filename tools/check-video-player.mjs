@@ -307,6 +307,7 @@ console.log('Video playback controller')
     { label: '导出 SVG 视频', export: true, mediaKind: 'svg', disabled: () => false, run() { exportedVideo++ } },
     { label: '导出 WebM', export: true, mediaKind: 'svg', disabled: () => false, run() {} },
     { label: '导出 MP4', export: true, disabled: () => false, run() {} },
+    { label: '导出 GIF', export: true, disabled: () => false, run() {} },
     { label: '导出源视频', export: true, mediaKind: 'raster', disabled: () => false, run() { exportedVideo++ } },
   ]
   const compactRaster = flatten(VideoControls({ ...props, compact: true, meta: meta('ui', 'raster'), actions, onError(error) { throw error } }))
@@ -319,10 +320,12 @@ console.log('Video playback controller')
   check(grabbed === 1, 'grab-frame button runs the still-to-image action')
   check(compactRaster.some((n) => n.children.includes('导出源视频')) && !compactRaster.some((n) => n.children.includes('导出 SVG 视频')), 'raster export menu only shows relevant actions')
   check(compactRaster.some((n) => n.children.includes('导出 MP4')), 'raster videos expose MP4 export')
+  check(compactRaster.some((n) => n.children.includes('导出 GIF')), 'raster videos expose GIF export')
   await compactRaster.find((n) => n.type === 'button' && n.props['aria-label'] === '绘制复刻').props.onClick()
   check(drawn === 1, 'compact primary action invokes the existing drawing workflow')
   const compactSvg = flatten(VideoControls({ ...props, compact: true, actions, onError(error) { throw error } }))
   check(compactSvg.some((n) => n.children.includes('导出 MP4')), 'SVG videos expose MP4 export')
+  check(compactSvg.some((n) => n.children.includes('导出 GIF')), 'SVG videos expose GIF export')
   check(!compactSvg.some((n) => n.children.includes('绘制复刻')) && compactSvg.some((n) => n.children.includes('导出 SVG 视频')) && compactSvg.some((n) => n.children.includes('导出 WebM')) && !compactSvg.some((n) => n.children.includes('导出源视频')), 'SVG toolbar hides unsupported drawing and source export actions')
   let closed = false
   await compactSvg.find((n) => n.type === 'button' && n.children.includes('导出 SVG 视频')).props.onClick({ currentTarget: { closest() { return { set open(value) { closed = value === false } } } } })

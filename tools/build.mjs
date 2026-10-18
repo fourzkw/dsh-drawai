@@ -42,7 +42,7 @@ const MXFILE_PATH = 'src/mxfile.js'
  * 抛 MODULE_NOT_FOUND —— 而那一刻插件已经"装好了"，报错在启动期，很难联想到构建。
  * 所以新增这类模块时：源文件放 src/、在这里登记一行，构建器同时做存在性校验。
  */
-const HOST_ONLY_MODULES = ['src/raster.js', 'src/trace-image.js', 'src/media.js', 'src/video-trace-worker.js', 'src/video-trace-pool.js', 'src/video-export.js', 'src/performance-log.js', 'src/performance-metrics.js', 'src/video-trace-reuse.js']
+const HOST_ONLY_MODULES = ['src/raster.js', 'src/trace-image.js', 'src/media.js', 'src/video-trace-worker.js', 'src/video-trace-pool.js', 'src/video-export.js', 'src/video-export-worker.js', 'src/performance-log.js', 'src/performance-metrics.js', 'src/video-trace-reuse.js', 'src/task-coordinator.js', 'src/task-patches.js', 'src/drawing-tasks.js', 'src/drawing-runner.js', 'src/drawing-results.js']
 
 
 /**
@@ -102,9 +102,10 @@ export function composeClientBody() {
   const sessions = readFileSync('src/canvas-sessions.js', 'utf8').replace(/^export \{[^\n]+\}\s*$/m, '')
   const timing = readFileSync('src/performance-metrics.js', 'utf8').replace(/^export /gm, '')
   const queue = readFileSync('src/drawing-queue.js', 'utf8').replace(/^export /gm, '')
-  return kernelInline() + '\n\n' + timing + '\n\n' + queue + '\nconst drawingQueue = createDrawingQueue()\n\nconst canvasSessions = (() => {\n' + sessions +
+  const patches = readFileSync('src/task-patches.js', 'utf8').split('export function applyTaskPatches')[1]
+  return kernelInline() + '\n\nfunction applyTaskPatches' + patches + '\n\n' + timing + '\n\n' + queue + '\nconst drawingQueue = createDrawingQueue()\n\nconst canvasSessions = (() => {\n' + sessions +
     '\nreturn createCanvasSessionStore({ onClose: (sessionId, path) => drawingQueue.closeScope(sessionId, path), onDispose: () => drawingQueue.dispose(), onApplied: (id) => drawingQueue.applied(id), onSaved: (id) => drawingQueue.saved(id), onRestore: (id) => drawingQueue.restore(id) })\n})()\n\nconst videoPlayer = (() => {\n' + player +
-    '\nreturn { createVideoController, VideoSurface, VideoControls, VideoPreview }\n})()\n\n' + body
+    '\nreturn { createVideoController, VideoSurface, VideoControls, VideoPreview }\n})()\n\n' + readFileSync('src/background-task-panel.js', 'utf8') + '\n\n' + body
 }
 
 /** 从内核尾部的 `export { ... }` 列表里取出符号名（单源：符号表不用手抄第二遍）。 */

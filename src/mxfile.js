@@ -531,6 +531,7 @@ function analyzeMxfile(source, pageIndex) {
     pageCount: diagrams.length,
     pageIndex: idx,
     pageNames: pageNames,
+    pageIds: diagrams.map((item) => attr(item[1], 'id') || null),
     // 纸张尺寸（drawio 挂在 `mxGraphModel` 上的属性）：AI 做布局/导出建议时要看它 ——
     // 850×1100 是 drawio 的 A4 竖版缺省，但不代表用户这份文件就是那个尺寸。
     pageSize: readPageSize(modelXml),
@@ -974,7 +975,8 @@ export function parseMxfile(text, options) {
   if (existing !== null && existing.meta !== undefined && existing.meta !== null && existing.meta.pinned === true) {
     doc.meta.pinned = true
   }
-  return { doc: doc, notes: notes, pageCount: pageCount, pageIndex: info.pageIndex, pageNames: info.pageNames }
+  return { doc: doc, notes: notes, pageCount: pageCount, pageIndex: info.pageIndex, pageNames: info.pageNames,
+    pageId: (info.pageIds || [])[info.pageIndex] || null, pageIds: info.pageIds || [null] }
 }
 
 // ---- 单元的 XML 生成（新单元、以及从零生成一份文件时共用）--------------------

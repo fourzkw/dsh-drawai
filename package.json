@@ -1,6 +1,6 @@
 {
   "name": "dsh-drawai",
-  "version": "0.2.7",
+  "version": "0.3.1",
   "type": "module",
   "description": "DSH 右侧栏的可编辑画布 + AI 语义绘图工具（diagram_apply / diagram_read），直接读写原生 .drawio 文件",
   "license": "MIT",
@@ -14,7 +14,7 @@
     "build": "node tools/build.mjs",
     "watch": "node tools/watch.mjs",
     "check": "node tools/check-package.mjs",
-    "test": "node tools/check-adaptive-palette.mjs && node tools/check-auto-save.mjs && node tools/check-drawing-queue.mjs && node tools/check-trace-optimization.mjs && node tools/check-performance.mjs && node tools/check-mxfile.mjs && node tools/check-route-preview.mjs && node tools/check-host.mjs && node tools/check-render.mjs && node tools/check-component.mjs && node tools/check-text-copy.mjs && node tools/check-image-export.mjs && node tools/check-canvas-sessions.mjs && node tools/check-trace.mjs && node tools/check-media.mjs && node tools/check-video-player.mjs && node tools/check-image-trace.mjs && node tools/check-video-trace.mjs && node tools/check-video-reuse.mjs && node tools/check-video-audio.mjs && node tools/check-video-export.mjs && node tools/check-video-import.mjs && node tools/check-node-labels.mjs",
+    "test": "node tools/check-adaptive-palette.mjs && node tools/check-auto-save.mjs && node tools/check-drawing-queue.mjs && node tools/check-background-tasks.mjs && node tools/check-background-ui.mjs && node tools/check-trace-optimization.mjs && node tools/check-performance.mjs && node tools/check-mxfile.mjs && node tools/check-route-preview.mjs && node tools/check-host.mjs && node tools/check-render.mjs && node tools/check-component.mjs && node tools/check-text-copy.mjs && node tools/check-image-export.mjs && node tools/check-canvas-sessions.mjs && node tools/check-trace.mjs && node tools/check-media.mjs && node tools/check-video-player.mjs && node tools/check-image-trace.mjs && node tools/check-video-trace.mjs && node tools/check-video-reuse.mjs && node tools/check-video-audio.mjs && node tools/check-video-export.mjs && node tools/check-video-import.mjs && node tools/check-node-labels.mjs",
     "bench:performance": "node tools/benchmark-performance.mjs"
   },
   "exports": {
@@ -38,6 +38,9 @@
   ],
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": ">=0.1.0-rc.1 <0.1.0 || >=0.1.5-rc.1 <0.2.0-0 || >=0.2.0-rc.1 <0.3.0-0"

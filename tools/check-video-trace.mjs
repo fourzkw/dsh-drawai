@@ -331,18 +331,11 @@ try {
         return call
       },
     }
-    const enqueueSource = clientSource.slice(clientSource.indexOf('  function enqueueVideoTrace('), clientSource.indexOf('  async function startVideoTrace('))
-    const { run, enqueue } = new Function(...Object.keys(environment), enqueueSource + runSource + '\nreturn { run: startVideoTrace, enqueue: enqueueVideoTrace }')(...Object.values(environment))
+    // The legacy decoder remains a compatibility path. The default host queue
+    // and pause/restart semantics are exercised by check-background-tasks.
+    const run = new Function(...Object.keys(environment), runSource + '\nreturn startVideoTrace')(...Object.values(environment))
     const options = { from: 2, seconds: 0.5, fps: 6, width: 320, level: 'low', preset: 'default', colors: 6, removeBg: false }
-    if (mode === 'queued' || mode === 'queued-pause') {
-      const queued = enqueue(options, { id: 'n1', clip: 'source' })
-      const until = Date.now() + 10000
-      while (!['succeeded', 'failed'].includes(drawingQueue.list()[0].status) && Date.now() < until) await new Promise((done) => setTimeout(done, 5))
-      assert.equal(drawingQueue.list()[0].status, 'succeeded', drawingQueue.list()[0].error)
-      assert.equal(docRef.current.nodes.find((node) => node.id === selected[0]).data.drawaiTaskId, queued.id)
-      if (pauseCheck) await pauseCheck
-      if (pauseError) throw pauseError
-    } else await run(options)
+    await run(options)
     await Promise.all(pendingCalls)
     if (mode === 'detached') {
       assert.deepEqual(docRef.current, before, 'an unmounted view is never mutated by a background completion')
@@ -391,8 +384,6 @@ try {
     drawingQueue.dispose()
   }
   await runWorkflow('success')
-  await runWorkflow('queued')
-  await runWorkflow('queued-pause')
   await runWorkflow('chunked')
   await runWorkflow('detached')
   await runWorkflow('cancel')
