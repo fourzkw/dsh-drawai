@@ -969,6 +969,10 @@ console.log('\n切换画布 → 主动告诉模型"当前是哪一张"（Agent.i
   // 会话对不上（agent 还没起来）时不能炸，也不能乱注入
   const stranger = await api2({ action: 'focus', sessionId: 's1', path: 'flow.drawio' })
   ok(stranger.ok === true && injected.length === 4, '切回原来那张会再注入一次（路径确实变了）')
+  // 注入消息会作为 user/message.data 持久化，缺 id 会让整条会话在读取时校验失败。
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  ok(injected.every((message) => typeof message.id === 'string' && uuid.test(message.id)), '打开、切换、关闭及重新打开画布的注入消息都带 UUID')
+  ok(new Set(injected.map((message) => message.id)).size === injected.length, '每条注入消息使用独立 id，重新打开同一画布也不复用')
 }
 
 console.log('\n二叉树：父节点居中于两个孩子之间（树/森林专用摆法）')
