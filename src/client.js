@@ -3789,7 +3789,7 @@ function VideoTracePanel(props) {
   } catch (error) { invalid = error.message }
   return React.createElement('div', { ref: panelRef, tabIndex: props.inline ? undefined : -1, className: props.inline ? 'drawai-video-trace-inline' : 'drawai-video-preview', role: props.inline ? 'group' : 'dialog', 'aria-modal': props.inline ? undefined : true, 'aria-label': '视频分段复刻',
     style: props.inline ? undefined : { alignItems: 'center', justifyContent: 'center' },
-    onKeyDown: (event) => { event.stopPropagation(); if (event.key === 'Escape') { if (busy) props.onCancel(); else props.onClose() } },
+    onKeyDown: (event) => { event.stopPropagation(); if (event.key === 'Escape') { if (busy) { if (props.onCancel) props.onCancel() } else props.onClose() } },
     onPointerDown: (event) => event.stopPropagation() },
     React.createElement('div', { className: 'drawai-export-panel', style: props.inline ? undefined : { padding: '20px', width: '360px', maxWidth: '100%', boxSizing: 'border-box', maxHeight: '100%', overflow: 'auto', borderRadius: '12px' } },
       React.createElement('div', { className: 'drawai-popover-title' }, '视频分段复刻'),
@@ -3810,7 +3810,8 @@ function VideoTracePanel(props) {
       React.createElement('div', { className: 'drawai-export-info' }, '画质、帧率和范围由你决定。提高尺寸、帧率或时长会增加处理时间与文件大小；小视频不放大。原视频保留，结果不含音轨。'),
       job ? React.createElement('div', { role: job.error ? 'alert' : 'status', 'aria-live': 'polite' }, job.message) : null,
       submitError ? React.createElement('div', { role: 'alert', className: 'drawai-err' }, submitError) : null,
-      busy ? React.createElement('progress', { value: job.done || 0, max: job.total || 1, 'aria-label': '视频复刻进度', style: { width: '100%' } }) : null,
+      // 排队模式只给 queued/onStart/onClose，提交中 busy=true 但还没有 job：进度条退化为不确定态。
+      busy ? React.createElement('progress', { value: job ? job.done || 0 : undefined, max: job ? job.total || 1 : undefined, 'aria-label': '视频复刻进度', style: { width: '100%' } }) : null,
       job && job.svg ? React.createElement('img', { src: 'data:image/svg+xml,' + encodeURIComponent(job.svg), alt: '最近完成的 SVG 帧', style: { width: '100%', maxHeight: '180px', objectFit: 'contain' } }) : null,
       React.createElement('div', { className: 'drawai-layer-footer' },
         props.inline ? null : React.createElement('button', { type: 'button', className: 'drawai-btn', onClick: busy ? props.onCancel : props.onClose }, busy ? '取消复刻' : '关闭'),

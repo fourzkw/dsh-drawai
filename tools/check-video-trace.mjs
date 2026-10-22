@@ -70,6 +70,31 @@ assert.ok(panel.filter((n) => n.type === 'select' || n.type === 'input').every((
 panel.find((n) => n.type === 'button' && n.children.includes('取消复刻')).props.onClick()
 assert.ok(cancelled)
 
+// 选区工具栏的排队模式只传 queued/onStart/onClose：提交中同样会 busy，但没有 job 也不能崩。
+{
+  cursor = 0
+  slots.length = 0
+  let resolveSubmit, closed = false
+  const queuedProps = { queued: true, inline: true, onClose() { closed = true },
+    onStart() { return new Promise((resolve) => { resolveSubmit = resolve }) } }
+  let queuedPanel = flatten(VideoTracePanel(queuedProps))
+  const submit = queuedPanel.find((n) => n.type === 'button' && n.children.includes('加入绘制队列')).props.onClick()
+  cursor = 0
+  queuedPanel = flatten(VideoTracePanel(queuedProps))
+  const progress = queuedPanel.find((n) => n.props['aria-label'] === '视频复刻进度')
+  assert.ok(progress, '排队提交中也应有进度反馈')
+  assert.equal(progress.props.value, undefined, '没有 job 时进度条是不确定态，而不是读 job.done')
+  assert.ok(queuedPanel.filter((n) => n.type === 'select' || n.type === 'input').every((n) => n.props.disabled))
+  assert.doesNotThrow(() => queuedPanel[0].props.onKeyDown({ key: 'Escape', stopPropagation() {} }), '没有 onCancel 时按 Esc 不能抛错')
+  resolveSubmit()
+  await submit
+  assert.equal(closed, false)
+  cursor = 0
+  queuedPanel = flatten(VideoTracePanel(queuedProps))
+  assert.ok(!queuedPanel.some((n) => n.props['aria-label'] === '视频复刻进度'))
+  assert.ok(queuedPanel.filter((n) => n.type === 'select' || n.type === 'input').every((n) => !n.props.disabled))
+}
+
 // 视频绘制和导出使用与图片同一个悬停卡片，验证真正的展开/延迟关闭行为。
 {
   const source = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
