@@ -223,17 +223,19 @@ console.log('\n障碍避让：能绕开时确实绕开')
   ok(free.length >= 3, '自由路由绕行时有折点（' + free.length + ' 个点）')
   ok(crossesBox(free, block) === 0, '自由路由绕开了挡路节点')
 
-  // (b) 指定了引出边（用户按住 E 手柄拖出来）：引出侧是**用户给定的必经点**，
-  //     路由必须照它走 —— 哪怕因此穿过障碍。预览在这里的职责是如实预告，不是自作聪明绕开：
-  //     预览一旦比落盘聪明，松手瞬间就会跳变，那正是这次要消灭的毛病。
+  // (b) 指定引出侧也要避障；预览和落盘共用同一套修复逻辑。
   const seeded = internals.routePreviewFor(docA, geoA, { x: 600, y: 48 }, 'a', geoA.byId.a.geo, { from: 'a', side: 'e' }, hotPad, 'a')
   ok(seeded.points.length >= 2 && finite(seeded.points) && orthogonal(seeded.points), '钉住引出侧时预览依然正交且有限')
   // 折线从**形状边框**起笔（视觉上就是贴着形状出来的），但要经过该侧的 stub 折点 —— 那个 stub 才是
   // 真正钉住"从这一边引出"的东西（和 onNodePointerUp 落盘时写的 points 是同一个点）。
   // stub 坐标直接用产物里的函数算（它是单源）：手抄一遍公式的话，吸附规则一变这里就假失败。
   const stub = internals.stubPointFor(geoA.byId.a.geo, 'e')
-  const onPath = seeded.points.some((p) => Math.abs(p.x - stub.x) < 0.51 && Math.abs(p.y - stub.y) < 0.51)
+  const onPath = seeded.points.some((p, i) => {
+    const q = seeded.points[i + 1]
+    return q && Math.abs(Math.abs(p.x - stub.x) + Math.abs(p.y - stub.y) + Math.abs(q.x - stub.x) + Math.abs(q.y - stub.y) - Math.abs(p.x - q.x) - Math.abs(p.y - q.y)) < 0.51
+  })
   ok(onPath, '钉住引出侧时折线经过该侧的 stub（与落盘一致）')
+  ok(crossesBox(seeded.points, block) === 0, '钉住引出侧时同样绕开挡路节点')
   ok(Math.abs(seeded.points[0].x - (geoA.byId.a.geo.x + geoA.byId.a.geo.w)) < 0.51, '折线从形状边框起笔')
 
   // (c) 差分：同一条 routeEdge 直接算，必须给出同一条折线（预览没有自己另搞一套）。
@@ -429,16 +431,12 @@ console.log('\n拖动线段：松手不该跳变（prune 只能改表示、不�
     if (seed.length > 0) edge.points = seed.map((p) => ({ x: p.x, y: p.y }))
     const pts0 = internals.edgeRoutePoints({ nodes: d.nodes, edges: [edge] }, edge)
     for (let index = 0; index < pts0.length - 1; index += 1) {
-      const points = Array.isArray(edge.points) ? edge.points.slice() : []
-      const pinA = internals.ensurePinned(pts0, points, index)
-      const pinB = internals.ensurePinned(pts0, points, index + 1)
-      if (pinA < 0 || pinB < 0 || pinA === pinB) continue
-      const saved = points.map((p) => ({ x: p.x, y: p.y }))
+      const drag = internals.prepareSegmentDrag({ nodes: d.nodes, edges: [edge] }, edge, pts0, index)
+      if (drag === null) continue
+      const { a: pinA, b: pinB, base: saved } = drag
       const horizontal = Math.abs(pts0[index].y - pts0[index + 1].y) < 0.5
       for (const delta of [30, -40, 70]) {
-        const moved = saved.map((p, i) =>
-          i === pinA || i === pinB ? { x: p.x + (horizontal ? 0 : delta), y: p.y + (horizontal ? delta : 0) } : { x: p.x, y: p.y },
-        )
+        const moved = internals.movePinnedSegment(saved, pinA, pinB, { x: horizontal ? 0 : delta, y: horizontal ? delta : 0 })
         const live = { nodes: d.nodes, edges: [{ id: 'e1', from: 'a', to: 'b', points: moved }] }
         const livePts = internals.edgeRoutePoints(live, live.edges[0])
         const pruned = internals.prunePoints(live, live.edges[0])
@@ -600,8 +598,7 @@ console.log('\n折返（头发夹）：出去又原路描回来的线不能画�
   ok(rr(zig, []).length === 4, '正常的 Z 形路径不会被误伤')
 
   // 用户的真实操作复现：n3 在左、n2 在右，n2 被从右往左拖到"西侧入口落在折点左边"之后。
-  // 期望值与 drawio 的 mxEdgeStyle.SegmentConnector 逐点一致
-  // （它也是先竖着上去、最后一段横着进西侧 —— 见上面对 drawio 源码的核对）。
+  // 旧期望会从 x=380 穿入目标节点，再折回西侧；保留用户折点并从节点下方绕行。
   const doc = {
     nodes: [
       { id: 'n3', x: 10, y: 280, w: 130, h: 60 },
@@ -613,10 +610,15 @@ console.log('\n折返（头发夹）：出去又原路描回来的线不能画�
   style = styleWithSide(style, 'target', 'w')
   const edge = { id: 'e2', from: 'n3', to: 'n2', points: [{ x: 380, y: 445 }], style: style }
   const got = internals.edgeRoutePoints({ nodes: doc.nodes, edges: [edge] }, edge)
-  const want = [{ x: 75, y: 340 }, { x: 75, y: 445 }, { x: 380, y: 445 }, { x: 380, y: 260 }, { x: 360, y: 260 }]
-  const same =
-    got !== null && got.length === want.length && got.every((p, i) => Math.abs(p.x - want[i].x) < 0.51 && Math.abs(p.y - want[i].y) < 0.51)
-  ok(same, '拖窄后的走线 == drawio 的走线：' + JSON.stringify(got))
+  const clearsNodes = got !== null && doc.nodes.every((n) => got.every((p, i) => {
+    if (i === 0) return true
+    const q = got[i - 1]
+    return !(Math.min(p.x, q.x) < n.x + n.w && Math.max(p.x, q.x) > n.x && Math.min(p.y, q.y) < n.y + n.h && Math.max(p.y, q.y) > n.y)
+  }))
+  const last = got === null ? -1 : got.length - 1
+  const entersWest = last > 0 && got[last].x === 360 && got[last].y === 260 && got[last - 1].y === 260 && got[last - 1].x < 360
+  const keepsWaypoint = got !== null && got.some((p) => p.x === 380 && p.y === 445)
+  ok(clearsNodes && entersWest && keepsWaypoint, '拖窄后保留折点、绕开节点并进入西侧：' + JSON.stringify(got))
 
   const folds = (pts) => {
     let n = 0
@@ -1078,6 +1080,136 @@ console.log('\n画布真图的连线不变量（直接读工作区里的 demo.dr
     ok(routed === docReal.edges.length, '每条边都算出了路径（' + routed + '/' + docReal.edges.length + '）')
     ok(broken === 0, 'demo 里 ' + docReal.edges.length + ' 条连线全部通过')
   }
+}
+
+console.log('\n拖动回归：共线折点顺序、节点避让与端点方向')
+{
+  const path = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }]
+  const points = [{ x: 50, y: 0 }]
+  const a = internals.ensurePinned(path, points, 0)
+  const b = internals.ensurePinned(path, points, 1)
+  ok(a === 0 && b === 2 && points.map((p) => p.x + ',' + p.y).join(';') === '0,0;50,0;100,0', '在线段内部的共线折点按路径顺序保留，新段两端的下标正确')
+  const moved = internals.movePinnedSegment(points, a, b, { x: 0, y: 40 })
+  ok(moved.every((p) => p.y === 40) && points.every((p) => p.y === 0), '整段拖动同时平移段内共线折点，按下时的快照保持不变')
+  const p2 = [{ x: 50, y: 0 }, { x: 100, y: 50 }]
+  const c = internals.ensurePinned(path, p2, 1)
+  const d = internals.ensurePinned(path, p2, 2)
+  ok(c === 1 && d === 3 && p2[2].y === 50, '插入后续段端点时，不把共线折点排到另一段后面')
+
+  const hits = (pts, geo) => pts.some((p, i) => {
+    if (i === 0) return false
+    const q = pts[i - 1]
+    return Math.min(p.x, q.x) < geo.x + geo.w && Math.max(p.x, q.x) > geo.x && Math.min(p.y, q.y) < geo.y + geo.h && Math.max(p.y, q.y) > geo.y
+  })
+  const passes = (pts, waypoint) => pts.some((p, i) => {
+    const q = pts[i + 1]
+    return q && Math.abs(Math.abs(p.x - waypoint.x) + Math.abs(p.y - waypoint.y) + Math.abs(q.x - waypoint.x) + Math.abs(q.y - waypoint.y) - Math.abs(p.x - q.x) - Math.abs(p.y - q.y)) < 0.5
+  })
+  let style = styleWithSide(DEFAULT_EDGE_STYLE, 'source', 'e')
+  style = styleWithSide(style, 'target', 'w')
+  const edge = { id: 'edge', from: 'a', to: 'b', style, points: [{ x: 240, y: 160 }] }
+  let broken = 0
+  let count = 0
+  for (let x = 320; x <= 520; x += 20) {
+    for (let y = 80; y <= 220; y += 20) {
+      const nodes = [{ id: 'a', x: 0, y: 0, w: 120, h: 60 }, { id: 'b', x, y, w: 120, h: 60 }, { id: 'block', x: 170, y: 20, w: 40, h: 90 }]
+      const pts = internals.edgeRoutePoints({ nodes, edges: [edge] }, edge)
+      count += 1
+      const last = pts.length - 1
+      const fold = pts.some((p, i) => i > 1 && internals.isFoldApex(pts[i - 2], pts[i - 1], p))
+      if (!finite(pts) || !orthogonal(pts) || fold || nodes.some((n) => hits(pts, n)) || pts[1].x <= pts[0].x || pts[last - 1].x >= pts[last].x || pts[last - 1].y !== pts[last].y || !passes(pts, { x: 240, y: 160 })) {
+        broken += 1
+        console.log('异常位置', x, y, JSON.stringify(pts))
+      }
+    }
+  }
+  ok(broken === 0, '连续移动目标节点 ' + count + ' 个位置：保留折点，保持进出方向，无穿模或折返（异常 ' + broken + '）')
+
+  const from = { id: 'a', geo: { x: 0, y: 0, w: 120, h: 60 } }
+  const to = { id: 'b', geo: { x: 400, y: 200, w: 120, h: 60 } }
+  const walls = [
+    { id: 'middle', geo: { x: 240, y: -100, w: 40, h: 500 } },
+    { id: 'left', geo: { x: -65, y: 80, w: 10, h: 100 } },
+    { id: 'right', geo: { x: 575, y: 80, w: 10, h: 100 } },
+  ]
+  const boxes = [from, to, ...walls]
+  const candidates = internals.routeCandidates(from, to)
+  ok(candidates.every((c) => walls.some((wall) => hits(c.points, wall.geo))), '六个自动路由候选均受阻，回归场景确实触发兜底寻路')
+  const routed = internals.routeEdge(from, to, boxes, null)
+  ok(finite(routed) && orthogonal(routed) && boxes.every((box) => !hits(routed, box.geo)), '候选全部受阻时找到节点外的可行通道')
+}
+
+console.log('\n截图回归：首末段平移不能把节点连接点拖成折点')
+{
+  const baseNodes = [{ id: 'a', x: -190, y: -450, w: 130, h: 60 }, { id: 'b', x: -80, y: -320, w: 130, h: 60 }]
+  const rotate = (p, turns) => {
+    let q = { ...p }
+    for (let i = 0; i < turns; i += 1) q = { x: -q.y, y: q.x }
+    return q
+  }
+  const rotatedNode = (node, turns) => {
+    const corners = [rotate(node, turns), rotate({ x: node.x + node.w, y: node.y + node.h }, turns)]
+    return { id: node.id, x: Math.min(...corners.map((p) => p.x)), y: Math.min(...corners.map((p) => p.y)), w: Math.abs(corners[1].x - corners[0].x), h: Math.abs(corners[1].y - corners[0].y) }
+  }
+  const sideOrder = ['n', 'e', 's', 'w']
+  let runs = 0
+  let broken = 0
+  for (let turns = 0; turns < 4; turns += 1) {
+    for (const reverse of [false, true]) {
+      const nodes = baseNodes.map((node) => rotatedNode(node, turns))
+      const source = sideOrder[(1 + turns) % 4]
+      const target = sideOrder[turns]
+      let style = styleWithSide(DEFAULT_EDGE_STYLE, 'source', reverse ? target : source)
+      style = styleWithSide(style, 'target', reverse ? source : target)
+      const edge = { id: 'screenshot', from: reverse ? 'b' : 'a', to: reverse ? 'a' : 'b', style }
+      if (reverse) edge.points = [rotate({ x: -15, y: -420 }, turns)]
+      const doc = { nodes, edges: [edge] }
+      const original = JSON.stringify(doc)
+      const initial = internals.edgeRoutePoints(doc, edge)
+      const index = reverse ? 0 : initial.length - 2
+      const seed = internals.prepareSegmentDrag(doc, edge, initial, index)
+      ok(seed !== null && JSON.stringify(doc) === original, '旋转 ' + turns + ' / ' + (reverse ? '源端' : '目标端') + '：按下只生成快照，不修改文档')
+      for (const delta of [-10, -5, 5, 10, 20, 40]) {
+        const move = rotate({ x: delta, y: 0 }, turns)
+        const moved = { ...edge, points: internals.movePinnedSegment(seed.base, seed.a, seed.b, move) }
+        const pts = internals.edgeRoutePoints({ ...doc, edges: [moved] }, moved)
+        const first = pts[0]
+        const last = pts[pts.length - 1]
+        const fixedEnds = first.x === initial[0].x && first.y === initial[0].y && last.x === initial[initial.length - 1].x && last.y === initial[initial.length - 1].y
+        const folds = pts.some((p, i) => i > 1 && internals.isFoldApex(pts[i - 2], pts[i - 1], p))
+        const pinnedBorder = moved.points.some((p) => (p.x === first.x && p.y === first.y) || (p.x === last.x && p.y === last.y))
+        const interval = reverse ? 2 : pts.length - 4
+        const actualA = pts[interval]
+        const actualB = pts[interval + 1]
+        const translated = seed.horizontal ? actualA.y === initial[index].y + move.y && actualB.y === actualA.y : actualA.x === initial[index].x + move.x && actualB.x === actualA.x
+        const pruned = internals.prunePoints({ ...doc, edges: [moved] }, moved)
+        const after = internals.edgeRoutePoints(doc, { ...moved, points: pruned })
+        if (!finite(pts) || !orthogonal(pts) || pts.length !== 5 || !fixedEnds || folds || pinnedBorder || !translated || !internals.samePath(pts, after)) {
+          broken += 1
+          console.log('截图回归异常', turns, reverse, delta, { fixedEnds, folds, pinnedBorder, translated, same: internals.samePath(pts, after) }, JSON.stringify(pts))
+        }
+        runs += 1
+      }
+    }
+  }
+  ok(broken === 0, '首末段四方向平移 ' + runs + ' 次：仅增加必要转角，连接点固定，松手不跳变（异常 ' + broken + '）')
+  let style = styleWithSide(DEFAULT_EDGE_STYLE, 'source', 'e')
+  style = styleWithSide(style, 'target', 'n')
+  let edge = { id: 'repeat', from: 'a', to: 'b', style }
+  let stable = true
+  for (let i = 0; i < 24; i += 1) {
+    const doc = { nodes: baseNodes, edges: [edge] }
+    const path = internals.edgeRoutePoints(doc, edge)
+    const index = path.findIndex((p, j) => j < path.length - 1 && p.x === path[j + 1].x && Math.abs(p.y - path[j + 1].y) > 50)
+    const seed = internals.prepareSegmentDrag(doc, edge, path, index)
+    const moved = { ...edge, points: internals.movePinnedSegment(seed.base, seed.a, seed.b, { x: i % 2 === 0 ? 5 : -5, y: 0 }) }
+    const drawn = internals.edgeRoutePoints(doc, moved)
+    moved.points = internals.prunePoints({ ...doc, edges: [moved] }, moved)
+    const after = internals.edgeRoutePoints(doc, moved)
+    stable = stable && after.length <= 5 && internals.samePath(drawn, after) && !after.some((p, j) => j > 1 && internals.isFoldApex(after[j - 2], after[j - 1], p))
+    edge = moved
+  }
+  ok(stable, '同一竖段来回拖动并松手 24 次，不累积小弯或冗余折点')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
