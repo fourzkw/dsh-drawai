@@ -4,16 +4,17 @@ function BackgroundTaskPanel(props) {
   const [filter, setFilter] = React.useState('active')
   const [busy, setBusy] = React.useState('')
   const [error, setError] = React.useState('')
-  const jobs = props.jobs.concat(props.exports.map((job) => ({ ...job, id: job.token, export: true, label: job.clip + ' · ' + job.format.toUpperCase() })))
-  const attention = (job) => ['failed', 'error', 'interrupted'].includes(job.status) || job.delivery === 'conflict'
-  const ended = (job) => ['succeeded', 'done', 'cancelled', 'failed', 'error'].includes(job.status)
+  const jobs = props.jobs.concat(props.exports.map((job) => ({ ...job, id: job.token, export: true, label: job.clip + ' · ' + job.format.toUpperCase() })),
+    (props.motions || []).map((job) => ({ ...job, motion: true, label: '绘制视频 · ' + job.nodeId })))
+  const attention = (job) => ['failed', 'error', 'interrupted', 'retained'].includes(job.status) || job.delivery === 'conflict'
+  const ended = (job) => ['succeeded', 'done', 'cancelled', 'failed', 'error', 'retained', ...(job.motion ? ['interrupted'] : [])].includes(job.status)
   const live = jobs.filter((job) => !ended(job)).length, needs = jobs.filter(attention).length
   const visible = jobs.filter((job) => filter === 'all' || (filter === 'active' ? !ended(job) || attention(job) : filter === 'attention' ? attention(job) : ended(job) && !attention(job)))
   const labels = { queued: '等待中', running: '绘制中', paused: '已暂停', cancelling: '正在取消', interrupted: '等待恢复', failed: '绘制失败', cancelled: '已取消', succeeded: '已完成', rendering: '渲染中', encoding: '编码中', done: '已保存文件', error: '导出失败' }
   const phases = { preparing: '检查素材', probing: '探测视频', decoding: '解码抽帧', tracing: '绘制色块' }
   const invoke = async (job, action, value) => {
     setBusy(job.id || 'queue'); setError('')
-    try { await props.onCommand(job, action, value) }
+    try { await (job.motion ? props.onMotionCommand(job, action) : props.onCommand(job, action, value)) }
     catch (err) { setError(String(err.message || err)) }
     finally { setBusy('') }
   }
@@ -32,10 +33,29 @@ function BackgroundTaskPanel(props) {
       [['active', '进行中'], ['attention', '需处理'], ['complete', '已结束'], ['all', '全部']].map(([key, label]) =>
         React.createElement('button', { key, type: 'button', className: 'drawai-trace-pin', 'aria-pressed': filter === key, style: { fontWeight: filter === key ? 700 : 400 }, onClick: () => setFilter(key) }, label)),
       props.jobs.length ? button(props.jobs.some((job) => job.queuePaused) ? '继续绘制队列' : '暂停后续绘制', () => invoke({}, 'pause-queue', !props.jobs.some((job) => job.queuePaused))) : null),
-    React.createElement('small', null, '切换页面或关闭网页后继续；宿主重启后可恢复绘制。'),
+    React.createElement('small', null, '切换页面或关闭网页后继续；视频创作中断后可继续生成。'),
     error || props.error ? React.createElement('div', { role: 'alert', className: 'drawai-err', style: { userSelect: 'text' } }, error || props.error) : null,
     !visible.length ? React.createElement('p', { className: 'drawai-note' }, jobs.length ? '此分类暂无任务，可切换到“全部”查看记录。' : '暂无后台任务') : null,
     visible.map((job) => {
+      if (job.motion) {
+          const states = { 'agent-thinking':'正在规划', 'agent-tool':'正在操作工程', 'awaiting-session': '准备任务', queued: '排队中', planning: '规划镜头', brief: '设计风格与分镜', storyboard: '分镜已确定', coding: '编写场景动画', reviewing: '检查关键帧', repairing: '修复场景动画', bundling: '准备渲染', rendering: '渲染中', done: '已写入画布', retained: '成片已保留 · 等待回填', error: '绘制失败', cancelled: '已取消', interrupted: '任务已中断' }
+        return React.createElement('article', { key: job.id, className: 'drawai-video-task-detail' },
+          React.createElement('strong', null, job.label),
+            React.createElement('div', { role: 'status' }, job.status==='film-review'?'检查整片运动与声音':states[job.status] || job.status),
+          React.createElement('small', null, '第 ' + (job.page + 1) + ' 页' + (job.stageDetail?.shotId ? ' · ' + job.stageDetail.shotId : '') + (job.stageDetail?.componentId ? ' · ' + job.stageDetail.componentId : '')),
+          !ended(job) ? React.createElement('progress', { 'aria-label': job.label + '进度', max: 100,
+            value: job.status === 'rendering' ? Math.round((job.progress || 0) * 100) : undefined }) : null,
+          job.error ? React.createElement('details', { style: { marginTop: 6, minWidth: 0 } },
+            React.createElement('summary', { role: 'alert', style: { overflowWrap: 'anywhere', cursor: 'pointer' } }, String(job.error).split(/\r?\n/)[0].slice(0, 160) + (String(job.error).split(/\r?\n/)[0].length > 160 ? '…' : '') + '（展开详情）'),
+            React.createElement('pre', { style: { maxHeight: 160, overflow: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', userSelect: 'text', font: 'inherit' } }, job.error)) : null,
+          React.createElement('div', { className: 'drawai-trace-card-actions', style: { flexWrap: 'wrap' } },
+            button('定位节点', () => invoke(job, 'locate')),
+            !ended(job) ? button('取消', () => invoke(job, 'cancel')) : null,
+            ['error', 'cancelled', 'interrupted'].includes(job.status) ? button('继续生成', () => invoke(job, 'resume')) : null,
+            job.status === 'retained' ? button('尝试回填', () => invoke(job, 'apply')) : null,
+            ended(job) ? button('移除记录', () => invoke(job, 'remove')) : null,
+            job.error ? button('复制错误', () => writeClipboardText(job.error).catch(() => {})) : null))
+      }
       const running = ['running', 'rendering', 'encoding'].includes(job.status)
       const done = job.export ? job.status === 'rendering' ? job.received : job.encoded : job.done
       const total = job.export ? job.count : job.total

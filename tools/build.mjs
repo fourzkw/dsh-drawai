@@ -16,10 +16,11 @@
  *
  * 用法：node tools/build.mjs     （watch 时由 tools/watch.mjs 直接 import buildAll，不 spawn）
  */
-import { readFileSync, writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, cpSync, mkdirSync, readdirSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { resolve } from 'node:path'
+import { resolve, join } from 'node:path'
 
 const GENERATED = '/* 由 tools/build.mjs 生成 —— 请勿直接编辑；改 src/ 下的源文件。 */\n'
 
@@ -42,7 +43,8 @@ const MXFILE_PATH = 'src/mxfile.js'
  * 抛 MODULE_NOT_FOUND —— 而那一刻插件已经"装好了"，报错在启动期，很难联想到构建。
  * 所以新增这类模块时：源文件放 src/、在这里登记一行，构建器同时做存在性校验。
  */
-const HOST_ONLY_MODULES = ['src/raster.js', 'src/trace-image.js', 'src/media.js', 'src/video-trace-worker.js', 'src/video-trace-pool.js', 'src/video-export.js', 'src/video-export-worker.js', 'src/performance-log.js', 'src/performance-metrics.js', 'src/video-trace-reuse.js', 'src/task-coordinator.js', 'src/task-patches.js', 'src/drawing-tasks.js', 'src/drawing-runner.js', 'src/drawing-results.js']
+const HOST_ONLY_MODULES = ['src/shotcard-core.js', 'src/shotcard-reference.js', 'src/motion-session.js', 'src/motion-library.js', 'src/motion-source.js', 'src/motion-project.js', 'src/motion-core.js', 'src/motion-tasks.js', 'src/motion-render-worker.js', 'src/document-core.js', 'src/document-commands.js', 'src/canvas-format.js', 'src/raster.js', 'src/trace-image.js', 'src/media.js', 'src/video-trace-worker.js', 'src/video-trace-pool.js', 'src/video-export.js', 'src/video-export-worker.js', 'src/performance-log.js', 'src/performance-metrics.js', 'src/video-trace-reuse.js', 'src/task-coordinator.js', 'src/task-patches.js', 'src/drawing-tasks.js', 'src/drawing-runner.js', 'src/drawing-results.js', 'src/comfyui-workflow.mjs', 'src/comfyui-default-workflow.mjs', 'src/imagegen.mjs']
+HOST_ONLY_MODULES.push('src/motion-capture.js', 'src/motion-film-review.js', 'src/motion-agent-protocol.js', 'src/motion-agent-files.js', 'src/motion-vision.js', 'src/audio-media.js', 'src/audio-service.js')
 
 
 /**
@@ -103,12 +105,28 @@ export function composeClientBody() {
   const timing = readFileSync('src/performance-metrics.js', 'utf8').replace(/^export /gm, '')
   const queue = readFileSync('src/drawing-queue.js', 'utf8').replace(/^export /gm, '')
   const patches = readFileSync('src/task-patches.js', 'utf8').split('export function applyTaskPatches')[1]
-  return kernelInline() + '\n\nfunction applyTaskPatches' + patches + '\n\n' + timing + '\n\n' + queue + '\nconst drawingQueue = createDrawingQueue()\n\nconst canvasSessions = (() => {\n' + sessions +
+  const documentCore = readFileSync('src/document-core.js', 'utf8').replace(/^import .*$/gm, '').replace(/^export /gm, '')
+  const commands = readFileSync('src/document-commands.js', 'utf8').replace(/^import .*$/gm, '').replace(/^export /gm, '')
+  const shotCatalog = JSON.parse(readFileSync('src/motion/shotcraft/catalog.json', 'utf8'))
+  const catalog = shotCatalog.cards.map(({ id, category, summary }) => ({ id, category, summary }))
+  const shotCore = readFileSync('src/shotcard-core.js', 'utf8').replace(/^export /gm, '')
+  const motion = 'const catalog = ' + JSON.stringify(catalog).replaceAll('`', '\\u0060') + ';\n' + 'const shotCatalog = ' + JSON.stringify(shotCatalog).replaceAll(String.fromCharCode(96), '\\u0060') + ';\n' + shotCore + '\n' + readFileSync('src/motion-core.js', 'utf8').replace(/^import .*$/gm, '').replace(/^export /gm, '')
+  return kernelInline() + routingInline() + '\nconst motionCore = (() => {\n' + motion + '\nreturn { catalog, shotCatalog, resolveShotStyle, searchShotCards, isShotCardNode, shotCardData, shotCardSelections, MOTION_ROLES, isAudioNode, audioNodeData, audioNodeSettings, validateAudioTimeline, motionSettings, isMotionNode, motionNodeData, bindMotionReference, motionReferenceEdges, motionReferenceRole, motionInput, motionInputKey, assertMotionEditable, validateMotionPlan, applyMotionResult }\n})()\n' + '\nconst documentCore = (() => {\nconst normalizeDrawioDoc = styleKernel.normalizeDrawioDoc\n' + documentCore + '\nreturn { cloneDocument, emptyDocument, normalizeDocument, documentTransaction }\n})()\n' + commands.replaceAll('documentTransaction(current,', 'documentCore.documentTransaction(current,') + '\nconst documentCommands = createDocumentCommands({ mutate: (draft, command) => command.mutate(draft) })\n' + '\n\nfunction applyTaskPatches' + patches + '\n\n' + timing + '\n\n' + queue + '\nconst drawingQueue = createDrawingQueue()\n\nconst canvasSessions = (() => {\n' + sessions +
     '\nreturn createCanvasSessionStore({ onClose: (sessionId, path) => drawingQueue.closeScope(sessionId, path), onDispose: () => drawingQueue.dispose(), onApplied: (id) => drawingQueue.applied(id), onSaved: (id) => drawingQueue.saved(id), onRestore: (id) => drawingQueue.restore(id) })\n})()\n\nconst videoPlayer = (() => {\n' + player +
-    '\nreturn { createVideoController, VideoSurface, VideoControls, VideoPreview }\n})()\n\n' + readFileSync('src/background-task-panel.js', 'utf8') + '\n\n' + body
+    '\nreturn { createVideoController, VideoSurface, VideoControls, VideoPreview }\n})()\n\n' + readFileSync('src/background-task-panel.js', 'utf8') + '\n' + readFileSync('src/audio-panel.js', 'utf8') + '\n' + readFileSync('src/motion-panel.js', 'utf8') + '\n' + readFileSync('src/shotcard-panel.js', 'utf8') + '\n\n' + body
 }
 
 /** 从内核尾部的 `export { ... }` 列表里取出符号名（单源：符号表不用手抄第二遍）。 */
+function routingInline() {
+  const vendor = ['libavoid.min.js', 'libavoid-routing.js'].map((file) => readFileSync('src/routing/vendor/' + file, 'utf8')).join('\n')
+  const adapter = readFileSync('src/routing/router.js', 'utf8').replace(/^import .*$/gm, '').replace(/^export /gm, '')
+  return '\nconst routingCore = (() => {\nconst routingKernel = styleKernel\nconst {routingModeOf, styleGet, stylePatch, jettyFromStyle} = routingKernel\n' + adapter +
+    '\nreturn {createOrthogonalRouter, routingBoxes, storedRoute, validRoute, affectedRoutes}\n})()\n' +
+    'let privateRoutingRuntime\nfunction getRoutingRuntime() {\nif (!privateRoutingRuntime) {\nconst globalThis = {}\n// drawai-routing-vendor-start\n' + vendor +
+    '\n// drawai-routing-vendor-end\nprivateRoutingRuntime = globalThis\n}\nreturn privateRoutingRuntime\n}\n' +
+    'const routingEngine = routingCore.createOrthogonalRouter(getRoutingRuntime)\n'
+}
+
 function kernelExports() {
   // 必须锚定行首：内核的说明注释里也出现过字面量 `export { ... }`，
   // 不加锚点会匹配到那句注释，生成出 `return { ... }` 这种语法错误。
@@ -176,7 +194,45 @@ function assertBackticksBalanced(file, text) {
   )
 }
 
+/**
+ * 语法/绑定体检：对产物逐个跑 `node --check`。
+ *
+ * 为什么必须有：反引号配平只管"模板字符串被截断"，管不到别的语法错，
+ * 更管不到**同一个模块里重复声明同一个名字**（例如从两个文件各 import 一个
+ * `readManifest`）。那种错构建器照样写出产物、`构建完成` 照样打印，插件却在
+ * 宿主启动时整片加载失败 —— 用户看到的是"插件没装上"，不是"少了个分号"。
+ * `--check` 只解析不执行，不联网、不加载宿主依赖，几毫秒一个文件。
+ */
+function assertParses(files) {
+  const bad = []
+  for (const file of files) {
+    const result = spawnSync(process.execPath, ['--check', file], { encoding: 'utf8' })
+    if (result.status !== 0) {
+      const message = String(result.stderr || '').split('\n').filter((line) => line && !line.startsWith('    at ')).slice(0, 4).join('\n')
+      bad.push(file + '\n' + message)
+    }
+  }
+  if (bad.length) {
+    throw new Error('产物的语法/绑定检查没过（宿主加载会直接失败）：\n\n' + bad.join('\n\n'))
+  }
+}
+
+/** lib/motion 下所有 .js（递归）—— 拷贝过去的那批也得体检。 */
+function motionOutputs(dir = 'lib/motion') {
+  const files = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) files.push(...motionOutputs(path))
+    else if (entry.name.endsWith('.js') || entry.name.endsWith('.mjs')) files.push(path)
+  }
+  return files
+}
+
 export function buildAll() {
+  mkdirSync('lib/routing', { recursive: true })
+  cpSync('src/routing', 'lib/routing', { recursive: true })
+  mkdirSync('lib/motion', { recursive: true })
+  cpSync('src/motion', 'lib/motion', { recursive: true })
   const pkg = JSON.parse(readFileSync('package.json', 'utf8'))
 
   const host = readFileSync('src/index.js', 'utf8')
@@ -201,7 +257,11 @@ export function buildAll() {
   }
 
   const body = composeClientBody()
+  let inRoutingVendor = false
   for (const [index, line] of body.split('\n').entries()) {
+    if (line === '// drawai-routing-vendor-start') inRoutingVendor = true
+    if (line === '// drawai-routing-vendor-end') inRoutingVendor = false
+    if (inRoutingVendor) continue
     if (!line.includes('`')) continue
     const trimmed = line.trim()
     const isComment = trimmed.startsWith('*') || trimmed.startsWith('/*') || trimmed.startsWith('//')
@@ -225,6 +285,14 @@ export function buildAll() {
   const tail = ['', '    return module.exports', '  },', '})', ''].join('\n')
 
   writeFileSync('lib/client.js', GENERATED + head + indented + tail, 'utf8')
+
+  assertParses([
+    'lib/index.js',
+    'lib/style-kernel.js',
+    'lib/mxfile.js',
+    ...HOST_ONLY_MODULES.map((source) => source.replace(/^src\//, 'lib/')),
+    ...motionOutputs(),
+  ])
 
   console.log('构建完成  host ' + digest(host) + '  client-body ' + digest(body) + '  kernel ' + digest(kernelBody()))
 }

@@ -782,7 +782,22 @@ function avoidFromStyle(style) {
 
 /** 写避让开关：开 = libavoidRouting=1，关 = 删键（回落缺省关）。 */
 function styleWithAvoid(style, on) {
-  return stylePatch(style, { libavoidRouting: on === true ? '1' : null })
+  return stylePatch(style, { libavoidRouting: on === true ? '1' : null, drawaiRoutingMode: on === true ? 'auto' : null })
+}
+
+/** Mode owns points: auto points are solver output; manual points belong to the user. */
+function routingModeOf(edge) {
+  var style = edge && typeof edge.style === 'string' ? edge.style : DEFAULT_EDGE_STYLE
+  if (!isOrthogonalEdgeStyle(style)) return 'straight'
+  if (avoidFromStyle(style)) return 'auto'
+  var mode = styleGet(style, 'drawaiRoutingMode', null)
+  if (mode === 'manual' || mode === 'orthogonal') return mode
+  return edge && Array.isArray(edge.points) && edge.points.length > 0 ? 'manual' : 'orthogonal'
+}
+
+function styleWithRoutingMode(style, mode) {
+  if (['auto', 'manual', 'orthogonal'].indexOf(mode) < 0) throw new Error('Unknown routing mode: ' + mode)
+  return stylePatch(style, { libavoidRouting: mode === 'auto' ? '1' : null, drawaiRoutingMode: mode })
 }
 
 // ── 折点与悬空端 ─────────────────────────────────────────────────────────────
@@ -924,6 +939,12 @@ function copyData(data) {
     if (key === 'id' || key === 'label') continue
     var value = data[key]
     if (value === undefined || value === null) continue
+    // Native creative documents own these JSON fields. XML compatibility stores
+    // their JSON spelling, while the canvas and clipboard keep detached objects.
+    if (key === 'motion' || key === 'motionReference') {
+      if (typeof value === 'string') { try { value = JSON.parse(value) } catch (error) {} }
+      if (isObject(value)) { out[key] = JSON.parse(JSON.stringify(value)); continue }
+    }
     out[key] = typeof value === 'string' ? value : String(value)
   }
   return out
@@ -1063,7 +1084,7 @@ export {
   sideFromStyle, fractionFromStyle, styleWithSide, sideFromFraction,
   edgeStyleValueFromStyle, isOrthogonalEdgeStyle, jettyFromStyle, styleWithJetty,
   lineKindFromStyle, styleWithLineKind, curvedFromStyle,
-  avoidFromStyle, styleWithAvoid,
+  avoidFromStyle, styleWithAvoid, routingModeOf, styleWithRoutingMode,
   normalizePoint, normalizePoints, pointsEqual,
   edgeTerminalId, edgeFreePoint,
   copyData,

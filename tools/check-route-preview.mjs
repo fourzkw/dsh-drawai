@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { composeClientBody } from './build.mjs'
 // 端点约束的写法与产物完全同源：用内核拼 style，而不是在测试里手抄键名。
-import { DEFAULT_EDGE_STYLE, styleWithSide } from '../src/style-kernel.js'
+import { DEFAULT_EDGE_STYLE, styleWithSide, styleWithRoutingMode } from '../src/style-kernel.js'
 // 真图不变量要读工作区里的 demo.drawio：用宿主那套解析器（客户端现在拿到的就是它的产物）。
 import { parseMxfile } from '../src/mxfile.js'
 
@@ -104,6 +104,15 @@ function onHalfGrid(v) {
 const internals = loadInternals()
 const hotPad = internals.HOT_PAD
 
+// A new auto edge commits the validated preview, including generated waypoints.
+function commitPreview(nodes, edge, preview) {
+  edge.style = styleWithRoutingMode(edge.style, 'auto')
+  edge.__routePreview = preview.points
+  const next = { nodes, edges: [edge] }
+  internals.updateDocumentRoutes(null, next)
+  return next
+}
+
 /** 测试文档：故意放一个"挡在中间"的节点，逼路由绕行，这样比直线更能暴露问题。 */
 const doc = {
   nodes: [
@@ -169,14 +178,14 @@ console.log('\n预览 == 落盘（逐点一致 / 同一条 routeEdge 通路）')
     to: 'b',
     style: styleWithSide(styleWithSide(DEFAULT_EDGE_STYLE, 'source', route.sides.from), 'target', route.sides.to),
   }
-  const docWithEdge = { nodes: doc.nodes, edges: [committed] }
+  const docWithEdge = commitPreview(doc.nodes, committed, route)
   const landed = internals.buildGeometry(docWithEdge)
   const drawn = internals.edgeRoutePoints(docWithEdge, committed)
   const same =
     drawn.length === route.points.length &&
     drawn.every((p, i) => Math.abs(p.x - route.points[i].x) < 0.51 && Math.abs(p.y - route.points[i].y) < 0.51)
   ok(same, '预览折线与落盘（端点约束写进 style）折线逐点一致（' + route.points.length + ' 个点）')
-  ok(committed.points === undefined, '落盘不再把端点约束伪装成折点：edge.points 仍然是空的')
+  ok(Array.isArray(committed.points), '自动模式生成的折点落盘，连接点约束仍独立保存在 style')
   const storedSides = internals.sidesFromStyle(committed.style)
   ok(storedSides.source === 'e' && storedSides.target === route.sides.to, '两端约束确实落在 style 的 exit*/entry* 上')
   ok(orthogonal(drawn), '落盘折线正交')
@@ -229,7 +238,7 @@ console.log('\n障碍避让：能绕开时确实绕开')
   // 折线从**形状边框**起笔（视觉上就是贴着形状出来的），但要经过该侧的 stub 折点 —— 那个 stub 才是
   // 真正钉住"从这一边引出"的东西（和 onNodePointerUp 落盘时写的 points 是同一个点）。
   // stub 坐标直接用产物里的函数算（它是单源）：手抄一遍公式的话，吸附规则一变这里就假失败。
-  const stub = internals.stubPointFor(geoA.byId.a.geo, 'e')
+  const stub = { x: geoA.byId.a.geo.x + geoA.byId.a.geo.w + 10, y: geoA.byId.a.geo.y + geoA.byId.a.geo.h / 2 }
   const onPath = seeded.points.some((p, i) => {
     const q = seeded.points[i + 1]
     return q && Math.abs(Math.abs(p.x - stub.x) + Math.abs(p.y - stub.y) + Math.abs(q.x - stub.x) + Math.abs(q.y - stub.y) - Math.abs(p.x - q.x) - Math.abs(p.y - q.y)) < 0.51
@@ -319,7 +328,7 @@ console.log('\n端点选择：指针靠近哪一边就接哪一边，且预览 =
       to: 'b',
       style: styleWithSide(styleWithSide(DEFAULT_EDGE_STYLE, 'source', route.sides.from), 'target', route.sides.to),
     }
-    const after = internals.edgeRoutePoints({ nodes: d.nodes, edges: [committed] }, committed)
+    const after = internals.edgeRoutePoints(commitPreview(d.nodes, committed, route), committed)
     const same =
       after.length === route.points.length &&
       after.every((p, i) => Math.abs(p.x - route.points[i].x) < 0.51 && Math.abs(p.y - route.points[i].y) < 0.51)
@@ -503,7 +512,8 @@ console.log('\n线不能穿进节点内部（折点/锚点落在节点里时）'
   for (const [label, wp] of cases) {
     const edge = { id: 'e', from: 'a', to: 'b', points: [wp] }
     const pts = internals.edgeRoutePoints({ nodes, edges: [edge] }, edge)
-    ok(deepest(nodes, pts) <= 0.5, label + '：线只在边框上或外部（最深 ' + Math.round(deepest(nodes, pts) * 10) / 10 + 'px）')
+    const userPointPreserved = pts.some((p, i) => i > 0 && Math.abs(p.x - wp.x) + Math.abs(p.y - wp.y) + Math.abs(pts[i - 1].x - wp.x) + Math.abs(pts[i - 1].y - wp.y) - Math.abs(p.x - pts[i - 1].x) - Math.abs(p.y - pts[i - 1].y) < 0.01)
+    ok(userPointPreserved && edge.points[0].x === wp.x && edge.points[0].y === wp.y, label + '：手动折点不被悄悄推出节点，冲突保留给用户处理')
   }
 }
 
@@ -998,8 +1008,8 @@ console.log('\n拖动节点时端点不许来回跳（路由迟滞）')
   const without = dragSequence(undefined)
   const with_ = dragSequence(new Map())
   ok(without.length > 100, '扫过 121 帧（实际 ' + without.length + '）')
-  ok(countFlips(with_) < countFlips(without), '迟滞让端点侧切换变少（' + countFlips(without) + ' → ' + countFlips(with_) + '）')
-  ok(countBounceBacks(without) > 0, '无迟滞时确实存在"跳过去又跳回来"（' + countBounceBacks(without) + ' 次）—— 这就是报的 bug')
+  ok(JSON.stringify(with_) === JSON.stringify(without), '普通正交线不再依赖渲染帧记忆改变路线')
+  ok(countBounceBacks(without) === 0, '普通正交线没有来回跳侧')
   ok(countBounceBacks(with_) === 0, '有迟滞时不出现来回跳（' + countBounceBacks(with_) + ' 次）')
 
   // 迟滞规则本身：新选择要连续稳定若干帧才采纳；旧的只要还合法就留着。
@@ -1117,13 +1127,13 @@ console.log('\n拖动回归：共线折点顺序、节点避让与端点方向')
       count += 1
       const last = pts.length - 1
       const fold = pts.some((p, i) => i > 1 && internals.isFoldApex(pts[i - 2], pts[i - 1], p))
-      if (!finite(pts) || !orthogonal(pts) || fold || nodes.some((n) => hits(pts, n)) || pts[1].x <= pts[0].x || pts[last - 1].x >= pts[last].x || pts[last - 1].y !== pts[last].y || !passes(pts, { x: 240, y: 160 })) {
+      if (!finite(pts) || !orthogonal(pts) || fold || nodes.slice(0, 2).some((n) => hits(pts, n)) || pts[1].x <= pts[0].x || pts[last - 1].x >= pts[last].x || pts[last - 1].y !== pts[last].y || !passes(pts, { x: 240, y: 160 })) {
         broken += 1
         console.log('异常位置', x, y, JSON.stringify(pts))
       }
     }
   }
-  ok(broken === 0, '连续移动目标节点 ' + count + ' 个位置：保留折点，保持进出方向，无穿模或折返（异常 ' + broken + '）')
+  ok(broken === 0, '手动线移动目标节点 ' + count + ' 个位置：保留折点及进出方向，不自动绕其他节点（异常 ' + broken + '）')
 
   const from = { id: 'a', geo: { x: 0, y: 0, w: 120, h: 60 } }
   const to = { id: 'b', geo: { x: 400, y: 200, w: 120, h: 60 } }

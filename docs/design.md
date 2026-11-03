@@ -1,5 +1,7 @@
 # 设计文档 / Design notes
 
+> 当前存储与事务设计见[原生画布](native-canvas.md)。本页下面关于“`.drawio` 是唯一载体”的段落是兼容层的历史设计；新建已默认使用 `.drawai`。
+
 这份文档保留 **dsh-drawai 为什么这么做** 的全部细节：载体为什么是 `.drawio`、
 无损写回的外科手术规则、drawio 的 style 键与默认省略、图层与折点模型、
 连线路由与预览、构建器为什么这么小、以及宿主/客户端两半边各自的自测。
@@ -742,6 +744,16 @@ window.__ModuleLoader__.load({ id: 'dsh-drawai', factory: (require) => module.ex
 将来若要用 TSX / TS 类型：补上 typescript + tsdown 即可，`src/` 结构不用动。
 
 ---
+
+## 文生图（2026-10-26）
+
+- **只从画布 UI 发起**：`diagram_apply` 里没有 imagegen op —— 生成会占用本机显卡或用户的 API 额度，模型不该在对话里随手触发。
+- **节点就是一个 image 节点 + 自定义 style 键**：`drawaiGen=1` 标记它，`drawaiGenWidth/Height/Steps/Seed` 记上次参数，提示词就放 `label`（`verticalLabelPosition=bottom;verticalAlign=top;align=center` → 文字画在图片下方）。渲染器为此给 image 节点算「底部标签带」高度（`imageContentRect` / `labelTextBox` / `nodeTextFitHeight` / `labelPaintBounds` 都要认这个分支）；换图时节点高度 = 图片区 + 带高，提示词换行也不会压到图。
+- **同步请求**：一次生成 60s 上下，宿主 handler 直接等（默认 300s 超时），不进后台任务表 —— 没有中间产物要恢复，取消就是客户端超时/断开；代价是这条 HTTP 请求会一直挂着。
+- **工作流转换**：内置一份 Qwen-Image 2.1 的 **UI 格式**工作流（`src/comfyui-default-workflow.mjs`），每次按 ComfyUI `/object_info` 现转成 API prompt（按端点缓存 10 分钟）—— 换模型/升级 ComfyUI 时用户只要重贴工作流，转换规则跟着 `/object_info` 走。子图要内联（内层 id 加 `外层:内层` 前缀），`ComfySwitchNode` 按开关值**只留选中分支**，`SaveImageAdvanced` 换成内置 `SaveImage`（动态 combo 少两格），`MarkdownNote` 这类前端专用节点跳过。**提示词改写支路默认剪掉**：`switch=false` 选 `on_false`（用户提示词），`TextGenerate` / 9B PE 那半支不加载。
+- **两种 provider**：`src/imagegen.mjs` 里 `generateImage()` 按 `provider` 分派 —— ComfyUI（`/prompt` → 轮询 `/history` → `/view` 取图）与 OpenAI 兼容（`POST /images/generations`，`response_format: b64_json`）；配置和 key 都由客户端偏好持有、随请求 body 带来，宿主不落盘。宿主侧只加了三个 action（`imagegen-generate` / `imagegen-status` / `imagegen-default-workflow`），不新开路由。
+- **落节点由客户端做**：拿到 PNG data URI 后 `applyLocal` 改节点 style；宿主不写画布，避免和用户/模型并发改同一个文件。
+- **自测**：`tools/check-imagegen.mjs`（mock ComfyUI / OpenAI + 内置真工作流离线转换、超时取消等）+ `tools/check-host.mjs` 末尾的「文生图路由」段（action 分发、403/400、返回形状）。真机联调脚本在 `tmp/`（不提交）。
 
 ## 开发回路
 

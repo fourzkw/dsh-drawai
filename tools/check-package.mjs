@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs'
 import { composeClientBody, dedentBody, extractBody } from './build.mjs'
 
 const EXPECTED_INJECT = ['tools', 'fs', 'sessions', 'sandboxPolicy', 'webServer']
-const EXPECTED_TOOLS = ['diagram_read', 'diagram_apply']
+const EXPECTED_TOOLS = ['shotcraft_search', 'audio_asset', 'diagram_read', 'motion_task', 'diagram_apply']
 const EXPECTED_ROUTE = '/drawai/api/save'
 
 let failures = 0
@@ -53,6 +53,11 @@ try {
     check('lib/' + name + '.js 与宿主源码一致', built.includes(source))
   }
   check('SVG 宿主渲染器没有混进浏览器 bundle', !bundle.includes('@resvg/resvg-js'))
+  for (const name of ['router.js', 'node-runtime.js', 'NOTICE.md', 'vendor/libavoid.min.js', 'vendor/libavoid-routing.js', 'vendor/LICENSE', 'vendor/DRAWIO-LICENSE']) {
+    const source = readFileSync(new URL('../src/routing/' + name, import.meta.url))
+    const built = readFileSync(new URL('../lib/routing/' + name, import.meta.url))
+    check('路由引擎及许可已打包：' + name, source.equals(built))
+  }
 } catch (error) {
   check('可读取 lib/ 与 src/', false, error && error.message ? error.message : String(error))
 }
@@ -105,9 +110,17 @@ try {
 }
 
 const names = registered.map((tool) => tool.name)
-check('注册了两个工具', registered.length === 2, names.join(', '))
+check('注册了五个工具', registered.length === 5, names.join(', '))
 for (const expected of EXPECTED_TOOLS) {
   check('注册了 ' + expected, names.includes(expected))
+}
+// execute() alone never exercises defineTool's captured userRender callback.
+try {
+  const tool = registered.find((item) => item.name === 'motion_task')
+  const blocks = tool.output.render({ action: 'status' }, { summary: '视频任务：error', details: '{"error":"max-tokens"}' })
+  check('motion_task 状态输出能经过真实 SDK render', blocks[0]?.type === 'text' && blocks[0].text.includes('max-tokens'))
+} catch (error) {
+  check('motion_task 状态输出能经过真实 SDK render', false, error.message)
 }
 
 // 写回路由是人工编辑的唯一落盘通道，注册不上就等于 M1 白做。

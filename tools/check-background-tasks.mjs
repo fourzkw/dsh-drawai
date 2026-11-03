@@ -11,6 +11,7 @@ import { probeDrawingVideo, planDrawingVideo, executeDrawing } from '../src/draw
 import { ffmpegBinary } from '../src/video-export.js'
 import { ensureClipPack, writeManifest, readManifest, clipDirFor, videoDataAttrs } from '../src/media.js'
 import { buildMxfile, parseMxfile, contentHash } from '../src/mxfile.js'
+import { parseCanvas } from '../src/canvas-format.js'
 import { applyTaskPatches } from '../src/task-patches.js'
 import * as plugin from '../lib/index.js'
 
@@ -166,6 +167,18 @@ try {
     const short = await executeDrawing(makeJob('short', { ...videoOptions, fps: 0.5 }), context(() => false))
     assert.equal(short.count, 1, 'short clips still produce their first sample at a low output FPS')
   }
+  const beforeMigration = readFileSync(file, 'utf8')
+  const migrated = await request('read', { autoMigrate: true })
+  assert.equal(migrated.ok, true, migrated.error)
+  assert.ok(migrated.migratedTo.endsWith('.drawai'))
+  const nativePath = migrated.migratedTo
+  let nativeDoc = parseCanvas(readFileSync(nativePath, 'utf8')).doc
+  const nativeTask = await request('drawing-task-start', { path: nativePath, sourceId: 'image', kind: 'image', revision: nativeDoc.revision, options })
+  assert.equal(nativeTask.ok, true, nativeTask.error)
+  await until(() => request('drawing-task-list', { path: nativePath }), (result) => result.jobs?.some((job) => job.id === nativeTask.job.id && job.delivery === 'applied'))
+  nativeDoc = parseCanvas(readFileSync(nativePath, 'utf8')).doc
+  assert.ok(nativeDoc.nodes.some((item) => item.data?.drawaiTaskId === nativeTask.job.id), 'background result reaches native document')
+  assert.equal(readFileSync(file, 'utf8'), beforeMigration, 'background native editing keeps original migration source unchanged')
   console.log('check-background-tasks: OK (native image/video/extract, unattended queue, revision patches, undo protection, ownership, cancellation and restart recovery)')
 } finally {
   await manager?.close(); pool.close()

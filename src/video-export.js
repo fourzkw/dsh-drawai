@@ -48,6 +48,15 @@ export function createVideoExportManager(options = {}) {
   const binary = options.ffmpegPath || ffmpegBinary()
   const historyRoot = (path) => join(dirname(path), '.drawai-cache', 'video-export-history')
   const ended = (job) => ['done', 'error', 'interrupted'].includes(job.status)
+  function migrationRecords(scope) {
+    load(scope)
+    const root = historyRoot(scope.drawioAbs)
+    if (!existsSync(root)) return []
+    return readdirSync(root).filter((name) => /^[a-f0-9-]{36}\.json$/.test(name)).map((name) => {
+      const id = name.slice(0, -5)
+      return jobs.get(id) || JSON.parse(readFileSync(join(root, name), 'utf8'))
+    }).filter((job) => job.drawioAbs === scope.drawioAbs)
+  }
   function persist(job) {
     const root = historyRoot(job.drawioAbs); mkdirSync(root, { recursive: true })
     const record = Object.fromEntries(['sessionId', 'drawioAbs', 'clip', 'token', 'status', 'time', 'next', 'encoded', 'format', 'kind', 'w', 'h', 'fps', 'count', 'bytes', 'savedPath', 'error'].map((key) => [key, job[key]]))
@@ -61,7 +70,7 @@ export function createVideoExportManager(options = {}) {
       try {
         const data = JSON.parse(readFileSync(join(root, name), 'utf8'))
         if (data.token + '.json' !== name || data.sessionId !== scope.sessionId || data.drawioAbs !== scope.drawioAbs || !sanitizeClipId(data.clip) || !['mp4', 'webm', 'gif'].includes(data.format)) continue
-        const expected = join(dirname(scope.drawioAbs), basename(scope.drawioAbs).replace(/\.drawio$/i, '') + '-' + data.clip + '-' + data.token + '.' + data.format)
+        const expected = join(dirname(scope.drawioAbs), basename(scope.drawioAbs).replace(/\.(?:drawio|drawai)$/i, '') + '-' + data.clip + '-' + data.token + '.' + data.format)
         if (data.status === 'done' && (data.savedPath !== expected || !existsSync(expected) ||
             isAbsolute(relative(realpathSync(dirname(scope.drawioAbs)), realpathSync(expected))) || relative(realpathSync(dirname(scope.drawioAbs)), realpathSync(expected)).startsWith('..'))) {
           data.status = 'error'; data.error = '已导出的文件已移动或删除'; data.savedPath = null
@@ -142,7 +151,7 @@ export function createVideoExportManager(options = {}) {
       if (job.status === 'error') throw new Error(job.error)
       if (job.control.signal.aborted) throw new Error('已取消视频导出')
       // Persist independently of the browser's progress polling or download.
-      const name = basename(job.drawioAbs).replace(/\.drawio$/i, '') + '-' + job.clip + '-' + job.token + '.' + job.format
+      const name = basename(job.drawioAbs).replace(/\.(?:drawio|drawai)$/i, '') + '-' + job.clip + '-' + job.token + '.' + job.format
       const path = join(dirname(job.drawioAbs), name)
       renameSync(job.output, path)
       job.output = path; job.savedPath = path; job.status = 'done'; job.time = Date.now()
@@ -276,6 +285,12 @@ export function createVideoExportManager(options = {}) {
     // Compatibility endpoint: the task already runs after start, without a client finish call.
     finish(scope, token) { return view(owned(scope, token)) },
     list(scope) { load(scope); return [...jobs.values()].filter((job) => job.sessionId === scope.sessionId && job.drawioAbs === scope.drawioAbs).map(view) },
+    canMigrateCanvas(scope) { return migrationRecords(scope).every(ended) },
+    migrateCanvas(scope, to) {
+      const selected = migrationRecords(scope)
+      if (selected.some((job) => !ended(job))) throw new Error('视频导出仍在运行，完成后下次打开时迁移')
+      for (const job of selected) { job.drawioAbs = to; persist(job) }
+    },
     status(scope, token) { return view(owned(scope, token)) },
     read(scope, token, offset) {
       const job = owned(scope, token)

@@ -14,6 +14,8 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import { migrateMxfile, parseCanvas } from '../src/canvas-format.js'
+import { buildMxfile, parseMxfile } from '../src/mxfile.js'
 import { composeClientBody } from './build.mjs'
 // 造 style 键夹具时直接用内核（与宿主/客户端同一份），免得把键名再抄一遍。
 import { DEFAULT_EDGE_STYLE, NODE_SHAPES, curvedFromStyle, lineKindFromStyle, nodeShapeFromStyle, normalizeDrawioDoc, styleGet, stylePatch, styleWithImageDataUri, styleWithLineKind, styleWithNodeShape, styleWithSvgMarkup, svgMarkupFromStyle, styleWithTextColorName, textColorNameFromStyle } from '../src/style-kernel.js'
@@ -58,6 +60,14 @@ new Function('module', 'exports', 'require', 'window', 'document', clientBody)(m
 const internals = module.exports.__routeInternals
 const renderDiagram = internals.renderDiagram
 if (typeof renderDiagram !== 'function') throw new Error('renderDiagram 没有导出，无法做渲染自测')
+
+const migrationXml = buildMxfile({ version: 2, nodes: [
+  { id: 'migration-text', label: '迁移文字', x: 10, y: 20, w: 100, h: 40, style: 'text;fontColor=#334455;' },
+  { id: 'migration-shape', label: '图形', x: 200, y: 20, w: 100, h: 60, style: 'rounded=1;fillColor=#fff2cc;' },
+], edges: [{ id: 'migration-edge', from: 'migration-text', to: 'migration-shape', style: 'edgeStyle=orthogonalEdgeStyle;' }] }).text
+const oldTree = renderDiagram(parseMxfile(migrationXml).doc, 'light', 'migration', { current: null }, { selectedIds: [] }, null)
+const newTree = renderDiagram(parseCanvas(migrateMxfile(migrationXml)).doc, 'light', 'migration', { current: null }, { selectedIds: [] }, null)
+ok(JSON.stringify(oldTree) === JSON.stringify(newTree), '旧画布迁移后文字、图形、连线的渲染树一致')
 
 /** 深度遍历元素树，收集所有满足 predicate 的节点（含根）。 */
 function walk(node, predicate, out) {

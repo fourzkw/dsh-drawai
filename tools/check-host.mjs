@@ -17,6 +17,8 @@ import { mkdirSync, existsSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { routingModeOf, styleWithRoutingMode } from '../src/style-kernel.js'
+import { storedRoute, validRoute, routingBoxes } from '../src/routing/router.js'
 // 自测直接引用样式内核：文档格式的"真相"只有一份，测试跟着它走，而不是把键名再抄一遍。
 import { DEFAULT_EDGE_STYLE, edgeFreePoint, formatStyle, lineKindFromStyle, nodeShapeFromStyle, parseStyle, styleGet, styleWithSide,
   styleWithTextColorName } from '../src/style-kernel.js'
@@ -24,6 +26,7 @@ import { DEFAULT_EDGE_STYLE, edgeFreePoint, formatStyle, lineKindFromStyle, node
 import { buildMxfile, contentHash, parseMxfile } from '../src/mxfile.js'
 // 写回路径也要能直接断言（"纸张尺寸不参与写回"这类"原样保留"的性质不看产物看不出来）。
 import { applyDocToMxfile } from '../src/mxfile.js'
+import { parseCanvas } from '../src/canvas-format.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -45,7 +48,7 @@ function ok(condition, label) {
 /** @deepseek-ai/dsh-tools 必须在 profile 里可解析；工作区自测先建 junction（见 README）。 */
 const require = createRequire(import.meta.url)
 try {
-  require.resolve('@deepseek-ai/dsh-tools')
+  await import('@deepseek-ai/dsh-tools')
 } catch (error) {
   console.log('无法解析 @deepseek-ai/dsh-tools —— 宿主半边 import 不了，本自测无法运行。')
   console.log('')
@@ -348,7 +351,7 @@ console.log('\ndiagram_read 的输出 schema 必须声明返回体里所有字�
   ok(styleGet(out.edges[0].style, 'dashed', null) === '1' && styleGet(out.edges[0].style, 'startArrow', null) === 'classic', 'read 的 style 串里能直接看到 drawio 键')
 
   // 视频节点会往 nodes[] 塞 mediaKind/mediaClip/fps/… —— 漏声明同样踩 additionalProperties:false。
-  await apply([{ op: 'addNode', shape: 'video', x: 40, y: 40, as: 'vid', fps: 12 }])
+  await apply([{ op: 'addNode', shape: 'video', mediaKind: 'svg', x: 40, y: 40, as: 'vid', fps: 12 }])
   const videoOut = await readTool.execute({ path: 'doc.drawio' }, exec)
   const videoNode = videoOut.nodes.filter((n) => n.shape === 'video')[0]
   ok(videoNode !== undefined, 'read 能看到 video 节点')
@@ -713,10 +716,10 @@ console.log('\n格式逻辑：默认省略 / 开放集合 / 折点与端点分�
   ok(edge.points === undefined, 'clearPoints 清掉折点')
   ok(parseStyle(edge.style).exitX === '0', 'clearPoints 不动进出侧约束（折点与端点是两套模型）')
 
-  // ── 显式重排 → 端点动了 → 过期折点必须被清掉（v1 的真实缺口：宿主当时不知道 points 存在）──
+  // Manual waypoints belong to the user even when nodes are explicitly rearranged.
   seed(pairDoc({ edges: [{ id: 'e1', from: 'a', to: 'b', style: DEFAULT_EDGE_STYLE, points: [{ x: 200, y: 30 }] }] }))
   await apply([{ op: 'setLabel', id: 'a', label: '重排' }], { layout: 'dagre-tb' })
-  ok(current().edges[0].points === undefined, '显式重排且端点移动 → 过期折点被清掉（否则会飘在旧坐标上）')
+  ok(current().edges[0].points?.[0]?.x === 200 && current().edges[0].points?.[0]?.y === 30, '显式重排保留手动折点，不再把用户数据当自动缓存清空')
 
   // ── sourcePoint / targetPoint：drawio 语义是"该端**没有**真实顶点时的自由点" ──
   // 有这个规则，才谈得上"端点与折点是两套模型"：连着顶点时端点由 exit*/entry* 约束，
@@ -892,24 +895,24 @@ console.log('\n写回路由：list / read / save / create 都只认 .drawio')
 
   // ── create：新建就落一份真正的 .drawio ──
   const created = await api({ action: 'create', sessionId: 's1', name: 'brand-new' })
-  ok(created.status === 200 && created.payload.ok === true && created.payload.path === 'brand-new.drawio', 'create 落的是 .drawio：' + String(created.payload && created.payload.path))
-  const createdText = store.get(WORKSPACE + '\\brand-new.drawio')
-  ok(typeof createdText === 'string' && createdText.indexOf('<mxfile') === 0, '新建出来的是一份 mxfile')
-  ok(parseMxfile(createdText).doc.meta.pinned === true, '新建的画布带 pinned（人手工建的，AI 别重排）')
+  ok(created.status === 200 && created.payload.ok === true && created.payload.path === 'brand-new.drawai', 'create 落的是 .drawai：' + String(created.payload && created.payload.path))
+  const createdText = store.get(WORKSPACE + '\\brand-new.drawai')
+  ok(typeof createdText === 'string' && JSON.parse(createdText).format === 'dsh-drawai', '新建出来的是原生 JSON')
+  ok(parseCanvas(createdText).doc.meta.pinned === true, '新建的画布带 pinned（人手工建的，AI 别重排）')
   // 新建的文件必须有那个缺省图层单元 —— 否则图层面板在这张画布上说"没有图层信息"，
   // 而 drawio 打开同一份文件却有"背景"那一层（同一张画布两种样子）。
-  ok(parseMxfile(createdText).doc.layers.length === 1, '新建的文件带一个缺省图层（实际 ' + JSON.stringify(parseMxfile(createdText).doc.layers) + '）')
-  ok(createdText.indexOf('<mxCell id="1" parent="0" />') >= 0, '缺省图层单元的写法与 drawio 一致')
+  ok(parseCanvas(createdText).doc.layers.length === 1, '新建的文件带一个缺省图层（实际 ' + JSON.stringify(parseCanvas(createdText).doc.layers) + '）')
+  ok(parseCanvas(createdText).doc.layers[0].id === '1', '缺省图层身份保留')
   // 再读一遍（客户端新建完就是这么做的）：图层表要能从盘上读回来
-  const createdRead = await api({ action: 'read', sessionId: 's1', path: 'brand-new.drawio' })
+  const createdRead = await api({ action: 'read', sessionId: 's1', path: 'brand-new.drawai' })
   ok(createdRead.payload.ok === true && createdRead.payload.doc.layers.length === 1, '新建后回读：图层表在（这才是图层面板看到的那份文档）')
   ok(created.payload.revision === contentHash(createdText), 'create 返回的 revision 也是内容指纹')
-  const created2 = await api({ action: 'create', sessionId: 's1', name: 'brand-new.drawio' })
+  const created2 = await api({ action: 'create', sessionId: 's1', name: 'brand-new.drawai' })
   ok(created2.payload.ok !== true && created2.payload.exists === true, '同名文件已存在时不覆盖')
 
   // ── suggest：默认名也补 .drawio ──
   const suggested = await api({ action: 'suggest', sessionId: 's1', base: 'untitled' })
-  ok(suggested.payload.ok === true && suggested.payload.name === 'untitled.drawio', 'suggest 预填的名字带 .drawio：' + String(suggested.payload && suggested.payload.name))
+  ok(suggested.payload.ok === true && suggested.payload.name === 'untitled.drawai', 'suggest 预填的名字带 .drawai：' + String(suggested.payload && suggested.payload.name))
 
   // ── focus：记录"用户在看哪张"，AI 不传 path 时改它 ──
   const focus = await api({ action: 'focus', sessionId: 's1', path: 'flow.drawio' })
@@ -2159,6 +2162,108 @@ console.log('\n大图画布自动写回使用独立预算')
   ok(current().nodes[0].style.includes(image), '原图完整保留，保存不会丢弃或截断图片')
   const control = await api({ action: 'list', sessionId: 's1', padding: image })
   ok(control.status === 413, '普通控制请求仍受 4MB 限制')
+}
+console.log('\n文生图路由（imagegen）')
+{
+  // 路由只做三件事：校验会话、调 provider、把结果包成 JSON。provider 内部的 ComfyUI 交互
+  // 已有 check-imagegen 覆盖，这里补的是「接线」——action 分发、会话校验、错误码、返回形状。
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=='
+  const realFetch = globalThis.fetch
+  const json = (value) => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } })
+  globalThis.fetch = async (url) => {
+    const text = String(url)
+    if (text.endsWith('/prompt')) return json({ prompt_id: 'p1' })
+    if (text.includes('/queue')) return json({ queue_running: [], queue_pending: [] })
+    if (text.includes('/history/p1')) {
+      return json({ p1: { status: { completed: true }, outputs: { 5: { images: [{ filename: 'drawai_0001.png', subfolder: 'drawai/gen', type: 'output' }] } } } })
+    }
+    if (text.includes('/view?')) return new Response(Buffer.from(PNG, 'base64'), { status: 200, headers: { 'content-type': 'image/png' } })
+    throw new Error('自测没预料到的请求：' + text)
+  }
+  // 用 API 格式工作流测路由：不走 /object_info，速度最快；UI 格式的转换由 check-imagegen 管。
+  const workflow = {
+    1: { class_type: 'EmptyLatentImage', inputs: { width: 512, height: 512, batch_size: 1 } },
+    2: { class_type: 'CLIPTextEncode', inputs: { text: '旧提示词', clip: ['3', 0] } },
+    3: { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: 'x.safetensors' } },
+    4: { class_type: 'KSampler', inputs: { model: ['3', 0], positive: ['2', 0], negative: ['2', 0], latent_image: ['1', 0], seed: 0, steps: 20, cfg: 7, sampler_name: 'euler', scheduler: 'normal', denoise: 1 } },
+    5: { class_type: 'SaveImage', inputs: { images: ['4', 0], filename_prefix: 'drawai/gen' } },
+  }
+  try {
+    const good = await api({ action: 'imagegen-generate', sessionId: 's1', provider: 'comfyui', comfyUrl: 'http://127.0.0.1:8188', prompt: '一只在草地上打滚的橘猫', width: 512, height: 512, steps: 8, seed: 7, workflow })
+    ok(good.status === 200 && good.payload.ok === true, 'imagegen-generate 返回 ok:true')
+    ok(typeof good.payload.dataUri === 'string' && good.payload.dataUri.startsWith('data:image/png;base64,'), '返回可直接落节点的 PNG data URI')
+    ok(good.payload.seed === 7 && good.payload.steps === 8, 'seed/steps 原样回报（客户端要回填面板）')
+    ok(good.payload.prompt === '一只在草地上打滚的橘猫', '提示词原样回报')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  // 错误路径：会话不存在 → 403；提示词为空 → 400。两者都不能把 fetch 打出去。
+  globalThis.fetch = async () => { throw new Error('不该发请求') }
+  try {
+    const noSession = await api({ action: 'imagegen-generate', sessionId: 'nope', provider: 'comfyui', prompt: 'x' })
+    ok(noSession.status === 403 && noSession.payload.ok === false, '没有会话工作区时拒绝生成（403）')
+    const emptyPrompt = await api({ action: 'imagegen-generate', sessionId: 's1', provider: 'comfyui', prompt: '   ' })
+    ok(emptyPrompt.status === 400 && emptyPrompt.payload.ok === false, '空提示词在宿主侧就报错（400）')
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  const defaultWorkflowOut = await api({ action: 'imagegen-default-workflow' })
+  ok(defaultWorkflowOut.status === 200 && defaultWorkflowOut.payload.workflow !== undefined, 'imagegen-default-workflow 能把内置工作流交给设置页')
+}
+
+console.log('\n原生文档与自动迁移端到端')
+{
+  const sourcePath = WORKSPACE + '\\native-legacy.drawio'
+  const source = buildMxfile({ version: 2, nodes: [{ id: 'n1', label: '旧文字', x: 20, y: 30, w: 80, h: 40 }], edges: [] }).text
+  store.set(sourcePath, source)
+  const migration = await api({ action: 'read', sessionId: 's1', path: 'native-legacy.drawio', autoMigrate: true })
+  ok(migration.payload.ok && migration.payload.migratedTo.endsWith('.drawai'), '界面打开旧画布自动迁移并返回新绑定路径')
+  ok(store.get(sourcePath) === source, '迁移保留旧文件原文')
+  const path = 'native-legacy.drawai'
+  const opened = await api({ action: 'read', sessionId: 's1', path })
+  const doc = opened.payload.doc
+  doc.nodes[0].label = '原生文字'
+  doc.nodes[0].creation = { inputs: [{ role: 'prompt', nodeId: 'n1' }] }
+  const saved = await api({ sessionId: 's1', path, revision: opened.payload.revision, doc })
+  ok(saved.payload.ok, '原生格式经现有保存路由写入')
+  const reread = await api({ action: 'read', sessionId: 's1', path })
+  ok(reread.payload.doc.nodes[0].creation.inputs[0].role === 'prompt', '创作扩展元数据经过保存和归一化不丢失')
+  const conflict = await api({ sessionId: 's1', path, revision: opened.payload.revision, doc })
+  ok(conflict.status === 409, '原生文档保留乐观锁')
+  const changed = await apply([{ op: 'setLabel', id: 'n1', label: 'AI 修改' }], { path })
+  ok(changed.path.endsWith('.drawai'), 'AI 工具写入原生画布')
+  const legacyAlias = await apply([{ op: 'move', id: 'n1', dx: 5, dy: 0 }], { path: 'native-legacy.drawio' })
+  ok(legacyAlias.path.endsWith('.drawai') && store.get(sourcePath) === source, '迁移后的旧路径在工具侧解析到新文档，原稿不变')
+  const again = await api({ action: 'read', sessionId: 's1', path: 'native-legacy.drawio', autoMigrate: true })
+  ok(again.payload.ok && again.payload.doc.nodes[0].label === 'AI 修改', '再次打开旧路径复用已编辑的新文档')
+  const copy = await api({ sessionId: 's1', path: 'native-copy.drawai', createOnly: true, fromPath: path, doc: again.payload.doc })
+  ok(copy.payload.ok && JSON.parse(store.get(WORKSPACE + '\\native-copy.drawai')).format === 'dsh-drawai', '原生另存为成功')
+  ok(JSON.parse(store.get(WORKSPACE + '\\native-copy.drawai')).id !== JSON.parse(store.get(WORKSPACE + '\\native-legacy.drawai')).id, '另存为建立独立项目身份')
+  const asDrawio = await api({ sessionId: 's1', path: 'native-export.drawio', createOnly: true, fromPath: path, doc: again.payload.doc })
+  ok(asDrawio.payload.ok && parseMxfile(store.get(WORKSPACE + '\\native-export.drawio')).doc.nodes[0].label === 'AI 修改', '原生文档可另存为兼容 drawio')
+  store.set(sourcePath, source.replace('旧文字', '外部修改'))
+  const diverged = await api({ action: 'read', sessionId: 's1', path: 'native-legacy.drawio', autoMigrate: true })
+  ok(!diverged.payload.ok, '旧原稿迁移后发生修改时明确报告冲突')
+}
+console.log('\n自动路由的宿主编辑与保存')
+{
+  store.clear()
+  seed({ version: 2, meta: { pinned: true }, nodes: [
+    { id: 'a', x: 0, y: 0, w: 120, h: 60 }, { id: 'b', x: 500, y: 0, w: 120, h: 60 },
+    { id: 'wall', x: 220, y: -20, w: 100, h: 120 },
+  ], edges: [] })
+  await apply([{ op: 'addEdge', id: 'auto', from: 'a', to: 'b' }])
+  let saved = current(), edge = saved.edges[0]
+  ok(routingModeOf(edge) === 'auto' && Array.isArray(edge.points), 'AI 新建正交线默认自动避障，生成折点已落盘')
+  ok(validRoute(storedRoute(edge, routingBoxes(saved)), edge, routingBoxes(saved)), '工具写入的路线绕开障碍，浏览器可直接读取')
+  await apply([{ op: 'move', id: 'wall', dy: 200 }])
+  saved = current(); edge = saved.edges[0]
+  ok(validRoute(storedRoute(edge, routingBoxes(saved)), edge, routingBoxes(saved)), 'AI 移走未连接障碍后更新附近自动线')
+  await apply([{ op: 'setStyle', id: 'auto', avoid: false }])
+  ok(routingModeOf(current().edges[0]) !== 'auto', '工具侧 avoid:false 确实关闭自动避障')
+  await apply([{ op: 'setStyle', id: 'auto', avoid: true, clearPoints: true, exit: 'e', entry: 'w' }])
+  saved = current(); edge = saved.edges[0]
+  ok(routingModeOf(edge) === 'auto' && validRoute(storedRoute(edge, routingBoxes(saved)), edge, routingBoxes(saved)), '恢复自动避障遵守固定进出连接点')
 }
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

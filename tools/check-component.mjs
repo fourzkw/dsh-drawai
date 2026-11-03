@@ -20,6 +20,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { composeClientBody } from './build.mjs'
+import * as motionCore from '../src/motion-core.js'
+import { isShotCardNode } from '../src/shotcard-core.js'
 import * as styleKernel from '../src/style-kernel.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -462,7 +464,7 @@ console.log('\n启动行为：空舞台（没有"未绑定画布"那一套）')
   ok(setTabsCalls.length === 1 && /setTabs\(\[\{ key: key, path: tabPath \}\]\)/.test(boot), 'bootstrap 里只有一次 setTabs，且只开真文件的标签（没有任何空画布兜底）')
 
   // "未绑定画布"那一整套代码必须消失（注释里提历史可以，用户可见的字符串与标识符不行）
-  ok(!/unbound/.test(src), '源码里不再有 unbound（未绑定画布）')
+  ok(!/unbound/.test(readFileSync(resolve(here, '..', 'src/client.js'), 'utf8')), '画布源码里不再有 unbound（第三方引擎不属于画布状态）')
   ok(!/UNTITLED/.test(src), '源码里不再有 UNTITLED 哨兵')
   ok(!/'(\(未绑定\)|未绑定文件|未绑定画布)'/.test(src) && !/AI 对话改不到它/.test(src), '不再有"未绑定"的用户可见文案')
   ok(!/const blank = \{ version: 2/.test(src), '空舞台不再就地造一份"幽灵空文档"')
@@ -1201,8 +1203,10 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
     ColorPalette: 'color-palette', uid: 'test', prefs: { customColors: [] },
     customColorList: new Function('normalizeCustomColor', 'value', bodyOf('customColorList')).bind(null, new Function('value', bodyOf('normalizeCustomColor'))),
     loadDrawaiPrefs: () => ({ customColors: [] }), patchPrefs: () => {},
+    motionCore: { ...motionCore, isShotCardNode },
+    createMotionFromSelection: () => {},
     ImageTraceControl: 'image-trace-control',
-    ToolbarPopover: 'toolbar-popover',
+    ToolbarPopover: 'toolbar-popover', NodeToolCard: 'node-tool-card', canvasRef: { current: null }, active: true,
     exportNodeImage: (node, format) => { lineChange = { node, format } },
     nodeImageExportInfo: new Function('isVideoNodeData', 'imageValueFromStyle', 'isRasterDataUri', 'isSvgDataUri', 'node', bodyOf('nodeImageExportInfo')).bind(null,
       styleKernel.isVideoNodeData, styleKernel.imageValueFromStyle, styleKernel.isRasterDataUri, styleKernel.isSvgDataUri),
@@ -1219,7 +1223,7 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
   const render = () => new Function(...Object.keys(context), src.slice(start, end) + '\nreturn renderSelectionToolbar()')(...Object.values(context))
   const flatten = (node) => Array.isArray(node) ? node.flatMap(flatten) : node && typeof node === 'object' ? [node].concat(flatten(node.children || [])) : []
   const tree = render()
-  ok(tree.props.role === 'toolbar' && tree.props.style.width === '244px', '窄侧栏中浮动工具栏限制在画布宽度内')
+  ok(tree.props.role === 'toolbar' && tree.props.style.width === '460px', '浮动工具栏保持宽度，不限制在画布视口内')
   const controls = flatten(tree)
   const control = (label) => controls.find((el) => el.props.label === label || el.props['aria-label'] === label)
   ok(control('字号').props.value === '', '节点与边字号不同，显示混合状态')
@@ -1315,7 +1319,7 @@ console.log('\n标准色与自定义色板')
   tree.props.ref.current = anchor
   popup.props.ref.current = panel
   tree.props.onToggle({ target: anchor, currentTarget: anchor })
-  ok(panel.shown && panel.style.top === '158px' && panel.style.left === '28px', '色板在工具栏上方弹出，窄窗口中自动靠内定位')
+  ok(panel.shown && panel.style.top === '448px' && panel.style.left === '318px', '色板跟随入口，允许超出窄窗口边界')
   tree.props.onPointerEnter()
   ok(anchor.open && panel.shown, '悬停工具入口直接打开上浮面板')
   tree.props.onPointerLeave()

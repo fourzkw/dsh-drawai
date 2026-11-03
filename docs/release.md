@@ -1,5 +1,14 @@
 # 发布与收录流程 / Release & listing
 
+## 未发布：去掉内层制作 Agent（2026-11-03）
+
+- 删除 `src/motion-agent.js`、`src/motion-agent-tools.js`、`src/motion-planner.js`（约 50KB）与它们写出的 `.agent/state.json` / 192 份 receipts；`motion-tasks.js` 只保留任务记录与旧的遗留管线。
+- 工具面换成动词：`motion_project`（建工程）、`motion_preview`（同一轮回图的帧拼图）、`motion_render`（异步 job，支持 `frames`/`range`/`apply` 回填 clip pack）、`motion_assets`（素材进 `assets/`）、`motion_audio`（挂音轨、分析节拍、钉拍）、`motion_audio_verify`（渲后回测）。`motion_task` 收缩为旧任务记录（list/status/cancel/focus/remove）。
+- 时间轴改为工程内的 `timeline.json`：镜头卡连线顺序与卡片时长决定分段，音轨 `audio[]` 与画面同用帧坐标；渲染时 `src/motion/entry.jsx` 统一挂 `<Audio>`，旁白窗口自动压 BGM。
+- 镜头卡接入配方：`shotcraft_search` 返回 `recipe` / `demoSource`，`@shotcraft/lib/*` 与 `@shotcraft/demos/*` 可被场景直接 import；SKILL 改成八步硬顺序（定镜头 → 建工程 → 写画面 → 备素材 → 看画面 → 配声音 → 踩点 → 出片）。
+- 成片回填：`motion_render apply` 把 `film.mp4` 落成 raster clip pack（`source.mp4` + `poster.svg` + 节点 `mediaClip`），画布卡片直接可播。
+- 实测：15 秒片从 32 分钟 / 166 轮降到 45 秒 / 0 轮；音频输出偏移 1.29 帧、钉拍误差 0.3 帧、避让 12.1dB。
+
 ## 0.3.4 发布内容（2026-10-26）
 
 - 修复拖动线段时共线折点插入顺序错误、段内折点未随整段移动而产生折返重叠的问题。

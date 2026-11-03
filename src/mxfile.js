@@ -956,6 +956,7 @@ export function parseMxfile(text, options) {
         ? metaCell.wrapperAttrs
         : info.modelXml.slice(metaCell.start + metaCell.attrsSpan.attrsStart, metaCell.start + metaCell.attrsSpan.attrsEnd)
   const pinned = metaCell !== undefined && attr(metaAttrs, 'drawaiPinned') === '1'
+  const drawableIds = new Set([...nodes.map((node) => node.id), ...edges.map((edge) => edge.id)])
   const doc = {
     version: 2,
     revision: contentHash(source),
@@ -963,6 +964,7 @@ export function parseMxfile(text, options) {
     nodes: nodes,
     edges: edges,
     labels: labels,
+    drawOrder: info.cells.filter((cell) => drawableIds.has(cell.id)).map((cell) => cell.id),
     // 图层（drawio 的写法：挂在 root 下、没有 vertex/edge 的单元）：
     // id + 名字 + 显示/隐藏 + 锁定，顺序就是覆盖顺序（后面的压前面的）。
     layers: info.layers,
@@ -1156,7 +1158,7 @@ function dataPairs(data) {
   const pairs = {}
   for (const key of Object.keys(data)) {
     if (key === 'id' || key === 'label') continue
-    pairs[key] = escapeAttr(String(data[key]))
+    pairs[key] = escapeAttr((key === 'motion' || key === 'motionReference') && typeof data[key] === 'object' ? JSON.stringify(data[key]) : String(data[key]))
   }
   return pairs
 }

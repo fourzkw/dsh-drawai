@@ -39,3 +39,14 @@ desktop.ini
 
 # 视频旁路媒体包（<画布>.media/，逐帧 SVG 由画布侧生成，体积大，不进仓库）
 *.media/
+
+# 动效视频工程（含 .out 渲染产物、assets 素材，体积大，本机产物）
+.drawai-motion/
+# 动效/音频临时目录
+.audio-src/
+.voice-probe/
+.acl-report/
+out/
+reference-media/
+# 画布文件（*.drawio 已忽略，*.drawai 同理）
+*.drawai

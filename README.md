@@ -8,15 +8,24 @@
 
 ## 功能一览
 
-`dsh-drawai` 把可编辑画布放进 DeepSeek Harness 右侧栏，并给模型两个改图工具；人和 AI 读写的是同一份原生 `.drawio`。
+`dsh-drawai` 把可编辑画布放进 DeepSeek Harness 右侧栏，并给模型两个改图工具；人和 AI 读写同一份画布。新建默认使用 `.drawai` 原生 JSON，旧 `.drawio` 在界面打开时自动迁移并保留原稿。
 
-1. **右侧栏可编辑画布** —— 打开 / 新建工作区 `.drawio`：画节点、连边、就地改字、分层、排序、对齐、导出；双击即可改标签。
+原生格式、媒体目录、自动迁移和兼容说明见[原生画布文档](docs/native-canvas.md)。
+
+1. **右侧栏可编辑画布** —— 打开 / 新建工作区 `.drawai` 或 `.drawio`：画节点、连边、就地改字、分层、排序、对齐、导出；双击即可改标签。
 2. **自然语言改图** —— 对话里说需求，模型用 `diagram_read` / `diagram_apply` 读现状、结构化改图、自动布局并原子写回。
 3. **选区感知与回退** —— 你在画布上选中什么，模型就知道什么；模型改动最多可退 8 步。
 4. **SVG 图形节点** —— 图标 / logo 可直接当节点内容，拼流程图与示意图。
 5. **位图矢量化（`traceImage`）** —— 照着工作区图片逐像素描成 SVG 节点，不是凭印象手写近似图。
-6. **原生 `.drawio` 载体** —— 无需导入导出；画布读不懂的单元逐字节保留，文件可直接用 drawio / diagrams.net 继续编辑。
+6. **原生文档与 drawio 兼容** —— `.drawai` 保存多页、节点扩展和叠放顺序；旧画布迁移保留完整 XML 与原媒体，支持另存为 `.drawio`。
 7. **视频复刻** —— 选中已导入视频，点击悬浮工具条「绘制复刻」自主设置画质、帧率、完整视频或起止范围，自动抽帧并绘制成 SVG 视频；显示预计帧数、实际进度与帧预览，支持取消，原视频保留。支持 SVG 帧序列包，以及保留原帧率、白底和片段音频的 MP4 / WebM 离线导出；也可导出白底、循环播放的无声 GIF。渲染、编码和保存由宿主后台执行，切换标签或刷新网页后仍继续，完成文件自动保存到画布旁（编码需 FFmpeg）。详见[视频节点说明](docs/video-nodes.md)。
+8. **文生图节点** —— 右侧元素条「文生图」放一个节点，写段提示词就出图：后端可以是本机 **ComfyUI**（默认 Qwen-Image 2.1 工作流，也能换成你自己的），也可以是任意 **OpenAI 兼容**的生图 API。图片是节点内容，提示词就是图片下方那行文字，改完可原地重新生成。
+
+9. **节点绘制视频** —— 选中视频节点，先用 `shotcraft_search` 挑几张镜头卡连到它（连线顺序=镜头顺序，卡片时长=段长），再说一句要做什么：`motion_project` 按卡片排好时间轴，并把**分镜表**（每镜做什么/屏幕上出现什么/配什么字）写进工程；先只写 `scene-0`、`motion_preview` 看一张**定调帧**把风格定住，再铺开写其余场景。AI 在对话里直接读写 `scene-*.tsx`，`motion_render` 在后台渲染，完成后 `motion_render apply` 把成片落成画布上能播的 clip pack。**只有对话里这一个 agent**：没有第二套后台 agent、不需要轮询、不用等任务面板。详见[动效视频说明](docs/motion-video.md)。
+
+10. **音频、音效、旁白与踩点** —— 把 BGM、旁白挂进时间轴（`motion_audio add`），渲染时由画面侧一起播放，淡入淡出与「旁白期间压低 BGM」都在音量曲线上算；旁白用 `motion_voice` 合成（脚本一句一行，台词决定镜头多长，字幕自动进 `timeline.subtitles`）；音效可用 `motion_sfx` 从 Freesound 搜（**不按许可过滤**，每条结果带许可标签，用哪条由人决定），下载时复核许可并自动写 `FREESOUND-CREDITS.md`。`motion_audio analyze` 给出 BPM 与等距节拍网格，`motion_audio apply` 把切镜吸到拍子上，`motion_audio_verify` 再从成片音轨回测对拍误差。详见[声音制作说明](docs/motion-audio.md)。
+
+11. **素材捕获与看帧验收** —— 图片、音频、视频可捕获进工程 `assets/`（`motion_assets`，附尺寸、色板、峰值），**产品界面还能用 `motion_assets page` 让无头 Chrome 把一段 HTML 模板或网址截成 2 倍图**，场景里用 `staticFile()` 引用；`motion_preview` 一次渲染多帧拼成一张图直接回给对话，不用等整片渲染就能看版式。详见[动效视频说明](docs/motion-video.md)。
 
 ![整体界面：右侧栏画布与多标签](docs/picture/整体界面图.png)
 
@@ -44,8 +53,9 @@ dsh plugin --profile web add github:fourzkw/dsh-drawai
 
 | 装好后的变化 | 出现在哪里 |
 |---|---|
-| 「DrawAI 画布」面板，负责打开 `**/*.drawio` | 右侧栏 |
-| `diagram_read` / `diagram_apply` | 模型工具集 |
+| 「DrawAI 画布」面板，负责打开 `**/*.drawai` 和 `**/*.drawio` | 右侧栏 |
+| `diagram_read` / `diagram_apply` / `shotcraft_search` | 模型工具集 |
+| `motion_project` / `motion_preview` / `motion_render` / `motion_assets` / `motion_audio` | 视频工程工具 |
 | `drawai-canvas` 技能 | 会话技能目录（模型按需取全文） |
 
 - 两种装法都不需要 `allowBuilds` 构建授权：npm 包是预构建的；GitHub 源码包里 `lib/` 也已提交、没有 `prepare` / `postinstall` 脚本。
@@ -53,14 +63,24 @@ dsh plugin --profile web add github:fourzkw/dsh-drawai
 
 ## 使用 / Usage
 
-一块画布、两个工具、一份文件：人改的、模型改的、drawio 改的，最后都落在同一个 `.drawio` 上。
+人和模型共享同一画布文档；对话可直接编排节点、建视频工程、改场景、看预览和出片。迁移后以 `.drawai` 为主，原 `.drawio` 作为保留原稿；外部编辑原稿会提示版本冲突。
 
 | 入口 | 你能得到什么 |
 |---|---|
 | **右侧栏画布** | 打开或新建画布、画节点与连线、就地改字、图层、分区、顺序、多选对齐、查找、微移、多页切换、复制粘贴、导出 SVG / PNG / 透明 PNG（4×，含导出选中） |
 | **`diagram_apply`** | 让模型按 ops 改图：增删改、重接边、复制、排序、分层、导出；支持 `ids` 批量、`as` 别名、`expectRevision` |
 | **`diagram_read`** | 让模型看见图的结构与样式、图层与父级、页面尺寸、你此刻的选区、文件指纹 `revision` |
+| **`motion_project`** | 建/打开视频工程：按挂上来的镜头卡排时间轴，写 `timeline.json` 与 `scene-*.tsx` 桩 |
+| **`motion_preview`** | 渲染指定几帧并拼成一张图直接回图（首次打包 10–30 秒，之后复用缓存） |
+| **`motion_render`** | `start` 立刻返回 jobId、后台渲染；`status`/`list`/`cancel`；`apply` 把成片回填成画布 clip pack |
+| **`motion_assets`** | 素材进工程 `assets/`：`list`/`capture`（图/音/视频）/`crop`/`palette`/`page`（无头 Chrome 截 HTML 或网址） |
+| **`motion_audio`** | 音轨增删与对齐：`list`/`add`/`remove`/`analyze`（节拍网格）/`apply`（钉帧） |
+| **`motion_sfx`** | 音效采购：`search`（Freesound，不按许可过滤，结果带许可）/`get`（下载 + 详情页许可复核 + 署名清单）/`list` |
+| **`motion_audio_verify`** | 从成片音轨回测每拍偏差，超过 2 帧判不合格 |
+| **`motion_voice`** | 旁白：`plan`（脚本→估时长→重排镜头→写字幕，不合成）/`say`（合成后再按真实时长重排）/`align`（只按已有音频重排）/`list`。脚本 `voice.script.md` 一节一句，台词决定镜头多长 |
+| **`motion_task`** | 旧任务记录：`list`/`status`/`cancel`/`focus`/`remove`（新流程不用它开工） |
 | **选中与回退** | 你选中什么模型就知道什么；模型的每一轮改动都能在界面上退回去 |
+| **文生图** | 元素条（后台任务入口上方）放节点 → 写提示词 → 悬浮工具条「文生图」面板点生成；后端与地址在偏好里配（ComfyUI / OpenAI 兼容） |
 
 ## 🗂️ 画布面板 / The canvas panel
 
@@ -82,7 +102,7 @@ dsh plugin --profile web add github:fourzkw/dsh-drawai
 | **导出** | SVG / PNG(4×) / 透明 PNG(4×)；「看一眼画布效果」走 DSH 附件服务，**不在工作区落文件** |
 | **回退** | 「编辑 → 撤销 AI 改动」最多可以连着退 8 步 |
 
-## 🤖 两个工具 / The two tools
+## 🤖 模型工具 / Model tools
 
 ### `diagram_apply` —— 模型怎么改图
 
@@ -195,6 +215,25 @@ dsh plugin --profile web add github:fourzkw/dsh-drawai
 画布是自己实现的：纯 SVG + DOM，没有 iframe，也不依赖任何外部编辑器资源。换来的是每个单元都有
 id / layer / parent、选区能上报给模型、写回是逐单元的、画布本身能被模型驱动；代价是只覆盖这个格式的一个子集。
 
+## 🎨 文生图节点 / Text-to-image node
+
+右侧元素条「文生图」（在后台任务入口上方）落一个**文生图节点**：上面是图片、下面那行文字是提示词（就是节点标签，双击可改）。选中它，悬浮工具条里出现「文生图」面板：
+
+1. 在面板里填提示词、点「生成」——结果直接替换节点图片，节点按 480px 长边压缩显示；
+2. 面板里可改尺寸（1024×1024 / 832×1248 / 1248×832，或自定义 256–2048）、步数（默认 20）、种子（0 = 随机）；「重新生成」沿用节点上记着的上次参数。
+
+**两种后端**（偏好面板「文生图」区切换，`设置 → 文生图`）：
+
+| 后端 | 怎么配 | 说明 |
+|---|---|---|
+| ComfyUI（本机） | 地址默认 `http://127.0.0.1:8188`；内置一份 **UI 格式**的 Qwen-Image 2.1 文生图工作流，也可粘贴自己的工作流（ComfyUI 菜单「导出」或「导出 (API)」两种格式都认） | 需要 ComfyUI 正在跑、且工作流用到的节点/模型都在；宿主会读 `/object_info` 把 UI 工作流转成 API 格式，再把提示词、尺寸、步数、种子注入进去 |
+| OpenAI 兼容 API | 接口地址（默认 `https://api.openai.com/v1`）、API key、模型名 | 走 `POST /images/generations`（`response_format: b64_json`），同协议的任何网关都能接 |
+
+- **结果存在哪**：图片以 data URI 内嵌进 `.drawio`（与粘贴的位图同一条路径），提示词是节点标签，不产生旁路素材目录。1024×1024 的 PNG 通常 0.9–1.5MB，画布里攒很多张时文件会明显变大。
+- **耗时**：8GB 显存的 RTX 5070 Laptop 上，1024×1024 / 20 步约 60 秒（首次还要加载模型）；单次请求宿主最长等 5 分钟，超时/报错会显示在工具条里。
+- **不会被偷偷改写提示词**：内置 Qwen 工作流里有「提示词改写（PE）」支路，默认把它剪掉——你写什么就画什么，9B 改写模型不加载。
+- **AI 侧也能生成**：`diagram_apply` 的 `imagegen` 不在工具面里；文生图目前只从画布 UI 发起（宿主 action `imagegen-generate`），避免模型在对话里悄悄花你的显卡/API 额度。
+
 ## ⚙️ 配置与默认值 / Configuration
 
 **目前还没有设置页**：下面这些默认值都写在代码里；能通过 AI 侧改的，在右列给出等价做法。
@@ -208,6 +247,8 @@ id / layer / parent、选区能上报给模型、写回是逐单元的、画布�
 | 文字多的节点**纵向自适应**（只长不缩，独立文字不参与） | 不用调 —— 标签换行所需的高度会写回文件的 `h` |
 | 主题跟随 DSH 的明暗 | —— |
 | 显示层、当前层 | 「图层」菜单（会写进文件） |
+
+**文生图默认值**（与本机自定义颜色存在同一处浏览器 localStorage）：ComfyUI 地址 `http://127.0.0.1:8188`、内置 Qwen-Image 2.1 工作流、尺寸 1024×1024、步数 20；OpenAI 兼容默认地址 `https://api.openai.com/v1`、模型 `gpt-image-1`。API key 以明文存浏览器 localStorage（本机自用没问题，共享机器别填）；生成请求只带当前会话的 `sessionId`，宿主不落盘 key。
 
 **右侧常驻元素条**：按类型（图形 / 文字 / 分区 / SVG / 图片）放置，点画布落下**一次**即卸工具；
 「图形」的矩形、圆角、菱形等是同族变体，只在侧面板展开，不全部铺在主条上。选中图形后可换同族形状；悬停画布节点不会触发右侧工具栏浮窗。
@@ -244,7 +285,7 @@ id / layer / parent、选区能上报给模型、写回是逐单元的、画布�
 - **生效方式**：宿主侧只在 `dsh web` 启动时加载，换 `lib/index.js` 必须**重启**；客户端是独立 bundle，刷新页面即可。
 - **界面语言**：目前只有简体中文，还没有 i18n。
 - **大图性能**：几百个单元时的重渲染与路由开销还没测过。
-- **数据与网络**：插件只读写工作区里的 `.drawio` 文件；不发网络请求、不读凭据，也没有安装期脚本。
+- **数据与网络**：画布本身只读写工作区里的 `.drawio` 文件；**文生图**会按你在偏好里的配置请求本机 ComfyUI 或你填的 OpenAI 兼容生图 API；**`motion_sfx`** 会访问 `freesound.org`（搜索）与 `cdn.freesound.org`（下载音效预览），只在你明确让它找音效时才发生。除此之外不发网络请求、不读凭据、没有安装期脚本；API key 只存在浏览器 localStorage，宿主进程不保存。
 
 ## 已知限制 / Limitations
 
@@ -252,7 +293,10 @@ id / layer / parent、选区能上报给模型、写回是逐单元的、画布�
 - 独立 `edgeLabel` 单元只读；`entityRelation` 等其它 edgeStyle、箭头字形、旋转 / 翻转 / 透明、stencil 形状只保留、不渲染；`.drawio.svg` / `.png` / `.html` 内嵌载体不支持。
 - **图片**：内嵌 SVG（`data:image/svg+xml,…`）与内嵌位图（PNG/JPEG/GIF/WebP data URI）都会画出来；**外链 / 相对路径**图片仍按矩形占位，单元原样保留（工作区磁盘上的图片文件画布直接读不到——要复刻请用 `traceImage`）。
 - 导出支持 SVG 与 PNG（透明背景、倍数或指定尺寸）：没有 PDF。
+- **文生图**：需要本机 ComfyUI 在跑，或一个 OpenAI 兼容的生图 API；结果内嵌为位图，不自动描成 SVG（要矢量图请再选中它用 `traceImage`）；换 ComfyUI 版本 / 模型后，工作流可能要重新粘贴，提示词改写支路也默认不跑。
 - 交互细节：对齐辅助线只跟节点比（不与折点、端点对齐）；单条选中的连线不能复制。
+- **视频**：动效视频节点是「画布上的一个工程目录」，成片靠 `motion_render` 后台渲染（首帧要打包，第一次通常 20–40 秒），渲染完成后用 `motion_render apply` 回填成 clip pack 才能在卡片里播放。节点不支持 `video_player` 式的自由播放控件（逐帧 / 跳转），要精确对照请用 `motion_preview` 或 `motion_render` 的 `frames` 参数看静帧。单帧渲染比整片省时，但每次仍要过一次打包（源码或素材变了才会重建缓存）。
+- **声音**：`motion_audio` 只做「分析节拍 + 挂到轴 + 钉拍」，不生成音乐；旁白靠 `motion_voice` 合成（edge-tts，需要本机 Python 3 + `edge_tts` 包；拿不到就退回 Windows SAPI，音色是老式播音腔）。整片渲完会自动过一次响度归一 + 限幅（`loudnorm` + `alimiter`，默认 −16 LUFS / 真峰值 −1.5 dBFS），目标可以在 `timeline.audioMix` 里改；画布上的音频节点只是素材库里的文件，不参与渲染。
 
 完整的取舍与实现细节在 [docs/design.md](docs/design.md)。
 
@@ -262,7 +306,7 @@ id / layer / parent、选区能上报给模型、写回是逐单元的、画布�
 npm run watch   # 常驻：监听 src/，变化即重建 lib/
 npm run build   # 一次性构建
 npm run check   # 安装前烟测（含 lib 与 src 是否同步）
-npm test        # 六份自测（mxfile 编解码 / 路由预览 / 宿主行为 / 渲染 / 组件 / 矢量化），1716 项断言
+npm test        # 多份自测（mxfile 编解码 / 路由预览 / 宿主行为 / 渲染 / 组件 / 矢量化 / 视频 / 文生图 provider 与宿主路由）
 ```
 
 > ⚠️ **绝不改 `lib/` 下的文件** —— 它们是构建产物，会被覆盖。改 `src/`。
