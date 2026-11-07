@@ -1,5 +1,7 @@
 # 设计文档 / Design notes
 
+> 当前存储与事务设计见[原生画布](native-canvas.md)。本页下面关于“`.drawio` 是唯一载体”的段落是兼容层的历史设计；新建已默认使用 `.drawai`。
+
 这份文档保留 **dsh-drawai 为什么这么做** 的全部细节：载体为什么是 `.drawio`、
 无损写回的外科手术规则、drawio 的 style 键与默认省略、图层与折点模型、
 连线路由与预览、构建器为什么这么小、以及宿主/客户端两半边各自的自测。
@@ -54,7 +56,7 @@
 | 客户端 | **批量改样式**：右键点中的元素**在选区里**时，形状/配色/线型/箭头作用于**整组同类型元素**（菜单标题会写"共 N 个/条"）；删除、拖动、复制、对齐早就是整组生效的 |
 | 客户端 | **独立线**：右键空白处「／ 独立连线」直接放一条**两端都不接节点**的线（drawio 的合法形态：两端都是自由点），之后拖端点就能接到节点上；它也能被整体拖动、加标签、改画法 |
 | 双方 | **连线画法**：线型（实线/虚线/点线，含 `dashPattern` 间距）× 箭头（单向/双向/无/反向）× 颜色 × 折角圆滑 × 引出段长度（`jettySize`）—— 全部是**文档里的 drawio style 键**，与 drawio 同构 |
-| 双方 | **线型四选一**：**直线**（`edgeStyle=none`，不带折点）/ **直角折线**（正交，缺省）/ **圆角折线**（`rounded=1`，**只在折点处**倒圆角 —— 圆角半径跟 drawio 一样由 `arcSize` 决定，缺省 `LINE_ARCSIZE(20)/2` = 10px）/ **曲线**（`curved=1`，drawio 的 Curved）。这是把 drawio 的两组键（走线 Straight|Orthogonal × 拐角 sharp|rounded|curved）压平成一次选择：四个组合里只有这四个有意义（直线没有折点可倒角，曲线与圆角互斥 —— drawio 的 `paintCurvedLine` 优先）。右键连线即可切；空白处右键还有「╱ 直线」直接放一条**两端自由、没有折点**的直线。两个语义上的连带动作：选直线会**清掉折点**（留着就不是直线了）；选曲线时，如果这条边本来就笔直（两点共线），会**补一个弓形中点** —— 因为 drawio 的曲线是把*现有走线*抹圆（`mxPolyline.paintCurvedLine`），两点时控制点落在起点上、退化成直线，不补中点的话"画条弧线"屏幕上什么都不会发生。曲线的路径算法与 drawio **逐字一致**（中间点当二次曲线的控制点），命中带也用同一条曲线（否则"看着是弧、点起来按折线算"） |
+| 双方 | **线型四选一**：**直线**（`edgeStyle=none`，不带折点）/ **直角折线**（正交）/ **圆角折线**（新建节点连接默认，`rounded=1`，**只在折点处**倒圆角 —— 圆角半径跟 drawio 一样由 `arcSize` 决定，缺省 `LINE_ARCSIZE(20)/2` = 10px）/ **曲线**（`curved=1`，drawio 的 Curved）。这是把 drawio 的两组键（走线 Straight|Orthogonal × 拐角 sharp|rounded|curved）压平成一次选择：四个组合里只有这四个有意义（直线没有折点可倒角，曲线与圆角互斥 —— drawio 的 `paintCurvedLine` 优先）。右键连线即可切；空白处右键还有「╱ 直线」直接放一条**两端自由、没有折点**的直线。两个语义上的连带动作：选直线会**清掉折点**（留着就不是直线了）；选曲线时，如果这条边本来就笔直（两点共线），会**补一个弓形中点** —— 因为 drawio 的曲线是把*现有走线*抹圆（`mxPolyline.paintCurvedLine`），两点时控制点落在起点上、退化成直线，不补中点的话"画条弧线"屏幕上什么都不会发生。曲线的路径算法与 drawio **逐字一致**（中间点当二次曲线的控制点），命中带也用同一条曲线（否则"看着是弧、点起来按折线算"） |
 | 双方 | **字号可改**：节点标签、独立文字、连线上的文字都吃 drawio 的 `fontSize` 键。右键菜单里是「10 / 12 / 14 / 18 / 24」加上**手动调节**（`−` / 数字输入框 / `＋`，8–72 任意整数，回车或失焦生效，打字过程中不写文档）—— **没有「默认」那一项**：它唯一的作用是删掉键，而看到的样子和"选中那个等价档位"完全一样（节点/文字 12、连线 10，两个都在档位里），一个"选了等于没选"的选项只会让人犹豫；AI 侧是 `fontSize:18`（`null` = 删键，这条仍然保留） |
 | 双方 | **字色可改**：节点标签、独立文字、连线上的文字都吃 drawio 的 `fontColor` 键。右键菜单里节点与连线各有**一类「字色」**，色板预览的就是**文字色**（调色板的 stroke 那一支 —— 与"独立文字换色"是同一个值，否则点"黄"得到的字色看着像点错了）；色板第一块是**黑**（写出去是删掉 `fontColor` 键 —— 画出来就是缺省黑字；叫它「黑」而不是「默认」：一排颜色里混一个"默认"，既说不清它是什么色，又和"选个深色"是同一件事）。独立文字那一类**直接叫「字色」**（它只有字色可换，不再多一个重复入口）。AI 侧是 `fontColor:"#666666"`，或调色板名（`fontColor:"red"` → `#b85450`），`null` = 删键 —— 注意它与连线上的 `color` 是两件事：`color` 是**线**的颜色，`fontColor` 是**字**的颜色 |
 | 客户端 | **暗色外观不改节点里的字色**：缺省字色由**这块填充**算（浅底黑字、深底浅字），不跟主题走 —— 以前缺省字色取的是主题的 `skin.text`（暗色 `#e8e8e8`），而填充是文档里写死的浅色（`#ffe6cc`/`#dae8fc`…，主题不改它），于是**切到暗色，浅底节点上的字一起变浅，直接看不见**。现在只有"填充也是主题补的深色底"（无填充节点）才用浅字，那一对仍然看得清；**边上的字**压在页面上，照旧跟主题走（深色页面配浅字） |
@@ -743,6 +745,16 @@ window.__ModuleLoader__.load({ id: 'dsh-drawai', factory: (require) => module.ex
 
 ---
 
+## 文生图（2026-10-26）
+
+- **只从画布 UI 发起**：`diagram_apply` 里没有 imagegen op —— 生成会占用本机显卡或用户的 API 额度，模型不该在对话里随手触发。
+- **节点就是一个 image 节点 + 自定义 style 键**：`drawaiGen=1` 标记它，`drawaiGenWidth/Height/Steps/Seed` 记上次参数，提示词就放 `label`（`verticalLabelPosition=bottom;verticalAlign=top;align=center` → 文字画在图片下方）。渲染器为此给 image 节点算「底部标签带」高度（`imageContentRect` / `labelTextBox` / `nodeTextFitHeight` / `labelPaintBounds` 都要认这个分支）；换图时节点高度 = 图片区 + 带高，提示词换行也不会压到图。
+- **同步请求**：一次生成 60s 上下，宿主 handler 直接等（默认 300s 超时），不进后台任务表 —— 没有中间产物要恢复，取消就是客户端超时/断开；代价是这条 HTTP 请求会一直挂着。
+- **工作流转换**：内置一份 Qwen-Image 2.1 的 **UI 格式**工作流（`src/comfyui-default-workflow.mjs`），每次按 ComfyUI `/object_info` 现转成 API prompt（按端点缓存 10 分钟）—— 换模型/升级 ComfyUI 时用户只要重贴工作流，转换规则跟着 `/object_info` 走。子图要内联（内层 id 加 `外层:内层` 前缀），`ComfySwitchNode` 按开关值**只留选中分支**，`SaveImageAdvanced` 换成内置 `SaveImage`（动态 combo 少两格），`MarkdownNote` 这类前端专用节点跳过。**提示词改写支路默认剪掉**：`switch=false` 选 `on_false`（用户提示词），`TextGenerate` / 9B PE 那半支不加载。
+- **两种 provider**：`src/imagegen.mjs` 里 `generateImage()` 按 `provider` 分派 —— ComfyUI（`/prompt` → 轮询 `/history` → `/view` 取图）与 OpenAI 兼容（`POST /images/generations`，`response_format: b64_json`）；配置和 key 都由客户端偏好持有、随请求 body 带来，宿主不落盘。宿主侧只加了三个 action（`imagegen-generate` / `imagegen-status` / `imagegen-default-workflow`），不新开路由。
+- **落节点由客户端做**：拿到 PNG data URI 后 `applyLocal` 改节点 style；宿主不写画布，避免和用户/模型并发改同一个文件。
+- **自测**：`tools/check-imagegen.mjs`（mock ComfyUI / OpenAI + 内置真工作流离线转换、超时取消等）+ `tools/check-host.mjs` 末尾的「文生图路由」段（action 分发、403/400、返回形状）。真机联调脚本在 `tmp/`（不提交）。
+
 ## 开发回路
 
 ```sh
@@ -900,13 +912,13 @@ README、`src/`、`tools/` 都不会过去。于是模型能依仗的是三条�
 
 | 通道 | 机制 |
 |---|---|
-| **工具默认值** | 客户端在画布面板里切换标签页时 `POST {action:'focus'}`，宿主按会话记下路径；`diagram_read` / `diagram_apply` 不传 `path` 时就用它（没打开任何画布才退回 `demo.drawio`）。两个工具的 `path` 说明里都写明了这一点 |
+| **工具默认值** | 客户端切换画布时上报焦点。`diagram_read` 可读取会话焦点，没有焦点会报错；`diagram_apply` 始终要求显式提供目标 `path`，避免延迟或缺失的焦点导致误写。 |
 | **返回值** | 不传 path 调一次，返回里的 `path` / `absolute` 就是当前那张 —— 想确认是哪张，这一步就够 |
-| **主动注入** | 聚焦**变化**时，宿主用 `ctx.agents.get(sessionId).inject(...)` 往那个会话注入一条环境事实（`{role:'user', source:{kind:'plugin:drawai'}}`；Session V4 要求 producer-owned kind，字面量 `'plugin'` 会被拒）：`DrawAI 画布：用户现在打开的是 <路径>。diagram_read / diagram_apply 不传 path 时默认就操作这一张。` 于是模型下一步直接看得到，不用先探 |
+| **主动注入** | 聚焦**变化**时，宿主用 `ctx.agents.get(sessionId).inject(...)` 向会话通报当前画布路径；写入仍须显式传入路径。 |
 
 细节：注入只在**路径真的变了**时才发（客户端每次挂载都会重报同一张，去重；A→B→A 是三次真实切换）；
 画布关掉时也发一条（否则模型还以为是刚才那张）；`agents` 是**可选**服务（走 `ctx.get`），
-没装 agent 服务的部署只是少这条主动提示，工具那条回退链照旧。
+没装 agent 服务的部署只是少这条主动提示；没有明确目标时不会自动回退到其他画布。
 `tools/check-host.mjs` 用第二个实例（带假 `agents`）盯这四条。
 
 **"用户选中了哪几个"走的是另一条更轻的通道**：客户端在选区变化时 `POST {action:'selection'}`

@@ -1,0 +1,35 @@
+{
+  "slug": "03-isometric",
+  "name": "等轴 2.5D·浮岛城市",
+  "oneLiner": "12×12 瓦片波浪落下，长成一座浮岛城市，最后拉远露字。",
+  "signature": [
+    "正交相机沿 (1,1,1)，棱线 2:1 斜率，全片零透视",
+    "瓦片顶面是奶白陶土 #F1EEFA，侧面才上色，空瓦片会被冲击波翻面",
+    "所有生长都是「底座先落—墙长—屋顶晚 0.375s」，墙有 9% 过冲",
+    "落下统一 0.3s 重力加速，触地 30% 压扁 + 40rad/s 抖两下",
+    "6.0s 冲击波以 15 单位/s 从 CORE 扩散，窗色延迟点亮",
+    "7.75–8.75s 拉远露出浮岛，标题平躺在等轴地面上"
+  ],
+  "palette": {
+    "page": "#EEEAFC",
+    "surface": "#F4F1FD",
+    "field": "#E6E1F7",
+    "text": "#2C2960",
+    "muted": "#8781D0",
+    "accent": "#62F0F2",
+    "border": "#C9BFF0"
+  },
+  "colors": ["#EEEAFC", "#F1EEFA", "#94DFBD", "#FFF0C8", "#62F0F2", "#2C2960", "#FFC4AC", "#8781D0"],
+  "fonts": {
+    "display": "\"Unbounded\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+    "text": "\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+    "mono": "\"JetBrains Mono\",monospace"
+  },
+  "rhythm": {
+    "bpm": 120,
+    "fps": 30,
+    "duration": 10,
+    "aspect": "16:9",
+    "cutFrames": 15
+  }
+}

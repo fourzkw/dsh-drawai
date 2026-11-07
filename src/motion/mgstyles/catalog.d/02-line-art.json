@@ -1,0 +1,34 @@
+{
+  "slug": "02-line-art",
+  "name": "一笔画·金线",
+  "oneLiner": "一根金线从不抬笔，7.5 秒画完一座城，收成金币字标。",
+  "signature": [
+    "全片单条连续路径，23 段图形首尾相接，笔尖从不抬起",
+    "线宽恒为 3px（成片 4.5px），除以相机缩放保持屏幕恒定",
+    "新墨 #FFF6DC 发烫，旧线 1.5s 内退到 40% 并偏成 #967D50",
+    "三处 0.15s 停顿用重复 marker 实现，笔停但路径不断",
+    "7.5s 圆环从中心 swell 成金币，0.367s 由环带填满"
+  ],
+  "palette": {
+    "page": "#0B1320",
+    "surface": "#101A28",
+    "field": "#16233A",
+    "text": "#E9D7A5",
+    "muted": "#967D50",
+    "accent": "#FFF6DC",
+    "border": "#24344C"
+  },
+  "colors": ["#0B1320", "#E9D7A5", "#FFF6DC", "#967D50", "#F2E0AE", "#CCAB6C", "#6E5428"],
+  "fonts": {
+    "display": "\"Cormorant Garamond\",\"Noto Serif SC\",serif",
+    "text": "\"Noto Serif SC\",serif",
+    "mono": "\"JetBrains Mono\",monospace"
+  },
+  "rhythm": {
+    "bpm": 72,
+    "fps": 30,
+    "duration": 10,
+    "aspect": "16:9",
+    "cutFrames": 13
+  }
+}

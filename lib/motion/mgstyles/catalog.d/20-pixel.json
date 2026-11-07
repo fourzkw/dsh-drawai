@@ -1,0 +1,28 @@
+{
+  "slug": "20-pixel",
+  "name": "像素 8-bit·横版卷轴",
+  "oneLiner": "每个像素是 6×6 输出方块，QUEST-32 色板配 4×4 Bayer 抖动的横版卷轴，外面套一层 CRT。",
+  "signature": [
+    "1 源像素 = 6×6 输出方块，全程无抗锯齿、无亚像素位移",
+    "同屏 ≤32 色，渐变只走 4×4 Bayer 抖动（天空 5 级色阶）",
+    "动作阶梯化：跑步 10fps、金币 15fps、星星 7.5fps",
+    "横向卷轴：主角钉在屏幕 x=96，四层视差 0.125/0.3/0.55/1.4",
+    "CRT 包住一切：桶形 k=0.03 + 按源像素行扫描线 + 8 向辉光 + 四角暗角"
+  ],
+  "palette": {
+    "page": "#1b1a33",
+    "surface": "#0d0b1a",
+    "field": "#2a2f5a",
+    "text": "#ffffff",
+    "muted": "#8cc8f5",
+    "accent": "#ffd166",
+    "border": "#5b9bea"
+  },
+  "colors": ["#0d0b1a", "#1b1a33", "#2a2f5a", "#5b9bea", "#ffd166", "#ffffff", "#d23c3c"],
+  "fonts": {
+    "display": "\"Press Start 2P\",\"Fusion Pixel 12\",monospace",
+    "text": "\"Fusion Pixel 12\",monospace",
+    "mono": "\"Press Start 2P\",\"Fusion Pixel 12\",monospace"
+  },
+  "rhythm": { "bpm": 150, "fps": 30, "duration": 10, "aspect": "16:9", "cutFrames": 3 }
+}

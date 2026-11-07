@@ -1,0 +1,2715 @@
+{
+  "source": "https://github.com/Vincentwei1021/video-shotcraft",
+  "commit": "1266a3ec4831289c4d893d42dd5102723658039a",
+  "license": "Apache-2.0",
+  "cards": [
+    {
+      "id": "assemble-then-type-flyin",
+      "category": "effects",
+      "summary": "空的暗底网格上，无文字的组件骨架先从四面八方飞入贴合；随后各处文字逐字从 3D 空间旋转着飞来落位，先大标题后小标注，全部落位后页面成形",
+      "use": "页面/海报\"自己长出来\"的开场；排版类产品的能力展示；从骨架到成稿的两段式叙事",
+      "duration": "约5.6s（168f@30fps）",
+      "energy": "中高（骨架段稀疏、文字段密集，能量单调上升到收尾）",
+      "source": "references/shots/effects/assemble-then-type-flyin.md",
+      "styles": [
+        {
+          "key": "assemble-then-type-flyin",
+          "label": "assemble-then-type-flyin"
+        }
+      ],
+      "demos": [
+        "demos/effects/assemble-then-type-flyin/AssembleThenTypeFlyin.tsx"
+      ]
+    },
+    {
+      "id": "aurora-bloom-bg-flip",
+      "category": "effects",
+      "summary": "浅灰底从底部升起紫橙柔焦 blob，随后整个底色在约 0.36s 内压暗到近黑、blob 压成余晖；文案同步 blur-out 换句 blur-in，换句间留空档不 cross-fade",
+      "use": "叙事转折点（\"多年以来…→一切都变了\"）；品牌片从铺垫拉到重音的那一拍；深浅色系之间的段落切换",
+      "duration": "约5.2s（156f@30fps）",
+      "energy": "由低到高（前 2/3 是酝酿，压暗那一瞬是全片重音）",
+      "source": "references/shots/effects/aurora-bloom-bg-flip.md",
+      "styles": [
+        {
+          "key": "aurora-bloom-bg-flip",
+          "label": "aurora-bloom-bg-flip"
+        }
+      ],
+      "demos": [
+        "demos/effects/aurora-bloom-bg-flip/AuroraBloomBgFlip.tsx"
+      ]
+    },
+    {
+      "id": "autolayout-gap-dial",
+      "category": "interaction",
+      "summary": "间距拨盘驱动布局——一排链接块带框选描边+缝隙间距标注，徽章数字逐格跳动、块被参数实时推开再弹簧回弹归位；\"参数驱动布局\"的可视化",
+      "use": "设计工具/低代码产品的\"改一个数、界面跟着动\"卖点镜头；\"用设计工具语义做包装\"的品类语言",
+      "duration": "~5s（150f：框选入场 + 预备回收 10f + 拉松 34f + 屏息 hold 20f + 弹簧回弹 + 落定 hold）",
+      "energy": "中（工具理性型，爽点在数字与位移的锁定同步）",
+      "source": "references/shots/interaction/autolayout-gap-dial.md",
+      "styles": [
+        {
+          "key": "autolayout-gap-dial",
+          "label": "autolayout-gap-dial"
+        }
+      ],
+      "demos": [
+        "demos/interaction/autolayout-gap-dial/AutolayoutGapDial.tsx"
+      ]
+    },
+    {
+      "id": "avatar-bracket-carousel",
+      "category": "ui-entrance",
+      "summary": "\"Your ___ agent\" 填空排版，四角对焦框钉在句中不动，头像队列在框内垂直 spring 轮换三次，入框放大清晰、出框按距离缩小淡化模糊，角色标签同步更换，切换瞬间对焦框呼吸 7%",
+      "use": "\"一个位置，多种角色\"的能力枚举；团队/身份/预设/人格类产品的核心一句话镜头",
+      "duration": "约 5.2s（156f@30fps）",
+      "energy": "中（三次等距切换构成稳定节拍器，对焦框脉冲是唯一装饰性动作）",
+      "source": "references/shots/ui-entrance/avatar-bracket-carousel.md",
+      "styles": [
+        {
+          "key": "avatar-bracket-carousel",
+          "label": "avatar-bracket-carousel"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/avatar-bracket-carousel/AvatarBracketCarousel.tsx"
+      ]
+    },
+    {
+      "id": "basic-3d-scene",
+      "category": "camera",
+      "summary": "impress.js 式空间演示：卡片以不同位置/旋转/缩放散布 3D 空间，相机取各步姿态之逆依次飞行对齐，末步拉到 OVERVIEW 总览",
+      "use": "概念/路线图/三步法的空间化讲述；替代平面 slides 的\"每一步都换个空间视角\"",
+      "duration": "约 7.5s（225f@30fps；四站，三段飞行 28/32/32f，每站停留 ≥30f）",
+      "energy": "中（每次转场有空间惊喜，停留段安静读卡）",
+      "source": "references/shots/camera/basic-3d-scene.md",
+      "styles": [
+        {
+          "key": "basic-3d-scene",
+          "label": "basic-3d-scene"
+        }
+      ],
+      "demos": [
+        "demos/camera/basic-3d-scene/Basic3DScene.tsx"
+      ]
+    },
+    {
+      "id": "beat-cut-moves",
+      "category": "rhythm",
+      "summary": "硬切当节拍乐器——连闪定格：三次白闪各硬切同一画面的一个裁切（全景→卡片→特写），快门余韵沉降后停在特写收束",
+      "use": "高光段落把\"切\"本身打成鼓点；颁奖连拍式的仪式感、关键信息的加冕",
+      "duration": "全程 140f ≈4.7s（活素材 30f + 三闪 + hold 70f）",
+      "energy": "高",
+      "source": "references/shots/rhythm/beat-cut-moves.md",
+      "styles": [
+        {
+          "key": "paparazzi-flash",
+          "label": "paparazzi-flash 连闪定格"
+        }
+      ],
+      "demos": [
+        "demos/rhythm/beat-cut-moves/PaparazziFlash.tsx"
+      ]
+    },
+    {
+      "id": "beat-step-list-theme-cycle",
+      "category": "rhythm",
+      "summary": "三通道节拍器——深色场形容词列表逐拍上移一行，视口中央固定胶囊\"接住\"下一个词并换色，整场底色同拍跟换；行、色、场三通道锁死同一拍点",
+      "use": "\"同一产品多种气质/多主题展示\"段落（modern/playful/expressive 式形容词连打）；全片节奏最密的一段；音乐段对拍",
+      "duration": "铺垫 30f + 每拍 18f × 拍数 + 收尾 hold；4 拍约 4.7s（demo 140f）",
+      "energy": "高（0.6s 一拍三通道齐跳，密度型高能）",
+      "source": "references/shots/rhythm/beat-step-list-theme-cycle.md",
+      "styles": [
+        {
+          "key": "beat-step-list-theme-cycle",
+          "label": "beat-step-list-theme-cycle"
+        }
+      ],
+      "demos": [
+        "demos/rhythm/beat-step-list-theme-cycle/BeatStepListThemeCycle.tsx"
+      ]
+    },
+    {
+      "id": "before-after-slider-scrub",
+      "category": "data",
+      "summary": "前后对比拉杆——\"处理前/后\"两版叠放，分割杆先猛甩后慢扫，杆过处新版\"显影\"揭出",
+      "use": "AI 增强/优化/重构类功能的效果对比段落（\"用前 vs 用后\"一镜讲清）",
+      "duration": "4–5s",
+      "energy": "中（快甩是打击点，慢扫是阅读期）",
+      "source": "references/shots/data/before-after-slider-scrub.md",
+      "styles": [
+        {
+          "key": "before-after-slider-scrub",
+          "label": "before-after-slider-scrub"
+        }
+      ],
+      "demos": [
+        "demos/data/before-after-slider-scrub/BeforeAfterSliderScrub.tsx"
+      ]
+    },
+    {
+      "id": "bezier-source-converge-merge",
+      "category": "ui-entrance",
+      "summary": "左侧四个来源节点各有一条细贝塞尔曲线连向右侧同一汇聚点，曲线先错峰由左向右 draw-on，节点沿自己的曲线滑向汇聚点并三段式加速缩小到消失，强调色数据包全程沿路径滑行，吞并完成后曲线从左端反向擦除只留品牌标志（demo：白瓷圆片托 video-shotcraft 镜刻标志）",
+      "use": "\"多源整合/统一接入/数据汇聚\"的核心机制镜头；集成、聚合、单一入口类产品的说明段落",
+      "duration": "约 5.6s（168f@30fps）",
+      "energy": "中（长镜慢速推进，靠数据包滑行维持活性；吞并瞬间是唯一小高点）",
+      "source": "references/shots/ui-entrance/bezier-source-converge-merge.md",
+      "styles": [
+        {
+          "key": "bezier-source-converge-merge",
+          "label": "bezier-source-converge-merge"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/bezier-source-converge-merge/BezierSourceConvergeMerge.tsx"
+      ]
+    },
+    {
+      "id": "blur-slide",
+      "category": "typography",
+      "summary": "标题逐词入场，y 0.38em→0 + blur 18→0 + opacity 0→1 三通道走同一条 ease-out 同步收敛，词间隔约 4f；副标题在标题收完前就错峰跟进",
+      "use": "几乎所有标题/副标题成对出现的场合；产品页首屏文案、章节小标题；需要\"专业但不抢戏\"的默认文字 reveal",
+      "duration": "约 4.0s（120f@30fps）",
+      "energy": "低（一次性收敛，无峰值无循环）",
+      "source": "references/shots/typography/blur-slide.md",
+      "styles": [
+        {
+          "key": "blur-slide",
+          "label": "blur-slide"
+        }
+      ],
+      "demos": [
+        "demos/typography/blur-slide/BlurSlide.tsx"
+      ]
+    },
+    {
+      "id": "bottom-push-stack-wipe",
+      "category": "transition",
+      "summary": "底边上推换章——新场景连底色整屏从底边向上推入，把旧场景物理顶出画外，连推数章各配一种饱和底色，内容钉死在各自色底坐标系里随底色走",
+      "use": "多章节产品片的换章骨架（每章一个卖点一种底色）；需要\"翻页节奏感\"贯穿全片的段落切换",
+      "duration": "demo 三连推 170f（~5.7s）；单次推入 26f + 章内 hold ~1.2s",
+      "energy": "中",
+      "source": "references/shots/transition/bottom-push-stack-wipe.md",
+      "styles": [
+        {
+          "key": "bottom-push-stack-wipe",
+          "label": "bottom-push-stack-wipe"
+        }
+      ],
+      "demos": [
+        "demos/transition/bottom-push-stack-wipe/BottomPushStackWipe.tsx"
+      ]
+    },
+    {
+      "id": "brace-expand",
+      "category": "typography",
+      "summary": "一对紧贴的小花括号先在正中出现，随即带一次过冲向左右弹开并放大到标题级，文字 clip 宽度严格绑括号内缘、像被拉开幕布般从中间揭示，落定后字距再细微松弛",
+      "use": "开发者/技术产品的标题字卡；章节开场；需要\"一个符号完成揭示\"的极简一拍",
+      "duration": "约 4s（120f@30fps：光标 0–6f → 6f 小括号硬切 → 14f 弹开 → 40–64f 字距松弛 → 副标 → hold）",
+      "energy": "中（单次过冲是唯一峰值，其余静止）",
+      "source": "references/shots/typography/brace-expand.md",
+      "styles": [
+        {
+          "key": "brace-expand",
+          "label": "brace-expand"
+        }
+      ],
+      "demos": [
+        "demos/typography/brace-expand/BraceExpand.tsx"
+      ]
+    },
+    {
+      "id": "brand-frame-snap",
+      "category": "effects",
+      "summary": "品牌色画框语法——一圈粗纯色画框先于内容长出包住全屏，录屏窗口落进框内；模式切换时整圈画框同帧硬翻色+窗内布局同帧换，一个 borderColor 干完章节导航/状态提示/品牌露出三件事",
+      "use": "双模式/双章节产品片的全片包装层（蓝=模式A、绿=模式B 颜色编码）；真实录屏素材的品牌化包裹",
+      "duration": "单次翻色 ~4.7s（140f）；画框本身可全片驻场",
+      "energy": "中（翻色瞬间高，其余时间是安静的包装层）",
+      "source": "references/shots/effects/brand-frame-snap.md",
+      "styles": [
+        {
+          "key": "brand-frame-snap",
+          "label": "brand-frame-snap"
+        }
+      ],
+      "demos": [
+        "demos/effects/brand-frame-snap/BrandFrameSnap.tsx"
+      ]
+    },
+    {
+      "id": "brand-ink-open",
+      "category": "opening",
+      "summary": "墨线十字准星描画→字标逐字压印→打字机副标→满一秒静止再上浮消散",
+      "use": "品牌开场；任何\"先立名号再进产品\"的片头",
+      "duration": "约 2.8s（83f）",
+      "energy": "低（起步位，为后续镜头留爬升空间）",
+      "source": "references/shots/opening/brand-ink-open.md",
+      "styles": [
+        {
+          "key": "brand-ink-open",
+          "label": "brand-ink-open"
+        }
+      ],
+      "demos": [
+        "demos/typography/brand-ink-open/BrandInkOpen.tsx"
+      ]
+    },
+    {
+      "id": "canvas-materialize-moves",
+      "category": "interaction",
+      "summary": "内容\"物化上画布\"两式——panel-to-canvas 行倒卡（面板表格行沿弧线飞出、跨容器变形成画布卡片）与 diagram-cascade 级联生成树（prompt 打字后节点逐层弹出、连线先于节点生长）",
+      "use": "AI/协作工具\"生成结果落到画布上\"的叙事段落；A 式讲\"已有内容换了个存在形态\"，B 式讲\"从一句话长出一棵结构\"",
+      "duration": "A ~5s（150f）/ B ~6s（180f）",
+      "energy": "中",
+      "source": "references/shots/interaction/canvas-materialize-moves.md",
+      "styles": [
+        {
+          "key": "panel-to-canvas",
+          "label": "panel-to-canvas 行倒卡"
+        },
+        {
+          "key": "diagram-cascade",
+          "label": "diagram-cascade 级联生成树"
+        }
+      ],
+      "demos": [
+        "demos/interaction/canvas-materialize-moves/DiagramCascadeBuild.tsx",
+        "demos/interaction/canvas-materialize-moves/PanelToCanvasMaterialize.tsx"
+      ]
+    },
+    {
+      "id": "card-flip-reveal",
+      "category": "transition",
+      "summary": "功能卡 3D 翻面揭示——卡片沿 Y 轴翻 180°，正面 UI 翻到侧棱最薄处掠过一道随角度移动的受光，背面揭出大号结论数字，逐张错峰扫过整排",
+      "use": "\"功能→成果\"的成对叙事：一排功能卡逐张翻出各自的指标/结论；元素级转场卡",
+      "duration": "全程 150f（~5s，含 hold）；单卡 4f 预备 + 16f 翻 + ~10f 弹簧落定，三卡错峰 12f",
+      "energy": "中高",
+      "source": "references/shots/transition/card-flip-reveal.md",
+      "styles": [
+        {
+          "key": "card-flip-reveal",
+          "label": "card-flip-reveal"
+        }
+      ],
+      "demos": [
+        "demos/transition/card-flip-reveal/CardFlipReveal.tsx"
+      ]
+    },
+    {
+      "id": "card-flock-tumble",
+      "category": "transition",
+      "summary": "三张 UI 页卡从侧棱薄边 3D 翻飞成阶梯站定（全程清晰、样条连续丝滑），站定后保持慢转不停，快速收束吸入中心，炸出单个湍流烟雾环扩散，巨字横贯收场",
+      "use": "能量高潮段（功能页群→品牌口号的爆点转场）；霓虹/极光暗场调性；\"多页面能力\"收束成一句话的段落",
+      "duration": "翻飞 ~1.5s + 慢转展示 ~0.3s + 收束 0.3s + 烟环+巨字 ~2s；全段 4.5s",
+      "energy": "极高（全片能量顶点用）",
+      "source": "references/shots/transition/card-flock-tumble.md",
+      "styles": [
+        {
+          "key": "card-flock-tumble",
+          "label": "card-flock-tumble"
+        }
+      ],
+      "demos": [
+        "demos/transition/card-flock-tumble/CardFlockTumble.tsx"
+      ]
+    },
+    {
+      "id": "card-stack",
+      "category": "ui-entrance",
+      "summary": "一组模板卡（demo 9 张）从屏幕下方逐张 spring 弹入、越落越快叠成一摞，全员落位后整摞一次性展成扇面——每张按序号偏转 6.5°、横移 138px，最后中心卡被抽出",
+      "use": "需要交代\"我们有一组东西\"的产品段落；卡片墙/模板库/方案列表的建立镜头，也能当 logo 前的一拍蓄势",
+      "duration": "约 5.0s（150f@30fps）",
+      "energy": "中高（入场是连续小爆发，展开段收成一次平滑的整体动作）",
+      "source": "references/shots/ui-entrance/card-stack.md",
+      "styles": [
+        {
+          "key": "card-stack",
+          "label": "card-stack"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/card-stack/CardStack.tsx"
+      ]
+    },
+    {
+      "id": "carousel-3d",
+      "category": "ui-entrance",
+      "summary": "8 张卡排成圆环整环自转一圈（匀速底 + 每 45° 一次停靠的分步），每卡只绕 Y 公转、自身 billboard 朝外，正反两层同向贴图配 backface-visibility:hidden 保证任何时刻都正立不倒置，正前方卡被点亮、环下字幕随之换字，相机全程钉在浅俯角",
+      "use": "作品集/模板库/集成清单的循环展示；需要无缝 loop 的背景拍或落地页 hero",
+      "duration": "约 5.6s（168f@30fps）",
+      "energy": "中（可无限循环的稳态运动，每 45° 一次停靠给出节拍）",
+      "source": "references/shots/ui-entrance/carousel-3d.md",
+      "styles": [
+        {
+          "key": "carousel-3d",
+          "label": "carousel-3d"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/carousel-3d/Carousel3D.tsx"
+      ]
+    },
+    {
+      "id": "chart-live-moves",
+      "category": "data",
+      "summary": "活体图表三式——oscilloscope-stream 示波流线（曲线右端实时写入+突发尖峰）、unit-dot-swarm-regroup 点阵重组（点群三幕迁徙聚成数字）、axis-rescale-shock 轴爆表重标（新值冲出画框逼 y 轴重标）",
+      "use": "数据叙事段落；分别讲\"实时性\"、\"每个数字是一个人\"、\"增长装不下\"",
+      "duration": "各 165–192f（5.5–6.4s）",
+      "energy": "中高（数据即剧情）",
+      "source": "references/shots/data/chart-live-moves.md",
+      "styles": [
+        {
+          "key": "oscilloscope-stream",
+          "label": "oscilloscope-stream"
+        },
+        {
+          "key": "unit-dot-swarm-regroup",
+          "label": "unit-dot-swarm-regroup"
+        },
+        {
+          "key": "axis-rescale-shock",
+          "label": "axis-rescale-shock"
+        }
+      ],
+      "demos": [
+        "demos/data/chart-live-moves/AxisRescaleShockV2.tsx",
+        "demos/data/chart-live-moves/OscilloscopeStreamV2.tsx",
+        "demos/data/chart-live-moves/UnitDotSwarmRegroupV2.tsx"
+      ]
+    },
+    {
+      "id": "chip-grid-single-select-blackout",
+      "category": "interaction",
+      "summary": "五个选项 chip 以 3+2 居中排布逐个淡入；选中帧先插一帧灰色按压块，紧接数帧内底色变墨黑、文字变白并做 1→1.04→1 极轻回弹，其余 chip 淡到 18% 但位置锁死；随后余项归零，黑 chip 上移收窄，下方升起结算价格",
+      "use": "单选/套餐/档位选择的交互演示；\"选了它之后会怎样\"的因果镜头；价格/参数结算类链路",
+      "duration": "约5.5s（165f@30fps）",
+      "energy": "中低（唯一的爆点是那一帧灰闪，其余都在收）",
+      "source": "references/shots/interaction/chip-grid-single-select-blackout.md",
+      "styles": [
+        {
+          "key": "chip-grid-single-select-blackout",
+          "label": "chip-grid-single-select-blackout"
+        }
+      ],
+      "demos": [
+        "demos/interaction/chip-grid-single-select-blackout/ChipGridSingleSelectBlackout.tsx"
+      ]
+    },
+    {
+      "id": "circle-match-iris",
+      "category": "transition",
+      "summary": "圆心匹配光圈切——光圈从页面上圆形元素的圆心炸开，圈内新页的圆形图表接在同一个圆上；匹配剪辑给光圈一个语义锚点",
+      "use": "前景有圆形元素（头像/图标/圆钮）、后景有圆形主体（donut 图/圆环进度）的接缝；转场技法卡",
+      "duration": "5.5s / 165f（入场+定睛 40f + 蓄力 7f + 接圆开圈 37f + sweep 58f + 静止 47f）",
+      "energy": "中高",
+      "source": "references/shots/transition/circle-match-iris.md",
+      "styles": [
+        {
+          "key": "circle-match-iris",
+          "label": "circle-match-iris"
+        }
+      ],
+      "demos": [
+        "demos/transition/circle-match-iris/CircleMatchIris.tsx"
+      ]
+    },
+    {
+      "id": "cloner-depth-echo",
+      "category": "ui-entrance",
+      "summary": "克隆纵队——主卡瞬间\"复印\"出 7 个半透明分身沿斜向纵深排开成队，停一拍后全体加速吸回本体合一+弹跳",
+      "use": "\"多副本/多租户/规模感/批量处理\"卖点；一镜讲完\"一个=很多\"",
+      "duration": "138f（约 4.6s）",
+      "energy": "中（陈列-收束型）",
+      "source": "references/shots/ui-entrance/cloner-depth-echo.md",
+      "styles": [
+        {
+          "key": "cloner-depth-echo",
+          "label": "cloner-depth-echo"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/cloner-depth-echo/ClonerDepthEcho.tsx"
+      ]
+    },
+    {
+      "id": "collab-cursor-moves",
+      "category": "interaction",
+      "summary": "协作光标当演员——cast-ensemble 五光标群演氛围层（错峰飞入+正弦漂移+打字 cameo+聚拢围观）",
+      "use": "协作/多人主题的画布场景，给画面铺\"团队在场\"体温",
+      "duration": "A ~5.2s（156f）",
+      "energy": "A 低中（氛围层，可垫任何时长）",
+      "source": "references/shots/interaction/collab-cursor-moves.md",
+      "styles": [
+        {
+          "key": "cast-ensemble",
+          "label": "cast-ensemble"
+        }
+      ],
+      "demos": [
+        "demos/interaction/collab-cursor-moves/CursorCastEnsemble.tsx"
+      ]
+    },
+    {
+      "id": "countdown-arc-scatter",
+      "category": "typography",
+      "summary": "纸面表盘 9 个等大数字沿大弧切向排布，整盘扫过 96° 后减速急停，\"5\" 停在弧顶随即平移落位成标题首字符，其余数字带 blur 原地散去，标题逐词模糊淡入、末词转强调色",
+      "use": "倒计时/时长承诺类文案（\"5 min to install\"）；数据揭晓的一拍；需要\"仪表盘\"语汇的浅底短镜",
+      "duration": "约 3.3s（100f@30fps：扫动 ~30f + 落位 20f + 标题成句 + hold 22f；最短可压到 33f 单拍）",
+      "energy": "高（96° 大幅扫动压进 ~20 帧，纯冲击）",
+      "source": "references/shots/typography/countdown-arc-scatter.md",
+      "styles": [
+        {
+          "key": "countdown-arc-scatter",
+          "label": "countdown-arc-scatter"
+        }
+      ],
+      "demos": [
+        "demos/typography/countdown-arc-scatter/CountdownArcScatter.tsx"
+      ]
+    },
+    {
+      "id": "crane-rise-reveal",
+      "category": "opening",
+      "summary": "升降臂拉升揭示——开场怼在一行数据特写，相机沿 Y 轴减速升起后拉，行行涌入直到整面 dashboard 铺满全幅",
+      "use": "\"从细节到全局\"的开场定场；与 drone-dive-landing（全局→单点俯冲）互为反向",
+      "duration": "5.5s（165f：特写 hold 24f + 拉升 102f + 落定/余波/静止 39f）",
+      "energy": "中高（持续单向运动，无冲击拍）",
+      "source": "references/shots/opening/crane-rise-reveal.md",
+      "styles": [
+        {
+          "key": "crane-rise-reveal",
+          "label": "crane-rise-reveal"
+        }
+      ],
+      "demos": [
+        "demos/opening/crane-rise-reveal/CraneRiseReveal.tsx"
+      ]
+    },
+    {
+      "id": "crash-zoom-punch",
+      "category": "camera",
+      "summary": "全景一拍急推到目标特写（6f），落位二选一——过冲回弹（弹性）或撞停震屏（重量）",
+      "use": "功能段\"点名\"镜头——把观众视线一拍按到目标卡/模块上；强调级用撞停",
+      "duration": "约 0.5s 动作 + 前后 hold（动作 6–11f，前 hold ≥30f 建立全景、后 hold ≥45f 读特写）",
+      "energy": "高（瞬时冲击，非持续高能）",
+      "source": "references/shots/camera/crash-zoom-punch.md",
+      "styles": [
+        {
+          "key": "crash-zoom-punch",
+          "label": "crash-zoom-punch"
+        }
+      ],
+      "demos": [
+        "demos/camera/crash-zoom-punch/CrashImpactReal.tsx",
+        "demos/camera/crash-zoom-punch/CrashZoomReal.tsx"
+      ]
+    },
+    {
+      "id": "cursor-flyover",
+      "category": "camera",
+      "summary": "整页俯瞰后，相机依次飞到四个功能区 zoom-in 特写，SVG 光标先一步到位指点、点击留下涟漪并触发界面响应，最后拉回俯瞰",
+      "use": "单页产品的功能巡览：一镜带观众看完四个功能区，光标当\"导游手指\"",
+      "duration": "约 8.0s（240f@30fps；俯瞰 22f · 四站各 44f（飞行 20f + 停留 24f）· 拉回 24f · hold 18f）",
+      "energy": "中（等距巡航，节奏靠点击涟漪打点）",
+      "source": "references/shots/camera/cursor-flyover.md",
+      "styles": [
+        {
+          "key": "cursor-flyover",
+          "label": "cursor-flyover"
+        }
+      ],
+      "demos": [
+        "demos/camera/cursor-flyover/CursorFlyover.tsx"
+      ]
+    },
+    {
+      "id": "dataviz-landscape-open",
+      "category": "opening",
+      "summary": "暗场支流线束地景开场——多条流线汇入主干、虚构 ID 标签浮在线上、相机重景深低速飞越",
+      "use": "品牌级抽象开场（\"数据宇宙\"隐喻），接亮场产品段或字标；与 glow-flyline-moves 分工：那卡是段落内卡片之间的连线叙事，本卡是开场专用的全画幅地景",
+      "duration": "5–8s（开场氛围段，一支片 ≤1 次；demo 180f）",
+      "energy": "低开缓升（起步位，为后续爬升留空间）",
+      "source": "references/shots/opening/dataviz-landscape-open.md",
+      "styles": [
+        {
+          "key": "dataviz-landscape-open",
+          "label": "dataviz-landscape-open"
+        }
+      ],
+      "demos": [
+        "demos/opening/dataviz-landscape-open/DatavizLandscapeOpen.tsx"
+      ]
+    },
+    {
+      "id": "deck-deal-flyin",
+      "category": "ui-entrance",
+      "summary": "暗色石墨桌面上的实体牌堆特写环绕开局，灯从牌堆亮到旁边的页面板，一摞卡像发牌一样硬加速甩进网格，相机追着发牌升起后仰、落在整块满板的跑道式俯瞰上定格",
+      "use": "展示\"内容量大/源源不断汇入\"的列表页与卡片墙；建立信息密度的第一印象",
+      "duration": "150f（约 5s：0–36 牌堆特写 + 预备，36–~101 发牌，108–150 满板 hold）",
+      "energy": "高（节奏爬升段主力，不放开场第一镜）",
+      "source": "references/shots/ui-entrance/deck-deal-flyin.md",
+      "styles": [
+        {
+          "key": "deck-deal-flyin",
+          "label": "deck-deal-flyin"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/deck-deal-flyin/DeckDealFlyin.tsx"
+      ]
+    },
+    {
+      "id": "depth-layer-moves",
+      "category": "camera",
+      "summary": "分层深度运镜——多层视差滑轨：3 层速度梯度横移出纵深，滑轨落定时主角浮起",
+      "use": "平面截图要\"有厚度\"的段落：卡组 / 列表 / 整页的横向巡览",
+      "duration": "4–5.5s 持续（demo 165f）",
+      "energy": "中（质感型）",
+      "source": "references/shots/camera/depth-layer-moves.md",
+      "styles": [
+        {
+          "key": "multiplane",
+          "label": "multiplane"
+        }
+      ],
+      "demos": [
+        "demos/camera/depth-layer-moves/MultiplaneReal.tsx"
+      ]
+    },
+    {
+      "id": "doc-park-left-pill-deal",
+      "category": "ui-entrance",
+      "summary": "文档不淡出而是向左滑出只露约 35% 宽并微缩到 0.92，右侧按旁白节奏慢速发牌三张白底描边药丸（outBack 弹入），每张落定后其下方字幕逐词加深、下一张到来前整句淡出，左侧文档全程极缓慢自动滚动保持\"正在被读\"",
+      "use": "旁白驱动的\"分析结论逐条给出\"段落；文档理解、推荐理由、审阅意见类产品的核心说明镜头",
+      "duration": "约 5.8s（174f@30fps）",
+      "energy": "低（慢发牌节奏，全片无峰值；靠自动滚动维持活性）",
+      "source": "references/shots/ui-entrance/doc-park-left-pill-deal.md",
+      "styles": [
+        {
+          "key": "doc-park-left-pill-deal",
+          "label": "doc-park-left-pill-deal"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/doc-park-left-pill-deal/DocParkLeftPillDeal.tsx"
+      ]
+    },
+    {
+      "id": "document-typewriter-reveal",
+      "category": "typography",
+      "summary": "悬浮在暗场里的整页真排版文档窗口在光标后自己\"写\"出来、侧栏跟进、历史条目逐个落入轨道，相机从斜侧标题特写一路后撤到全窗",
+      "use": "文档/报告/笔记类功能镜头；信息密度最高的一拍",
+      "duration": "150f（约 5s，含 history-list-stack 尾段与标语 hold）",
+      "energy": "低中（信息密度最高，节奏放稳让观众读字）",
+      "source": "references/shots/typography/document-typewriter-reveal.md",
+      "styles": [
+        {
+          "key": "document-typewriter-reveal",
+          "label": "document-typewriter-reveal"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/document-typewriter-reveal/DocumentTypewriterReveal.tsx"
+      ]
+    },
+    {
+      "id": "draw-svg-trace",
+      "category": "ui-entrance",
+      "summary": "描边生长圈注——一条带笔头的墨线沿元素轮廓跑一圈把它\"画\"出来，闭合瞬间闪黑交棒、内容淡入；同套路可给标题画下划线",
+      "use": "单个卡片/图表/标题的被点名入场；元素级手法（整页级蓝图描线归 wall-reveal-moves B 式）",
+      "duration": "132f（预告 10f + 描边 40f + 闪黑交棒 16f + 下划线 18f + hold 40f，约 4.4s）",
+      "energy": "中",
+      "source": "references/shots/ui-entrance/draw-svg-trace.md",
+      "styles": [
+        {
+          "key": "draw-svg-trace",
+          "label": "draw-svg-trace"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/draw-svg-trace/DrawSvgTrace.tsx"
+      ]
+    },
+    {
+      "id": "element-body-moves",
+      "category": "ui-entrance",
+      "summary": "元素身体感——contact-shadow-lift 接触阴影离面抬升：卡抬起时桌上的阴影同步放大变淡，纸片离桌被阴影证明",
+      "use": "给\"位置在变\"之外补\"身体在变\"：卡片点名给悬浮证据；配 2.5D 运镜与逐张点名",
+      "duration": "A 150f 5s",
+      "energy": "A 低中",
+      "source": "references/shots/ui-entrance/element-body-moves.md",
+      "styles": [
+        {
+          "key": "contact-shadow-lift",
+          "label": "contact-shadow-lift"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/element-body-moves/ContactShadowLift.tsx"
+      ]
+    },
+    {
+      "id": "flying-words",
+      "category": "typography",
+      "summary": "22 个关键词按黄金角铺在扁椭圆截面上，沿 z 轴从远处飞到相机前擦身而过，透明度走 [0,1,0.5,0.2,0] 生命曲线，跑满 2 整圈首尾无缝",
+      "use": "关键词云/能力清单的动态背景；片头片尾的\"信息量\"垫底层；需要纵深穿越感的转场",
+      "duration": "约 6.0s（180f@30fps，2 个完整循环，可无缝接续）",
+      "energy": "高（全屏持续 3D 位移，画面无一刻静止）",
+      "source": "references/shots/typography/flying-words.md",
+      "styles": [
+        {
+          "key": "flying-words",
+          "label": "flying-words"
+        }
+      ],
+      "demos": [
+        "demos/typography/flying-words/FlyingWords.tsx"
+      ]
+    },
+    {
+      "id": "fracture",
+      "category": "opening",
+      "summary": "5×5 瓦片从 3D 碎片态按中心波纹逐圈聚合成整面海报，停一拍亮字，随后全部碎片背离中心加速旋转飞出画面",
+      "use": "开场第一镜\"从混沌到成形\"的品牌/海报揭示；倒放或只取后半可作硬转场",
+      "duration": "约 5.2s（156f@30fps；聚合 0–2.6s · hold 1s · 飞散 1.5s）",
+      "energy": "高（两头高能、中段静止，适合压 BGM 重音起收）",
+      "source": "references/shots/opening/fracture.md",
+      "styles": [
+        {
+          "key": "fracture",
+          "label": "fracture"
+        }
+      ],
+      "demos": [
+        "demos/opening/fracture/Fracture.tsx"
+      ]
+    },
+    {
+      "id": "fui-hud-moves",
+      "category": "effects",
+      "summary": "FUI/HUD 准星咬合——reticle-lock-on 四个 L 形角标组成的取景框从画外飞入、超调回弹后咬合锁定目标",
+      "use": "任何\"看这里\"的目标点名（替代箭头圈红，画面不冻结）",
+      "duration": "2–3s（demo 90f）",
+      "energy": "中高（咬合帧是打击点）",
+      "source": "references/shots/effects/fui-hud-moves.md",
+      "styles": [
+        {
+          "key": "reticle-lock-on",
+          "label": "reticle-lock-on"
+        }
+      ],
+      "demos": [
+        "demos/effects/fui-hud-moves/ReticleLockOn.tsx"
+      ]
+    },
+    {
+      "id": "gauge-readout-moves",
+      "category": "data",
+      "summary": "仪表读数两式——needle-sweep-selftest 满弧扫针（点火自检指针甩满全弧再回落真值）与 tape-scroll-fixed-pointer 滚带定针（针不动刻度带滚过+冲刺刹车）",
+      "use": "dashboard 开场仪式/性能指标揭晓；A 多表盘开机感，B 单指标大跳变",
+      "duration": "A 140f（4.7s）/ B 150f（5s）",
+      "energy": "中高（机械仪式型）",
+      "source": "references/shots/data/gauge-readout-moves.md",
+      "styles": [
+        {
+          "key": "needle-sweep-selftest",
+          "label": "needle-sweep-selftest"
+        },
+        {
+          "key": "tape-scroll-fixed-pointer",
+          "label": "tape-scroll-fixed-pointer"
+        }
+      ],
+      "demos": [
+        "demos/data/gauge-readout-moves/NeedleSweepSelftest.tsx",
+        "demos/data/gauge-readout-moves/TapeScrollFixedPointer.tsx"
+      ]
+    },
+    {
+      "id": "glass-pill-dictation-typing",
+      "category": "interaction",
+      "summary": "一条定宽玻璃胶囊以约 1.25 倍略大弹出后缓落到位，内部自左淡到右浓铺一层强调色暖光；光标先行、随后匀速打出听写句，光（连同胶囊背后的环境光）随打字进度渐渐退去，收尾成一条中性的磨砂玻璃条",
+      "use": "语音/AI 输入框的登场；\"跟它说话\"的交互提示镜头；高能段之间的一个安静过渡拍",
+      "duration": "约3.3s（100f@30fps）",
+      "energy": "低（全片最安静的一拍，只有光在退）",
+      "source": "references/shots/interaction/glass-pill-dictation-typing.md",
+      "styles": [
+        {
+          "key": "glass-pill-dictation-typing",
+          "label": "glass-pill-dictation-typing"
+        }
+      ],
+      "demos": [
+        "demos/interaction/glass-pill-dictation-typing/GlassPillDictationTyping.tsx"
+      ]
+    },
+    {
+      "id": "glitch-cycle",
+      "category": "typography",
+      "summary": "同一行等宽槽位循环轮播 4 条状态短语，每条头尾按概率关键帧 [1,0,0,0.1,0,0,1] 全乱码、中段偶发单字抖动，切换瞬间叠 RGB 分离与整行位移；末条概率收 0 保证收尾干净",
+      "use": "加载/构建/部署过程的状态播报；技术型片头的\"系统自述\"；需要机器口吻推进时间的一段垫底",
+      "duration": "约 5.6s（168f@30fps；demo 每条短语 38f，末条延续到片尾作收尾 hold）",
+      "energy": "中高（持续的高频噪声脉冲，切换点是峰值）",
+      "source": "references/shots/typography/glitch-cycle.md",
+      "styles": [
+        {
+          "key": "glitch-cycle",
+          "label": "glitch-cycle"
+        }
+      ],
+      "demos": [
+        "demos/typography/glitch-cycle/GlitchCycle.tsx"
+      ]
+    },
+    {
+      "id": "glow-flyline-moves",
+      "category": "effects",
+      "summary": "暗场光斑与飞线三式——glow-orb-ambient 光斑底噪、flyline-arc 飞线连接、orb-flyline-relay 同帧共振组合",
+      "use": "全片唯一暗场段落的氛围与数据叙事：铺底噪用 A、讲数据流向用 B、要背景给前景搭腔用 C；Linear 官网味",
+      "duration": "A 170f（~5.7s）/ B 140f（~4.7s）/ C 165f（5.5s）",
+      "energy": "A 低（底噪级）/ B 中 / C 中高",
+      "source": "references/shots/effects/glow-flyline-moves.md",
+      "styles": [
+        {
+          "key": "glow-orb-ambient",
+          "label": "glow-orb-ambient"
+        },
+        {
+          "key": "flyline-arc",
+          "label": "flyline-arc"
+        },
+        {
+          "key": "orb-flyline-relay",
+          "label": "orb-flyline-relay"
+        }
+      ],
+      "demos": [
+        "demos/effects/glow-flyline-moves/FlylineArc.tsx",
+        "demos/effects/glow-flyline-moves/GlowOrbAmbient.tsx",
+        "demos/effects/glow-flyline-moves/OrbFlylineRelay.tsx"
+      ]
+    },
+    {
+      "id": "gradient-transition",
+      "category": "transition",
+      "summary": "背景在 linear、radial、conic 三类 CSS 渐变间平滑过渡——角度、色标、中心、半径逐参数插值，段间交叉淡化换类型",
+      "use": "氛围底/章节底色的连续变奏；给静态排版段落提供\"活着\"的背景层",
+      "duration": "约 6.7s（200f@30fps；linear 0–2.3s · radial 1.9–4.4s · conic 3.9–6.7s）",
+      "energy": "低（纯背景运动，为前景内容让路）",
+      "source": "references/shots/transition/gradient-transition.md",
+      "styles": [
+        {
+          "key": "gradient-transition",
+          "label": "gradient-transition"
+        }
+      ],
+      "demos": [
+        "demos/transition/gradient-transition/GradientTransition.tsx"
+      ]
+    },
+    {
+      "id": "gradient-word-sweep",
+      "category": "typography",
+      "summary": "黑底标语里关键词被渐变彩光从左到右快速扫过\"充能\"——波前字符辉光最强向后衰减，填满后字符间勾连细紫红闪电、整词稳态泛光呼吸",
+      "use": "标语里给单个动词/卖点词充能（Supercharged/faster/AI…）；能量高潮段的文字戏；黑场品牌片的口号帧",
+      "duration": "扫充 ~15–20f（要快）+ 稳态闪电呼吸 1–2s；全段 2.5–3.5s",
+      "energy": "高（一词爆点，前后都该让位）",
+      "source": "references/shots/typography/gradient-word-sweep.md",
+      "styles": [
+        {
+          "key": "gradient-word-sweep",
+          "label": "gradient-word-sweep"
+        }
+      ],
+      "demos": [
+        "demos/typography/gradient-word-sweep/GradientWordSweep.tsx"
+      ]
+    },
+    {
+      "id": "grain-dissolve",
+      "category": "outro",
+      "summary": "整行字爆裂成沸腾颗粒噪点并浮现斜纹选区框，噪点云急速凝聚成更大号发光短字标，位移衰减归零定格",
+      "use": "收尾\"XX. Now Live\"式上线宣告；长句信息压缩成品牌短标的能量聚合拍",
+      "duration": "约 2.0s（60f@30fps；砂化 0.26–0.56s · 凝聚 1.2–1.42s · 凝固回落收尾）",
+      "energy": "中高（短促、一次性的能量脉冲，天然的 outro 卡点）",
+      "source": "references/shots/outro/grain-dissolve.md",
+      "styles": [
+        {
+          "key": "grain-dissolve",
+          "label": "grain-dissolve"
+        }
+      ],
+      "demos": [
+        "demos/outro/grain-dissolve/GrainDissolve.tsx"
+      ]
+    },
+    {
+      "id": "graze-face-tour",
+      "category": "camera",
+      "summary": "大倾角贴面游走特写——镜头贴着 UI 表面低飞掠过（侧栏树/顶栏/列表当地形），页面文字初始悬浮在界面上空带同形软影，随镜头行进先后加速贴落回界面",
+      "use": "功能区巡礼（把 UI 当地景飞掠）；配合暗场+霓虹缘光做产品\"内部世界\"段落；界面内容逐区登场",
+      "duration": "单段 4–5s；可多段接力延长",
+      "energy": "中高（运镜持续推进+元素连续落位，信息密度高）",
+      "source": "references/shots/camera/graze-face-tour.md",
+      "styles": [
+        {
+          "key": "graze-face-tour",
+          "label": "graze-face-tour"
+        }
+      ],
+      "demos": [
+        "demos/camera/graze-face-tour/GrazeFaceTour.tsx"
+      ]
+    },
+    {
+      "id": "hashtag-to-pill-materialize",
+      "category": "interaction",
+      "summary": "话题词打字实体化——居中打出 \"#word\"（红实心光标恒亮），1 帧硬切变成宽大胶囊标签，hold 后缩小左移落到页面标签位，再 1 帧硬切揭示成品页；\"两次硬切一次滑动\"的节奏骨架",
+      "use": "标签/分类/关键词功能的演示段（笔记 app 打 tag、话题聚合）；\"输入 → 变成 UI 实体 → 归位到成品\"的三段式叙事",
+      "duration": "120f（4s）——打字 ~40f + 硬切胶囊 hold ~18f + 缩移 ~14f + 硬切揭示后静置 ~1.2s（原片 18–21.5s）",
+      "energy": "中（干脆利落，靠硬切给劲，不靠弹跳）",
+      "source": "references/shots/interaction/hashtag-to-pill-materialize.md",
+      "styles": [
+        {
+          "key": "hashtag-to-pill-materialize",
+          "label": "hashtag-to-pill-materialize"
+        }
+      ],
+      "demos": [
+        "demos/interaction/hashtag-to-pill-materialize/HashtagToPillMaterialize.tsx"
+      ]
+    },
+    {
+      "id": "icon-field-colorize",
+      "category": "opening",
+      "summary": "灰阶小图标点阵错峰浮现铺满全屏，停一拍后多道品牌色横带波纹极快向下扫翻全场——\"功能全景先摆满，品牌一瞬间点亮\"的开场/收束卡",
+      "use": "开场铺陈产品能力面（图标=功能宇宙）再一举打上品牌色；功能集合页、生态/集成规模展示、片头 logo 前垫场",
+      "duration": "浮现 ~45f 错峰 + 静置 ~10f + 翻色 12–45f + 终态静置；全段 3–6s（demo 170f：翻色走 30f 档 + 标题落版 + 终态 hold 1s）",
+      "energy": "中（浮现是铺垫，翻色瞬间是唯一爆点）",
+      "source": "references/shots/opening/icon-field-colorize.md",
+      "styles": [
+        {
+          "key": "icon-field-colorize",
+          "label": "icon-field-colorize"
+        }
+      ],
+      "demos": [
+        "demos/opening/icon-field-colorize/IconFieldColorize.tsx"
+      ]
+    },
+    {
+      "id": "icon-performance-moves",
+      "category": "effects",
+      "summary": "图标表演——attention-bounce 求关注弹跳（图标连跳递增+落地压扁+镜头被吸引）",
+      "use": "半屏级 icon 特写段落；新功能引出",
+      "duration": "156f（5.2s）",
+      "energy": "蓄势引入",
+      "source": "references/shots/effects/icon-performance-moves.md",
+      "styles": [
+        {
+          "key": "attention-bounce",
+          "label": "attention-bounce"
+        }
+      ],
+      "demos": [
+        "demos/effects/icon-performance-moves/AttentionBounce.tsx"
+      ]
+    },
+    {
+      "id": "impact-feedback",
+      "category": "effects",
+      "summary": "命中反馈两式——hit-counter 连招计数（顿帧+伤害数字+combo 跳字）、anime-impact 动漫打击帧（负片+集中线+色散）",
+      "use": "元素落位/撞击的\"命中一瞬\"——给砸入、撞停加游戏级手感；按强度阶梯选式",
+      "duration": "n/a（元素级技法，寄生在落位动作上；各式占用帧数见参数表）",
+      "energy": "高（瞬时冲击）",
+      "source": "references/shots/effects/impact-feedback.md",
+      "styles": [
+        {
+          "key": "hit-counter",
+          "label": "hit-counter 连招计数"
+        },
+        {
+          "key": "anime-impact",
+          "label": "anime-impact 打击帧"
+        }
+      ],
+      "demos": [
+        "demos/effects/impact-feedback/AnimeImpact.tsx",
+        "demos/effects/impact-feedback/HitCounter.tsx"
+      ]
+    },
+    {
+      "id": "integration-hub-map",
+      "category": "ui-entrance",
+      "summary": "旧页面一次性快翻 180°（侧棱瞬间亮闪）落成新中枢页，五个集成 app 图标同帧弹现、随即五条彩虹光管同帧齐连，光管内输送脉冲持续流动——\"翻开新一页，生态一齐接入\"",
+      "use": "集成/生态能力段（一个产品连一切）；版本翻新叙事（旧页翻成新页）；暗场霓虹调性的功能高潮",
+      "duration": "前摇 ~0.5s + 快翻 ~1.2s + 图标齐现 → 光管齐连两拍 ~0.7s + 输送呼吸 ≥1.5s；全段 4.5–5s",
+      "energy": "中高（翻面是爆点，输送段是余韵）",
+      "source": "references/shots/ui-entrance/integration-hub-map.md",
+      "styles": [
+        {
+          "key": "integration-hub-map",
+          "label": "integration-hub-map"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/integration-hub-map/IntegrationHubMap.tsx"
+      ]
+    },
+    {
+      "id": "lead-word-zoom-assemble",
+      "category": "typography",
+      "summary": "首词以 2.3 倍字号占据画面中央、hold 期间继续推近 6%，随后一条曲线同时完成「缩回终字号」与「整行左滑归位」，后续词各自从槽位右侧 0.5em 被推进来；支点横向钉首词中心、纵向钉基线（挂载时实测），整行上移的同一时窗副行浮出，停一拍后整幕 crash-zoom 推近失焦交棒",
+      "use": "品牌名/产品名的 Introducing 字卡；发布会式开场第二镜；一句话主张需要\"先让一个词占满画面、再把整句补齐\"的场合",
+      "duration": "约 2.8s（84f@30fps；组句 f36 完成、上移与副行 f32–46、静止 26f、末 12f crash）",
+      "energy": "中高（起手就是满画面的大字，但全程只有一次运动，没有二次冲击）",
+      "source": "references/shots/typography/lead-word-zoom-assemble.md",
+      "styles": [
+        {
+          "key": "lead-word-zoom-assemble",
+          "label": "lead-word-zoom-assemble"
+        }
+      ],
+      "demos": [
+        "demos/typography/lead-word-zoom-assemble/LeadWordZoomAssemble.tsx"
+      ]
+    },
+    {
+      "id": "letterspace-materialize",
+      "category": "opening",
+      "summary": "大字距字标全字符并行连续描画结晶——所有字母同帧起笔、笔画像手写一样连续生长、同帧齐收成词；氛围底景上的品牌字标显影",
+      "use": "片尾/片头品牌字标登场（大字距细骨架字标；demo 为 video-shotcraft 全小写）；章节题字；needs 静谧/高级感的收束帧",
+      "duration": "静置 ~15f + 描画 ~50f + 终态静置 ≥30f；全段 3–4s",
+      "energy": "低（静谧仪式感，一次呼吸完成）",
+      "source": "references/shots/opening/letterspace-materialize.md",
+      "styles": [
+        {
+          "key": "letterspace-materialize",
+          "label": "letterspace-materialize"
+        }
+      ],
+      "demos": [
+        "demos/opening/letterspace-materialize/LetterspaceMaterialize.tsx"
+      ]
+    },
+    {
+      "id": "light-play-moves",
+      "category": "effects",
+      "summary": "光效两式——spotlight-sweep 聚光扫字、sheen 单点扫光",
+      "use": "把光当另一种笔触（扫/擦）：暗场标题揭示（A）、主角卡加冕（B）",
+      "duration": "A 170f ~5.7s / B 150f ~5s",
+      "energy": "A 中 / B 低",
+      "source": "references/shots/effects/light-play-moves.md",
+      "styles": [
+        {
+          "key": "spotlight-sweep",
+          "label": "spotlight-sweep"
+        },
+        {
+          "key": "sheen-sweep",
+          "label": "sheen-sweep"
+        }
+      ],
+      "demos": [
+        "demos/effects/light-play-moves/SheenSweepRetry.tsx",
+        "demos/effects/light-play-moves/SpotlightSweepReveal.tsx"
+      ]
+    },
+    {
+      "id": "line-carry-transition",
+      "category": "transition",
+      "summary": "线条接力横移转场——场景 A 的进度条延伸出画，镜头跟线横移，线在移动中拐角围出场景 B 的卡框，全程无剪切",
+      "use": "两个有图形亲缘的场景之间（进度条→卡框、下划线→图表轴）；一支片子的招牌转场位，Catch Me If You Can 片头的图形接力",
+      "duration": "~6.3s / 190f（进度条走满 36f + 冲出 10f + 横移 56f + 收框 24f + 框内海报 30f + 静止 24f）",
+      "energy": "中",
+      "source": "references/shots/transition/line-carry-transition.md",
+      "styles": [
+        {
+          "key": "line-carry-transition",
+          "label": "line-carry-transition"
+        }
+      ],
+      "demos": [
+        "demos/transition/line-carry-transition/LineCarryTransition.tsx"
+      ]
+    },
+    {
+      "id": "list-reveal",
+      "category": "ui-entrance",
+      "summary": "垂直菜单 6 项按 10f 的间隔依次 scale 找位、软 back 轻微过冲落定，同时整个列表容器全程匀速上移——逐项入场与整体漂移是两层不相干的运动",
+      "use": "导航/侧边栏/设置面板的入场；任何\"界面自己长出来\"的 UI 段落，也适合做旁白铺垫时的低能量底",
+      "duration": "约 4s（120f@30fps）",
+      "energy": "低（稳定节拍，无峰值；靠漂移维持画面不死）",
+      "source": "references/shots/ui-entrance/list-reveal.md",
+      "styles": [
+        {
+          "key": "list-reveal",
+          "label": "list-reveal"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/list-reveal/ListReveal.tsx"
+      ]
+    },
+    {
+      "id": "list-stack-press",
+      "category": "ui-entrance",
+      "summary": "列表卡从画面底部逐张飞上摞起，每张落地压弹整摞、计数器同步跳一格",
+      "use": "feed/雷达/收件箱类\"每天有新东西\"的镜头；强调持续积累的资产列表",
+      "duration": "约 3s（18–88f）",
+      "energy": "中",
+      "source": "references/shots/ui-entrance/list-stack-press.md",
+      "styles": [
+        {
+          "key": "list-stack-press",
+          "label": "list-stack-press"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/list-stack-press/ListStackPress.tsx"
+      ]
+    },
+    {
+      "id": "logo-shrink-wordmark-lockup",
+      "category": "outro",
+      "summary": "霓虹切口大环快速收束成中央实心小白 O、过冲刹车时换成 video-shotcraft 标志，图标左移让位，字标字母逐个滑入完成 lockup，强调色标语收尾",
+      "use": "片尾品牌定妆：从满屏图形能量收束到\"图标+字标+标语\"的标准 lockup",
+      "duration": "约 4.4s（132f@30fps；收束 0.1–1.2s · 让位 1.5–2.1s · 字母 2–2.7s · 标语 3.2–3.7s）",
+      "energy": "中（收束段有冲击力，整体是沉稳的落定节奏）",
+      "source": "references/shots/outro/logo-shrink-wordmark-lockup.md",
+      "styles": [
+        {
+          "key": "logo-shrink-wordmark-lockup",
+          "label": "logo-shrink-wordmark-lockup"
+        }
+      ],
+      "demos": [
+        "demos/outro/logo-shrink-wordmark-lockup/LogoShrinkWordmarkLockup.tsx"
+      ]
+    },
+    {
+      "id": "magician-card-flourish",
+      "category": "opening",
+      "summary": "午夜蓝暗场上蓝色星芒闪现 0.3s（X 形针状光束旋转 90°+中心辉光放射小光芒），卡片从闪光点弹射而出——极速自旋弧线飞向镜头、自旋随靠近衰减、瞬间硬定格（卡高 86% 画高）、光脉冲 + sheen 扫光，右侧文案随后逐行揭示",
+      "use": "单张卡片/海报/封面的魔术性登场（片头主视觉、产品卡揭晓）；纯黑暗场；需要\"变出来\"仪式感的爆点",
+      "duration": "156f（闪光 0.3s + 飞行 1.6s + 定格/扫光/文案揭示 + hold 3.3s；全段 5.2s）",
+      "energy": "高（一次性爆点，定格后即静）",
+      "source": "references/shots/opening/magician-card-flourish.md",
+      "styles": [
+        {
+          "key": "magician-card-flourish",
+          "label": "magician-card-flourish"
+        }
+      ],
+      "demos": [
+        "demos/opening/magician-card-flourish/MagicianCardFlourish.tsx"
+      ]
+    },
+    {
+      "id": "marker-underline-title",
+      "category": "typography",
+      "summary": "大标题落定后，关键词下方马克笔下划线从左到右快速描画——变宽笔形、毛糙边缘、微上斜跟随斜体字势，贴着字底",
+      "use": "标题里强调单个关键词（new/free/AI…）；手写感/人味的品牌调性；正文标注式强调",
+      "duration": "标题落定 +4~8f 后起笔，划线 8–12f，总 1–1.5s",
+      "energy": "低（一笔点睛，不抢标题的戏）",
+      "source": "references/shots/typography/marker-underline-title.md",
+      "styles": [
+        {
+          "key": "marker-underline-title",
+          "label": "marker-underline-title"
+        }
+      ],
+      "demos": [
+        "demos/typography/marker-underline-title/MarkerUnderlineTitle.tsx"
+      ]
+    },
+    {
+      "id": "mosaic-reframe",
+      "category": "transition",
+      "summary": "12 张瓦片在规则网格、feature mosaic、对角瀑布串三种排版间连续变形，位置宽高各自插值、逐片微错峰，段间留 hold",
+      "use": "\"同一批内容多种看法\"的陈列转场：作品集/模板库/相册产品的布局能力展示",
+      "duration": "约 7.1s（214f@30fps；浮现 0–22f · hold A · A→B 56–92f · hold B · B→C 132–176f · hold C 至 214f）",
+      "energy": "中（连续流动的重排，无爆点，气质从容）",
+      "source": "references/shots/transition/mosaic-reframe.md",
+      "styles": [
+        {
+          "key": "mosaic-reframe",
+          "label": "mosaic-reframe"
+        }
+      ],
+      "demos": [
+        "demos/transition/mosaic-reframe/MosaicReframe.tsx"
+      ]
+    },
+    {
+      "id": "neon-frame-forerun",
+      "category": "ui-entrance",
+      "summary": "强透视直角霓虹框自左缘两头奔画先行成型，页面在框内由暗转亮，同时框内组件/文字从 3D 上空带同形软影错峰贴落、随页面点亮同步完成贴合，背景霓虹群（demo 为同形框纵深回声隧道）终段熄灭让位",
+      "use": "暗场品牌片里给 UI 面板做\"登场仪式\"（框先到、内容后落）；功能区首次亮相；霓虹/赛博调性的段落开场",
+      "duration": "框奔画 ~0.7s + 点亮&贴落 ~2.7s + 背景熄灭收束 ~1s；全段 4–4.7s（demo 140f）",
+      "energy": "中高（三层动作叠进，但都服务同一次登场）",
+      "source": "references/shots/ui-entrance/neon-frame-forerun.md",
+      "styles": [
+        {
+          "key": "neon-frame-forerun",
+          "label": "neon-frame-forerun"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/neon-frame-forerun/NeonFrameForerun.tsx"
+      ]
+    },
+    {
+      "id": "neon-frame-orbit-drop",
+      "category": "ui-entrance",
+      "summary": "霓虹框先行描框后，镜头绕页面左→右弧线旋转，页面全部组件/文字**同帧**从空中往下贴合（同形软影同步收敛）——整体登场式的框内安放",
+      "use": "单页 UI 的一次性隆重登场（与巡礼/逐区亮相相对）；暗场霓虹调性段落的主视觉揭幕；neon-frame-forerun 的姊妹镜",
+      "duration": "描框 ~0.5s + 旋转&同时贴落 ~2.5s + 落定 ~1s；全段 ~4.7s（140f，旋转到 128f 收住后留落定）",
+      "energy": "中高（一次性的大动作，落定即静）",
+      "source": "references/shots/ui-entrance/neon-frame-orbit-drop.md",
+      "styles": [
+        {
+          "key": "neon-frame-orbit-drop",
+          "label": "neon-frame-orbit-drop"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/neon-frame-orbit-drop/NeonFrameForerunOrbit.tsx"
+      ]
+    },
+    {
+      "id": "neon-triple-marquee",
+      "category": "outro",
+      "summary": "三行对向霓虹跑马灯 recap——三连词空心霓虹灯管巨字上中下排满一面斜拍的砖墙，奇偶行反向匀速无限横滚，三行按 1/3 相位轮流点亮，结尾逐行断电",
+      "use": "片尾主题词复读机段落；三连词口号的\"余韵\"拍法；音乐段无旁白铺陈",
+      "duration": "4–5s（demo 150f：18f 逐行点火上电 + 循环体 + 18f 逐行断电 + 8f 熄灯 hold）",
+      "energy": "中高（持续流动 + 逐行脉冲，无瞬时冲击）",
+      "source": "references/shots/outro/neon-triple-marquee.md",
+      "styles": [
+        {
+          "key": "neon-triple-marquee",
+          "label": "neon-triple-marquee"
+        }
+      ],
+      "demos": [
+        "demos/outro/neon-triple-marquee/NeonTripleMarquee.tsx"
+      ]
+    },
+    {
+      "id": "orbit-ring-title-open",
+      "category": "opening",
+      "summary": "石墨暗场上八张 16:9 暗色内容卡按 45° 均布在 720×380 椭圆上匀速公转（卡身永不倾斜，纵深只由 sin θ 给出 ±12% 缩放、z 序与远处压暗失焦），环撑开期间卡内容冻结首帧、f24 之后八张一起开播；居中两级标题逐字解糊下沉落定，关键词到位那一刻荧光马克块自左横扫铺满、扫过处字反白为墨，mono 副行随后浮出；可选末段整行失焦淡出、环继续转着交棒下一镜",
+      "use": "开场第一镜 = 「这个产品有一整套东西」；素材库/模板库/功能矩阵/案例集的门面拍；需要用真实运动的产品画面托住一句主张，而不是把截图摆成静态九宫格",
+      "duration": "150f（5s@30fps；马克块 f64 落定后 2.9s 稳态巡回 + 极缓推近；开 HANDOFF_EXIT 时 f118 起退场交棒）",
+      "energy": "中（唯一的持续运动是匀速公转，全片只有马克块横扫一次冲击）",
+      "source": "references/shots/opening/orbit-ring-title-open.md",
+      "styles": [
+        {
+          "key": "orbit-ring-title-open",
+          "label": "orbit-ring-title-open"
+        }
+      ],
+      "demos": [
+        "demos/opening/orbit-ring-title-open/OrbitRingTitleOpen.tsx"
+      ]
+    },
+    {
+      "id": "outline-word-fill",
+      "category": "typography",
+      "summary": "空心词（细暖灰描边、500 字重）从 3.2 倍急缓收缩落位，虚线大圆随后从 2.8 倍收到字周围并缓慢自转，左右水平虚线从画框边缘内伸；描边先微微增亮，实心白热字在一帧内硬切点亮，一闪辉光即定格",
+      "use": "单词式利益点/口号的重锤一拍；节奏卡点上的\"钉子\"镜；深底品牌片的强调帧",
+      "duration": "约 3.0s（90f@30fps，短促单拍 + 36f 落定）",
+      "energy": "高（3.2 倍收缩 + 瞬时点亮，短时高冲击）",
+      "source": "references/shots/typography/outline-word-fill.md",
+      "styles": [
+        {
+          "key": "outline-word-fill",
+          "label": "outline-word-fill"
+        }
+      ],
+      "demos": [
+        "demos/typography/outline-word-fill/OutlineWordFill.tsx"
+      ]
+    },
+    {
+      "id": "outro-group-photo-launch",
+      "category": "outro",
+      "summary": "全片元素从四面八方飞来围住字标合影，crane 落机位+舞台光+金尘做成发布会收场",
+      "use": "outro/品牌收尾；多功能产品的\"全家福\"式终镜",
+      "duration": "约 4.8s（145f）",
+      "energy": "峰值（全片最高点）",
+      "source": "references/shots/outro/outro-group-photo-launch.md",
+      "styles": [
+        {
+          "key": "outro-group-photo-launch",
+          "label": "outro-group-photo-launch"
+        }
+      ],
+      "demos": [
+        "demos/outro/outro-group-photo-launch/OutroGroupPhotoLaunch.tsx"
+      ]
+    },
+    {
+      "id": "overhead-camera-moves",
+      "category": "camera",
+      "summary": "俯拍揭示两式——tilt-reveal 俯仰抬正揭示、overhead-tabletop-drop 桌面卡阵横滑骤降扎入",
+      "use": "用\"俯仰角\"讲故事的开场/转场：单页 establishing 用 A，多页巡视择一扎入用 B",
+      "duration": "A 120f（4s）/ B 140f（4.7s）",
+      "energy": "A 中 / B 中高",
+      "source": "references/shots/camera/overhead-camera-moves.md",
+      "styles": [
+        {
+          "key": "tilt-reveal",
+          "label": "tilt-reveal"
+        },
+        {
+          "key": "overhead-tabletop-drop",
+          "label": "overhead-tabletop-drop"
+        }
+      ],
+      "demos": [
+        "demos/camera/overhead-camera-moves/OverheadTabletopDrop.tsx",
+        "demos/camera/overhead-camera-moves/TiltReveal.tsx"
+      ]
+    },
+    {
+      "id": "page-turn-transitions",
+      "category": "transition",
+      "summary": "整页体块转场——barn-door-split 对开门裂幕（旧页裂两半滑出、新页迎上）",
+      "use": "章节级换页：新旧交替的两个大段落之间的\"翻篇\"仪式；与 shot-transitions 系（镜头交棒）分工——那是\"航拍机移过去\"，这是\"页面自己是实体\"",
+      "duration": "单式 150f（前态建立 30–40f + 转场 24–40f + 跟随与收尾 ≥70f），约 5.0s",
+      "energy": "中高",
+      "source": "references/shots/transition/page-turn-transitions.md",
+      "styles": [
+        {
+          "key": "barn-door-split",
+          "label": "barn-door-split"
+        }
+      ],
+      "demos": [
+        "demos/transition/page-turn-transitions/BarnDoorSplit.tsx"
+      ]
+    },
+    {
+      "id": "page-waterfall-wall",
+      "category": "ui-entrance",
+      "summary": "页面瀑布墙——真实页面截图切成 3–4 列在 3D 后仰墙面上差速反向无限滚动，视差 + 镜头缓推做\"内容多到流不完\"的一览",
+      "use": "\"多页面/多功能/多模板\"体量感段落；montage 中段铺陈或 intro 后的产品广度镜头",
+      "duration": "4–6s（无限循环体，时长由段落需要裁）",
+      "energy": "中（流动陈列型）",
+      "source": "references/shots/ui-entrance/page-waterfall-wall.md",
+      "styles": [
+        {
+          "key": "page-waterfall-wall",
+          "label": "page-waterfall-wall"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/page-waterfall-wall/PageWaterfallWall.tsx",
+        "demos/ui-entrance/page-waterfall-wall/VerticalTicker.tsx"
+      ]
+    },
+    {
+      "id": "panel-grid-moves",
+      "category": "rhythm",
+      "summary": "分格节奏——comic-panel-split 漫画斜格劈出同一主体的三个机位，咔咔咔三格定格后末格斜边吃屏成海报",
+      "use": "把\"格子\"当节奏器：同主体多机位定格并列，逐格踩拍劈出；吃拍点",
+      "duration": "156f ≈5.2s（全屏侧拍 20f + 三刀分格定格 + 吃屏 + 海报 hold）",
+      "energy": "中高",
+      "source": "references/shots/rhythm/panel-grid-moves.md",
+      "styles": [
+        {
+          "key": "comic-panel-split",
+          "label": "comic-panel-split"
+        }
+      ],
+      "demos": [
+        "demos/rhythm/panel-grid-moves/ComicPanelSplit.tsx"
+      ]
+    },
+    {
+      "id": "paper-title-card",
+      "category": "typography",
+      "summary": "一句话逐词压印上纸、一个词标强调色斜体、短划线收束",
+      "use": "章节转场/价值主张字卡；重要功能出场前的引导卡；全片呼吸位",
+      "duration": "1.7–1.8s（50–55f）",
+      "energy": "低（呼吸位，隔开两段高能镜头）",
+      "source": "references/shots/typography/paper-title-card.md",
+      "styles": [
+        {
+          "key": "paper-title-card",
+          "label": "paper-title-card"
+        }
+      ],
+      "demos": [
+        "demos/typography/paper-title-card/PaperTitleCard.tsx"
+      ]
+    },
+    {
+      "id": "picker-carousel-feature-cycle",
+      "category": "interaction",
+      "summary": "移动端风竖向选择器——焦点药丸不动、内容穿过它，每项带明显 outQuint 减速吸附后完全静止，按到中心距离分层控制透明度/字号/灰度，落定时药丸做 scaleY 极轻呼吸",
+      "use": "逐个念出功能名/场景名的列表镜头；\"选一个\"的交互演示；移动端产品的 picker 类控件展示",
+      "duration": "约3.6s（108f@30fps）",
+      "energy": "中（每一次吸附都是一个节拍点，5 拍匀速推进）",
+      "source": "references/shots/interaction/picker-carousel-feature-cycle.md",
+      "styles": [
+        {
+          "key": "picker-carousel-feature-cycle",
+          "label": "picker-carousel-feature-cycle"
+        }
+      ],
+      "demos": [
+        "demos/interaction/picker-carousel-feature-cycle/PickerCarouselFeatureCycle.tsx"
+      ]
+    },
+    {
+      "id": "pill-chip-slot-cycle-handled",
+      "category": "typography",
+      "summary": "白底句式 \"Your `chip` Handled\" 里深色胶囊内词竖向滚轮轮换，胶囊宽度按预量文本宽插值平滑伸缩、两侧文字被自然挤开收拢，胶囊上下露出 13% 透明度的灰色幽灵项",
+      "use": "\"我们替你搞定 ___\" 这类句式卖点；SaaS 功能列举的一句话收口；浅底品牌片主视觉一拍",
+      "duration": "约 5.0s（150f@30fps：静置 → 3 次切换（0.25/0.47/0.69）→ 尾部静置）",
+      "energy": "中（三拍稳定节拍，宽度伸缩是唯一的连续运动）",
+      "source": "references/shots/typography/pill-chip-slot-cycle-handled.md",
+      "styles": [
+        {
+          "key": "pill-chip-slot-cycle-handled",
+          "label": "pill-chip-slot-cycle-handled"
+        }
+      ],
+      "demos": [
+        "demos/typography/pill-chip-slot-cycle-handled/PillChipSlotCycleHandled.tsx"
+      ]
+    },
+    {
+      "id": "pill-slot-cycle",
+      "category": "typography",
+      "summary": "句中词槽轮换——固定句干钉死不动，句尾 pill 徽章每 ~0.7s 老虎机滚一格（旧的上飞加速淡出、新的从下带模糊滑入），连换 N 个功能词后落成完整句子收束",
+      "use": "\"功能列举\"类文案的最优雅解法（比逐条列表快、比字符级滚动有语义）；一句话卖点 + 多个动词短语的段落",
+      "duration": "入场 12f + 每拍 21f × 词数 + 收束 14f + hold；6 词约 6.7s（demo 200f，含 48f 完整句 hold）",
+      "energy": "中（稳定节拍器，无峰值）",
+      "source": "references/shots/typography/pill-slot-cycle.md",
+      "styles": [
+        {
+          "key": "pill-slot-cycle",
+          "label": "pill-slot-cycle"
+        }
+      ],
+      "demos": [
+        "demos/typography/pill-slot-cycle/PillSlotCycle.tsx"
+      ]
+    },
+    {
+      "id": "print-texture-transitions",
+      "category": "transition",
+      "summary": "印刷质感转场——ink-bleed-reveal 墨渗揭示（须状渗边洇开吃掉旧景）",
+      "use": "换景接缝的纸墨审美款；与交棒三式/穿越式并列的第三族——\"介质显影\"型转场",
+      "duration": "4–4.5s（洇开段 55–80f + 静止收尾 ≥30f）",
+      "energy": "中（渐进显形，无冲击拍）",
+      "source": "references/shots/transition/print-texture-transitions.md",
+      "styles": [
+        {
+          "key": "ink-bleed-reveal",
+          "label": "ink-bleed-reveal 墨渗揭示"
+        }
+      ],
+      "demos": [
+        "demos/transition/print-texture-transitions/InkBleedReveal.tsx"
+      ]
+    },
+    {
+      "id": "product-card-progressive-assemble",
+      "category": "ui-entrance",
+      "summary": "详情卡像被逐字段抓取般自建——一枚\"填充光标\"领先跳格，图→标题→分类 pill 依次 pop→原价出现后被划线降级、强调色新价 spring 跳出→正文逐行揭示且高亮块由左向右刷过→色卡点亮→按钮填满，整卡全程极慢 scale 前推",
+      "use": "商品/条目详情页的能力展示；\"结构化抽取\"\"自动填充\"\"数据自己长出来\"类叙事的主镜头",
+      "duration": "约 5.7s（172f@30fps）",
+      "energy": "中（连续小事件密集排布，无单点爆发；靠前推保持推进感）",
+      "source": "references/shots/ui-entrance/product-card-progressive-assemble.md",
+      "styles": [
+        {
+          "key": "product-card-progressive-assemble",
+          "label": "product-card-progressive-assemble"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/product-card-progressive-assemble/ProductCardProgressiveAssemble.tsx"
+      ]
+    },
+    {
+      "id": "quad-split-parallel-scenes",
+      "category": "rhythm",
+      "summary": "画面硬切 2×2 四宫格，四个象限并行跑各自的微场景（打字、急推、逐词、交互链），关键节拍错开 3–6 帧制造信息轰炸",
+      "use": "节奏段\"功能很多、同时发生\"的蒙太奇拍；预告片中段的密度峰值",
+      "duration": "90f（3s@30fps：0–62f 并行轰炸 + 28f 终态 hold，全程无转场）",
+      "energy": "高（四线并行 + 错拍冲击，标准的 BGM 副歌位）",
+      "source": "references/shots/rhythm/quad-split-parallel-scenes.md",
+      "styles": [
+        {
+          "key": "quad-split-parallel-scenes",
+          "label": "quad-split-parallel-scenes"
+        }
+      ],
+      "demos": [
+        "demos/rhythm/quad-split-parallel-scenes/QuadSplitParallelScenes.tsx"
+      ]
+    },
+    {
+      "id": "radial-ripple-phone-chips",
+      "category": "effects",
+      "summary": "暖沙底四层同心圆错相呼吸如水波，中央手机 mockup 屏内 feed 自动缓滚，两侧白色 chip 先后 spring pop 入场并悬浮",
+      "use": "移动端产品的\"这就是它\"定格镜头；功能点分列两侧的介绍段；片头/片尾的产品全景",
+      "duration": "约5.6s（168f@30fps）",
+      "energy": "低（安静、有呼吸感，靠同心圆的持续起伏撑住不冷场）",
+      "source": "references/shots/effects/radial-ripple-phone-chips.md",
+      "styles": [
+        {
+          "key": "radial-ripple-phone-chips",
+          "label": "radial-ripple-phone-chips"
+        }
+      ],
+      "demos": [
+        "demos/effects/radial-ripple-phone-chips/RadialRipplePhoneChips.tsx"
+      ]
+    },
+    {
+      "id": "radial-wave",
+      "category": "ui-entrance",
+      "summary": "17×9 圆点阵列按到波源的欧氏距离错峰点亮，每点 scale 过冲到 1.5 再落回常亮，第一道波扫完后第二道亮蓝脉冲从外圈反向收拢回中心",
+      "use": "产品/品牌开场的\"系统上电\"一拍；也用作数据网格、节点地图、覆盖范围类叙事的建立镜头",
+      "duration": "约 3.8s（114f@30fps）",
+      "energy": "中高（起手爆发一次，波前过后转为常亮低能量底子）",
+      "source": "references/shots/ui-entrance/radial-wave.md",
+      "styles": [
+        {
+          "key": "radial-wave",
+          "label": "radial-wave"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/radial-wave/RadialWave.tsx"
+      ]
+    },
+    {
+      "id": "research-card-stack-scroll",
+      "category": "ui-entrance",
+      "summary": "深色论文卡每 12 帧一张沿右下轴线飞入中心叠压，落位带 1 帧压缩，只有最上一张全清晰渲染标题+作者+摘要，下方卡按堆积深度递增模糊变暗只露标题条，背景横向 grid 同步下移做速度参照",
+      "use": "\"读了大量资料/处理了海量文档\"的量级交代；研究类、检索类、批处理类产品的能力镜头",
+      "duration": "约 4.8s（144f@30fps）",
+      "energy": "中高（匀速高频，无爆发但持续压迫）",
+      "source": "references/shots/ui-entrance/research-card-stack-scroll.md",
+      "styles": [
+        {
+          "key": "research-card-stack-scroll",
+          "label": "research-card-stack-scroll"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/research-card-stack-scroll/ResearchCardStackScroll.tsx"
+      ]
+    },
+    {
+      "id": "rhythm-interrupt-moves",
+      "category": "rhythm",
+      "summary": "打断节奏——jump-cut-punch-in 三级跳切推近：同构图三次无补间硬跳放大，逐级逼近目标",
+      "use": "用\"打断连续性\"本身当节奏器：顿挫推近（A）；与 beat-cut-moves（切点排布）互补",
+      "duration": "A 135f ≈4.5s",
+      "energy": "A 中",
+      "source": "references/shots/rhythm/rhythm-interrupt-moves.md",
+      "styles": [
+        {
+          "key": "jump-cut-punch-in",
+          "label": "jump-cut-punch-in"
+        }
+      ],
+      "demos": [
+        "demos/rhythm/rhythm-interrupt-moves/JumpCutPunchIn.tsx"
+      ]
+    },
+    {
+      "id": "riso-print-hits",
+      "category": "effects",
+      "summary": "套印错位冲击帧——riso-misregistration-hit 单发：标题撞停瞬间裂成双色 riso 印版，抖两下\"啪\"地套准",
+      "use": "标题/卡片的命中强调，纸墨审美版的\"故障闪\"；全片 1–2 次的单发高潮",
+      "duration": "4s（120f，单发）",
+      "energy": "高",
+      "source": "references/shots/effects/riso-print-hits.md",
+      "styles": [
+        {
+          "key": "misregistration-hit",
+          "label": "misregistration-hit 单发"
+        }
+      ],
+      "demos": [
+        "demos/effects/riso-print-hits/RisoMisregistrationHit.tsx"
+      ]
+    },
+    {
+      "id": "row-embed",
+      "category": "ui-entrance",
+      "summary": "内容行像卡片一样从空中降下、rotateX 收平、嵌入瞬间底边亮一道强调色的缝",
+      "use": "\"结构化数据长进页面\"的详情页/列表镜头；行级内容的批量入场",
+      "duration": "约 2s（12–68f）",
+      "energy": "中",
+      "source": "references/shots/ui-entrance/row-embed.md",
+      "styles": [
+        {
+          "key": "row-embed",
+          "label": "row-embed"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/row-embed/RowEmbed.tsx"
+      ]
+    },
+    {
+      "id": "sakuga-timing-shift",
+      "category": "rhythm",
+      "summary": "一拍三转一拍一——元素先以每 3 帧一步的手翻书顿挫移动，高潮瞬间切成逐帧丝滑冲刺，帧率量化的突变本身就是看点",
+      "use": "单元素的强调性位移（卡片入场、指标冲线）；需要\"手工感→高潮爆发\"反差的段落",
+      "duration": "150f（5s）",
+      "energy": "中高",
+      "source": "references/shots/rhythm/sakuga-timing-shift.md",
+      "styles": [
+        {
+          "key": "sakuga-timing-shift",
+          "label": "sakuga-timing-shift"
+        }
+      ],
+      "demos": [
+        "demos/rhythm/sakuga-timing-shift/SakugaTimingShift.tsx"
+      ]
+    },
+    {
+      "id": "scan-bracket-sweep",
+      "category": "effects",
+      "summary": "文档弹到中央，四角落下 L 形取景括号，一条扫描光带拖着渐变尾迹在文档上往复扫 5 趟——文档全程静止，只有光在读它",
+      "use": "\"正在解析/校验这份内容\"的过程镜头；文档类产品的能力演示；上传→分析链路的中段",
+      "duration": "约5.0s（150f@30fps）",
+      "energy": "中低（机械、克制，节奏全在往复扫掠的呼吸上）",
+      "source": "references/shots/effects/scan-bracket-sweep.md",
+      "styles": [
+        {
+          "key": "scan-bracket-sweep",
+          "label": "scan-bracket-sweep"
+        }
+      ],
+      "demos": [
+        "demos/effects/scan-bracket-sweep/ScanBracketSweep.tsx"
+      ]
+    },
+    {
+      "id": "scanline-annotate-focus",
+      "category": "effects",
+      "summary": "一条扫描线自上而下匀速掠过已存在的页面，越过哪块区块的下缘，哪块就被四角取景框从外扩处弹簧收拢对准（一次过冲），随后贴出一枚逐字打出的机器标签，顶部状态行同步计数 00/06→06/06",
+      "use": "\"AI 正在读你的页面/品牌\"的分析镜头；设计系统/品牌规范的拆解介绍；产品能力的自我说明段",
+      "duration": "约5s（150f@30fps）",
+      "energy": "中（机械冷静，节奏由扫描线匀速推动，标注是节拍点）",
+      "source": "references/shots/effects/scanline-annotate-focus.md",
+      "styles": [
+        {
+          "key": "scanline-annotate-focus",
+          "label": "scanline-annotate-focus"
+        }
+      ],
+      "demos": [
+        "demos/effects/scanline-annotate-focus/ScanlineAnnotateFocus.tsx"
+      ]
+    },
+    {
+      "id": "scanline-assemble-flyin",
+      "category": "effects",
+      "summary": "页面开场是一张只有网格与虚线槽位的蓝图画板，一条亮扫描线自上而下掠过；扫到每个槽位，该处组件就从画外飞入过冲贴合，带方向性残影模糊与落位咬合角标——扫完整页恰好装配完成",
+      "use": "\"页面自己生成\"的开场；AI 建站/自动排版类产品的核心演示；从空白到成品的能力叙事",
+      "duration": "约5.2s（156f@30fps）",
+      "energy": "中高（扫描线是稳的，但每次组件飞入都是一个爆点，密度递进）",
+      "source": "references/shots/effects/scanline-assemble-flyin.md",
+      "styles": [
+        {
+          "key": "scanline-assemble-flyin",
+          "label": "scanline-assemble-flyin"
+        }
+      ],
+      "demos": [
+        "demos/effects/scanline-assemble-flyin/ScanlineAssembleFlyin.tsx"
+      ]
+    },
+    {
+      "id": "scroll-brake-moves",
+      "category": "data",
+      "summary": "长卷急刹两式——changelog-scroll-brake 基本款（高速长卷指数减速精准停位+目标抬升）与 brake-reticle-lock 组合款（急刹帧同帧准星咬合）",
+      "use": "changelog/发布史/长列表段落：\"一直在发货，今天这条最大\"；要给停点更强打击感用 B",
+      "duration": "A 4–5s / B 5s",
+      "energy": "高开中收（速度对比型）",
+      "source": "references/shots/data/scroll-brake-moves.md",
+      "styles": [
+        {
+          "key": "changelog-scroll-brake",
+          "label": "changelog-scroll-brake"
+        },
+        {
+          "key": "brake-reticle-lock",
+          "label": "brake-reticle-lock"
+        }
+      ],
+      "demos": [
+        "demos/data/scroll-brake-moves/BrakeReticleLock.tsx",
+        "demos/data/scroll-brake-moves/ChangelogScrollBrake.tsx"
+      ]
+    },
+    {
+      "id": "segmented-thumb-hero",
+      "category": "interaction",
+      "summary": "分段控件 thumb 位移当主角特写——超大胶囊 segmented control 弹簧浮入，描边箭头光标画外滑入按下，白 thumb 8f ease-out 滑到另一段，到位瞬间新图标 spring 弹出、旧图标收起",
+      "use": "\"模式切换/二选一\"功能的宣告镜头（demo 的 video-shotcraft Prompt→Film、Chat→Agent 式）；一个 UI 微交互撑一整镜的特写拍法",
+      "duration": "~3.5s（demo 110f：浮入 18f + 光标 24f + 点击 + 滑动 8f + 图标弹出 + hold）",
+      "energy": "中（微交互特写，精致不轰）",
+      "source": "references/shots/interaction/segmented-thumb-hero.md",
+      "styles": [
+        {
+          "key": "segmented-thumb-hero",
+          "label": "segmented-thumb-hero"
+        }
+      ],
+      "demos": [
+        "demos/interaction/segmented-thumb-hero/SegmentedThumbHero.tsx"
+      ]
+    },
+    {
+      "id": "shot-transitions",
+      "category": "transition",
+      "summary": "镜头交棒三式——推进流白、whip-pan 甩镜（急刹款）、mask-wipe 穿窗（纵深款），按能量落差与接缝语义选型",
+      "use": "任何两镜衔接处（技法卡，分镜阶段排完镜头后逐个接缝选一式）",
+      "duration": "n/a（技法卡；各式占用帧数见参数表，从相邻镜头预算里划）",
+      "energy": "n/a（技法卡，不占能量位）",
+      "source": "references/shots/transition/shot-transitions.md",
+      "styles": [
+        {
+          "key": "flash-cut",
+          "label": "推进流白 flash-cut"
+        },
+        {
+          "key": "whip-pan",
+          "label": "whip-pan 甩镜"
+        },
+        {
+          "key": "mask-wipe",
+          "label": "mask-wipe 穿窗"
+        }
+      ],
+      "demos": [
+        "demos/transition/shot-transitions/PortalWipeV2.tsx",
+        "demos/transition/shot-transitions/WhipBrakeReal.tsx"
+      ]
+    },
+    {
+      "id": "slam-entrance-moves",
+      "category": "effects",
+      "summary": "高能砸入三式——kanada-perspective-snap 金田透视急停、score-slam 比分砸落、impact-burst-kit 落点冲击套件（波及邻卡）",
+      "use": "主角卡/KPI 卡的重拳入场；impact-feedback 管落位后的反馈，本卡管入场本身就是冲击",
+      "duration": "单式动作段 6–22f + 冲击余波 ~16f + hold ≥45f（demo：A 120f / B 135f / C 140f）",
+      "energy": "高",
+      "source": "references/shots/effects/slam-entrance-moves.md",
+      "styles": [
+        {
+          "key": "kanada-perspective-snap",
+          "label": "kanada-perspective-snap"
+        },
+        {
+          "key": "score-slam",
+          "label": "score-slam"
+        },
+        {
+          "key": "impact-burst-kit",
+          "label": "impact-burst-kit"
+        }
+      ],
+      "demos": [
+        "demos/effects/slam-entrance-moves/ImpactBurstKit.tsx",
+        "demos/effects/slam-entrance-moves/KanadaPerspectiveSnap.tsx",
+        "demos/effects/slam-entrance-moves/ScoreSlam.tsx"
+      ]
+    },
+    {
+      "id": "space-camera-moves",
+      "category": "camera",
+      "summary": "3D 空间化运镜两式——exploded-view 爆炸分解（构件沿 Z 炸开再合体）、drone-dive-landing 无人机俯冲降落",
+      "use": "把平面页面当 3D 实体拍的高光段落；两式都是\"大动作\"，一支片合计 ≤2 次",
+      "duration": "A 170f（5.7s，炸开-悬停-合体-收尾标题全程）；C 105f（3.5s，俯冲 69f + 落定 hold 36f）单向俯冲",
+      "energy": "高",
+      "source": "references/shots/camera/space-camera-moves.md",
+      "styles": [
+        {
+          "key": "exploded-view",
+          "label": "exploded-view"
+        },
+        {
+          "key": "drone-dive-landing",
+          "label": "drone-dive-landing"
+        }
+      ],
+      "demos": [
+        "demos/camera/space-camera-moves/DroneDiveLanding.tsx",
+        "demos/camera/space-camera-moves/ExplodedView.tsx"
+      ]
+    },
+    {
+      "id": "speed-ramp-freeze",
+      "category": "rhythm",
+      "summary": "帧号非线性 remap 的节奏手法——定格标注（流动→定格圈注→解冻）",
+      "use": "卡片流/长横移中把一个重点\"停下给人看\"；教学解说、评审语境",
+      "duration": "定格标注全程 158f（≈5.3s，定格段 67f ≥45f）",
+      "energy": "中高（速度反差本身即energy beat）",
+      "source": "references/shots/rhythm/speed-ramp-freeze.md",
+      "styles": [
+        {
+          "key": "freeze-annotate",
+          "label": "freeze-annotate"
+        }
+      ],
+      "demos": [
+        "demos/rhythm/speed-ramp-freeze/FreezeAnnotateReal.tsx"
+      ]
+    },
+    {
+      "id": "spotlight-hero-card",
+      "category": "opening",
+      "summary": "关灯的剧场里一束钨丝聚光（带体积光柱）扫过页面锁定一张卡，斜侧推进后卡片弹起悬浮、香槟色光束沿轮廓两圈、连同 3D 注记一起贴回原位",
+      "use": "\"单一主角\"式产品开场；把一个核心对象（卡片/条目/模块）立成全片主角",
+      "duration": "172f（约 5.7s；锁定 f34 → 触地 f142 → 30f 真静止 hold）",
+      "energy": "中（质感最高的一镜，节奏慢而稳）",
+      "source": "references/shots/opening/spotlight-hero-card.md",
+      "styles": [
+        {
+          "key": "spotlight-hero-card",
+          "label": "spotlight-hero-card"
+        }
+      ],
+      "demos": [
+        "demos/opening/spotlight-hero-card/SpotlightHeroCard.tsx"
+      ]
+    },
+    {
+      "id": "spotlight-sweep-moves",
+      "category": "effects",
+      "summary": "暗场聚光显影三式——A 醒睡扫过（光到即亮光走即暗）、B 贴边泛光横摇（紫光贴 UI 边缘渗入+聚光匀速右移）、C 角落匀速显影（径向聚光从角落匀速扩张点亮全屏）；黑场里\"光即叙事\"的 UI 展示",
+      "use": "暗色调品牌片里逐个介绍 UI 面板/功能区；黑场开场把界面\"点亮\"登场；段落间光转场",
+      "duration": "单式 3.5–4.5s；A/B 可串联成巡礼段",
+      "energy": "中低（克制、神秘感，爆点在\"亮起\"瞬间）",
+      "source": "references/shots/effects/spotlight-sweep-moves.md",
+      "styles": [
+        {
+          "key": "glow-wake-sleep-panel",
+          "label": "glow-wake-sleep-panel"
+        },
+        {
+          "key": "slide-spotlight-pan",
+          "label": "slide-spotlight-pan"
+        },
+        {
+          "key": "corner-spotlight-reveal",
+          "label": "corner-spotlight-reveal"
+        }
+      ],
+      "demos": [
+        "demos/effects/spotlight-sweep-moves/CornerSpotlightReveal.tsx",
+        "demos/effects/spotlight-sweep-moves/GlowWakeSleepPanel.tsx",
+        "demos/effects/spotlight-sweep-moves/SlideSpotlightPan.tsx"
+      ]
+    },
+    {
+      "id": "steep-tilt-glide",
+      "category": "camera",
+      "summary": "固定镜头下直立页面以 60° 强透视侧立（右近左远），页面自身沿其 3D 横面方向滑移掠过镜头（物动镜不动），滑移带速度重影、文字组件悬空贴落、由暗揭亮",
+      "use": "长页面/多区块 UI 的炫技巡览（内容依次滑过固定机位）；暗场霓虹调性；与贴面运镜卡互补的\"侧掠\"机位",
+      "duration": "4s（120f）单镜；页面越宽越可拉长",
+      "energy": "中高（透视炫技+持续运动，但节奏是匀的）",
+      "source": "references/shots/camera/steep-tilt-glide.md",
+      "styles": [
+        {
+          "key": "steep-tilt-glide",
+          "label": "steep-tilt-glide"
+        }
+      ],
+      "demos": [
+        "demos/camera/steep-tilt-glide/SteepTiltGlide.tsx"
+      ]
+    },
+    {
+      "id": "stroke-segment-build",
+      "category": "opening",
+      "summary": "断笔成字——标题拆成十几段互不相连的笔画乱序逐段点亮，前 70% 不可读，末段落位瞬间语义\"啪\"地成立",
+      "use": "开场吊悬念的产品名/大数字揭晓；一支片 ≤1 次；与 type-assembly/draw-svg-trace 分工：那些是\"看着字被组装/描画\"，本卡是\"意义延迟揭晓\"",
+      "duration": "165f（5.5s；揭晓 f105 后 hold 2s）",
+      "energy": "低起中收（悬念型，落位帧是能量点）",
+      "source": "references/shots/opening/stroke-segment-build.md",
+      "styles": [
+        {
+          "key": "stroke-segment-build",
+          "label": "stroke-segment-build"
+        }
+      ],
+      "demos": [
+        "demos/opening/stroke-segment-build/StrokeSegmentBuild.tsx"
+      ]
+    },
+    {
+      "id": "tear-streak-transitions",
+      "category": "transition",
+      "summary": "撕裂转场——glitch-displace 噪声撕裂（16 横条错位抖动中硬切），数字故障语义的条带级撕裂",
+      "use": "高能换页：数字故障/断裂语义；页面完整性不破、能量拉满的条带级撕裂",
+      "duration": "前态 ≥40f + 撕裂 16–24f + 收尾 ≥40f，约 4.5s（135f）",
+      "energy": "高",
+      "source": "references/shots/transition/tear-streak-transitions.md",
+      "styles": [
+        {
+          "key": "glitch-displace",
+          "label": "glitch-displace"
+        }
+      ],
+      "demos": [
+        "demos/transition/tear-streak-transitions/GlitchDisplace.tsx"
+      ]
+    },
+    {
+      "id": "tension-camera-moves",
+      "category": "camera",
+      "summary": "情绪运镜两式——bullet-time 冻结环绕、pull-back 拉远孤立，相机替观众\"感受\"而非\"看\"",
+      "use": "情绪节点（震撼/收束）的运镜语言；与 space-camera-moves 的\"炫技大动作\"互补——这两式动作小、情绪重",
+      "duration": "单式 5–6s（150–170f）；全片合计 ≤2 式（各 ≤1 次）",
+      "energy": "A 高 / B 低收",
+      "source": "references/shots/camera/tension-camera-moves.md",
+      "styles": [
+        {
+          "key": "bullet-time-freeze-orbit",
+          "label": "bullet-time-freeze-orbit 冻结环绕"
+        },
+        {
+          "key": "pull-back-isolation",
+          "label": "pull-back-isolation 拉远孤立"
+        }
+      ],
+      "demos": [
+        "demos/camera/tension-camera-moves/BulletTimeFreezeOrbit.tsx",
+        "demos/camera/tension-camera-moves/PullBackIsolation.tsx"
+      ]
+    },
+    {
+      "id": "terminal-3d",
+      "category": "camera",
+      "summary": "三个终端窗散布 3D 空间，相机窗间飞行、途中正弦拉远，每到一窗打字机敲命令、结果逐行滑出——命令执行的空间叙事流",
+      "use": "开发者产品的 CLI/工作流演示：把\"三步命令\"拍成三站空间旅程",
+      "duration": "约 8.2s（246f@30fps；三站各约 2–3s 停留 + 两段 30f 飞行）",
+      "energy": "中（飞行给动感、打字给节奏，整体是沉稳的技术叙事；收在 ● READY 一记亮点）",
+      "source": "references/shots/camera/terminal-3d.md",
+      "styles": [
+        {
+          "key": "terminal-3d",
+          "label": "terminal-3d"
+        }
+      ],
+      "demos": [
+        "demos/camera/terminal-3d/Terminal3D.tsx"
+      ]
+    },
+    {
+      "id": "text-as-mask",
+      "category": "opening",
+      "summary": "文字视频遮罩——瓷白舞台上切出超粗大标题字，字内部透出缓慢平移的暗色实时产品面板，结尾吸一口气后字形指数冲入放大 46 倍溢出、内部画面接管全屏",
+      "use": "品牌词/口号与产品画面二合一的开场或章节卡；字是门、产品在门里",
+      "duration": "165f（入场 18f + 字内漂移 78f + 吸气 8f + 冲入接管 24f + 落定/hold 37f）",
+      "energy": "中高（漂移段沉稳，接管段一次爆发）",
+      "source": "references/shots/opening/text-as-mask.md",
+      "styles": [
+        {
+          "key": "text-as-mask",
+          "label": "text-as-mask"
+        }
+      ],
+      "demos": [
+        "demos/opening/text-as-mask/TextAsMask.tsx"
+      ]
+    },
+    {
+      "id": "text-column-converge",
+      "category": "typography",
+      "summary": "双词对峙合拢——左\"NEW\"右特性词钉死在等屏边距两侧硬切轮换、全程零收缩，换到最后一词才唯一一次 ease-in-out 滑到居中咬合成短语，下方小字近乎硬切浮现；收尾揭晓型文字卡",
+      "use": "特性清单收束到产品名/口号的段落（\"NEW × 一串特性 → NEW <产品名>\"式）；发布会式 recap、版本号揭晓",
+      "duration": "轮换 7–16f/词 × 8–9 词 + 合拢 ~36f + 小字后静置；全段约 5–6s",
+      "energy": "中低（机器节奏、小字规格清单气质，不是砸字）",
+      "source": "references/shots/typography/text-column-converge.md",
+      "styles": [
+        {
+          "key": "text-column-converge",
+          "label": "text-column-converge"
+        }
+      ],
+      "demos": [
+        "demos/typography/text-column-converge/TextColumnConverge.tsx"
+      ]
+    },
+    {
+      "id": "theme-switch-moves",
+      "category": "interaction",
+      "summary": "主题切换两式——theme-sweep 斜向扫场（边界扫过处就地换肤）与 palette-ripple 组合款（⌘K 面板收缩成点、涟漪从点荡开换肤）",
+      "use": "深色模式/主题功能的叙事段落；同一 UI \"在你眼前变色\"而非切到新场景",
+      "duration": "A 140f（4.7s）/ B 156f（5.2s）",
+      "energy": "A 中 / B 中高（组合款有完整因果链）",
+      "source": "references/shots/interaction/theme-switch-moves.md",
+      "styles": [
+        {
+          "key": "theme-sweep-toggle",
+          "label": "theme-sweep-toggle"
+        },
+        {
+          "key": "palette-theme-ripple",
+          "label": "palette-theme-ripple"
+        }
+      ],
+      "demos": [
+        "demos/interaction/theme-switch-moves/PaletteThemeRipple.tsx",
+        "demos/interaction/theme-switch-moves/ThemeSweepToggle.tsx"
+      ]
+    },
+    {
+      "id": "timeline-travel",
+      "category": "data",
+      "summary": "时间轴横移——镜头沿水平刻度轴加速掠过版本刻度，每过一格卡片弹立短停，末刻度急停推近",
+      "use": "changelog/里程碑/发展史段落（\"我们一直在发货\"的另一种拍法）；与 scroll-brake-moves 分工：那卡是纵向列表急刹，本卡是横向时间旅行",
+      "duration": "4–5s",
+      "energy": "中高（加速→急刹的节奏型镜头）",
+      "source": "references/shots/data/timeline-travel.md",
+      "styles": [
+        {
+          "key": "timeline-travel",
+          "label": "timeline-travel"
+        }
+      ],
+      "demos": [
+        "demos/data/timeline-travel/TimelineTravel.tsx"
+      ]
+    },
+    {
+      "id": "title-demote-to-label",
+      "category": "typography",
+      "summary": "大标题降格为节标签两式——A 大标题居中显影站稳一拍后连续缩小 0.3x 平移到左上角落成小节标签、内容区在其下生长；B 同套路但登场时带文本选中态高亮块扫入再撤掉",
+      "use": "章节开场（标题先当主角再让位给内容）；教程/功能演示片的小节交接；B 式给\"文字/编辑\"类产品加身份暗示",
+      "duration": "A ~3.7s（112f）/ B ~4.5s（134f）；demo 两式串播 246f",
+      "energy": "低中（版式变换型，氛围镜头）",
+      "source": "references/shots/typography/title-demote-to-label.md",
+      "styles": [
+        {
+          "key": "title-demote-to-label",
+          "label": "title-demote-to-label"
+        }
+      ],
+      "demos": [
+        "demos/typography/title-demote-to-label/TitleDemoteToLabel.tsx"
+      ]
+    },
+    {
+      "id": "trailer-grammar-moves",
+      "category": "rhythm",
+      "summary": "预告片语法一式——trailer-bumper 前置速剪钩子：三镜 9f 速剪 + 黑场静默一拍，再开场标题",
+      "use": "预告片的开场钩子（cold open）：正片前先塞三个最抓眼的镜头，再静默一拍正式开场",
+      "duration": "A ~4.7s（140f）",
+      "energy": "A 高",
+      "source": "references/shots/rhythm/trailer-grammar-moves.md",
+      "styles": [
+        {
+          "key": "trailer-bumper",
+          "label": "trailer-bumper"
+        }
+      ],
+      "demos": [
+        "demos/rhythm/trailer-grammar-moves/TrailerBumper.tsx"
+      ]
+    },
+    {
+      "id": "transition-hidden-cut",
+      "category": "transition",
+      "summary": "藏切点转场三式——前景遮挡隐形切、对撞开屏、暖色漏光，硬切藏进遮挡/撞击/光峰的 1-3 帧里，观众看不见剪刀",
+      "use": "两镜衔接处需要\"无痕换景\"或\"仪式感开屏\"时（技法卡，与 shot-transitions 三式同层选型）",
+      "duration": "n/a（技法卡；各式占用帧数见参数表，从相邻镜头预算里划）",
+      "energy": "n/a（技法卡，不占能量位）",
+      "source": "references/shots/transition/transition-hidden-cut.md",
+      "styles": [
+        {
+          "key": "invisible-cut",
+          "label": "invisible-cut 前景遮挡隐形切"
+        },
+        {
+          "key": "versus-slam",
+          "label": "versus-slam 对撞开屏"
+        },
+        {
+          "key": "light-leak-burn",
+          "label": "light-leak-burn 琥珀漏光"
+        }
+      ],
+      "demos": [
+        "demos/transition/transition-hidden-cut/InvisibleCut.tsx",
+        "demos/transition/transition-hidden-cut/LightLeakBurn.tsx",
+        "demos/transition/transition-hidden-cut/VersusSlam.tsx"
+      ]
+    },
+    {
+      "id": "transition-travel",
+      "category": "transition",
+      "summary": "穿越式转场——字腔穿越：巨型章节标题的字形就是一扇窗，镜头钻进字形笔画完成换景",
+      "use": "前后两镜存在\"元素/容器\"级空间关系的接缝（技法卡，与 shot-transitions 三式互补选用）",
+      "duration": "n/a（技法卡；demo 150f，主推动作段 52f，前后 hold 另计，帧数从相邻镜头预算里划）",
+      "energy": "n/a（技法卡，不占能量位）",
+      "source": "references/shots/transition/transition-travel.md",
+      "styles": [
+        {
+          "key": "letterform-zoom",
+          "label": "字腔穿越 letterform-zoom"
+        }
+      ],
+      "demos": [
+        "demos/transition/transition-travel/LetterformZoom.tsx"
+      ]
+    },
+    {
+      "id": "type-and-filter",
+      "category": "interaction",
+      "summary": "真实 UI 上打字搜索、网格自己收敛成一张卡、点击穿透进详情页",
+      "use": "功能演示的\"操作叙事\"段；搜索/筛选/进入详情的任何交互链路",
+      "duration": "约 2.5s（118–190f）",
+      "energy": "中（发牌高能段之后的从容一拍）",
+      "source": "references/shots/interaction/type-and-filter.md",
+      "styles": [
+        {
+          "key": "type-and-filter",
+          "label": "type-and-filter"
+        }
+      ],
+      "demos": [
+        "demos/interaction/type-and-filter/TypeAndFilter.tsx"
+      ]
+    },
+    {
+      "id": "type-assembly-moves",
+      "category": "typography",
+      "summary": "文字集结三式——split-text-stagger 逐字裂升、letterform-drift-assembly 漂移合拢、text-on-path 沿线流入",
+      "use": "大标题/标语的入场；与 type-entrance-moves、document-typewriter-reveal 同属标题入场大品类，全片 ≤2 种",
+      "duration": "单式 4–5.5s（动作段 A ~56f / B ~104f / C ~110f；demo 全长含 hold：A 130f / B 150f / C 160f，各自导出 `*_DURATION`）",
+      "energy": "A 中 / B 中高 / C 中",
+      "source": "references/shots/typography/type-assembly-moves.md",
+      "styles": [
+        {
+          "key": "split-text-stagger",
+          "label": "split-text-stagger 裂升"
+        },
+        {
+          "key": "drift-assembly",
+          "label": "drift-assembly 漂移合拢"
+        },
+        {
+          "key": "text-on-path",
+          "label": "text-on-path 沿线流入"
+        }
+      ],
+      "demos": [
+        "demos/typography/type-assembly-moves/LetterformDriftAssembly.tsx",
+        "demos/typography/type-assembly-moves/SplitTextStagger.tsx",
+        "demos/typography/type-assembly-moves/TextOnPath.tsx"
+      ]
+    },
+    {
+      "id": "type-entrance-moves",
+      "category": "typography",
+      "summary": "标题文字入场一式——letter-drop-physics 字符坠落（重力砸落、弹跳、歪斜站定，最后一拍集体立正归位）",
+      "use": "大标题/章节字卡的入场；与 type-assembly-moves（集结系）、document-typewriter-reveal（打字机）同品类互斥选用",
+      "duration": "单式 5s（含 hold 与静止收尾；动作段 ~116f，demo 150f）",
+      "energy": "中高（物理趣味）",
+      "source": "references/shots/typography/type-entrance-moves.md",
+      "styles": [
+        {
+          "key": "letter-drop-physics",
+          "label": "letter-drop-physics 字符坠落"
+        }
+      ],
+      "demos": [
+        "demos/typography/type-entrance-moves/LetterDropPhysics.tsx"
+      ]
+    },
+    {
+      "id": "type-rhythm-sync",
+      "category": "typography",
+      "summary": "文字随声同步两式——font-weight-pump 字重脉冲（笔画随鼓点变粗弹回）与 karaoke-fill-sync 卡拉OK填色（词随旁白逐个点亮）",
+      "use": "标题/标语与音轨强绑定的段落；A 绑节拍（鼓点），B 绑语音（旁白逐词）",
+      "duration": "A FontWeightPump 165f / B KaraokeFillSync 150f；A 128 BPM 每拍 14f、衰减窗 9–13f，B 每词按语速 18–33f",
+      "energy": "A 高（蹦迪感）/ B 中（跟读引导）",
+      "source": "references/shots/typography/type-rhythm-sync.md",
+      "styles": [
+        {
+          "key": "font-weight-pump",
+          "label": "font-weight-pump 字重脉冲"
+        },
+        {
+          "key": "karaoke-fill-sync",
+          "label": "karaoke-fill-sync 填色随读"
+        }
+      ],
+      "demos": [
+        "demos/typography/type-rhythm-sync/FontWeightPump.tsx",
+        "demos/typography/type-rhythm-sync/KaraokeFillSync.tsx"
+      ]
+    },
+    {
+      "id": "typewriter-moves",
+      "category": "typography",
+      "summary": "打字机 error-retype——误删重打的\"改口\"三幕剧：打出平庸词 → 犹豫 → 退格删掉 → 更快打出卖点词",
+      "use": "slogan/卖点字卡、否定式文案；文字自带时间性的入场",
+      "duration": "~5.3s（160f）",
+      "energy": "中低",
+      "source": "references/shots/typography/typewriter-moves.md",
+      "styles": [
+        {
+          "key": "error-retype",
+          "label": "error-retype"
+        }
+      ],
+      "demos": [
+        "demos/typography/typewriter-moves/TypewriterErrorRetype.tsx"
+      ]
+    },
+    {
+      "id": "ui-strip-away-outro",
+      "category": "outro",
+      "summary": "减法式收尾——点击 Publish 后整个编辑器 UI 从外围到中心层层错峰蒸发，黑场上只剩那颗按钮滑到屏心放大，按钮再淡出交棒字标定版",
+      "use": "\"发布/完成\"语义的 outro；想讲\"一键之后一切复杂性消失\"的产品收尾",
+      "duration": "~4.8s（144f：光标就位 34f → 蒸发 ~40f → 按钮独占 → 字标接棒 → 字标 hold ≥1s）",
+      "energy": "中（前段安静操作，中段持续退场，无瞬时冲击）",
+      "source": "references/shots/outro/ui-strip-away-outro.md",
+      "styles": [
+        {
+          "key": "ui-strip-away-outro",
+          "label": "ui-strip-away-outro"
+        }
+      ],
+      "demos": [
+        "demos/outro/ui-strip-away-outro/UiStripAwayOutro.tsx"
+      ]
+    },
+    {
+      "id": "ui-to-brand-morph",
+      "category": "outro",
+      "summary": "UI 变品牌两式——icon-flip-bloom 图标 Y 轴翻扁成竖线、从竖线撑开成品牌标志（琥珀斜切随后划入）+ wordmark 逐字落定，与 input-morph-assemble 输入框收缩成取景框竖笔、三块图元落进构造槽位拼成完整标志",
+      "use": "品牌收尾/outro 前最后一拍；\"你每天用的那个 UI 就是这个品牌\"的视觉论证",
+      "duration": "A ~4.3s（130f）/ B ~5.6s（168f）",
+      "energy": "中高（收尾点睛，一次完整变形讲完）",
+      "source": "references/shots/outro/ui-to-brand-morph.md",
+      "styles": [
+        {
+          "key": "icon-flip-bloom",
+          "label": "icon-flip-bloom"
+        },
+        {
+          "key": "input-morph-assemble",
+          "label": "input-morph-assemble"
+        }
+      ],
+      "demos": [
+        "demos/outro/ui-to-brand-morph/IconFlipBloomLogo.tsx",
+        "demos/outro/ui-to-brand-morph/InputMorphsIntoLogo.tsx"
+      ]
+    },
+    {
+      "id": "value-stagger-gradient",
+      "category": "ui-entrance",
+      "summary": "16 根柱入场时 delay 是时间错峰，同时高度/色相/位移/模糊四个属性各自铺成从首到末的数值梯度；第二拍把错峰原点换成中心，脉冲幅度以中心为最大重新铺开",
+      "use": "技法演示与参数化能力的展示镜头；也可直接当数据/频谱/均衡器类界面的入场",
+      "duration": "约 5.0s（150f@30fps）",
+      "energy": "中高（第一拍是连续铺开，第二拍中心脉冲是明确的一次峰值）",
+      "source": "references/shots/ui-entrance/value-stagger-gradient.md",
+      "styles": [
+        {
+          "key": "value-stagger-gradient",
+          "label": "value-stagger-gradient"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/value-stagger-gradient/ValueStaggerGradient.tsx"
+      ]
+    },
+    {
+      "id": "vertical-word-roll-blur-cycle",
+      "category": "typography",
+      "summary": "句尾词换成竖向滚轮，3 次换词各 0.55s（outQuint 七成 + outBack 三成，前快后极慢带微过冲），相邻行按距离上垂直 blur 与灰度，中心词落定瞬间从灰染成强调色",
+      "use": "\"Crafted for ___\" / \"Built for ___\" 这类句干 + 受众/对象列举的一句话卖点；浅底品牌片的干净一拍",
+      "duration": "约 5.0s（150f@30fps：静置 → 3 次换词 → 尾部整组淡出）",
+      "energy": "中（稳定三拍，无峰值）",
+      "source": "references/shots/typography/vertical-word-roll-blur-cycle.md",
+      "styles": [
+        {
+          "key": "vertical-word-roll-blur-cycle",
+          "label": "vertical-word-roll-blur-cycle"
+        }
+      ],
+      "demos": [
+        "demos/typography/vertical-word-roll-blur-cycle/VerticalWordRollBlurCycle.tsx"
+      ]
+    },
+    {
+      "id": "voice-waveform-live",
+      "category": "interaction",
+      "summary": "录音胶囊实时声纹——64 根细竖条随\"说话\"起伏，说话时中部高耸、停顿缩成点线，波形从右往左滚动；说→停→说→提交塌缩的完整表演",
+      "use": "语音输入/AI 助手\"正在听你说\"的功能镜头；无 UI 内容可展示但需要持续活性撑画面的段落",
+      "duration": "172f（~5.7s：入场 14f + 说 1.4s + 停 0.8s + 说 1.4s + 提交塌缩 / 收进气泡 0.8s + hold 0.7s）",
+      "energy": "中（功能性活性，不是炫技）",
+      "source": "references/shots/interaction/voice-waveform-live.md",
+      "styles": [
+        {
+          "key": "voice-waveform-live",
+          "label": "voice-waveform-live"
+        }
+      ],
+      "demos": [
+        "demos/interaction/voice-waveform-live/VoiceWaveformLive.tsx"
+      ]
+    },
+    {
+      "id": "wall-reveal-moves",
+      "category": "ui-entrance",
+      "summary": "整墙批量入场两式——bento 逐格点亮、蓝图描线成形，全部原位显形不位移，与 deck-deal-flyin 的飞入位移型互补成品类矩阵",
+      "use": "功能墙/卡片墙/整页界面的整体亮相；内容已在原位、要\"显形\"而非\"涌入\"的段落",
+      "duration": "单式约 5s（A 150f / B 150f @30fps，含建立 hold 与静止收尾）",
+      "energy": "中",
+      "source": "references/shots/ui-entrance/wall-reveal-moves.md",
+      "styles": [
+        {
+          "key": "bento-light-up",
+          "label": "bento-light-up 逐格点亮"
+        },
+        {
+          "key": "wireframe-draw-on",
+          "label": "wireframe-draw-on 蓝图描线成形"
+        }
+      ],
+      "demos": [
+        "demos/ui-entrance/wall-reveal-moves/BentoLightUp.tsx",
+        "demos/ui-entrance/wall-reveal-moves/WireframeDrawOn.tsx"
+      ]
+    },
+    {
+      "id": "white-flash-logo-simplify-cut",
+      "category": "transition",
+      "summary": "液态金属质感的彩色词标静置流光，蓄力后从字心炸出一记白闪过曝，曝光回落时同一位置已是扁平版字标——一次闪白完成质感降维",
+      "use": "品牌段落收束（华丽演绎→干净定妆）；情绪从炫技切换到正式宣告的转场拍",
+      "duration": "约 4s（120f@30fps；演出 0–34f · 蓄力 34–46f · 冲白 44–54f · 曝光回落 54–76f · 锁定 72–96f · hold 至 120f）",
+      "energy": "中高（一次脉冲式重音，前后都是静场）",
+      "source": "references/shots/transition/white-flash-logo-simplify-cut.md",
+      "styles": [
+        {
+          "key": "white-flash-logo-simplify-cut",
+          "label": "white-flash-logo-simplify-cut"
+        }
+      ],
+      "demos": [
+        "demos/transition/white-flash-logo-simplify-cut/WhiteFlashLogoSimplifyCut.tsx"
+      ]
+    },
+    {
+      "id": "wipe-transitions",
+      "category": "transition",
+      "summary": "几何擦除转场——blinds-slice 百叶窗切条（12 根 3D 叶片错峰翻面成波，波扫过后整页由 A 换成 B）",
+      "use": "新旧页都不动、一条几何边界扫过完成交接的通用转场；不依赖构图里有合适元素，哪儿都能用",
+      "duration": "前态 ≥20f + 擦除 ~56f + 收尾 ≥40f，约 4.4s（132f）",
+      "energy": "中",
+      "source": "references/shots/transition/wipe-transitions.md",
+      "styles": [
+        {
+          "key": "blinds-slice",
+          "label": "blinds-slice"
+        }
+      ],
+      "demos": [
+        "demos/transition/wipe-transitions/BlindsSlice.tsx"
+      ]
+    },
+    {
+      "id": "word-relay-filmstrip",
+      "category": "typography",
+      "summary": "左列黑白相间等高页面卡步进滚动（焦点卡全亮、邻卡离焦压暗）、右侧衬线大词原位接力（名词恒定+动词轮换）——切词瞬间才滚动一格，词块垂直中心与当前页面卡中点精确对齐",
+      "use": "\"一个主体 × 多种能力\"的枚举段（Shotcraft frames/builds/ships…）；作品集/案例流展示；产品多场景巡礼",
+      "duration": "每词期 ~1.5–2s × 3–4 词；demo 180f（6s）",
+      "energy": "中低（编辑部气质，节奏靠切词的\"咔哒\"感）",
+      "source": "references/shots/typography/word-relay-filmstrip.md",
+      "styles": [
+        {
+          "key": "word-relay-filmstrip",
+          "label": "word-relay-filmstrip"
+        }
+      ],
+      "demos": [
+        "demos/typography/word-relay-filmstrip/WordRelayFilmstrip.tsx"
+      ]
+    },
+    {
+      "id": "word-relay-geometry",
+      "category": "typography",
+      "summary": "三个利益词各带一套专属几何接力——虚线大圆减速自转 + 彗星弧飞跑 → 三实线圆 trim 依次生长后收拢咬紧 → 镀铬金属 sheen 扫过后一拍收成纯白；旧词缩到 0.86 淡出，新词描边→填充揭示",
+      "use": "三点式利益陈述（更快/更好/更强）；品牌价值观段落；需要\"一词一世界\"的中段推进",
+      "duration": "约 6.0s（180f@30fps：三段各 ≈60f，段间重叠 6f）",
+      "energy": "中高（三拍推进 + 全程几何运动 + 背景粒子，无静止帧）",
+      "source": "references/shots/typography/word-relay-geometry.md",
+      "styles": [
+        {
+          "key": "word-relay-geometry",
+          "label": "word-relay-geometry"
+        }
+      ],
+      "demos": [
+        "demos/typography/word-relay-geometry/WordRelayGeometry.tsx"
+      ]
+    }
+  ],
+  "files": {
+    "LICENSE": "02da8ccd8ddb6946940ccc99494c04992a8cf4b9835bcc32f70ae985ef160f59",
+    "SKILL.md": "e5046d8cd9d95d42ff6f6d942089512ef947c435f8c2a9e4e22330a6f5592533",
+    "assets/lib/Caption.tsx": "7539ceb9456cb2fe693872bd77f976db9c703addb8eb569633666df9050f99bd",
+    "assets/lib/ClipCard.tsx": "709c0d15faf96662998d8677ed833f4ecf19dfda8313fd0efbdf19cb2b39fe2b",
+    "assets/lib/DigitRoll.tsx": "9b4e3b269a9d053ed22469b5f49c09f30aae0d18a2df46e1d4449b38b86f50bf",
+    "assets/lib/FlashCut.tsx": "c21d48223ed5d99cfafca77836c7055976e83a6589e73a4b0d0bdd8f1ed29e79",
+    "assets/lib/FlatPanel.tsx": "d3bad4d49521b834fdc3b13f8a89d30176ffdc81f07fce1ee86306cb2ee69d76",
+    "assets/lib/PageCam.tsx": "1b82a9d612894d1a4d6daf8700b39cb50fc71715ae7b6f0897a0bd66ab3411c8",
+    "assets/lib/VerticalTicker.tsx": "1de3a6ee447eb5afc5cd7339bf32aa82b78a6e0b8e6850f0cf7d4efa3bad7791",
+    "assets/lib/helpers/camera.tsx": "f35b9814457e12970f35cdd601f44e88721333699cf3d6dd0ca80ec15b1faf1e",
+    "assets/lib/helpers/motion.ts": "95fac010e48eb7d49dcad68b0f855dca57bfd5ea3d5b197a27b7597f51e7fad8",
+    "assets/lib/helpers/rand.ts": "383aa73d830fd81bab495199b07d9626ea6c2a710ed6081c2341f2b57b762d41",
+    "assets/lib/helpers/shake.ts": "962aff832d17410c050c9cb374c2991033eac470e99bb0c3e7ce037776448368",
+    "assets/scripts/build-readme-cover.mjs": "b9bb23be730e53fbee1524af4f330d89e2aebf9c8ec7962d39301c1b6787e046",
+    "assets/scripts/capture-template.mjs": "8e3efa941e0c297ed2d17e5e72af28ba5f9101d6137919bd8d0eb36baf855c77",
+    "assets/scripts/sfx-source.py": "4b7fc77203cf5e76017cf37017ff516cb98f0bf925ace3d0f50a34cf4786ceb8",
+    "assets/scripts/smoke-render-demos.py": "7e0e4d9a4e20d7d28297060b2a2fac5047e4398106f2583155be88165f85bdc8",
+    "assets/scripts/test_sfx_source.py": "9a2a9f4c0cdd4517a0231d626185a700c9288f19062d5543a885b2cc6dcee5be",
+    "demos/README.md": "f593440524eb82c6ce4fe0bee7abe63a111eef6bb4bacf258538d7b76bd62e20",
+    "demos/_fixtures/Brand.tsx": "8034fa987c0f8ed37fd6422a0b8a2fcf1f6e2c73abe373aba5fb83007af250e2",
+    "demos/_fixtures/Fixtures.tsx": "bd45fa10c22d6c4645e74fe5e106f2a91841716962b9be198c545e9ab34cd987",
+    "demos/_fixtures/Look.tsx": "d3dba47b91841648a9ee7d827f86fbb1224f11acce2036fa5b2270fbe4e19bf6",
+    "demos/_fixtures/Motion.tsx": "81daa150aded61c21f4e8fe4b80a7efb87f9a767d28b69b274bc50705f07485e",
+    "demos/_fixtures/PageCam2D.tsx": "97e687ac30adc8e96bd1f71107de9d0e417cc35f405b72c7c6db98a8687cf154",
+    "demos/_fixtures/Polish.tsx": "85d26e13593f38b403bb66945c05dbc2631c23437ac5b0242f9d96b53cc54e54",
+    "demos/_textures/live-layout.json": "e8d2e6a76fbc1e1fa0cd56a9acc341279683cd2452a1a667d420c31931b520fd",
+    "demos/camera/basic-3d-scene/Basic3DScene.tsx": "5c06728fca57abb7d6416ce6dd7ff92642ebedbe590e5459e63d5a0082691016",
+    "demos/camera/crash-zoom-punch/CrashImpactReal.tsx": "e44839c7d1e43a25978bededa58573478aeb95e94f2b1b830542fd55f693bc49",
+    "demos/camera/crash-zoom-punch/CrashZoomReal.tsx": "f226b81b8f970b7d0a38ae3fb0d86cefc27a2ab1aa0334cf3cbf30b172563f45",
+    "demos/camera/cursor-flyover/CursorFlyover.tsx": "f234775365ecb93f9576db4715c66bb21513bfb158e71112c1efa63b121ab826",
+    "demos/camera/depth-layer-moves/MultiplaneReal.tsx": "4566d05a98022ce52d09b2292bf0d81e04f0ea5d40f5cfe71455e3266fb19bd7",
+    "demos/camera/graze-face-tour/GrazeFaceTour.tsx": "27e816d7b33051f677e5472276fcdcf9fe8832aeef8780cb16644724c4377db4",
+    "demos/camera/overhead-camera-moves/OverheadTabletopDrop.tsx": "2a8e3d5241d68d2a4b77eb2bc51d69cfe644baf51d673564871600eeaac872e7",
+    "demos/camera/overhead-camera-moves/TiltReveal.tsx": "2621fbf6a60d2c89175156c9e6b6c28c2c741b011f9c6dffcd4d267714ae5568",
+    "demos/camera/space-camera-moves/DroneDiveLanding.tsx": "8cafe8fc6011a5ced57765916e4f1be7bbfffbf83973a94f2eda34292ccc91af",
+    "demos/camera/space-camera-moves/ExplodedView.tsx": "5127dc596bd5557b3cd093ed5fb983f6d00ff3a05bae9344702a69215783aec4",
+    "demos/camera/steep-tilt-glide/SteepTiltGlide.tsx": "a99a4f838a0f33bb963e5de0845597973b4712ccb7f4ffab955be3bcd141f67d",
+    "demos/camera/tension-camera-moves/BulletTimeFreezeOrbit.tsx": "87e2ae1248a724cebbc6642bbea013fb000a1bd9841a51221129af7b9026d273",
+    "demos/camera/tension-camera-moves/PullBackIsolation.tsx": "f6e909d64453b9da0b484bd34d3c7d03cee0fabd407286aad6b4ff0681c9de39",
+    "demos/camera/terminal-3d/Terminal3D.tsx": "74a96bcb19e4e65a9822703f5907b3e7357f39ee15e69d5867a23ef86f220300",
+    "demos/data/before-after-slider-scrub/BeforeAfterSliderScrub.tsx": "924435426b3e0f3378ab05ca5a04e66b8b1a7ab198410b8bc2ee1ddb69458359",
+    "demos/data/chart-live-moves/AxisRescaleShockV2.tsx": "7f6003c967329cc7d9bd5e9c78cd4924ca2ffec84aedc1d6537b865b0a529c94",
+    "demos/data/chart-live-moves/OscilloscopeStreamV2.tsx": "00548471ea812de87e3e010cb45a2c0722dd0ca4eaa3146eb7e8ad6d82b3b30a",
+    "demos/data/chart-live-moves/UnitDotSwarmRegroupV2.tsx": "9898bae674ed759eb9d888dcae1ec2a556463d9854dbbf870e44cd324945f496",
+    "demos/data/gauge-readout-moves/NeedleSweepSelftest.tsx": "7d869f984b89fe0d6c2b339737990faceb3556ff0489bf03404fe72042f3e577",
+    "demos/data/gauge-readout-moves/TapeScrollFixedPointer.tsx": "0fd3fd8cf726f75852ac3d6d02509252e8d806bf82e96b502d81207f0d7f4204",
+    "demos/data/scroll-brake-moves/BrakeReticleLock.tsx": "d7a835169382d630a6a0c76922a75eee7ff7d66d78fa0b47e9c8a7580eb3f63b",
+    "demos/data/scroll-brake-moves/ChangelogScrollBrake.tsx": "624034efec290edb04c789f5b96c1c6aac5cdffa18417fc5f2ff6f547c68f75c",
+    "demos/data/timeline-travel/TimelineTravel.tsx": "d93d1b33db8ad29f69a913b15662670121031f5be2df90188c5680527b8eccf7",
+    "demos/effects/assemble-then-type-flyin/AssembleThenTypeFlyin.tsx": "ddf865a26f5309e00ae13d64428341f36c4f44054027b2fdd86fbe5679fe6519",
+    "demos/effects/aurora-bloom-bg-flip/AuroraBloomBgFlip.tsx": "2c663caf82bfbb2b564c897bb205ba8e8b65d09ac827e590f62357f08195893f",
+    "demos/effects/brand-frame-snap/BrandFrameSnap.tsx": "52247e0eafc647a86b1ef7cd7408ddf6fcfe6d02b4d5057907a69e02005fc2d4",
+    "demos/effects/fui-hud-moves/ReticleLockOn.tsx": "f24845551c2a68a9393bd527c065acf9062ac2d2b125e97079d6392ec56b013d",
+    "demos/effects/glow-flyline-moves/FlylineArc.tsx": "325b9e9e4b946b0750e1ea45a6049b245cf6bda21a046908647a5065c5e50a00",
+    "demos/effects/glow-flyline-moves/GlowOrbAmbient.tsx": "c7d1b04d7587a96bfd348dd60589424a0b3311aa92b470b0be0dccaa51e9908f",
+    "demos/effects/glow-flyline-moves/OrbFlylineRelay.tsx": "bb05cd2c495585fc1635cdf7a09cf55fb372eda77c9210edd105aa646e7bb974",
+    "demos/effects/icon-performance-moves/AttentionBounce.tsx": "8fbb1fab7c2165dc3e68b9d012425687b1d1285ea314fdd9138491e3ca45db56",
+    "demos/effects/impact-feedback/AnimeImpact.tsx": "8552991a4632b1df974b25898cd3299d2f06f85e5b9a132dce2058cb5f917bd9",
+    "demos/effects/impact-feedback/HitCounter.tsx": "ccb3a3234faa19b366a3468fbd3e4a9a0d7d3b881f28e47f3db18edbaaf17dce",
+    "demos/effects/light-play-moves/SheenSweepRetry.tsx": "5067474b225197224ed0a95fc38e71228fd96de5faee1436501e7d53a798c1df",
+    "demos/effects/light-play-moves/SpotlightSweepReveal.tsx": "48095a947ebea7c7dafc4e50a77064cd26afe29092aaf2660789f9d51f6d98f3",
+    "demos/effects/radial-ripple-phone-chips/RadialRipplePhoneChips.tsx": "2ca99b1ccb2431bf4b2050a32f60f52d764e72839f5594c1f6e58f751116d0ee",
+    "demos/effects/riso-print-hits/RisoMisregistrationHit.tsx": "913226ac62d954206dad1f107626d9eca1a09e1ef8acd1c1ed4476e30738be77",
+    "demos/effects/scan-bracket-sweep/ScanBracketSweep.tsx": "64900312007e27b0e7e7ea02b225c86934a07523b093dfedca3d026ffd6a4f3b",
+    "demos/effects/scanline-annotate-focus/ScanlineAnnotateFocus.tsx": "da414a1e1ba71dfe59221dafb35a98836d54e79b0aa0ef00e080a1cb7bba4bc9",
+    "demos/effects/scanline-assemble-flyin/ScanlineAssembleFlyin.tsx": "899214f8b124d489d8cd033f2c3ea61c91de21650527e3e8ab30145b44467778",
+    "demos/effects/slam-entrance-moves/ImpactBurstKit.tsx": "88d8c85161612d7e5c55c8698b7fdd86577303080356c558d6ff1a85e59a7461",
+    "demos/effects/slam-entrance-moves/KanadaPerspectiveSnap.tsx": "05327068ad0dc691c1cadd1b64ff029d6fbe77a7897779106a549b1342dfffae",
+    "demos/effects/slam-entrance-moves/ScoreSlam.tsx": "3809e6e77a381b486fe94461e968f5138d196d80fcc12d1eba10a25ea99f4bad",
+    "demos/effects/spotlight-sweep-moves/CornerSpotlightReveal.tsx": "8cbc0e970a19d439e45799f1a0efd0a5a95139fb4ba331f2a772945deff9a461",
+    "demos/effects/spotlight-sweep-moves/GlowWakeSleepPanel.tsx": "b99e33200908716c8c451c4b23845099331cafd4ffb558c578c25c5d39b2f188",
+    "demos/effects/spotlight-sweep-moves/SlideSpotlightPan.tsx": "38b59eedab291378ea42b867220ddb2b8e7d08d0eebf3a26b2c8324e1808c446",
+    "demos/interaction/autolayout-gap-dial/AutolayoutGapDial.tsx": "72378447c389fa250361344a29c4fc74ba62002e962b9b05a8466477c7273d89",
+    "demos/interaction/canvas-materialize-moves/DiagramCascadeBuild.tsx": "ffe489f7c357aec64769da9944452479e4f9b5014a9bab6d487d981a878e3a8e",
+    "demos/interaction/canvas-materialize-moves/PanelToCanvasMaterialize.tsx": "3013fedfaaa05cd540235a1d7ca11d19b391959c7d6d3d519b6c8abab8d62aa4",
+    "demos/interaction/chip-grid-single-select-blackout/ChipGridSingleSelectBlackout.tsx": "b3333477dce8f7b0541b96e8783b0ac74b6fdfd269f866b312a2015cffcb80d3",
+    "demos/interaction/collab-cursor-moves/CursorCastEnsemble.tsx": "292d966103221e31fecaaffc53777807970546e1d36f5931167147eee84c4103",
+    "demos/interaction/glass-pill-dictation-typing/GlassPillDictationTyping.tsx": "a9690f5bd857ceafad5146ae61a3d8ca9c03f2ae32e9db620e29c057ff050284",
+    "demos/interaction/hashtag-to-pill-materialize/HashtagToPillMaterialize.tsx": "80185c9ce559fe2b2f99064e56b7d2c84f5e6f58619523ab70f9d7cb8f7e2e0f",
+    "demos/interaction/picker-carousel-feature-cycle/PickerCarouselFeatureCycle.tsx": "2106dfe5f69329e5580825db5f3bd41f46cfd6b455667bc5632556886a3a71fa",
+    "demos/interaction/segmented-thumb-hero/SegmentedThumbHero.tsx": "8426ee1879c2e30105579668f8cbbd9421da902fce6ecb391a8b04a24590aa5a",
+    "demos/interaction/theme-switch-moves/PaletteThemeRipple.tsx": "5999463f193470d83f0d89c3ffe96efeabb0c624b0b984e58ede7ab61ce5963c",
+    "demos/interaction/theme-switch-moves/ThemeSweepToggle.tsx": "44898999ea91bb2be4e27ea12514d0ad055e37336ddd002c0b9ad1f63bc073f5",
+    "demos/interaction/type-and-filter/TypeAndFilter.tsx": "6669feb5a5b71d6dd11b194c385bbf7c0ef78c5f89c05e14aae94b8f84ac5e11",
+    "demos/interaction/voice-waveform-live/VoiceWaveformLive.tsx": "57167645eb3846e6c9055c901261911c03ef75207fff3212b9ebb57463b8891f",
+    "demos/opening/crane-rise-reveal/CraneRiseReveal.tsx": "53b084c01bc32f70a570396b8fad6babb637128527dbb53829ecbf9269441baa",
+    "demos/opening/dataviz-landscape-open/DatavizLandscapeOpen.tsx": "fb8105f2f0772193bb5a051409070a6693ee433a38f3ef15efc7b6d22da1c724",
+    "demos/opening/fracture/Fracture.tsx": "4c97ecb444364c4ece38747d3677662eed906c14d2914c6c3cfcd510b59b0084",
+    "demos/opening/icon-field-colorize/IconFieldColorize.tsx": "5df1ee5bb62e58ec64cfb9a44d398ecb88ae45c5ad03677a84296ac4398bd452",
+    "demos/opening/letterspace-materialize/LetterspaceMaterialize.tsx": "f78ad285592bc7f641c80a701ad3c1dc4afe34a66ce8eec576d91b304fb338b4",
+    "demos/opening/magician-card-flourish/MagicianCardFlourish.tsx": "a4747bd1b2d851cc6e13f0aeffe701175948dca499fc5880200062166d6ad769",
+    "demos/opening/orbit-ring-title-open/OrbitRingTitleOpen.tsx": "03ddc9b013139a35cb147242f4c9398aab860bc5faf0b97aa476109bc364908d",
+    "demos/opening/spotlight-hero-card/SpotlightHeroCard.tsx": "84191de88c8ed3518ab1605fd4773d19446bf1fd07c912f93a0cfa3424e8490c",
+    "demos/opening/stroke-segment-build/StrokeSegmentBuild.tsx": "22b98c0579012cb90ad36d2e9eef9f229b84bce11573bb45e3956e57e8d37499",
+    "demos/opening/text-as-mask/TextAsMask.tsx": "6f743450fce0437d2aa2f7797d7d62dbb6e0d4b63fac94e05bb6bb0660ab63f2",
+    "demos/outro/grain-dissolve/GrainDissolve.tsx": "7e06c6de29f7c860b884a2befe4f905541e1446d784ece6539a108fb287092e6",
+    "demos/outro/logo-shrink-wordmark-lockup/LogoShrinkWordmarkLockup.tsx": "f32087814fa84d1d51b53a82840cf35a6d25e055445c9a615691ba68903eff85",
+    "demos/outro/neon-triple-marquee/NeonTripleMarquee.tsx": "da5df96cdbd6e13f7789a44525ea9215ee7c8f03549c5efe0c08c94cb9bfe561",
+    "demos/outro/outro-group-photo-launch/OutroGroupPhotoLaunch.tsx": "bdfa8d1a3262b3e7d1fda66627cd4eba386c04258d47bb7eb16bfbe79480a527",
+    "demos/outro/ui-strip-away-outro/UiStripAwayOutro.tsx": "dccfd1580a18c5fa126830f47f22e10f2d7f97f59ac607812edbbf59512a18ee",
+    "demos/outro/ui-to-brand-morph/IconFlipBloomLogo.tsx": "29cfa27f8663cc6eb32e80d37529771c05d5d146f11b91ce1e31cd6244ee933a",
+    "demos/outro/ui-to-brand-morph/InputMorphsIntoLogo.tsx": "024131a8cfb5ed46f3096767727708714da4fa500593a9257d10ca0d64befd23",
+    "demos/rhythm/beat-cut-moves/PaparazziFlash.tsx": "a3a8b637ad57f1815dc77c725dc64349b09627c7b6be24b61a5f4ba04a7610e4",
+    "demos/rhythm/beat-step-list-theme-cycle/BeatStepListThemeCycle.tsx": "191ac2d5081ac0ba3d04da19cc9af00ce5caf82178c2fddc56f9576f38348b18",
+    "demos/rhythm/panel-grid-moves/ComicPanelSplit.tsx": "ebca2dde478a1a0e2b80cf0105c1c33ee97eaf673e6ace9dfb687d8d255e7c53",
+    "demos/rhythm/quad-split-parallel-scenes/QuadSplitParallelScenes.tsx": "e16fd0689c64625264ec1faa10edd10a18efec3fa2cb822c6ac4c08c1a50c025",
+    "demos/rhythm/rhythm-interrupt-moves/JumpCutPunchIn.tsx": "861708d44cc69d06ea57d93302ea6e24a15a67f518b83dae66658382c8f1fb25",
+    "demos/rhythm/sakuga-timing-shift/SakugaTimingShift.tsx": "d7137c703e302b42ac9e6fd4c11f4f894110b6a67d4c889aab0d94051c70ca4e",
+    "demos/rhythm/speed-ramp-freeze/FreezeAnnotateReal.tsx": "2998edc6c8009cb329e9e66dad1a26d26d55b11baea1212029f0912014b2a282",
+    "demos/rhythm/trailer-grammar-moves/TrailerBumper.tsx": "7fc3f3e622830076d80f3b5d271b292ce145428d7dc79e4b0d552ca04d5ca267",
+    "demos/transition/bottom-push-stack-wipe/BottomPushStackWipe.tsx": "2e5502f1ea0a72674b791ce4d7478426ee502b81927b211ec9b5f92fd6d0a571",
+    "demos/transition/card-flip-reveal/CardFlipReveal.tsx": "8f865de560e44f96e950340099dc240c5a351168f9b5ca861ecb88c434a5e5ed",
+    "demos/transition/card-flock-tumble/CardFlockTumble.tsx": "d5f7c6f39a24866fb05fb3011cd514449fd3906105a05b822746f0f4d09a1aeb",
+    "demos/transition/circle-match-iris/CircleMatchIris.tsx": "4ea5457af4a57589edee36239824e78de7ec8cc792c9a3430af3acdb04b3d17c",
+    "demos/transition/gradient-transition/GradientTransition.tsx": "0481d8ef6d0e7fdcb1dd4890721b7631b7fb5b1b7ff2cf768f054861db36a6a4",
+    "demos/transition/line-carry-transition/LineCarryTransition.tsx": "bc4c0135279070f08061d236cab03e7716d1c89d7d295e76ea5c848850a50640",
+    "demos/transition/mosaic-reframe/MosaicReframe.tsx": "bb0bc5a847754500f5f2a7a5c4681f93f5013f017cacc8c65cb33c88385fc227",
+    "demos/transition/page-turn-transitions/BarnDoorSplit.tsx": "b042f3ab98c81ff2b1067952ad4e747466caad1e2a0176b51aaa6d4b7a1e2ee9",
+    "demos/transition/print-texture-transitions/InkBleedReveal.tsx": "a77edfadac12bbb1c02f726f056e62364d0d84c1aced13a644571490a0c4babd",
+    "demos/transition/shot-transitions/PortalWipeV2.tsx": "cde13bd5cbb445985dbc97c537a3f81c13d4a69d400b2d8e46fa7a1f6576fdef",
+    "demos/transition/shot-transitions/WhipBrakeReal.tsx": "9544f3decc2402e90b7992a7f99c3ddf999bce7d9faf87a15f14d08644a33123",
+    "demos/transition/tear-streak-transitions/GlitchDisplace.tsx": "b3b21babba48440ecb5b113857e3564572bb4b2130d4a8ed814c6b82d2b886c3",
+    "demos/transition/transition-hidden-cut/InvisibleCut.tsx": "f87a3b32c1d279891a739ba24f873380947f8e63036c200230b0b308104bcb4c",
+    "demos/transition/transition-hidden-cut/LightLeakBurn.tsx": "fe1d3dcbcf0be3dbbe2a1f7fee628219d5533dcb3da6ff7e5a16d78365297af4",
+    "demos/transition/transition-hidden-cut/VersusSlam.tsx": "70cbdded004034ab63408de5b7b70d642067fe4a7f1fe5b1151a0081d57b1249",
+    "demos/transition/transition-travel/LetterformZoom.tsx": "6aeade1667107bc2ee15c77dd2d5c7bf4377dc54e1816012806ceebfc4166a19",
+    "demos/transition/white-flash-logo-simplify-cut/WhiteFlashLogoSimplifyCut.tsx": "d128b08190ab8ea2cc91f8d1a8801556ca3cff5232eee7717fa54b5744be4521",
+    "demos/transition/wipe-transitions/BlindsSlice.tsx": "88683b602f5d149024b5231da5b8e28df33fb7b325d7409fbd5a8ad4bec2afb3",
+    "demos/typography/blur-slide/BlurSlide.tsx": "c7bc3640f882a05755b5c41989a7a10eb9306b8cf598629a3027997d17296ae1",
+    "demos/typography/brace-expand/BraceExpand.tsx": "f1a6fcdc389f844c0370ed18a7b40acb8f9e766b4fcbce53ca5f9085430b2b9c",
+    "demos/typography/brand-ink-open/BrandInkOpen.tsx": "9a1b82feadfdf20b1c4b7b59ec9b1ca34d5d8d190eb4669209a5de0b4dadcb4d",
+    "demos/typography/countdown-arc-scatter/CountdownArcScatter.tsx": "b990c81d4e93890f0113d9a80351eef782d38d6994da2073cf9ba8f88c069843",
+    "demos/typography/flying-words/FlyingWords.tsx": "28b5bd14044e8af6b4488715012a627d9354245bbb4ead5cc40c21fa47c2d572",
+    "demos/typography/glitch-cycle/GlitchCycle.tsx": "43a37b5c7cd6d8d475884acffcb1dd1d3db1ec1e9b42a8824ba5333a7230448f",
+    "demos/typography/gradient-word-sweep/GradientWordSweep.tsx": "44d0f358dbdfe6489ceb923ae0431f7a8e64d8ad59152399f99bc6ed8c3c879a",
+    "demos/typography/lead-word-zoom-assemble/LeadWordZoomAssemble.tsx": "4da4b0d0310e38100cb1166985af54fb43136f1a26a18f8b5d1d07c18b73b8e7",
+    "demos/typography/marker-underline-title/MarkerUnderlineTitle.tsx": "7b098cd880837603ceadd434b8a280b6bf1671ef5b37e8643ab09cfc166d9305",
+    "demos/typography/outline-word-fill/OutlineWordFill.tsx": "784e01369effad879abb99fbac3ae2cc12d6c2d99dc012b18e4140c86046c44b",
+    "demos/typography/paper-title-card/PaperTitleCard.tsx": "0a6f6a16e377e71e14e46956284f039f42707a066cd70352dcf201f0c1587c1a",
+    "demos/typography/pill-chip-slot-cycle-handled/PillChipSlotCycleHandled.tsx": "408f6d1eeebfe0eb8057a761e4e615e9b145a96497b8bc1e12410931cfaad127",
+    "demos/typography/pill-slot-cycle/PillSlotCycle.tsx": "70239ba5505e79dd1d2b9d27ccc6afa68482f1631949fd0f192f7f7b52e73490",
+    "demos/typography/text-column-converge/TextColumnConverge.tsx": "d9f8d7235c0fa6f87f32ae654f77ea72aa9f0b4a3638bdc85f55563185f5aab1",
+    "demos/typography/title-demote-to-label/TitleDemoteToLabel.tsx": "8ac70ad306246e2638fb66ef57a8bff37b8c2b2d7d7db2211509fc30e01fb0cf",
+    "demos/typography/type-assembly-moves/LetterformDriftAssembly.tsx": "485730a498141df7e0498ff8460c0a1c5115ff1f47433ebb0722642aa7d9a37f",
+    "demos/typography/type-assembly-moves/SplitTextStagger.tsx": "d1eab61db0ccc06071acf599f0557c86927db829b0caf85a4505571c7749a618",
+    "demos/typography/type-assembly-moves/TextOnPath.tsx": "1db95ca24c4d7428728ebbc640e2ac799d5756badc34b3f296468761324c8ed3",
+    "demos/typography/type-entrance-moves/LetterDropPhysics.tsx": "9c8402993e4bfdb909a74eec5962ae91ffb1928aad4e6d5d055eb7b2f40fc4fa",
+    "demos/typography/type-rhythm-sync/FontWeightPump.tsx": "8e5f12b05844599109a6e567c4e730146e96396e91b9cb2535befbd1571710c1",
+    "demos/typography/type-rhythm-sync/KaraokeFillSync.tsx": "c2725c7aa3ce92df8dd09306f7af4765ae90035129f99130e95b0839720bf29d",
+    "demos/typography/typewriter-moves/TypewriterErrorRetype.tsx": "dd96cc07d19af6884e5d2034d63a8ba46e065a03874fe32cc35c856b6289ef2b",
+    "demos/typography/vertical-word-roll-blur-cycle/VerticalWordRollBlurCycle.tsx": "a39720c6bdde7c88f5aea1e5d7a109f5efa1fe89f655849981ce67451d7c52df",
+    "demos/typography/word-relay-filmstrip/WordRelayFilmstrip.tsx": "3f8a10adccf6ded4bda050aecd04da0fc749821b4d0566d31405521a4eabebc7",
+    "demos/typography/word-relay-geometry/WordRelayGeometry.tsx": "ea418e0ca9f78fe491e086728587c5795b55b1a106d39f12d3d9a21c96c5b725",
+    "demos/ui-entrance/avatar-bracket-carousel/AvatarBracketCarousel.tsx": "b22ce4f7d1d57f78ec367ea88a0a10780579c4e93c9f7142fbef0a01fb9eb000",
+    "demos/ui-entrance/bezier-source-converge-merge/BezierSourceConvergeMerge.tsx": "016d60301b2592aab161e1fbd22ee536653c1ef63bd06a12e27357226771434c",
+    "demos/ui-entrance/card-stack/CardStack.tsx": "e3d720d6990ca04183906d78c19df7ec5f8f8284021aee50307131457c15df56",
+    "demos/ui-entrance/carousel-3d/Carousel3D.tsx": "64bcd4d730abd63abff1906223f2b858965c395f95f04f794a2e612021ee338e",
+    "demos/ui-entrance/clipcard-looping/ClipCardLooping.tsx": "9578968f8d16736113ad124cdf84be2dca28511811172eccec5f4ecf0c10bd8c",
+    "demos/ui-entrance/cloner-depth-echo/ClonerDepthEcho.tsx": "6ebdff4cb7174a3f0874746945c4e822665d827d37af9678dc3d34be2589b495",
+    "demos/ui-entrance/deck-deal-flyin/DeckDealFlyin.tsx": "162a502aa7b7ec6ad39d12c6c6574f918e95e710686289e643ca0bba84326fdd",
+    "demos/ui-entrance/doc-park-left-pill-deal/DocParkLeftPillDeal.tsx": "e1b1277d9f594c89e39af47a7482bf9e84fc9a462bd78db0c05ef79a566009b8",
+    "demos/ui-entrance/document-typewriter-reveal/DocumentTypewriterReveal.tsx": "8399fe6b10f948c21415737b3380b4b445739b6825c3cabba00197ae0a0b2047",
+    "demos/ui-entrance/draw-svg-trace/DrawSvgTrace.tsx": "c963b464b302069604e98ce2fb13d03239a6b41d6085ff764e6c48144c2121bd",
+    "demos/ui-entrance/element-body-moves/ContactShadowLift.tsx": "06e2c7e4d12915a3c0aecc55031078f428a50dc15ca92bf134ccf68cd6b52be1",
+    "demos/ui-entrance/integration-hub-map/IntegrationHubMap.tsx": "ccc7c43fafae77e2edf9ab21aef5abfd0b860f71f6587ac57fdb5472a3ca001b",
+    "demos/ui-entrance/list-reveal/ListReveal.tsx": "5efe5fa7fc9332f573b56cf7c2946a4fc4644ad3513653205e982ff4b0ef66a9",
+    "demos/ui-entrance/list-stack-press/ListStackPress.tsx": "20fa86e51a1a47354dd43e6a2b6b5217a5aa818805e9ffcd50d6588be6566d25",
+    "demos/ui-entrance/neon-frame-forerun/NeonFrameForerun.tsx": "d4f3e76bcba8dc7c7d0a50bef96db92018728fc56684d41e11d9c3653957a4c3",
+    "demos/ui-entrance/neon-frame-orbit-drop/NeonFrameForerunOrbit.tsx": "11e9a6225e98be88011dcd9cd6d42748e97da7fa010d9dbd05a9cc4f9613d9c1",
+    "demos/ui-entrance/page-waterfall-wall/PageWaterfallWall.tsx": "c1cc793244dd55c3746ce67e60080e61970426f5ec8845809255d89a443cf989",
+    "demos/ui-entrance/page-waterfall-wall/VerticalTicker.tsx": "1de3a6ee447eb5afc5cd7339bf32aa82b78a6e0b8e6850f0cf7d4efa3bad7791",
+    "demos/ui-entrance/product-card-progressive-assemble/ProductCardProgressiveAssemble.tsx": "f72cab79cf90e6efd1ef46c3713839302970371eb6852ad38089c4d3238d7e6e",
+    "demos/ui-entrance/radial-wave/RadialWave.tsx": "c4d372a60355be61148d9a84cd8bfa125f59163bbfe00856639ff172c24a0a64",
+    "demos/ui-entrance/research-card-stack-scroll/ResearchCardStackScroll.tsx": "7fb916c96b9fc759d97797e6eba15328ceb5bffa08e5af103f8a3ae9c9343c50",
+    "demos/ui-entrance/row-embed/RowEmbed.tsx": "bf075225041ee750b9859215b4aa13f3b700da923a94bbd8fb7780b8a5d7fd6f",
+    "demos/ui-entrance/value-stagger-gradient/ValueStaggerGradient.tsx": "e8aaa1aadbe9ac05712baf3965f9b95281c5149ee86e3576d69b5d6c787ae4cb",
+    "demos/ui-entrance/wall-reveal-moves/BentoLightUp.tsx": "088ca4e82490e88206f4595dec9274a354e1d1da2b1ad925aa287e0561d63cf5",
+    "demos/ui-entrance/wall-reveal-moves/WireframeDrawOn.tsx": "d8e6607d0fe5629fb3130d34804595b4335039cc8ceb0e9f47f905a1b9a26f31",
+    "gallery/api/library.json": "0f2164bf52ada0d33e1e0571288f8afcc105b0de5f6a4d2558a35048f205a9a0",
+    "references/aesthetic-rules.md": "ed46f4d1780a72e2d8d3634714359e6a8464bc1bd15c929d8854b481d2e84bc2",
+    "references/final-review.md": "8ff374bff38f807246aec575aba52f1f7862aade356a65a2c872dd17d7cb4bff",
+    "references/guided-free-creation.md": "3bce289d8e82c4bd74d6e246fcd0ca0e32ab6f14b04aaa4729d0a528be7d05e2",
+    "references/jianying-export.md": "cd01b49ad84cbc6f6ab629b0f9340ab649f24a6fb57b480b7b7aed6e1e21cdd6",
+    "references/music-beat-sync.md": "7bcb12a309f8e855f4698936e842dec91c2cd24421b8003a4a36721c2c6b8ba9",
+    "references/pipeline.md": "7593dd38ca5255febfc2778b0ed78b158edee8519e9070328480dd4be15c871e",
+    "references/publish-upload-post.md": "15ac196da74b25c6237f06411a9c624f1030bc3d9ae04bd1a3375aaaededbd31",
+    "references/sequences/promo-energy-arc.md": "023ac5741cd5367f6c19f1561fd114cad38e1c0523a2a77f2159442f37d755c1",
+    "references/sfx-sourcing.md": "1e173914127b38198975133162b699abe003d328bcfa0505a2980a5c4e05d0cd",
+    "references/shots/ATTRIBUTION.md": "f595aacb7563d793bf3c73d0fbceed8001a24c006b23df38771903d7195260e1",
+    "references/shots/camera/basic-3d-scene.md": "83c7cacdac78b4db949ccf0c0f842a8676016aeeea9f5d2c67c25b8f4475be13",
+    "references/shots/camera/crash-zoom-punch.md": "b683d6bb83546680b0381e999adfd0c38d39a167b9bad8b28a19f9652454344b",
+    "references/shots/camera/cursor-flyover.md": "dbda78e0054ca4ca9e83c09bea4e23fbbb68c2331ab40da765eb77ca8c73d1cb",
+    "references/shots/camera/depth-layer-moves.md": "54cfc27b32b008c121e4bb2f26d626f503547c6c1fb91f1d286446feee7998d1",
+    "references/shots/camera/graze-face-tour.md": "7247d4c1f19ab50204536a98af2e42b39da8023e2881c58d75ec8d8e774559c7",
+    "references/shots/camera/overhead-camera-moves.md": "ad56813514c854f0289ba5a7e6f8c68ead34de190bc7ebd594c42c6a6dd58d5b",
+    "references/shots/camera/space-camera-moves.md": "41225e87d157bb11e89c4cfea8cebded3258ef0a208ba940573df3be369ac04d",
+    "references/shots/camera/steep-tilt-glide.md": "c0e8f5efd8658042b1722d408fa79e664c141c129cb3053120597acdef907a2c",
+    "references/shots/camera/tension-camera-moves.md": "a9058e6c280eae8d567b18259fc375346376a058a24bd83d3545d44b27eeb3c3",
+    "references/shots/camera/terminal-3d.md": "57812e6bf786498afbe4c3771dd3b70208b6bd4182d26423fd67e233e06e63c1",
+    "references/shots/data/before-after-slider-scrub.md": "5c585d6a4d1df4c43bcc3cc501b3e1141d87ab8977c273ec136c67e56d897d9f",
+    "references/shots/data/chart-live-moves.md": "f1641e2daee76148f6ebb0019620d500fbb25c0518b963c87b4f56289ce68b17",
+    "references/shots/data/gauge-readout-moves.md": "f6eb9c44389dad9704863cd64cb2e104ba0c14d4fba7fbe0b932e51e3a348ca0",
+    "references/shots/data/scroll-brake-moves.md": "da8381402f9528a0b5a2063be6ea5aaac0b41574554351cc5d0f4cdd5cba527d",
+    "references/shots/data/timeline-travel.md": "c5f7ceceaf74cb9b88368e9a89d7006afdf53734ec5919ea6d79f4a0ca77fe14",
+    "references/shots/effects/assemble-then-type-flyin.md": "e33b01043347d8d4aa2156a3895e692b868afa351ac59480d7ad327cf162ecd8",
+    "references/shots/effects/aurora-bloom-bg-flip.md": "dba493d8aca20bf45ad2dd41998f0d5dc856559e367212843fe44768b80029fc",
+    "references/shots/effects/brand-frame-snap.md": "e057f60567fc5f696a65fe8b7a3c1bd14b9d205ffa7ba972520f3c169a2471f7",
+    "references/shots/effects/fui-hud-moves.md": "014baed764a43a5eee27bcb760ea9e9b815bb3e004bda7fcd755c8876b2c62fa",
+    "references/shots/effects/glow-flyline-moves.md": "27a769378a5523df1cfb8a24502982ff8d288663916c97d1aa31f0d28cf937b7",
+    "references/shots/effects/icon-performance-moves.md": "626e4833a2d994a572ad71214e74ef1f8d95d294ad9b13075be2da595405b293",
+    "references/shots/effects/impact-feedback.md": "ce76e43e1f90b252601d5af8afea995a6f760e1a12b3a26315f6a252800c1c98",
+    "references/shots/effects/light-play-moves.md": "cb89525d47fe9c7450ae8b80264f5fa625ac99b8f8c78dabd6a7bcc5bd9eb343",
+    "references/shots/effects/radial-ripple-phone-chips.md": "51acf92b06f92c9aa9dfdea12af0efcc5e75347689e07c123c749d423a57e3e5",
+    "references/shots/effects/riso-print-hits.md": "00c69e305c984f56eb2080d53fd0123c88120ef1b93d93092e21b6a8d8dcff16",
+    "references/shots/effects/scan-bracket-sweep.md": "ba3464faafc3ada5a64c4e29e8bcbc4ebe5f4ffb8ef3567f488be5121385a06f",
+    "references/shots/effects/scanline-annotate-focus.md": "4b20f8d91d999cd3f9a0a7922f0fc6b118691ba083bbcd5582dfebe65e75d8e4",
+    "references/shots/effects/scanline-assemble-flyin.md": "b634451c0c997974e99bf6149362015b103f8b8be0ea6c0b00d02cceb1098fb0",
+    "references/shots/effects/slam-entrance-moves.md": "40f656e15b47270a5ef82f8a8319d500402357ea468869626a9cb688903e2409",
+    "references/shots/effects/spotlight-sweep-moves.md": "39657d09b90009f4a18190664820b6cfd28d6808cbd65d47f5f5e4a1b43cdf7d",
+    "references/shots/interaction/autolayout-gap-dial.md": "3d7488afd21ccc6a73013ecc1ea9d31e1b189905808e3f0fa2a0086ae60ea233",
+    "references/shots/interaction/canvas-materialize-moves.md": "075d26cb0c4d5b9413a1b63dabc8a42699ba6e63e23529e3a66962a6a4f21770",
+    "references/shots/interaction/chip-grid-single-select-blackout.md": "3a72dccb3c29a3c39a32cfeb4078cfba6023e1d3975e677bb200307aff8dc90a",
+    "references/shots/interaction/collab-cursor-moves.md": "76854683f4888afc309317833b837a43b4fce0963598f20d2c999369b6fa2628",
+    "references/shots/interaction/glass-pill-dictation-typing.md": "27b85011e4c19df5f5dc96ae382fd5fb1be7f9b12a1eed7279f06869ff04cc5d",
+    "references/shots/interaction/hashtag-to-pill-materialize.md": "1d770cd02ca835027d14099140239efe037963a7d0528845cae787e5b486d7ed",
+    "references/shots/interaction/picker-carousel-feature-cycle.md": "e21ed5876c49e23f2bbeb5ff5caff53efd82070fb184c9cd60c61baa2db37a86",
+    "references/shots/interaction/segmented-thumb-hero.md": "5ac8152358e7dc151473f4881b05497cc5aeea821343e369fedd5b640b84598e",
+    "references/shots/interaction/theme-switch-moves.md": "982c7d1127e3db56b518eff645662c195c84d983881d11fa11f932e5e0054618",
+    "references/shots/interaction/type-and-filter.md": "a3dcc73f8cf96271e971bad2377295a7856d1903885bbcc6c47401311aa193de",
+    "references/shots/interaction/voice-waveform-live.md": "062a71b8e70b65a5b41084de65a56b8c572cef8a67bb3ff250c6925c83b7f8eb",
+    "references/shots/opening/brand-ink-open.md": "b9f5402c5afb47607fcd6324835d95215a901b2adfb0293c828c2eae6104e2cf",
+    "references/shots/opening/crane-rise-reveal.md": "081a20d3cee54456108185a1b3aa3fcf718fbf60d1a97f25165ce76fee1d46ec",
+    "references/shots/opening/dataviz-landscape-open.md": "55d6a9ffc368801d1d30b3aee964a26270657a733a4c61f93c062662028f9aea",
+    "references/shots/opening/fracture.md": "62de428e8d982569ab095ab0b3289bab4c6773fb85065676118b9f10b124ee09",
+    "references/shots/opening/icon-field-colorize.md": "cfd3373a3014b029281838e906ae75cf8d9bb4706bd8e6d3ec42637afb0816c3",
+    "references/shots/opening/letterspace-materialize.md": "910d848c6e925a7287f17905e94c109962353bbc4120d752b8fb327d431d59b8",
+    "references/shots/opening/magician-card-flourish.md": "92def0c771f360b4feaa9bb08c954df2a6fa9102b4273f5a60af20d23f45925f",
+    "references/shots/opening/orbit-ring-title-open.md": "54025976b3e66d500591af9b1f7e3dfb512f3622ce99ca6aeddff482c0e4cf64",
+    "references/shots/opening/spotlight-hero-card.md": "85e698e973dea676b529ce627842c0b3715a82ae68deff4a774fc48db113e4b6",
+    "references/shots/opening/stroke-segment-build.md": "82575a4e988a95503539a05ecc1e681d763fbda1f7a8dff1099ac60c878824f3",
+    "references/shots/opening/text-as-mask.md": "fc5b2fe1b703667e7267352493a9992a953b9058676c6ee3168efadc7b05d33e",
+    "references/shots/outro/grain-dissolve.md": "67e66e904e1ee5b6e848fe66aba1d4919a75cf947988e4f817080107d3c3c1a7",
+    "references/shots/outro/logo-shrink-wordmark-lockup.md": "c0909921a97b4db59145161dfad725875a0137aa7d38835ce94774c8cbf8953f",
+    "references/shots/outro/neon-triple-marquee.md": "435d95881b7d0b54119153f08efe7c9f05f33a46606db97501a37a49d555f21f",
+    "references/shots/outro/outro-group-photo-launch.md": "99a1f4231965a01dc653e7fe869d778f87a9210028230d76743cd16d599e5146",
+    "references/shots/outro/ui-strip-away-outro.md": "ce7471ee2db9baa32b90754ad470cc04f4ec5e3e59bb9594b435d815a7f9762f",
+    "references/shots/outro/ui-to-brand-morph.md": "365d75cdc0f2ca564fa599580825eeec5c454222986fec65f037dc5897e96bb4",
+    "references/shots/rhythm/beat-cut-moves.md": "76a8ab1be31d4aeb7c4456a7c069f9a5fe697a6c6fc08fe0eff49bcc7a8ed0cd",
+    "references/shots/rhythm/beat-step-list-theme-cycle.md": "2c6d48ddeafd6514a2809be9c94dadb9823df97913df9d3ceee3c3d19ac538e6",
+    "references/shots/rhythm/panel-grid-moves.md": "230ceb38ca2c4c157b28c5fbc129cd5e68b03e24f9ce8534f6e980f6f6886d7e",
+    "references/shots/rhythm/quad-split-parallel-scenes.md": "1424d5692906ceaee7bc9626b92c1f6c0a0203346c1103745fdba3fcaf7c3606",
+    "references/shots/rhythm/rhythm-interrupt-moves.md": "b16bb150d0d4ec69c513dc783b787ed42cf17aa2460bf0a5d6585c387ab087ff",
+    "references/shots/rhythm/sakuga-timing-shift.md": "a35518f88b06db937d87529a1906be2d224a314c4cc8ba4d3a90edbe3e00a935",
+    "references/shots/rhythm/speed-ramp-freeze.md": "e0256a63e0f96b798a60171ac53a319ba87eacc552925fd117d4578ee9b69b7b",
+    "references/shots/rhythm/trailer-grammar-moves.md": "92a1be277b568298708c7a0c0d09c7f5c405038db48b78995cf023f0fffae67a",
+    "references/shots/transition/bottom-push-stack-wipe.md": "070ed6e3f804786579d0d6e1a80fa5ad407824f053c1d327857ccb4a3f2626c8",
+    "references/shots/transition/card-flip-reveal.md": "34ab2b0d738881dd51f34c96f94a82d153f7176e119a3a6f0a0d1fd954df5f5f",
+    "references/shots/transition/card-flock-tumble.md": "85f7e09b5102406dbe7b395435424edaabea6193b98d5359b15360dc956fae09",
+    "references/shots/transition/circle-match-iris.md": "ca2ac559d8d0359f8067696524dff1cf216fb3d1dfa00e5668faf86943516293",
+    "references/shots/transition/gradient-transition.md": "80cbaf73406e51ef49dd5bb0dabffe6df0df4824a38c23953da7684743bdcc00",
+    "references/shots/transition/line-carry-transition.md": "83c7e8a7638cf4cb179a82c0b387849c9fe95981c751af017c18391cf16bbe5a",
+    "references/shots/transition/mosaic-reframe.md": "110cd5871844c173d519d3730c85757e0e13e8a31232ac15c8647c103da5826f",
+    "references/shots/transition/page-turn-transitions.md": "389653bbf110a629c5da62af52af6aec8929880765b589df3dbedfe0edd78eb4",
+    "references/shots/transition/print-texture-transitions.md": "a805d29ad25b142d28c4cf0041947c8f17ff4f27300c48abe9fd7bd57adf2c62",
+    "references/shots/transition/shot-transitions.md": "8d5b79d8d20ab09ab76b25a75ba08c80bae41486728807d440bf5de3b765e314",
+    "references/shots/transition/tear-streak-transitions.md": "bf6f373e543935fb8145936a8bbaeb928f7d795175e412d78870eb1449a831d4",
+    "references/shots/transition/transition-hidden-cut.md": "5ba4e973caa1fcf657cd9b65b23960fe93d952f100511ec5f05eaa7256479249",
+    "references/shots/transition/transition-travel.md": "0ee4fedf950bbda436a9491bcfe581233cac333dc29e68655edaba52c6b3eabe",
+    "references/shots/transition/white-flash-logo-simplify-cut.md": "a5f8a0aadfd16006e6109bfbff48025319f423c4c66ea5473833609d88819ba9",
+    "references/shots/transition/wipe-transitions.md": "ec0338aaff0208789495ba72b2f70e6031092b8bb47c2d3061f742cfe99e1702",
+    "references/shots/typography/blur-slide.md": "ef244292adea7d2f4a284a5599fb2f01893d3c50197b3a1f8ade9d3a4cc9ea7d",
+    "references/shots/typography/brace-expand.md": "7540d542a5ccd573fec946e1757ba4b5f5d1fa3e3bf909301176dcc05aae637f",
+    "references/shots/typography/countdown-arc-scatter.md": "220d28834fb78a7fd09cfebf3a7ad134e0d2158f46ebd0448692fcf3df03f1dc",
+    "references/shots/typography/document-typewriter-reveal.md": "bbaf22b6a62066b478818a47f316aeaf93886abb550e65bcbe6ce40c748f8cbd",
+    "references/shots/typography/flying-words.md": "13a625386e65d9d548d09a582e467b898f4600050c710d13a17ce54dd27739a3",
+    "references/shots/typography/glitch-cycle.md": "dadc9b4663bdb6955e5f838d6ff886d1238683cd05bb526d993fafea1b2b4e68",
+    "references/shots/typography/gradient-word-sweep.md": "7a29e0fbcd3c3207b050ca1d33c0c38647d46641c9d5201d04fa449ad9717b6b",
+    "references/shots/typography/lead-word-zoom-assemble.md": "6d3854a15d2311176b2fc87e98b9baffa45f9e7c54ea6405c992b8bf90da4c27",
+    "references/shots/typography/marker-underline-title.md": "7d42483e006ecd6bb6bb0e983b3815e21726a1428792df5ad3974b44b8754b2e",
+    "references/shots/typography/outline-word-fill.md": "062ffd426dfb518a6c0fa926e4b73e5f4355e4fd706b59f576ed31a977c76206",
+    "references/shots/typography/paper-title-card.md": "b64de54f010f46da6f2ab0da484b05c0121672f71a0dea344ffeba23ad4479b0",
+    "references/shots/typography/pill-chip-slot-cycle-handled.md": "4fa55f4633c4d194001382a8a8448df713b913bff2f92a380ac09b36e29af628",
+    "references/shots/typography/pill-slot-cycle.md": "d521b8436f383ab5eed6fcd6c1eab2ee099cd8d9785bb7c304253e7d1a76ce6c",
+    "references/shots/typography/text-column-converge.md": "1805ed635b77fa6686c1101e507bb5e7a3f1856d1dea8f7961ece1cb6786d247",
+    "references/shots/typography/title-demote-to-label.md": "544097b9f7a00ac0addb680a9ec1bdbc320536e6cf45208a0b1cbefa334f59f5",
+    "references/shots/typography/type-assembly-moves.md": "acb3bb884c49bb19288df1b4b00afc673f92d55e579d08d5194a4f02778afc20",
+    "references/shots/typography/type-entrance-moves.md": "fe757ae9b42fb5e251da58104766adfdc4aa2b170b0c40a38ea30f6da54310d2",
+    "references/shots/typography/type-rhythm-sync.md": "c2d729fb8e8f491e5cdc83171b0896e862b9ec25b1f5e93a923572f5c52f3a08",
+    "references/shots/typography/typewriter-moves.md": "b635864059f247034261a38bb436e664ff938c89b17a15868a7ba73a06d7e998",
+    "references/shots/typography/vertical-word-roll-blur-cycle.md": "e36192eb94946cf498c984f7876e623f0dc71d454281457671017b5a1f73f989",
+    "references/shots/typography/word-relay-filmstrip.md": "e6fa5bfe5c207fe84fc984b4c95a42bf7e22def2abf8c3bf139d0535cf12e35c",
+    "references/shots/typography/word-relay-geometry.md": "e88b51c807feecc87a959aa35913a32871c4719265e82df96fe1d604fa4b45ec",
+    "references/shots/ui-entrance/avatar-bracket-carousel.md": "410c66547ca1a7d69f87786d241e89208e289f0d11edb34f1fec462026814a9d",
+    "references/shots/ui-entrance/bezier-source-converge-merge.md": "2ab3e1993b49803c3089018c0802bae413b479f26d26c11cae542a8efe252e85",
+    "references/shots/ui-entrance/card-stack.md": "c656aafdd705ce2cad029e6a8a26f997837bc84a6f36dba077a304ebebf10095",
+    "references/shots/ui-entrance/carousel-3d.md": "30346eb0d0521e64f61d7b1c8d371a61d94a6c3e7f8942bed1718748a1ed47a6",
+    "references/shots/ui-entrance/cloner-depth-echo.md": "13f4a98c6a0816e55693c5644351616500e8b946b711332b4d4b4396238b2632",
+    "references/shots/ui-entrance/deck-deal-flyin.md": "eed5b9585bf80a7566b776ca16a5926ec6b35417803090e9a0756726315b039b",
+    "references/shots/ui-entrance/doc-park-left-pill-deal.md": "b1cca04e44384e21d79ebb947b6bec70aa1003f7e8e53d497709348a238dd57c",
+    "references/shots/ui-entrance/draw-svg-trace.md": "10badc80ed577324083366142a5a6d99021b67b5b81a41e1ea29b759b2dcfd0a",
+    "references/shots/ui-entrance/element-body-moves.md": "940931d0f1858c7bcbc0679b68bbc56b7fde1ab324b8d7b71d9cccf0ae1a0f5a",
+    "references/shots/ui-entrance/integration-hub-map.md": "a1474661f0e4158fd2223868742473cee903d9a33bdb51557638204c47522a09",
+    "references/shots/ui-entrance/list-reveal.md": "68b655b516fe96b714b5c798d7c50068741ceea570bc11c80db8513def83f4e9",
+    "references/shots/ui-entrance/list-stack-press.md": "079565fe5134b2ff97eb472203b49e8a4e21749afae6d8329fa41b5eee8c4732",
+    "references/shots/ui-entrance/neon-frame-forerun.md": "ee53fd6e931383bc51ccdc4c710379df0867c97fc5b98e217e55c74f47d7dfd2",
+    "references/shots/ui-entrance/neon-frame-orbit-drop.md": "6f5ecdaabd2700a7aee4feebacdd4dd5415f0d82cd09fe52e80211b8ddb959d2",
+    "references/shots/ui-entrance/page-waterfall-wall.md": "fc4cd282ef0f7d2c5c36b2f192ddc9d5e318ff60b6c3007305e439161db06cef",
+    "references/shots/ui-entrance/product-card-progressive-assemble.md": "b33c0702e9a5fcd66fad7b26b890ea5f5c5a8e389466e597b19752e7f1397839",
+    "references/shots/ui-entrance/radial-wave.md": "587f58625f5815e0376101b35ac552e977e5a57622959bed594d1decb9b53dc0",
+    "references/shots/ui-entrance/research-card-stack-scroll.md": "afb2c4d35007fde738bbf2a0c7a3e337de19b4b9254790878c1577eca6f904bb",
+    "references/shots/ui-entrance/row-embed.md": "c6e6026bc4e2c74b77e76c636752a6b5afe9cfb9740c0ffca2c39e091bf999f8",
+    "references/shots/ui-entrance/value-stagger-gradient.md": "59cff036d152a0f4448b7faee355f197e41c60226f726389f122dd3253e9e9fc",
+    "references/shots/ui-entrance/wall-reveal-moves.md": "8cf1a3f63d45f507ac9fe4db580079a0ed0ae48c4db5d641e36010055debaa15",
+    "references/sound-design.md": "8e22b7a5ae87171deea19e6e3569c80f459cc549ade97f5087aabd6034ec7185",
+    "references/workbench.md": "d1e603ac7b32815bf881116fe9f3f53a65c75f9ba9c5aecdb37429a3e4f64158",
+    "template/TEMPLATE.md": "77459536aa6452da34ee898545d5861c2b31d81a3a2f9299d2574725df5dbc32",
+    "template/THEMES.md": "02dd9afaf99106628ffc06fe0b0259950b42a564b57b0518b17819b3a4d9bf1e",
+    "template/package.json": "7ca1a23c6fad1f21debc3c89186284176a44eed0f5d1fcbdde622fd5153db477",
+    "template/public/audio/ATTRIBUTION.md": "a85a9da9826d6be5d9a6ff09bef40be21202ca262496548948e2a289a68d8b94",
+    "template/remotion.config.ts": "74322306f044aa2da278106bfc19251dca471d312946d1b4ab07c01eafa65c0e",
+    "template/src/Root.tsx": "8eb66cf143cbde04814214f67185a8a6e61be07e6b3b5e130c2578e251672abb",
+    "template/src/aifl/Caption.tsx": "116a808438f6c55be5f4001cc96b16d150b2d10368f8b199c060cf859e341209",
+    "template/src/aifl/DigitRoll.tsx": "38f224b78269e68b11c4780f340d300cc1ccd3cbaabdd7273a53dfa0a4c5dfc8",
+    "template/src/aifl/FlashCut.tsx": "3705429f1bde07e5ce1abd9580b793f6ad9590ba3660f54f4c8f28511ff9966f",
+    "template/src/aifl/Main.tsx": "e74e9694cd4305955725deaf342d463a96a35dcf18508fc4ce213f4bf4e28e6a",
+    "template/src/aifl/PaperTitleCard.tsx": "1ed52c1890fdad5c2dece1b002cae2bdfdee4594307f2bd2633ec36f13368851",
+    "template/src/aifl/live-layout.json": "2cf16d2ead8ec9cdeef5e93cb8861998d62f8a9d3b6254a2653ffde248654aab",
+    "template/src/aifl/live/PageCam.tsx": "2ed16b800cefcaa3d3c709e58952345c54c0b254ca91687587f02c7ea0670ec7",
+    "template/src/aifl/live/SceneDetail.tsx": "240de2143a64e790a2f02640cf0c092f31d783e9789952676347c6882d6c27fa",
+    "template/src/aifl/live/SceneFlyIn.tsx": "33b36bbda193390751eff39a2fa740d077beddff05325181b35f48975346cc7a",
+    "template/src/aifl/live/SceneOpen.tsx": "1e968d32b5dac1c56ad23a84c74d1a74db7211dc1deb150a7e37a884b644c75e",
+    "template/src/aifl/live/SceneOutroLive.tsx": "747d732f824fde1d235091f58ce9bb62968bdc0c4e3dc7f34c2ef3d9953f5896",
+    "template/src/aifl/live/ScenePapers.tsx": "800255af90fad38e5cc48b839f3be4a1870f52d68701557e118adc396420a325",
+    "template/src/aifl/live/SceneWbr.tsx": "27d42c0b5f0c84a016be706447f806fa1d38cdf328d97e18fc14e8dadfa8aeb8",
+    "template/src/index.ts": "7c7522648eb3464f3b3c46b41dfc370fe451d8be99bd1f00179924b9f3de71f3",
+    "template/src/themes/ThemedFilm.tsx": "fd26ffd60821fd6020ce4934320f3df6c854044738b42f128a6cfe4c94f2eb8e",
+    "template/src/themes/manifest.tsx": "cf30427b26e3486ba69e0accde389892d4e66c47f1bf11cd1af9fc11362f2a20",
+    "template/src/themes/palette-assets.json": "880e3ea5ec859bcbc0f14784efc930208af992ce8855298344ff52bcefa31169",
+    "template/src/themes/palette-assets.ts": "06f4608decb9c66af732b6f3b2cfc2826e8cd093c6104b4e5641f4b0cbe66a93",
+    "template/src/themes/palettes.json": "feaec5dd69247e833d506782131b16dab6a4249c6de1f76b25f88813fa164c66",
+    "template/src/themes/visual-theme.tsx": "9350fe5e6ccb1685c9de997fd5ad1342b81ed2f499c863bbe290aa46355e12c2",
+    "template/src/workbench.ts": "46d3e65a377b49c325df09f87f5162a6e97c649dd80e192058850aca79ba3d5d",
+    "template/tsconfig.json": "ec339bb6f95db886a61f20da00b99f6f8ea372401183c01c53f795dd6ead0cde"
+  }
+}

@@ -70,6 +70,19 @@ export function createDrawingTaskManager(options) {
       } catch { /* A damaged record must not prevent other tasks from loading. */ }
     }
   }
+  function migrationRecords(scope, from) {
+    load(scope)
+    const root = rootOf(scope), selected = []
+    for (const name of readdirSync(root)) {
+      if (!/^[a-f0-9-]{36}$/.test(name)) continue
+      const directory = join(root, name)
+      if (!contained(root, directory) || !contained(directory, join(directory, 'job.json'))) continue
+      const data = jobs.get(name) || JSON.parse(readFileSync(join(directory, 'job.json'), 'utf8'))
+      if (data.id === name && fileIdentity(data.scope.workspaceRoot) === fileIdentity(scope.workspaceRoot) &&
+          fileIdentity(data.scope.drawioAbs) === fileIdentity(from)) selected.push({ data, directory, live: jobs.has(name) })
+    }
+    return selected
+  }
   function owned(scope, id) {
     load(scope)
     const job = jobs.get(id)
@@ -164,6 +177,19 @@ export function createDrawingTaskManager(options) {
   }
   return {
     enqueue,
+    canMigrateCanvas(scope, from) {
+      return !migrationRecords(scope, from).some(({ data: job }) =>
+        ['queued', 'running', 'cancelling'].includes(job.status) || (job.status === 'succeeded' && job.kind !== 'extract' && job.delivery === 'pending'))
+    },
+    migrateCanvas(scope, from, to) {
+      const selected = migrationRecords(scope, from)
+      if (selected.some(({ data: job }) => ['queued', 'running', 'cancelling'].includes(job.status))) throw new Error('画布后台任务仍在运行，完成后下次打开时迁移')
+      for (const { data: job, directory, live } of selected) {
+        job.scope = { ...job.scope, drawioAbs: to, path: to }
+        if (live) persist(job)
+        else atomic(join(directory, 'job.json'), job)
+      }
+    },
     recordCommit(job, node) { job.createdNode = node; persist(job) },
     list(scope) { load(scope); return [...jobs.values()].filter((job) => ownerKey(job.scope) === ownerKey(scope)).sort((a, b) => a.order - b.order).map(view) },
     result(scope, id) { const job = owned(scope, id); if (!job.resultPath || !existsSync(job.resultPath)) throw new Error('结果尚未生成'); return { job: view(job), output: JSON.parse(readFileSync(job.resultPath, 'utf8')) } },

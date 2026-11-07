@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
+import { motionNodeData } from '../src/motion-core.js'
 import { mkdtempSync, existsSync, readFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join, resolve, relative, isAbsolute } from 'node:path'
+import { createServer } from 'node:http'
+import { once } from 'node:events'
 import { composeClientBody } from './build.mjs'
 import { svgMarkupFromStyle } from '../src/style-kernel.js'
 import * as plugin from '../lib/index.js'
@@ -42,15 +45,16 @@ decodeError = true
 await assert.rejects(readVideoFile(mp4, new AbortController().signal), /解码失败/)
 assert.equal(revoked, 2, 'decode failure releases URL')
 decodeError = false
-await assert.rejects(readVideoFile({ ...mp4, size: 49 * 1024 * 1024 }, new AbortController().signal), /48MB/)
+assert.equal((await readVideoFile({ ...mp4, size: 54 * 1024 * 1024 }, new AbortController().signal)).w, 1920, 'large video passes metadata validation')
 
 const clientSource = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
 const pendingVideoRef = { current: null }, videoImportsRef = { current: new Set() }, placement = [], imported = []
 let note
 const env = { hasPath: true, activeLayerLocked: () => false, videoImportsRef, pendingVideoRef, document,
-  videoFileExtension, VIDEO_FILE_MAX_BYTES: 48 * 1024 * 1024,
+  videoFileExtension,
+  insertVideoFiles(files, x, y, targetId) { imported.push({ files, x, y, targetId }) },
   setSaveNote(value) { note = value }, setPlaceEdgeKind() {}, setSelectedIds() {}, setPlaceTool(value) { placement.push(value) }, setMenu() {} }
-const pickerSource = clientSource.slice(clientSource.indexOf('  function openVideoFilePicker()'), clientSource.indexOf('  async function insertVideoFiles'))
+const pickerSource = clientSource.slice(clientSource.indexOf('  function openVideoFilePicker('), clientSource.indexOf('  async function insertVideoFiles'))
 const picker = new Function(...Object.keys(env), pickerSource + '\nreturn openVideoFilePicker')(...Object.values(env))
 picker()
 assert.equal(placement.length, 0, 'opening picker creates no placement or node')
@@ -62,19 +66,38 @@ assert.equal(placement.at(-1), 'video', 'only file selection arms placement')
 assert.match(note, /点击画布/)
 const createEnv = { ...env, docRef: { current: { nodes: [], edges: [] } },
   openVideoFilePicker: picker, insertVideoFiles(files, x, y) { imported.push({ files, x, y }) },
-  applyLocal() { throw new Error('must not create an empty node') } }
+  nextNodeId: () => 'empty-video', freshNode: (id) => ({ id, data: motionNodeData() }), activeLayerId: null, sectionAtPoint: () => null, ensureDrawOrder() {},
+  applyLocal(mutate) { mutate(this.docRef.current) } }
 const createSource = clientSource.slice(clientSource.indexOf('  function createNodeAt('), clientSource.indexOf('  /**\n   * 在空白处新建一条'))
+createEnv.applyLocal = (mutate) => mutate(createEnv.docRef.current)
 const create = new Function(...Object.keys(createEnv), createSource + '\nreturn createNodeAt')(...Object.values(createEnv))
 create('video', '', 100, 200)
 assert.deepEqual(imported, [{ files: [mp4], x: 100, y: 200 }])
 assert.equal(pendingVideoRef.current, null)
 create('video', '', 0, 0)
-assert.equal(imported.length, 1, 'video without a selected file reopens picker')
-inputElement.oncancel()
+assert.equal(imported.length, 1, 'empty video creation does not import a file')
+assert.equal(createEnv.docRef.current.nodes[0].data.drawaiMotion, '1')
+assert.equal(createEnv.docRef.current.nodes[0].data.mediaClip, undefined, 'empty video has no pretend media file')
 picker(); const staleInput = inputElement
 for (const control of videoImportsRef.current) control.abort()
 staleInput.files = [mp4]; staleInput.onchange()
 assert.equal(pendingVideoRef.current, null, 'switching canvas invalidates the pending picker')
+const placedCount = placement.length
+picker('selected-video'); inputElement.files = [mp4]; inputElement.onchange()
+assert.equal(imported.at(-1).targetId, 'selected-video', 'upload toolbar fills the selected node without arming placement')
+assert.equal(placement.length, placedCount)
+assert.equal(pendingVideoRef.current, null)
+const selectedDoc = { nodes: [{ id: 'selected-video', x: 30, y: 50, w: 400, h: 220, style: '', data: motionNodeData() }], edges: [], layers: [{ id: '1' }] }
+selectedDoc.nodes[0].data.motion.requestId = 'in-flight'
+const replacement = { clip: 'uploaded', w: 1920, h: 1080, duration: 3, poster: '<svg xmlns="http://www.w3.org/2000/svg"/>' }
+assert.equal(applyImportedVideoToDoc(selectedDoc, replacement, { x: 0, y: 0 }, '1', 'selected-video'), 'selected-video')
+assert.equal(selectedDoc.nodes.length, 1)
+assert.deepEqual([selectedDoc.nodes[0].x, selectedDoc.nodes[0].y, selectedDoc.nodes[0].w, selectedDoc.nodes[0].h], [30, 50, 400, 220])
+assert.equal(selectedDoc.nodes[0].data.mediaClip, 'uploaded')
+assert.equal(selectedDoc.nodes[0].data.motion.requestId, 'import:uploaded', 'late drawing results cannot overwrite uploaded content')
+selectedDoc.nodes[0].style = 'locked=1;'
+assert.throws(() => applyImportedVideoToDoc(selectedDoc, replacement, {}, '1', 'selected-video'), /锁定/)
+assert.throws(() => applyImportedVideoToDoc(selectedDoc, replacement, {}, '1', 'deleted-node'), /删除/)
 
 const received = []
 const transferEnv = { mediaFilesFromDataTransfer, hasMediaFileDrag, toUserSpace: () => ({ x: 75, y: 95 }), viewportCenterUser: () => ({ x: 0, y: 0 }),
@@ -111,7 +134,7 @@ async function request(action, extra = {}) {
   return { status, payload }
 }
 try {
-  const bytes = Buffer.alloc(1024 * 1024 + 17, 123), blob = new Blob([bytes], { type: 'video/mp4' })
+  const bytes = Buffer.alloc(54 * 1024 * 1024 + 17, 123), blob = new Blob([bytes], { type: 'video/mp4' })
   Object.defineProperty(blob, 'name', { value: 'sample.mp4' })
   const offsets = [], chunks = [], progress = []
   const api = async (action, args) => {
@@ -121,11 +144,32 @@ try {
     return payload
   }
   const result = await uploadVideoFile(blob, metadata, api, new AbortController().signal, (done) => progress.push(done))
-  assert.deepEqual(offsets, [0, 1024 * 1024])
-  assert.deepEqual(chunks, [1024 * 1024, 17])
+  assert.equal(offsets.length, 55)
+  assert.equal(offsets.at(-1), 54 * 1024 * 1024)
+  assert.equal(chunks.at(-1), 17)
+  assert.ok(chunks.slice(0, -1).every(n => n === 1024 * 1024))
   assert.equal(progress.at(-1), bytes.length)
   const dir = join(root, 'demo.media', result.clip)
   assert.deepEqual(readFileSync(join(dir, 'source.mp4')), bytes, 'chunk upload preserves exact source bytes')
+  const ticket = (await request('media-source-url', { clip: result.clip })).payload
+  assert.equal(ticket.ok, true)
+  const server = createServer((req, res) => route.handler(req, res))
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+  try {
+    const url = 'http://127.0.0.1:' + server.address().port + ticket.url
+    let response = await fetch(url, { headers: { Range: 'bytes=52428800-52428831' } })
+    assert.equal(response.status, 206)
+    assert.equal(response.headers.get('content-range'), `bytes 52428800-52428831/${bytes.length}`)
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes.subarray(52428800, 52428832))
+    response = await fetch(url, { headers: { Range: 'bytes=-17' } })
+    assert.equal(response.status, 206)
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes.subarray(-17))
+    response = await fetch(url, { headers: { Range: 'bytes=999999999-' } })
+    assert.equal(response.status, 416)
+    assert.equal((await fetch(url.replace(/video=.*/, 'video=invalid'))).status, 403)
+    assert.equal((await fetch(url, { headers: { 'sec-fetch-site': 'cross-site' } })).status, 403)
+  } finally { await new Promise((resolveClose) => server.close(resolveClose)) }
   assert.equal(existsSync(join(dir, 'source.upload')), false)
   const doc = { nodes: [], edges: [], layers: [{ id: 'L1' }], meta: {} }
   const id = applyImportedVideoToDoc(doc, result, { x: 100, y: 200 }, 'L1')

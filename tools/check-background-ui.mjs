@@ -45,11 +45,35 @@ assert.equal(render(), null, 'hiding removes the whole task panel')
 props.hidden = false
 tree = render(); button(tree, '展开').props.onClick(); tree = render()
 assert.equal(all(tree).filter((node) => node.type === 'article').length, 6, 'showing the panel retains task records and the selected filter')
+props.jobs = []
+props.motions = [{ id: 'motion', nodeId: 'movie', page: 1, status: 'rendering', progress: .5 },
+  { id: 'retained', nodeId: 'other', page: 0, status: 'retained', error: '输入已变化' }]
+props.onMotionCommand = async (...args) => calls.push(args)
+tree = render()
+assert.equal(all(tree).filter((node) => node.type === 'article').length, 2)
+assert.equal(all(tree).find((node) => node.type === 'progress').props.value, 50)
+await button(tree, '取消').props.onClick()
+assert.equal(calls.at(-1)[0].id, 'motion'); assert.equal(calls.at(-1)[1], 'cancel')
+await button(tree, '尝试回填').props.onClick()
+assert.equal(calls.at(-1)[0].id, 'retained'); assert.equal(calls.at(-1)[1], 'apply')
+button(tree, '需处理').props.onClick(); tree = render()
+assert.equal(all(tree).filter((node) => node.type === 'article').length, 1, 'retained motion outputs remain visible as actionable tasks')
+props.motions = [{ id: 'interrupted-motion', nodeId: 'movie', page: 0, status: 'interrupted' }]
+tree = render()
+await button(tree, '继续生成').props.onClick()
+assert.equal(calls.at(-1)[0].id, 'interrupted-motion'); assert.equal(calls.at(-1)[1], 'resume')
+props.motions[0].error = 'Module not found\n' + 'long resolver output\n'.repeat(100)
+tree = render()
+const errorDetails = all(tree).find((node) => node.type === 'details')
+assert.equal(errorDetails.props.open, undefined, 'errors start collapsed')
+assert.ok(all(errorDetails).find((node) => node.type === 'pre').children.includes(props.motions[0].error), 'full error remains available')
+await button(tree, '移除记录').props.onClick()
+assert.equal(calls.at(-1)[0].id, 'interrupted-motion'); assert.equal(calls.at(-1)[1], 'remove')
 const client = readFileSync(new URL('../src/client.js', import.meta.url), 'utf8')
 const taskButtonCode = client.slice(client.indexOf('    const activeTaskCount ='), client.indexOf('    const rail = React.createElement(', client.indexOf('    const activeTaskCount =')))
 let preference
-const taskButtons = (shown) => new Function('React', 'backgroundDrawingJobs', 'videoExportJobs', 'showTaskList', 'patchPrefs', 'railIcon', 'chips', taskButtonCode + '\nreturn chips')(
-  React, props.jobs, [], shown, (patch) => { preference = patch }, () => null, [])
+const taskButtons = (shown) => new Function('React', 'backgroundDrawingJobs', 'videoExportJobs', 'motionJobs', 'showTaskList', 'patchPrefs', 'railIcon', 'chips', taskButtonCode + '\nreturn chips')(
+  React, props.jobs, [], [], shown, (patch) => { preference = patch }, () => null, [])
 let toggle = taskButtons(false).find((node) => node.type === 'button')
 assert.equal(toggle.props['aria-expanded'], false)
 toggle.props.onClick(); assert.equal(preference.showTaskList, true)

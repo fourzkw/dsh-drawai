@@ -1,0 +1,28 @@
+{
+  "slug": "10-synthwave",
+  "name": "复古霓虹·合成器浪潮",
+  "oneLiner": "深紫夜空下的透视霓虹网格与分层日落，镀铬标题砸入、手写霓虹点亮、全程 VHS 做旧。",
+  "signature": [
+    "霓虹透视网格从地平线冲向镜头，靠 z 偏移取模滚动",
+    "日落是同一个圆切成 5–7 条横带，洋红→橙→黄，不是渐变球",
+    "双辉光：紧 4px 高亮 + 宽 30px 低透明",
+    "VHS 整链：RGB split 1–2px → 2px 扫描线 → 随机 glitch 抽帧 → 4:3 圆角遮罩 → CRT 关机",
+    "镀铬标题多段金属渐变 + bevel 高光 + 4 角星芒扫过"
+  ],
+  "palette": {
+    "page": "#120A2A",
+    "surface": "#2A1055",
+    "field": "#3A1A4E",
+    "text": "#F4F4FF",
+    "muted": "#8FF9FF",
+    "accent": "#FF2FB8",
+    "border": "#E6C465"
+  },
+  "colors": ["#120A2A", "#2A1055", "#FF2FB8", "#8FF9FF", "#EF933D", "#E6C465", "#F4F4FF"],
+  "fonts": {
+    "display": "\"Michroma\",\"Douyin Sans\",\"Noto Sans SC\",sans-serif",
+    "text": "\"Douyin Sans\",\"Noto Sans SC\",sans-serif",
+    "mono": "\"JetBrains Mono\",monospace"
+  },
+  "rhythm": { "bpm": 100, "fps": 30, "duration": 10, "aspect": "16:9", "cutFrames": 18 }
+}

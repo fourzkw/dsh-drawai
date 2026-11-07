@@ -4,10 +4,10 @@ function createVideoController(request, environment = {}) {
   const caf = environment.caf || ((id) => cancelAnimationFrame(id))
   const now = environment.now || (() => performance.now())
   const makeUrl = environment.makeUrl || ((source) => {
-    const bytes = Uint8Array.from(atob(source.base64), (c) => c.charCodeAt(0))
-    return URL.createObjectURL(new Blob([bytes], { type: source.mime || 'video/webm' }))
+    if (!source || typeof source.url !== 'string') throw new Error('无法读取源视频地址')
+    return source.url
   })
-  const revoke = environment.revoke || ((url) => URL.revokeObjectURL(url))
+  const revoke = environment.revoke || ((url) => { if (url.startsWith('blob:')) URL.revokeObjectURL(url) })
   const sessions = new Map()
   const listeners = new Set()
   let activeId = null
@@ -201,7 +201,7 @@ function createVideoController(request, environment = {}) {
       const frames = Array.isArray(manifest.frames) ? manifest.frames : []
       const fps = Number(manifest.fps) > 0 ? Number(manifest.fps) : meta.fps
       if (meta.kind === 'raster' || (info.hasSource && frames.length === 0)) {
-        const source = await request('media-source-bytes', { clip: meta.clip })
+        const source = await request('media-source-url', { clip: meta.clip })
         if (!current()) return
         if (!source) throw new Error('无法读取源视频')
         patch(id, { kind: 'raster', url: makeUrl(source), fps, status: 'ready' })
@@ -230,7 +230,7 @@ function createVideoController(request, environment = {}) {
         patch(id, { kind: 'svg', frames: svgs, fps, duration: frames.length / fps, status: 'ready' })
         }
         if (info.hasSource) {
-          const source = await request('media-source-bytes', { clip: meta.clip })
+          const source = await request('media-source-url', { clip: meta.clip })
           if (!current()) return
           if (!source) throw new Error('无法读取复刻视频的音频来源')
           const audio = environment.createAudio ? environment.createAudio() : document.createElement('audio')

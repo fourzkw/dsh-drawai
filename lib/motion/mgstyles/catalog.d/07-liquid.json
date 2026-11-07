@@ -1,0 +1,28 @@
+{
+  "slug": "07-liquid",
+  "name": "液态流动·棚拍稠液",
+  "oneLiner": "暗紫棚里的稠液体：橙粉紫按厚度混色，落地压扁回弹，最后把液滴拉成字形。",
+  "signature": [
+    "只有一种材质：稠液体，球缘 1–2px 高光唇线",
+    "内部按厚度三段插值 #FF5C0F → #FF1A70 → #8F1FFF",
+    "落地先压扁再回弹（spring），接触点留 splat 与 5–7 条 tendril",
+    "4.0s 三层洪流面各错 2 帧压上来，4.42s 沉进液体只剩涡流与气泡",
+    "6.4s 液滴拉成 4 个字形，7.2s glint 扫过，8.4s 一滴落下收尾"
+  ],
+  "palette": {
+    "page": "#371E3E",
+    "surface": "#4C2955",
+    "field": "#7C4684",
+    "text": "#FFE8F0",
+    "muted": "#FFC8E0",
+    "accent": "#FF5C0F",
+    "border": "#8F1FFF"
+  },
+  "colors": ["#FF5C0F", "#FF1A70", "#8F1FFF", "#FFE8F0", "#FFC8E0", "#371E3E", "#7C4684"],
+  "fonts": {
+    "display": "\"Fraunces\",\"Resource Han Rounded\",\"Noto Serif SC\",serif",
+    "text": "\"Noto Serif SC\",\"Inter\",serif",
+    "mono": "\"JetBrains Mono\",monospace"
+  },
+  "rhythm": { "bpm": 150, "fps": 30, "duration": 10, "aspect": "16:9", "cutFrames": 2 }
+}

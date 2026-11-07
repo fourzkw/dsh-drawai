@@ -45,7 +45,7 @@ const MEDIA_DATA_KEYS = ['drawaiMedia', 'mediaKind', 'mediaClip', 'mediaFps', 'm
 /** 从画布路径得到 stem（去掉 .drawio）。 */
 export function drawioStem(drawioPath) {
   const base = basename(String(drawioPath || ''))
-  return base.replace(/\.drawio$/i, '') || 'canvas'
+  return base.replace(/\.(?:drawio|drawai)$/i, '') || 'canvas'
 }
 
 /** `foo.drawio` → `…/foo.media`（绝对或相对，跟随入参形态）。 */
@@ -53,7 +53,8 @@ export function mediaRootFor(drawioPath) {
   const p = String(drawioPath || '')
   const dir = dirname(p)
   const stem = drawioStem(p)
-  return dir === '.' ? stem + MEDIA_DIR_SUFFIX : join(dir, stem + MEDIA_DIR_SUFFIX)
+  const suffix = /\.drawai$/i.test(p) ? '.drawai.media' : MEDIA_DIR_SUFFIX
+  return dir === '.' ? stem + suffix : join(dir, stem + suffix)
 }
 
 /** clip 目录：`…/foo.media/clip-a` */
@@ -161,7 +162,11 @@ export function emptyManifest(opts) {
 function syncDuration(manifest) {
   const frames = Array.isArray(manifest.frames) ? manifest.frames.length : 0
   const fps = Number(manifest.fps)
-  manifest.duration = frames > 0 && Number.isFinite(fps) && fps > 0 ? frames / fps : 0
+  // 有逐帧清单时以清单为准；没有清单（raster clip pack 就是这种）就保留写进来的时长。
+  // 以前这里无条件用 frames/fps 覆盖，于是 applyFilm 写下的 12.1s 被抹成 0 —— "不看 <video>
+  // metadata 也知道多长"这个用途就永远拿不到真值。
+  if (frames > 0 && Number.isFinite(fps) && fps > 0) manifest.duration = frames / fps
+  else if (!(Number(manifest.duration) > 0)) manifest.duration = 0
   return manifest
 }
 
@@ -182,6 +187,7 @@ export function normalizeManifest(raw) {
       frames.push({ file: file, t: Number.isFinite(t) ? t : i / (Number.isFinite(fps) && fps > 0 ? fps : DEFAULT_MEDIA_FPS) })
     }
   }
+  const duration = Number(raw.duration)
   return syncDuration({
     version: Number(raw.version) || MEDIA_VERSION,
     kind: raw.kind === 'raster' ? 'raster' : 'svg',
@@ -191,7 +197,7 @@ export function normalizeManifest(raw) {
     source: typeof raw.source === 'string' && raw.source.length > 0 ? raw.source.replace(/\\/g, '/') : null,
     sourceOffset: Number.isFinite(Number(raw.sourceOffset)) && Number(raw.sourceOffset) >= 0 ? Number(raw.sourceOffset) : 0,
     frames: frames,
-    duration: 0,
+    duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
   })
 }
 
@@ -394,8 +400,14 @@ export function collectReferencedClips(doc) {
   const used = new Set()
   if (doc === null || typeof doc !== 'object' || Array.isArray(doc.nodes) === false) return used
   for (let i = 0; i < doc.nodes.length; i += 1) {
+    const audioClip=doc.nodes[i].data?.drawaiAudio==='1'&&sanitizeClipId(doc.nodes[i].data.audioClip)
+    if(audioClip)used.add(audioClip)
     const meta = videoMetaFromData(doc.nodes[i].data)
     if (meta !== null && meta.clip !== null) used.add(meta.clip)
+    for (const result of Array.isArray(doc.nodes[i].data?.motion?.results) ? doc.nodes[i].data.motion.results : []) {
+      const clip = sanitizeClipId(result.clip)
+      if (clip) used.add(clip)
+    }
   }
   return used
 }
@@ -550,11 +562,11 @@ export function packCanvasBundle(drawioPath) {
   const stem = drawioStem(drawioPath)
   const files = []
   if (existsSync(drawioPath) === false) throw new Error('drawio not found: ' + drawioPath)
-  files.push({ name: stem + '.drawio', data: readFileSync(drawioPath) })
+  files.push({ name: stem + (/\.drawai$/i.test(drawioPath) ? '.drawai' : '.drawio'), data: readFileSync(drawioPath) })
   const mediaRoot = mediaRootFor(drawioPath)
   if (existsSync(mediaRoot)) {
     const mediaFiles = []
-    walkFiles(mediaRoot, stem + MEDIA_DIR_SUFFIX, mediaFiles)
+    walkFiles(mediaRoot, basename(mediaRoot), mediaFiles)
     for (let i = 0; i < mediaFiles.length; i += 1) files.push(mediaFiles[i])
   }
   return buildZip(files)
@@ -566,29 +578,30 @@ export function unpackCanvasBundle(zipBuffer, destDir, preferredStem) {
   if (entries.length === 0) throw new Error('empty zip')
   let drawioEntry = null
   for (let i = 0; i < entries.length; i += 1) {
-    if (/\.drawio$/i.test(entries[i].name) && entries[i].name.indexOf('/') < 0) {
+    if (/\.(?:drawio|drawai)$/i.test(entries[i].name) && entries[i].name.indexOf('/') < 0) {
       drawioEntry = entries[i]
       break
     }
   }
   if (drawioEntry === null) {
     for (let i = 0; i < entries.length; i += 1) {
-      if (/\.drawio$/i.test(entries[i].name)) {
+      if (/\.(?:drawio|drawai)$/i.test(entries[i].name)) {
         drawioEntry = entries[i]
         break
       }
     }
   }
   if (drawioEntry === null) throw new Error('zip 里没有 .drawio')
-  const stem = preferredStem || basename(drawioEntry.name).replace(/\.drawio$/i, '')
+  const stem = preferredStem || basename(drawioEntry.name).replace(/\.(?:drawio|drawai)$/i, '')
   mkdirSync(destDir, { recursive: true })
-  const drawioOut = join(destDir, stem + '.drawio')
+  const extension = /\.drawai$/i.test(drawioEntry.name) ? '.drawai' : '.drawio'
+  const drawioOut = join(destDir, stem + extension)
   if (existsSync(drawioOut)) throw new Error('already exists: ' + stem + '.drawio')
   writeFileSync(drawioOut, drawioEntry.data)
-  const mediaOut = join(destDir, stem + MEDIA_DIR_SUFFIX)
+  const mediaOut = mediaRootFor(drawioOut)
   for (let i = 0; i < entries.length; i += 1) {
     const name = entries[i].name.replace(/\\/g, '/')
-    if (/\.drawio$/i.test(name)) continue
+    if (/\.(?:drawio|drawai)$/i.test(name)) continue
     // 接受 `foo.media/...` 或任意 `*.media/...`
     const m = /([^/]+)\.media\/(.+)$/i.exec(name)
     if (m === null) continue
@@ -598,7 +611,7 @@ export function unpackCanvasBundle(zipBuffer, destDir, preferredStem) {
     mkdirSync(dirname(abs), { recursive: true })
     writeFileSync(abs, entries[i].data)
   }
-  return { path: stem + '.drawio', mediaRoot: mediaOut }
+  return { path: stem + extension, mediaRoot: mediaOut }
 }
 
 /** 导出单个 clip 为 SVG 视频 zip（manifest + frames + poster）。 */

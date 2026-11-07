@@ -12,10 +12,20 @@
   "main": "lib/index.js",
   "scripts": {
     "build": "node tools/build.mjs",
+    "test:routing": "node tools/check-routing.mjs && node tools/check-route-preview.mjs",
+    "test:fonts": "node tools/check-bundled-fonts.mjs",
+    "test:style-fonts": "node tools/check-mgstyle-fonts.mjs",
+    "test:motion-sync": "node tools/check-motion-sync.mjs",
+    "test:sfx": "node tools/check-sfx-download.mjs",
+    "test:motion-film-ui": "node tools/check-motion-film-ui.mjs",
+    "test:audio-host": "node tools/check-audio-host.mjs",
+    "test:audio-ui": "node tools/check-audio-ui.mjs",
     "watch": "node tools/watch.mjs",
     "check": "node tools/check-package.mjs",
-    "test": "node tools/check-adaptive-palette.mjs && node tools/check-auto-save.mjs && node tools/check-drawing-queue.mjs && node tools/check-background-tasks.mjs && node tools/check-background-ui.mjs && node tools/check-trace-optimization.mjs && node tools/check-performance.mjs && node tools/check-mxfile.mjs && node tools/check-route-preview.mjs && node tools/check-host.mjs && node tools/check-render.mjs && node tools/check-component.mjs && node tools/check-text-copy.mjs && node tools/check-image-export.mjs && node tools/check-canvas-sessions.mjs && node tools/check-trace.mjs && node tools/check-media.mjs && node tools/check-video-player.mjs && node tools/check-image-trace.mjs && node tools/check-video-trace.mjs && node tools/check-video-reuse.mjs && node tools/check-video-audio.mjs && node tools/check-video-export.mjs && node tools/check-video-import.mjs && node tools/check-node-labels.mjs",
-    "bench:performance": "node tools/benchmark-performance.mjs"
+    "test": "node tools/check-media-package.mjs && node tools/check-motion-session.mjs && node tools/check-motion-host.mjs && node tools/check-motion-canvas-spec.mjs && node tools/check-motion-json-bom.mjs && node tools/check-motion-pilot-host.mjs && node tools/check-motion-boundaries.mjs && node tools/check-motion-cache-fetch.mjs && node tools/check-media-library-host.mjs && node tools/check-motion-ui.mjs && node tools/check-native-canvas.mjs && node tools/check-adaptive-palette.mjs && node tools/check-auto-save.mjs && node tools/check-drawing-queue.mjs && node tools/check-background-tasks.mjs && node tools/check-background-ui.mjs && node tools/check-trace-optimization.mjs && node tools/check-performance.mjs && node tools/check-mxfile.mjs && node tools/check-routing.mjs && node tools/check-route-preview.mjs && node tools/check-host.mjs && node tools/check-render.mjs && node tools/check-component.mjs && node tools/check-text-copy.mjs && node tools/check-image-export.mjs && node tools/check-canvas-sessions.mjs && node tools/check-trace.mjs && node tools/check-media.mjs && node tools/check-video-player.mjs && node tools/check-image-trace.mjs && node tools/check-video-trace.mjs && node tools/check-video-reuse.mjs && node tools/check-video-audio.mjs && node tools/check-video-export.mjs && node tools/check-video-import.mjs && node tools/check-node-labels.mjs && node tools/check-imagegen.mjs",
+    "bench:performance": "node tools/benchmark-performance.mjs",
+    "test:shotcards-render": "node tools/check-shotcard-render.mjs",
+    "test:shotcards-ui": "node tools/check-shotcards-ui.mjs"
   },
   "exports": {
     ".": "./lib/index.js",
@@ -24,6 +34,8 @@
   },
   "files": [
     "lib",
+    "!lib/motion/fonts",
+    "!lib/motion/media-library",
     "cordis.patch.yml"
   ],
   "keywords": [
@@ -40,7 +52,20 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@resvg/resvg-js": "^2.6.2"
+    "@babel/parser": "7.28.5",
+    "@babel/traverse": "7.28.5",
+    "@react-three/fiber": "9.5.0",
+    "@remotion/bundler": "4.0.484",
+    "@remotion/motion-blur": "4.0.484",
+    "@remotion/renderer": "4.0.484",
+    "@remotion/three": "4.0.484",
+    "@resvg/resvg-js": "^2.6.2",
+    "parse5": "7.3.0",
+    "postcss": "8.5.32",
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "remotion": "4.0.484",
+    "three": "0.183.2"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": ">=0.1.0-rc.1 <0.1.0 || >=0.1.5-rc.1 <0.2.0-0 || >=0.2.0-rc.1 <0.3.0-0"

@@ -1,0 +1,1356 @@
+{
+  "source": "https://github.com/Vincentwei1021/mg-styles-15",
+  "commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c",
+  "license": "MIT",
+  "note": "整片风格库：14 种 MG 视觉语言，每种由一份上游提示词 + 一支上游成片源码 + 一份 Remotion 移植 brief 组成。上游的 04-3d-render（Blender 离线渲的 CGI 质感）没有收录，需要那种质感请走外部渲染回灌。",
+  "promptChars": 1258,
+  "styles": [
+    {
+      "slug": "01-flat-vector",
+      "name": "扁平矢量·一点成城",
+      "en": "Flat / Vector 2D",
+      "heading": "扁平矢量动画 Flat / Vector 2D Motion Graphics",
+      "oneLiner": "一点落地弹成太阳，长出一座城，再收进窗里变回一个点。",
+      "shot": "popwise「One Dot」一个点的一镜到底 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.64 / 10",
+      "tags": [
+        "扁平",
+        "矢量",
+        "广告",
+        "解释片",
+        "插画",
+        "企业",
+        "flat",
+        "vector",
+        "explainer",
+        "icon"
+      ],
+      "signature": [
+        "全片零渐变零阴影零描边，只有 #2B2BFF 底上五档纯色块",
+        "每次落地竖向压到 60%、横向撑到 136%，2–6 帧内回弹",
+        "入场一律「预备 4 帧—冲出 4 帧—回弹 8 帧」，过冲 1.56",
+        "9 栋楼以底边为锚错峰 3 帧升起，顶盖再延 2 帧",
+        "推镜 30 倍穿进 64×36 px 的窗，窗内是同一套矢量语言"
+      ],
+      "palette": {
+        "page": "#2B2BFF",
+        "surface": "#3B3BFF",
+        "field": "#4D4DFF",
+        "text": "#FFF6E9",
+        "muted": "#A3A3FF",
+        "accent": "#FF5A4E",
+        "border": "#1F1FCC"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#2B2BFF",
+        "#FF5A4E",
+        "#FFF6E9",
+        "#FFC62B",
+        "#151433",
+        "#2EE6A8",
+        "#A3A3FF"
+      ],
+      "fonts": {
+        "display": "\"Fredoka\",\"Resource Han Rounded\",\"Noto Sans SC\",sans-serif",
+        "text": "\"Resource Han Rounded\",\"Noto Sans SC\",sans-serif",
+        "mono": "\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 120,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 15
+      },
+      "prompt": "prompts/01-flat-vector.md",
+      "demos": [
+        "demos/01-flat-vector/cues.json",
+        "demos/01-flat-vector/index.html"
+      ],
+      "brief": "briefs/01-flat-vector.md",
+      "engine": "canvas2d",
+      "engines": [
+        "canvas2d"
+      ],
+      "engineNote": "纯 Canvas2D 逐帧绘制：色块、图标、网点都在 2D 画布里画，没有 DOM 合成。",
+      "engineFiles": [
+        "demos/01-flat-vector/index.html"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 1,
+          "shutter": 0.5
+        },
+        "transitions": "wipe",
+        "impact": false,
+        "camera": true,
+        "grain": null,
+        "secondary": [
+          "steam",
+          "pulse",
+          "bounce"
+        ],
+        "feather": false,
+        "files": [
+          "demos/01-flat-vector/index.html"
+        ]
+      }
+    },
+    {
+      "slug": "02-line-art",
+      "name": "一笔画·金线",
+      "en": "Line Art",
+      "heading": "线条动画 Line Art / Line Animation",
+      "oneLiner": "一根金线从不抬笔，7.5 秒画完一座城，收成金币字标。",
+      "shot": "ATELIER LINEA「一笔画 One Line」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.64 / 10",
+      "tags": [
+        "线条",
+        "描边",
+        "生长",
+        "极简",
+        "白场",
+        "线稿",
+        "line",
+        "outline",
+        "stroke",
+        "draw-on"
+      ],
+      "signature": [
+        "全片单条连续路径，23 段图形首尾相接，笔尖从不抬起",
+        "线宽恒为 3px（成片 4.5px），除以相机缩放保持屏幕恒定",
+        "新墨 #FFF6DC 发烫，旧线 1.5s 内退到 40% 并偏成 #967D50",
+        "三处 0.15s 停顿用重复 marker 实现，笔停但路径不断",
+        "7.5s 圆环从中心 swell 成金币，0.367s 由环带填满"
+      ],
+      "palette": {
+        "page": "#0B1320",
+        "surface": "#101A28",
+        "field": "#16233A",
+        "text": "#E9D7A5",
+        "muted": "#967D50",
+        "accent": "#FFF6DC",
+        "border": "#24344C"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#0B1320",
+        "#E9D7A5",
+        "#FFF6DC",
+        "#967D50",
+        "#F2E0AE",
+        "#CCAB6C",
+        "#6E5428"
+      ],
+      "fonts": {
+        "display": "\"Cormorant Garamond\",\"Noto Serif SC\",serif",
+        "text": "\"Noto Serif SC\",serif",
+        "mono": "\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 72,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 13
+      },
+      "prompt": "prompts/02-line-art.md",
+      "demos": [
+        "demos/02-line-art/cues.json",
+        "demos/02-line-art/film.js",
+        "demos/02-line-art/index.html",
+        "demos/02-line-art/tools/dump_timing.mjs"
+      ],
+      "brief": "briefs/02-line-art.md",
+      "engine": "canvas2d",
+      "engines": [
+        "canvas2d"
+      ],
+      "engineNote": "Canvas2D 逐笔描边：线条按帧生长，纸面留白直接画在画布上。",
+      "engineFiles": [
+        "demos/02-line-art/film.js"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 4,
+          "shutter": 0.5
+        },
+        "transitions": "cut",
+        "impact": false,
+        "camera": true,
+        "grain": {
+          "size": null
+        },
+        "secondary": [
+          "pulse"
+        ],
+        "feather": false,
+        "files": [
+          "demos/02-line-art/film.js"
+        ]
+      }
+    },
+    {
+      "slug": "03-isometric",
+      "name": "等轴 2.5D·浮岛城市",
+      "en": "Isometric 2.5D",
+      "heading": "等轴 2.5D Isometric / 2.5D",
+      "oneLiner": "12×12 瓦片波浪落下，长成一座浮岛城市，最后拉远露字。",
+      "shot": "ISOPOLIS「让城市自己生长」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 8.00 / 10",
+      "tags": [
+        "等轴",
+        "轴测",
+        "2.5D",
+        "场景",
+        "建筑",
+        "流程",
+        "isometric",
+        "axonometric",
+        "city",
+        "blockout"
+      ],
+      "signature": [
+        "正交相机沿 (1,1,1)，棱线 2:1 斜率，全片零透视",
+        "瓦片顶面是奶白陶土 #F1EEFA，侧面才上色，空瓦片会被冲击波翻面",
+        "所有生长都是「底座先落—墙长—屋顶晚 0.375s」，墙有 9% 过冲",
+        "落下统一 0.3s 重力加速，触地 30% 压扁 + 40rad/s 抖两下",
+        "6.0s 冲击波以 15 单位/s 从 CORE 扩散，窗色延迟点亮",
+        "7.75–8.75s 拉远露出浮岛，标题平躺在等轴地面上"
+      ],
+      "palette": {
+        "page": "#EEEAFC",
+        "surface": "#F4F1FD",
+        "field": "#E6E1F7",
+        "text": "#2C2960",
+        "muted": "#8781D0",
+        "accent": "#62F0F2",
+        "border": "#C9BFF0"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#EEEAFC",
+        "#F1EEFA",
+        "#94DFBD",
+        "#FFF0C8",
+        "#62F0F2",
+        "#2C2960",
+        "#FFC4AC",
+        "#8781D0"
+      ],
+      "fonts": {
+        "display": "\"Unbounded\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+        "text": "\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+        "mono": "\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 120,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 15
+      },
+      "prompt": "prompts/03-isometric.md",
+      "demos": [
+        "demos/03-isometric/cues.json",
+        "demos/03-isometric/index.html",
+        "demos/03-isometric/js/anim.js",
+        "demos/03-isometric/js/main.js",
+        "demos/03-isometric/js/night5.js",
+        "demos/03-isometric/js/render.js",
+        "demos/03-isometric/js/title.js",
+        "demos/03-isometric/js/title5.js",
+        "demos/03-isometric/js/ui.js",
+        "demos/03-isometric/js/world.js"
+      ],
+      "brief": "briefs/03-isometric.md",
+      "engine": "three",
+      "engines": [
+        "three"
+      ],
+      "engineNote": "three.js WebGLRenderer + three/addons 后处理（UnrealBloom 辉光、阴影贴图），等轴场景是真 3D。",
+      "engineFiles": [
+        "demos/03-isometric/js/main.js",
+        "demos/03-isometric/js/night5.js",
+        "demos/03-isometric/js/render.js",
+        "demos/03-isometric/js/title.js",
+        "demos/03-isometric/js/title5.js",
+        "demos/03-isometric/js/ui.js",
+        "demos/03-isometric/js/world.js"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 1,
+          "shutter": 0.5
+        },
+        "transitions": "wipe",
+        "impact": false,
+        "camera": true,
+        "grain": {
+          "size": null
+        },
+        "secondary": [
+          "pulse",
+          "ripple",
+          "bounce"
+        ],
+        "feather": false,
+        "files": [
+          "demos/03-isometric/js/anim.js",
+          "demos/03-isometric/js/main.js",
+          "demos/03-isometric/js/render.js",
+          "demos/03-isometric/js/title5.js",
+          "demos/03-isometric/js/ui.js",
+          "demos/03-isometric/js/world.js"
+        ]
+      }
+    },
+    {
+      "slug": "05-cel-boil",
+      "name": "逐帧手绘·线条沸腾",
+      "en": "Cel / Line Boil",
+      "heading": "逐帧手绘 / 线条沸腾 Cel Animation / Frame-by-Frame & Line Boil",
+      "oneLiner": "一拍二的纸上手绘：每换一张画墨线重抖一次，填色故意错位 5px，唯一饱和色是番茄红。",
+      "shot": "手作 HAND MADE · 1920×1080 · 24 fps · 10 秒 · AI 评审终评 8.07 / 10",
+      "tags": [
+        "手绘",
+        "逐帧",
+        "线条沸腾",
+        "抖动",
+        "动画片",
+        "cel",
+        "boil",
+        "hand-drawn",
+        "frame-by-frame"
+      ],
+      "signature": [
+        "线条每换一张画就重抖一次（simplex 噪声平移中线，±2.4px）",
+        "一拍二：每张画停 2 帧，开场只循环 4 张",
+        "填色层整体偏移 (-5, +4)px，墨线压在填色上",
+        "可变宽墨线：撇从 1.12 倍收到 0.5 倍，钩在末端收细",
+        "纸是两层：放大 1.045 的纸底 + multiply 的纸齿，位置随画号换"
+      ],
+      "palette": {
+        "page": "#f4e9d0",
+        "surface": "#fff6e2",
+        "field": "#ffc425",
+        "text": "#1c1613",
+        "muted": "#d9573f",
+        "accent": "#e5402b",
+        "border": "#e0cba6"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#f4e9d0",
+        "#fff6e2",
+        "#1c1613",
+        "#e5402b",
+        "#ffc425",
+        "#d9573f"
+      ],
+      "fonts": {
+        "display": "\"Caveat\",\"LXGW Marker Gothic\",\"Long Cang\",\"Noto Sans SC\",sans-serif",
+        "text": "\"LXGW Marker Gothic\",\"Long Cang\",\"Noto Sans SC\",sans-serif",
+        "mono": "\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 120,
+        "fps": 24,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 2
+      },
+      "prompt": "prompts/05-cel-boil.md",
+      "demos": [
+        "demos/05-cel-boil/cues.json",
+        "demos/05-cel-boil/index.html",
+        "demos/05-cel-boil/js/engine.js",
+        "demos/05-cel-boil/js/scene.js"
+      ],
+      "brief": "briefs/05-cel-boil.md",
+      "engine": "canvas2d",
+      "engines": [
+        "canvas2d"
+      ],
+      "engineNote": "Canvas2D 多缓冲逐帧重绘：线条抖动与曝光跳变靠每帧重画，不是滤镜。",
+      "engineFiles": [
+        "demos/05-cel-boil/js/engine.js",
+        "demos/05-cel-boil/js/scene.js"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 1,
+          "shutter": 0.5
+        },
+        "transitions": "cut",
+        "impact": false,
+        "camera": true,
+        "grain": {
+          "size": null
+        },
+        "secondary": [
+          "flap",
+          "smear",
+          "trail",
+          "bounce"
+        ],
+        "feather": false,
+        "files": [
+          "demos/05-cel-boil/js/scene.js"
+        ]
+      }
+    },
+    {
+      "slug": "06-collage",
+      "name": "拼贴剪贴·撕纸印刷",
+      "en": "Collage / Cutout",
+      "heading": "拼贴剪贴 Collage / Cutout Animation",
+      "oneLiner": "牛皮纸上的撕边剪贴与半调印刷，所有动作量化到 12fps，每个元素自己会抖。",
+      "shot": "NOGGIN 脑洞季刊「脑洞大开 The Mind Is a Collage」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 8.14 / 10",
+      "tags": [
+        "拼贴",
+        "剪纸",
+        "剪报",
+        "纸张",
+        "胶带",
+        "编辑",
+        "collage",
+        "cutout",
+        "zine",
+        "paper"
+      ],
+      "signature": [
+        "运动量化到 12fps（30/12=2.5 帧一步，实际 2 帧、3 帧交替）",
+        "每个元素独立抖动 ±2px / ±0.4°，静止元素降到 6fps、±1.1px",
+        "白描边是「剪」出来的：沿半径 3.5px 的圆画 28 遍再 source-in",
+        "贴上去有 lift：先放大 1.38，落点过冲 0.972 再回弹 1.01",
+        "影子随 lift 变：blur 5→39px、offset 3→27px、alpha 0.36→0.44"
+      ],
+      "palette": {
+        "page": "#F2ECDF",
+        "surface": "#EFE8DA",
+        "field": "#E3CFAE",
+        "text": "#16130F",
+        "muted": "#7A5516",
+        "accent": "#D2261C",
+        "border": "#C4A077"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#F2ECDF",
+        "#EFE8DA",
+        "#E3CFAE",
+        "#16130F",
+        "#7A5516",
+        "#D2261C",
+        "#C4A077"
+      ],
+      "fonts": {
+        "display": "\"Anton\",\"Noto Serif SC\",sans-serif",
+        "text": "\"Noto Serif SC\",\"Noto Sans SC\",serif",
+        "mono": "\"IBM Plex Mono\",\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 90,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 3
+      },
+      "prompt": "prompts/06-collage.md",
+      "demos": [
+        "demos/06-collage/assets/gen/layout.json",
+        "demos/06-collage/cues.json",
+        "demos/06-collage/index.html"
+      ],
+      "brief": "briefs/06-collage.md",
+      "engine": "canvas2d",
+      "engines": [
+        "canvas2d"
+      ],
+      "engineNote": "Canvas2D 拼贴：纸张纹理、撕边、胶带都在 2D 画布里合成。",
+      "engineFiles": [
+        "demos/06-collage/index.html"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 1,
+          "shutter": 0.5
+        },
+        "transitions": "cut",
+        "impact": false,
+        "camera": true,
+        "grain": {
+          "size": null
+        },
+        "secondary": [
+          "flap",
+          "smear",
+          "trail"
+        ],
+        "feather": false,
+        "files": [
+          "demos/06-collage/index.html"
+        ]
+      }
+    },
+    {
+      "slug": "07-liquid",
+      "name": "液态流动·棚拍稠液",
+      "en": "Liquid Motion",
+      "heading": "液态流动 Liquid Motion",
+      "oneLiner": "暗紫棚里的稠液体：橙粉紫按厚度混色，落地压扁回弹，最后把液滴拉成字形。",
+      "shot": "drop.「万物始于一滴」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.57 / 10",
+      "tags": [
+        "液态",
+        "流体",
+        "形变",
+        "金属",
+        "粘稠",
+        "抽象",
+        "liquid",
+        "fluid",
+        "gooey",
+        "metaball"
+      ],
+      "signature": [
+        "只有一种材质：稠液体，球缘 1–2px 高光唇线",
+        "内部按厚度三段插值 #FF5C0F → #FF1A70 → #8F1FFF",
+        "落地先压扁再回弹（spring），接触点留 splat 与 5–7 条 tendril",
+        "4.0s 三层洪流面各错 2 帧压上来，4.42s 沉进液体只剩涡流与气泡",
+        "6.4s 液滴拉成 4 个字形，7.2s glint 扫过，8.4s 一滴落下收尾"
+      ],
+      "palette": {
+        "page": "#371E3E",
+        "surface": "#4C2955",
+        "field": "#7C4684",
+        "text": "#FFE8F0",
+        "muted": "#FFC8E0",
+        "accent": "#FF5C0F",
+        "border": "#8F1FFF"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#FF5C0F",
+        "#FF1A70",
+        "#8F1FFF",
+        "#FFE8F0",
+        "#FFC8E0",
+        "#371E3E",
+        "#7C4684"
+      ],
+      "fonts": {
+        "display": "\"Fraunces\",\"Resource Han Rounded\",\"Noto Serif SC\",serif",
+        "text": "\"Noto Serif SC\",\"Inter\",serif",
+        "mono": "\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 150,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 2
+      },
+      "prompt": "prompts/07-liquid.md",
+      "demos": [
+        "demos/07-liquid/cues.json",
+        "demos/07-liquid/index.html",
+        "demos/07-liquid/js/engine.js",
+        "demos/07-liquid/js/links.js",
+        "demos/07-liquid/js/lookdev.js",
+        "demos/07-liquid/js/scene.js",
+        "demos/07-liquid/js/shaders.js",
+        "demos/07-liquid/js/textsdf.js",
+        "demos/07-liquid/js/type.js"
+      ],
+      "brief": "briefs/07-liquid.md",
+      "engine": "webgl2",
+      "engines": [
+        "webgl2",
+        "canvas2d"
+      ],
+      "engineNote": "原生 WebGL2 + GLSL 流体（engine.js 编译 shader、shaders.js 是片元源），文字用 Canvas2D 做 SDF。",
+      "engineFiles": [
+        "demos/07-liquid/js/engine.js",
+        "demos/07-liquid/js/textsdf.js",
+        "demos/07-liquid/js/type.js"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 1,
+          "shutter": 0.5
+        },
+        "transitions": "cut",
+        "impact": true,
+        "camera": true,
+        "grain": {
+          "size": null
+        },
+        "secondary": [
+          "trail",
+          "ripple",
+          "bounce"
+        ],
+        "feather": false,
+        "files": [
+          "demos/07-liquid/index.html",
+          "demos/07-liquid/js/engine.js",
+          "demos/07-liquid/js/scene.js",
+          "demos/07-liquid/js/shaders.js",
+          "demos/07-liquid/js/type.js"
+        ]
+      }
+    },
+    {
+      "slug": "08-morph",
+      "name": "一形万象·形变",
+      "en": "Morph",
+      "heading": "形变动画 Morphing / Shape Morph",
+      "oneLiner": "始终只有一个实心剪影：轮廓等点数重采样后逐点插值，必经圆形中介变出八个图标。",
+      "shot": "一形万象 One Shape, Every Story · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.64 / 10",
+      "tags": [
+        "形变",
+        "变形",
+        "转场",
+        "图标",
+        "无缝",
+        "morph",
+        "shape",
+        "transition",
+        "icon"
+      ],
+      "signature": [
+        "单形：永远一个实心剪影，无描边、无渐变、无阴影",
+        "变形靠等点数重采样（body 240 / 洞 72）+ 逐点 lerp，不是交叉淡化",
+        "中介形必过圆或胶囊（P.Ca/Cb）",
+        "每次落地压扁回弹：A·sin(2πτ/0.28)·e^(-7.5τ)，从落地前 2 帧起算",
+        "终场落在丝网印质感：纸纹 + 每帧偏移的 512² 颗粒 + 暗角"
+      ],
+      "palette": {
+        "page": "#F4EEE3",
+        "surface": "#E7E1D7",
+        "field": "#DED8CF",
+        "text": "#16151B",
+        "muted": "#908C89",
+        "accent": "#FF4F2B",
+        "border": "#D0CBC3"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#F4EEE3",
+        "#16151B",
+        "#FFB627",
+        "#FF4F2B",
+        "#2438E8",
+        "#D93A1C"
+      ],
+      "fonts": {
+        "display": "\"Outfit\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+        "text": "\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+        "mono": "\"IBM Plex Mono\",\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 150,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 25
+      },
+      "prompt": "prompts/08-morph.md",
+      "demos": [
+        "demos/08-morph/cues.json",
+        "demos/08-morph/glyphs.json",
+        "demos/08-morph/index.html"
+      ],
+      "brief": "briefs/08-morph.md",
+      "engine": "canvas2d",
+      "engines": [
+        "canvas2d"
+      ],
+      "engineNote": "Canvas2D 路径重采样：等点数轮廓逐点 lerp，中点必经圆形；变形是几何计算，不是形状补间滤镜。",
+      "engineFiles": [
+        "demos/08-morph/index.html"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 4,
+          "shutter": 0.5
+        },
+        "transitions": "wipe",
+        "impact": true,
+        "camera": true,
+        "grain": {
+          "size": 256
+        },
+        "secondary": [
+          "steam",
+          "flap",
+          "heartbeat",
+          "pulse",
+          "smear",
+          "trail",
+          "ripple"
+        ],
+        "feather": true,
+        "files": [
+          "demos/08-morph/index.html"
+        ]
+      }
+    },
+    {
+      "slug": "09-bauhaus",
+      "name": "几何构成·包豪斯",
+      "en": "Bauhaus / Geometric",
+      "heading": "几何构成 / 包豪斯 Geometric / Bauhaus Motion",
+      "oneLiner": "红黄蓝三原色 + 基础几何 + 严格 120px 网格，按拍切换的构成主义排版。",
+      "shot": "KONSTRUKTION · 20 SCHLÄGE「二十拍构成」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.71 / 10",
+      "tags": [
+        "包豪斯",
+        "几何",
+        "构成",
+        "网格",
+        "三原色",
+        "印刷",
+        "节拍",
+        "bauhaus",
+        "grid",
+        "swiss"
+      ],
+      "signature": [
+        "中央 8x8 网格（模数 120px）",
+        "只有纸/红/黄/蓝/墨五色",
+        "直角几何：正方形、四分之一圆、半圆、三角，无圆角矩形",
+        "每 15 帧一次状态切换，切换之间完全静止",
+        "四色套印偏移 2-4px + 纸纹"
+      ],
+      "palette": {
+        "page": "#F1E9DA",
+        "surface": "#EDE4D3",
+        "field": "#E8DECB",
+        "text": "#111111",
+        "muted": "#8C8172",
+        "accent": "#E03C31",
+        "border": "#D8CBB4"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#F1E9DA",
+        "#E03C31",
+        "#F2B705",
+        "#1E4FA3",
+        "#111111"
+      ],
+      "fonts": {
+        "display": "\"Anton\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+        "text": "\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+        "mono": "\"IBM Plex Mono\",\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 120,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 15
+      },
+      "prompt": "prompts/09-bauhaus.md",
+      "demos": [
+        "demos/09-bauhaus/cues.json",
+        "demos/09-bauhaus/film.js",
+        "demos/09-bauhaus/index.html"
+      ],
+      "brief": "briefs/09-bauhaus.md",
+      "engine": "webgl2",
+      "engines": [
+        "webgl2",
+        "canvas2d"
+      ],
+      "engineNote": "Canvas2D 出分色版（knockout plates），再进 WebGL2 做印刷套色 pass —— 两段都要在。",
+      "engineFiles": [
+        "demos/09-bauhaus/film.js"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 8,
+          "shutter": 0.5
+        },
+        "transitions": "cut",
+        "impact": false,
+        "camera": true,
+        "grain": {
+          "size": null
+        },
+        "secondary": [
+          "smear",
+          "ripple"
+        ],
+        "feather": false,
+        "files": [
+          "demos/09-bauhaus/film.js"
+        ]
+      }
+    },
+    {
+      "slug": "10-synthwave",
+      "name": "复古霓虹·合成器浪潮",
+      "en": "Synthwave / Y2K",
+      "heading": "复古系（80s Synthwave / Y2K 千禧） Retro: 80s Synthwave / VHS / Y2K",
+      "oneLiner": "深紫夜空下的透视霓虹网格与分层日落，镀铬标题砸入、手写霓虹点亮、全程 VHS 做旧。",
+      "shot": "NEON DRIVE · Midnight「霓虹夜驰 1986」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 8.21 / 10",
+      "tags": [
+        "复古",
+        "Synthwave",
+        "Y2K",
+        "霓虹",
+        "扫描线",
+        "铬字",
+        "蒸汽波",
+        "retro",
+        "vhs",
+        "chrome"
+      ],
+      "signature": [
+        "霓虹透视网格从地平线冲向镜头，靠 z 偏移取模滚动",
+        "日落是同一个圆切成 5–7 条横带，洋红→橙→黄，不是渐变球",
+        "双辉光：紧 4px 高亮 + 宽 30px 低透明",
+        "VHS 整链：RGB split 1–2px → 2px 扫描线 → 随机 glitch 抽帧 → 4:3 圆角遮罩 → CRT 关机",
+        "镀铬标题多段金属渐变 + bevel 高光 + 4 角星芒扫过"
+      ],
+      "palette": {
+        "page": "#120A2A",
+        "surface": "#2A1055",
+        "field": "#3A1A4E",
+        "text": "#F4F4FF",
+        "muted": "#8FF9FF",
+        "accent": "#FF2FB8",
+        "border": "#E6C465"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#120A2A",
+        "#2A1055",
+        "#FF2FB8",
+        "#8FF9FF",
+        "#EF933D",
+        "#E6C465",
+        "#F4F4FF"
+      ],
+      "fonts": {
+        "display": "\"Michroma\",\"Douyin Sans\",\"Noto Sans SC\",sans-serif",
+        "text": "\"Douyin Sans\",\"Noto Sans SC\",sans-serif",
+        "mono": "\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 100,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 18
+      },
+      "prompt": "prompts/10-synthwave.md",
+      "demos": [
+        "demos/10-synthwave/cues.json",
+        "demos/10-synthwave/index.html"
+      ],
+      "brief": "briefs/10-synthwave.md",
+      "engine": "three",
+      "engines": [
+        "three"
+      ],
+      "engineNote": "three.js + EffectComposer 后处理（bloom、扫描线、色差），霓虹网格与铬字是真 3D 场景。",
+      "engineFiles": [
+        "demos/10-synthwave/index.html"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 1,
+          "shutter": 0.5
+        },
+        "transitions": "cut",
+        "impact": false,
+        "camera": true,
+        "grain": null,
+        "secondary": [
+          "pulse",
+          "smear",
+          "trail",
+          "ripple"
+        ],
+        "feather": false,
+        "files": [
+          "demos/10-synthwave/index.html"
+        ]
+      }
+    },
+    {
+      "slug": "12-aurora-glass",
+      "name": "弥散渐变·玻璃拟态",
+      "en": "Aurora / Glassmorphism",
+      "heading": "弥散渐变 / 玻璃拟态 Gradient Blur (Aurora) & Glassmorphism",
+      "oneLiner": "近黑底上 7 块色斑缓慢漂移，玻璃卡带 1px 内描边与近边折射，一切都慢。",
+      "shot": "Aurora — think in light「思考，自有光」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 8.07 / 10",
+      "tags": [
+        "渐变",
+        "极光",
+        "玻璃",
+        "毛玻璃",
+        "弥散",
+        "光晕",
+        "UI",
+        "aurora",
+        "glass",
+        "gradient",
+        "blur"
+      ],
+      "signature": [
+        "底色 #040312，亮部全靠加色色斑，没有提亮的灰",
+        "7 块无边色斑，24–40s 闭环漂移，强度 0.32–1.15",
+        "玻璃 = 30px backdrop 模糊 + 7% 白 + 1px 白内描边 + 13px 近边折射",
+        "80BPM，最短动作 0.75s，没有 120ms 以下的跳变",
+        "文字只做 opacity + 8px 上浮，从不缩放旋转"
+      ],
+      "palette": {
+        "page": "#040312",
+        "surface": "#171043",
+        "field": "#0B0726",
+        "text": "#FFFFFF",
+        "muted": "#8C8CFF",
+        "accent": "#7050FF",
+        "border": "#FFFFFF"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#040312",
+        "#7050FF",
+        "#2F46F2",
+        "#34CFF0",
+        "#B653F0",
+        "#8C8CFF",
+        "#3320A8"
+      ],
+      "fonts": {
+        "display": "\"Sora\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+        "text": "\"Inter\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+        "mono": "\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 80,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 22
+      },
+      "prompt": "prompts/12-aurora-glass.md",
+      "demos": [
+        "demos/12-aurora-glass/cues.json",
+        "demos/12-aurora-glass/index.html",
+        "demos/12-aurora-glass/main.js",
+        "demos/12-aurora-glass/shaders.js"
+      ],
+      "brief": "briefs/12-aurora-glass.md",
+      "engine": "webgl2",
+      "engines": [
+        "webgl2"
+      ],
+      "engineNote": "原生 WebGL2 极光 shader（preserveDrawingBuffer），弥散光晕是片元着色器算出来的。",
+      "engineFiles": [
+        "demos/12-aurora-glass/main.js"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 1,
+          "shutter": 0.5
+        },
+        "transitions": "cut",
+        "impact": false,
+        "camera": true,
+        "grain": {
+          "size": null
+        },
+        "secondary": [
+          "ripple",
+          "bounce"
+        ],
+        "feather": false,
+        "files": [
+          "demos/12-aurora-glass/main.js",
+          "demos/12-aurora-glass/shaders.js"
+        ]
+      }
+    },
+    {
+      "slug": "18-hanazi",
+      "name": "综艺花字",
+      "en": "Variety Kinetic Captions",
+      "heading": "综艺花字 Variety Show Kinetic Captions (Hanazi)",
+      "oneLiner": "竖屏三层描边花字：白边 + 彩边 + 硬挤出，弹簧入场，字字都歪。",
+      "shot": "喵呜日记 EP.07「今日份快乐」 · 1080×1920 · 30 fps · 10 秒 · AI 评审终评 7.64 / 10",
+      "tags": [
+        "综艺",
+        "花字",
+        "字幕",
+        "贴纸",
+        "描边",
+        "弹跳",
+        "短视频",
+        "variety",
+        "caption",
+        "kinetic-type"
+      ],
+      "signature": [
+        "每字三层描边：白 7.6% / 彩 7.0% / 挤出 9.3%（相对 172px 字高）",
+        "逐字弹簧入场，第 5 帧峰值 1.15，8 帧到位，错峰 2 帧",
+        "所有花字带 -7°~+6° 歪斜与 ±16px 基线抖动",
+        "1080×1920 一行 5 字，字距 = 字高，不用 letter-spacing",
+        "装饰只有手绘几何：四角星/爆炸框/放射线/汗滴，无 emoji"
+      ],
+      "palette": {
+        "page": "#1B1B22",
+        "surface": "#1E2A78",
+        "field": "#0E1440",
+        "text": "#FFFFFF",
+        "muted": "#A9C4E0",
+        "accent": "#FFE14D",
+        "border": "#FFFFFF"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#1E2A78",
+        "#FFE14D",
+        "#FF3D7F",
+        "#1A1030",
+        "#2CCBF2",
+        "#FFFFFF",
+        "#FF9A1F"
+      ],
+      "fonts": {
+        "display": "\"Luckiest Guy\",\"Resource Han Rounded\",\"Noto Sans SC\",sans-serif",
+        "text": "\"Douyin Sans\",\"LXGW Marker Gothic\",\"Noto Sans SC\",sans-serif",
+        "mono": "\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 120,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "9:16",
+        "cutFrames": 15
+      },
+      "prompt": "prompts/18-hanazi.md",
+      "demos": [
+        "demos/18-hanazi/cues.json",
+        "demos/18-hanazi/index.html"
+      ],
+      "brief": "briefs/18-hanazi.md",
+      "engine": "canvas2d",
+      "engines": [
+        "canvas2d"
+      ],
+      "engineNote": "Canvas2D 花字与贴纸：描边、弹跳、逐字错峰都在画布里画。",
+      "engineFiles": [
+        "demos/18-hanazi/index.html"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 1,
+          "shutter": 0.5
+        },
+        "transitions": "wipe",
+        "impact": false,
+        "camera": true,
+        "grain": {
+          "size": null
+        },
+        "secondary": [
+          "smear"
+        ],
+        "feather": false,
+        "files": [
+          "demos/18-hanazi/index.html"
+        ]
+      }
+    },
+    {
+      "slug": "19-paperclip",
+      "name": "粗描边贴纸科普",
+      "en": "Sticker Explainer MG",
+      "heading": "粗描边贴纸人科普 MG（回形针/林超风格） Bold-outline Sticker Explainer MG (PaperClip / Lin Chao style)",
+      "oneLiner": "一块 2400×5900 的手机屏世界，镜头一路下飞，白描边贴纸配精确图表。",
+      "shot": "一部手机里，藏着多少种元素？ 70/118 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.71 / 10",
+      "tags": [
+        "科普",
+        "贴纸",
+        "粗描边",
+        "小人",
+        "手写",
+        "口播",
+        "paperclip",
+        "sticker",
+        "explainer"
+      ],
+      "signature": [
+        "世界是一块 2400×5900 的手机屏，#E9EEF2 底 + 48px 网点",
+        "没有切镜：16 个相机关键帧，z 从 1.06 压到 0.2",
+        "所有素材白描边 10px（长边的 2.3%），paint-order: stroke",
+        "章节头 = 20×20 橙方块 + 中文 30px + Inter 大写 .18em",
+        "只有 #25313D 墨 + #FF5A36 一个强调色，没有渐变填充"
+      ],
+      "palette": {
+        "page": "#1D2731",
+        "surface": "#E9EEF2",
+        "field": "#F7F9FB",
+        "text": "#25313D",
+        "muted": "#8C9AA8",
+        "accent": "#FF5A36",
+        "border": "#CDD6DE"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#25313D",
+        "#FF5A36",
+        "#E9EEF2",
+        "#F7F9FB",
+        "#8C9AA8",
+        "#C5CFD8",
+        "#1D2731"
+      ],
+      "fonts": {
+        "display": "\"Inter\",\"Noto Sans SC\",sans-serif",
+        "text": "\"Inter\",\"Noto Sans SC\",sans-serif",
+        "mono": "\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 120,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 15
+      },
+      "prompt": "prompts/19-paperclip.md",
+      "demos": [
+        "demos/19-paperclip/assets/countries-110m.json",
+        "demos/19-paperclip/assets/stickers/meta.json",
+        "demos/19-paperclip/cues.json",
+        "demos/19-paperclip/index.html"
+      ],
+      "brief": "briefs/19-paperclip.md",
+      "engine": "canvas2d",
+      "engines": [
+        "canvas2d"
+      ],
+      "engineNote": "Canvas2D 粗描边小人：手写感靠逐帧画路径，不是字体排版。",
+      "engineFiles": [
+        "demos/19-paperclip/index.html"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 1,
+          "shutter": 0.5
+        },
+        "transitions": "cut",
+        "impact": false,
+        "camera": true,
+        "grain": {
+          "size": null
+        },
+        "secondary": [],
+        "feather": false,
+        "files": [
+          "demos/19-paperclip/index.html"
+        ]
+      }
+    },
+    {
+      "slug": "20-pixel",
+      "name": "像素 8-bit·横版卷轴",
+      "en": "Pixel Art / 8-bit",
+      "heading": "像素风 Pixel Art / 8-bit",
+      "oneLiner": "每个像素是 6×6 输出方块，QUEST-32 色板配 4×4 Bayer 抖动的横版卷轴，外面套一层 CRT。",
+      "shot": "PIXEL QUEST 像素冒险 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 8.07 / 10",
+      "tags": [
+        "像素",
+        "8-bit",
+        "游戏",
+        "复古",
+        "网格",
+        "pixel",
+        "retro-game",
+        "sprite"
+      ],
+      "signature": [
+        "1 源像素 = 6×6 输出方块，全程无抗锯齿、无亚像素位移",
+        "同屏 ≤32 色，渐变只走 4×4 Bayer 抖动（天空 5 级色阶）",
+        "动作阶梯化：跑步 10fps、金币 15fps、星星 7.5fps",
+        "横向卷轴：主角钉在屏幕 x=96，四层视差 0.125/0.3/0.55/1.4",
+        "CRT 包住一切：桶形 k=0.03 + 按源像素行扫描线 + 8 向辉光 + 四角暗角"
+      ],
+      "palette": {
+        "page": "#1b1a33",
+        "surface": "#0d0b1a",
+        "field": "#2a2f5a",
+        "text": "#ffffff",
+        "muted": "#8cc8f5",
+        "accent": "#ffd166",
+        "border": "#5b9bea"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#0d0b1a",
+        "#1b1a33",
+        "#2a2f5a",
+        "#5b9bea",
+        "#ffd166",
+        "#ffffff",
+        "#d23c3c"
+      ],
+      "fonts": {
+        "display": "\"Press Start 2P\",\"Fusion Pixel 12\",monospace",
+        "text": "\"Fusion Pixel 12\",monospace",
+        "mono": "\"Press Start 2P\",\"Fusion Pixel 12\",monospace"
+      },
+      "rhythm": {
+        "bpm": 150,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 3
+      },
+      "prompt": "prompts/20-pixel.md",
+      "demos": [
+        "demos/20-pixel/cues.json",
+        "demos/20-pixel/film.js",
+        "demos/20-pixel/index.html"
+      ],
+      "brief": "briefs/20-pixel.md",
+      "engine": "webgl2",
+      "engines": [
+        "webgl2",
+        "canvas2d"
+      ],
+      "engineNote": "Canvas2D 低分辨率索引帧（320×180 语义槽 → LUT）再进 WebGL2 做 CRT 扫描线/色差 pass；像素颗粒来自真实低分辨率，不是后加滤镜。",
+      "engineFiles": [
+        "demos/20-pixel/film.js"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 1,
+          "shutter": 0.5
+        },
+        "transitions": "cut",
+        "impact": false,
+        "camera": true,
+        "grain": null,
+        "secondary": [
+          "bounce"
+        ],
+        "feather": false,
+        "files": [
+          "demos/20-pixel/film.js"
+        ]
+      }
+    },
+    {
+      "slug": "22-hud",
+      "name": "赛博 HUD·FUI",
+      "en": "Cyberpunk HUD / FUI",
+      "heading": "赛博朋克 HUD / FUI Cyberpunk HUD / FUI (Fictional UI)",
+      "oneLiner": "96% 的黑底上一束青，401px 扫描环配乱码定值的等宽数字，全程轻微 glitch。",
+      "shot": "隼眼-9 · 目标锁定 KESTREL-9 TARGET ACQUIRED · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.93 / 10",
+      "tags": [
+        "HUD",
+        "FUI",
+        "科幻",
+        "界面",
+        "数据",
+        "赛博",
+        "扫描",
+        "cyberpunk",
+        "fictional-ui",
+        "telemetry"
+      ],
+      "signature": [
+        "96% 画面是 #020A0D，只剩 1–1.5px 青线、11–21px 全大写等宽字与一束辉光",
+        "中央 401px 扫描环：40 段 4–34° 长短弧 + 四角 34px 直角框",
+        "数字先乱码后定值：scramble 5 帧、roll 4 帧、flick 4 帧才稳",
+        "一切都不太干净：3px 扫描线 ±5%、径向色差、54 条 glitch 切片、0.028 颗粒",
+        "锁定瞬间整屏压成橙调 vec3(1.0, 0.40, 0.0)"
+      ],
+      "palette": {
+        "page": "#020A0D",
+        "surface": "#0E3A42",
+        "field": "#0B7C8C",
+        "text": "#E8FEFF",
+        "muted": "#6B8C93",
+        "accent": "#00E5FF",
+        "border": "#FF2A1F"
+      },
+      "paletteSource": "brief",
+      "colors": [
+        "#020A0D",
+        "#0E3A42",
+        "#0B7C8C",
+        "#00E5FF",
+        "#E8FEFF",
+        "#FF2A1F",
+        "#FF2A8A"
+      ],
+      "fonts": {
+        "display": "\"Rajdhani\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+        "text": "\"Chakra Petch\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+        "mono": "\"JetBrains Mono\",monospace"
+      },
+      "rhythm": {
+        "bpm": 120,
+        "fps": 30,
+        "duration": 10,
+        "aspect": "16:9",
+        "cutFrames": 5
+      },
+      "prompt": "prompts/22-hud.md",
+      "demos": [
+        "demos/22-hud/cues.json",
+        "demos/22-hud/index.html",
+        "demos/22-hud/js/holo.js",
+        "demos/22-hud/js/hud.js",
+        "demos/22-hud/js/post.js",
+        "demos/22-hud/js/util.js",
+        "demos/22-hud/js/v5.js"
+      ],
+      "brief": "briefs/22-hud.md",
+      "engine": "three",
+      "engines": [
+        "three",
+        "canvas2d"
+      ],
+      "engineNote": "three.js 全息线框地球（holo.js）+ Canvas2D HUD 面板与数据流，3D 与 2D 两层叠加。",
+      "engineFiles": [
+        "demos/22-hud/index.html",
+        "demos/22-hud/js/holo.js",
+        "demos/22-hud/js/hud.js",
+        "demos/22-hud/js/v5.js"
+      ],
+      "motion": {
+        "motionBlur": {
+          "samples": 1,
+          "shutter": 0.5
+        },
+        "transitions": "wipe",
+        "impact": true,
+        "camera": true,
+        "grain": {
+          "size": null
+        },
+        "secondary": [
+          "pulse",
+          "smear",
+          "trail"
+        ],
+        "feather": false,
+        "files": [
+          "demos/22-hud/index.html",
+          "demos/22-hud/js/holo.js",
+          "demos/22-hud/js/hud.js",
+          "demos/22-hud/js/post.js",
+          "demos/22-hud/js/util.js",
+          "demos/22-hud/js/v5.js"
+        ]
+      }
+    }
+  ]
+}

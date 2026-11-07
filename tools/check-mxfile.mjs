@@ -119,7 +119,7 @@ const plain = parseMxfile(PLAIN)
   ok(Array.isArray(page2Parsed.doc.nodes) && page2Parsed.doc.nodes.length === 0, '夹具第 2 页是空 root')
   ok(/1 个分组\/容器/.test(notes) && /拖动容器会带走子节点/.test(notes), 'notes 说明分组可拖带子（层级仍保留）')
   ok(/1 个外链\/相对路径图片按矩形显示/.test(notes), 'notes 说明外链图片按矩形显示（单元原样保留）')
-  ok(/HTML 标签按纯文本/.test(notes), 'notes 说明 HTML 标签折成纯文本')
+  ok(/HTML 标签：文字节点支持部分富文本/.test(notes), 'notes 说明 HTML 支持范围')
   ok(/1 条边是悬空端/.test(notes), 'notes 说明有悬空端')
   ok(/1 条边的两端都找不到落点/.test(notes), 'notes 说明有边不显示但原样保留')
 }
@@ -710,7 +710,7 @@ console.log('\n[HTML 标签纯文本折算] &nbsp; / br / table')
   ok(byId.tbl1.label.indexOf('类型') >= 0 && byId.tbl1.label.indexOf('名字') >= 0 && byId.tbl1.label.indexOf('out') >= 0,
     '表格单元格文本都在：' + JSON.stringify(byId.tbl1.label))
   ok(/\n/.test(byId.tbl1.label) || /\s/.test(byId.tbl1.label), '表格粗折算保留行或列间距：' + JSON.stringify(byId.tbl1.label))
-  ok(parsed.notes.some((n) => /HTML 标签按纯文本/.test(n)), 'notes 仍说明 HTML 按纯文本')
+  ok(parsed.notes.some((n) => /HTML 标签：文字节点支持部分富文本/.test(n)), 'notes 说明 HTML 的部分支持范围')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')

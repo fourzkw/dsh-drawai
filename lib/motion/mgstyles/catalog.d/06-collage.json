@@ -1,0 +1,28 @@
+{
+  "slug": "06-collage",
+  "name": "拼贴剪贴·撕纸印刷",
+  "oneLiner": "牛皮纸上的撕边剪贴与半调印刷，所有动作量化到 12fps，每个元素自己会抖。",
+  "signature": [
+    "运动量化到 12fps（30/12=2.5 帧一步，实际 2 帧、3 帧交替）",
+    "每个元素独立抖动 ±2px / ±0.4°，静止元素降到 6fps、±1.1px",
+    "白描边是「剪」出来的：沿半径 3.5px 的圆画 28 遍再 source-in",
+    "贴上去有 lift：先放大 1.38，落点过冲 0.972 再回弹 1.01",
+    "影子随 lift 变：blur 5→39px、offset 3→27px、alpha 0.36→0.44"
+  ],
+  "palette": {
+    "page": "#F2ECDF",
+    "surface": "#EFE8DA",
+    "field": "#E3CFAE",
+    "text": "#16130F",
+    "muted": "#7A5516",
+    "accent": "#D2261C",
+    "border": "#C4A077"
+  },
+  "colors": ["#F2ECDF", "#EFE8DA", "#E3CFAE", "#16130F", "#7A5516", "#D2261C", "#C4A077"],
+  "fonts": {
+    "display": "\"Anton\",\"Noto Serif SC\",sans-serif",
+    "text": "\"Noto Serif SC\",\"Noto Sans SC\",serif",
+    "mono": "\"IBM Plex Mono\",\"JetBrains Mono\",monospace"
+  },
+  "rhythm": { "bpm": 90, "fps": 30, "duration": 10, "aspect": "16:9", "cutFrames": 3 }
+}

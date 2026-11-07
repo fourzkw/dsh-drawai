@@ -34,7 +34,7 @@ const check = (condition, message) => { assert.ok(condition, message); checks +=
   const audio = { currentTime: 0, readyState: 2, paused: true, src: '', play() { this.paused = false; return Promise.resolve() },
     pause() { this.paused = true }, removeAttribute() { this.src = '' }, load() {} }
   const h = harness((action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: Array(10).fill({}), fps: 10, sourceOffset: 2 } }
-    : action === 'media-source-bytes' ? { base64: 'AA==', mime: 'video/mp4' } : { svg }, { createAudio: () => audio })
+    : action === 'media-source-url' ? { url: '/video/test', mime: 'video/mp4' } : { svg }, { createAudio: () => audio })
   const c = h.controller
   await c.play(node('sound'), meta('sound'))
   check(audio.currentTime === 2 && !audio.paused && audio.muted === false, 'SVG audio starts at the selected source segment with sound enabled')
@@ -62,7 +62,7 @@ const check = (condition, message) => { assert.ok(condition, message); checks +=
   const requested = []
   const h = harness((action, body) => {
     if (action === 'media-manifest') return { hasSource: true, manifest: { frames: Array(80).fill({}), fps: 10, sourceOffset: 2 } }
-    if (action === 'media-source-bytes') return { base64: 'AA==', mime: 'video/mp4' }
+    if (action === 'media-source-url') return { url: '/video/test', mime: 'video/mp4' }
     if (action === 'media-frame') {
       requested.push(body.index)
       return body.index < 0 || body.index >= 80 ? null : { svg }
@@ -234,7 +234,7 @@ console.log('Video playback controller')
   finish({ hasSource: true, manifest: { frames: [] } })
   await pending
   check(c.get('fast').status === 'playing' && c.get('slow').status === 'idle', 'late loading response cannot replace a newer video')
-  check(!h.calls.some(([action, clip]) => clip === 'slow' && action === 'media-source-bytes'), 'cancelled loads do not fetch or allocate stale source data')
+  check(!h.calls.some(([action, clip]) => clip === 'slow' && action === 'media-source-url'), 'cancelled loads do not fetch or allocate stale source data')
   c.reset()
 }
 {

@@ -1,0 +1,268 @@
+/*
+ * 取「整片风格」上游 demo 的参考帧。
+ *
+ * brief 能写清色板与判据，但写不清动效：转场怎么擦、冲击有没有环、相机有没有抖、
+ * 颗粒是逐像素还是几百个点 —— 这些只有看帧才知道。这里用上游自带的服务端 + Chrome
+ * 打开 demos/<slug>/index.html，按 cues.json 的时间点调 renderAt(t) 截帧，交给模型当
+ * 对照物。缺字体/纸纹时用占位资源兜底，并记在 notes 里，不假装素材齐全。
+ */
+import {openBrowser} from '@remotion/renderer'
+import {existsSync,mkdirSync,readFileSync,statSync,writeFileSync} from 'node:fs'
+import {createServer} from 'node:http'
+import {extname,join,normalize,resolve,sep} from 'node:path'
+import {tmpdir} from 'node:os'
+import {fileURLToPath} from 'node:url'
+import {fontsDir, mediaLibraryRoot} from './asset-pack.js'
+import {fontFaces} from './fonts.js'
+
+const UPSTREAM = fileURLToPath(new URL('./mgstyles/upstream', import.meta.url))
+const DEMO_FONT_ALIASES = {
+  '/demos/03-isometric/assets/fonts/Unbounded-800-static.ttf': 'Unbounded',
+  '/demos/07-liquid/assets/Fraunces-Liquid-72-900-Soft.ttf': 'Fraunces',
+  '/demos/08-morph/assets/fonts/Outfit-SemiBold.ttf': 'Outfit',
+  '/demos/10-synthwave/assets/fonts/MrDafoe-Regular.ttf': 'Mr Dafoe',
+}
+// 上游 demo 的 importmap 指向 /node_modules/three/...、/node_modules/opentype.js/...，
+// 但这些包只在插件根目录的 node_modules 里。旧版只服务 upstream 目录，于是模块 404、
+// window.__ready 永不置真，最后报了句"没有在 120 秒内就绪"——错误信息指向了完全错误的地方。
+const MODULES = fileURLToPath(new URL('../../node_modules', import.meta.url))
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript',
+  '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ttf': 'font/ttf',
+  '.otf': 'font/otf', '.woff': 'font/woff', '.woff2': 'font/woff2', '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg', '.mp4': 'video/mp4', '.wasm': 'application/wasm', '.glb': 'model/gltf-binary',
+}
+
+// 1×1 透明 PNG：纸纹/贴图没 vendored 时先让页面能 decode 通过，画面里那块会是平的，notes 会写明。
+const PLACEHOLDER_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+// 字体没 vendored 时用系统字体顶上：document.fonts.load() 才不会 reject（字形本来就从 glyphs.json 来，
+// 参考帧里字的形状可能略有出入，但不会整页 init 失败）。
+const SYSTEM_FONT = [
+  ...(fontsDir() ? [join(fontsDir(), 'NotoSansSC-VF.ttf')] : []),
+  'C:/Windows/Fonts/segoeui.ttf',
+  'C:/Windows/Fonts/arial.ttf',
+  'C:/Windows/Fonts/msyh.ttc',
+].find((path) => existsSync(path))
+
+/** 素材库贴图目录：素材包没装好时返回 null。 */
+function texturesDir() {
+  const root = mediaLibraryRoot()
+  return root ? join(root, 'assets', 'textures') : null
+}
+
+function flattenNumbers(value, out) {
+  if (typeof value === 'number' && Number.isFinite(value)) out.push(value)
+  else if (Array.isArray(value)) for (const item of value) flattenNumbers(item, out)
+  else if (value && typeof value === 'object') for (const item of Object.values(value)) flattenNumbers(item, out)
+}
+
+function cueTimes(slug, duration) {
+  const file = join(UPSTREAM, 'demos', slug, 'cues.json')
+  if (!existsSync(file)) return []
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8'))
+    const out = []
+    // bpm/fps 是参数不是时间点；loop 是几何；它们混进来会截到片尾之外的空帧。
+    for (const [key, value] of Object.entries(raw)) {
+      if (/^(bpm|fps|loop)$/i.test(key)) continue
+      flattenNumbers(value, out)
+    }
+    const limit = Number.isFinite(duration) && duration > 0 ? duration - 0.04 : 60
+    return [...new Set(out.filter((t) => t >= 0.05 && t <= limit).map((t) => Math.round(t * 100) / 100))].sort((a, b) => a - b)
+  } catch {
+    return []
+  }
+}
+
+function pickTimes(slug, count, explicit, duration) {
+  if (Array.isArray(explicit) && explicit.length) {
+    const limit = Number.isFinite(duration) && duration > 0 ? duration : Infinity
+    return explicit.map(Number).filter((t) => Number.isFinite(t) && t >= 0 && t <= limit).slice(0, 24)
+  }
+  const cues = cueTimes(slug, duration)
+  const wanted = Math.max(1, Math.min(24, Math.floor(Number(count) || 8)))
+  if (cues.length >= wanted) {
+    // 均匀覆盖全片，同时尽量落在 cue 上（动作发生的那几帧信息量最大）
+    const min = cues[0], max = cues[cues.length - 1]
+    return Array.from({ length: wanted }, (_, i) => {
+      const target = min + ((max - min) * i) / Math.max(1, wanted - 1)
+      return cues.reduce((best, t) => (Math.abs(t - target) < Math.abs(best - target) ? t : best), cues[0])
+    })
+  }
+  const max = Number.isFinite(duration) && duration > 0 ? duration : 10
+  return Array.from({ length: wanted }, (_, i) => Math.round(((max * i) / Math.max(1, wanted - 1)) * 1000) / 1000)
+}
+
+// demo 的 importmap 指向 /node_modules/*，只有真装在本机的包才服务得出来。
+// 缺包时页面会静默卡在模块加载阶段，等到超时也只会说"没就绪"—— 这里提前查，几十毫秒就报清缺什么。
+function missingModules(slug) {
+  const html = join(UPSTREAM, 'demos', slug, 'index.html')
+  let text = ''
+  try { text = readFileSync(html, 'utf8') } catch { return [] }
+  const refs = [...text.matchAll(/["'](\/node_modules\/[^"']+)["']/g)].map((match) => match[1])
+  return [...new Set(refs)].filter((ref) => !existsSync(join(MODULES, ref.slice('/node_modules/'.length))))
+}
+
+function startStaticServer(misses) {
+  const roots = {vendor: resolve(MODULES), upstream: resolve(UPSTREAM)}
+  return new Promise((done) => {
+    const server = createServer((req, res) => {
+      try {
+        const pathname = decodeURIComponent(new URL(req.url, 'http://x').pathname)
+        if (pathname === '/assets/fonts/fonts.css') {
+          misses.push('/assets/fonts/fonts.css（使用 DrawAI 内置字体，部分上游字体或字重可能不同）')
+          res.writeHead(200, {'Content-Type': 'text/css; charset=utf-8'})
+          return res.end(fontFaces().map(face => '@font-face{font-family:' + JSON.stringify(face.family) + ';src:url(' + JSON.stringify('/__drawai-fonts/' + face.file) + ');font-weight:' + face.weight + ';font-style:' + face.style + ';font-display:block}').join('\n'))
+        }
+        if (pathname.startsWith('/__drawai-fonts/') && fontFaces().some(face => pathname === '/__drawai-fonts/' + face.file)) {
+          const file = join(fontsDir() || '', pathname.split('/').at(-1))
+          if (!existsSync(file)) { res.writeHead(404); return res.end('missing bundled font') }
+          res.writeHead(200, {'Content-Type': 'font/ttf'})
+          return res.end(readFileSync(file))
+        }
+        if (DEMO_FONT_ALIASES[pathname]) {
+          const face = fontFaces().find(item => item.family === DEMO_FONT_ALIASES[pathname] && item.style === 'normal')
+          if (face && existsSync(join(fontsDir() || '', face.file))) {
+            if (face.weight.includes(' ')) misses.push(pathname + '（使用同字体族可变字体，字重或轴值可能不同）')
+            res.writeHead(200, {'Content-Type': 'font/ttf'})
+            return res.end(readFileSync(join(fontsDir() || '', face.file)))
+          }
+        }
+        const vendor = pathname.startsWith('/node_modules/')
+        // 两条挂载点：/node_modules/* → 插件 node_modules；其余 → upstream。各自限制在自己目录内。
+        const root = vendor ? roots.vendor : roots.upstream
+        const relative = vendor ? pathname.slice('/node_modules'.length) : pathname
+        let file = resolve(join(root, normalize(relative)))
+        if (file !== root && !file.startsWith(root + sep)) { res.writeHead(403); return res.end('403') }
+        if (existsSync(file) && statSync(file).isDirectory()) file = join(file, 'index.html')
+        // Shared upstream textures are packaged separately from the text-only demo tree.
+        if (!vendor && !existsSync(file) && pathname.startsWith('/assets/textures/')) {
+          const tdir = texturesDir()
+          const texture = tdir ? resolve(tdir, pathname.slice('/assets/textures/'.length)) : ''
+          if (tdir && texture.startsWith(resolve(tdir) + sep) && existsSync(texture)) file = texture
+        }
+        if (!existsSync(file)) {
+          misses.push(pathname)
+          // 模块缺失不能给占位：给个假的 three.module.js 只会让页面以更难懂的方式失败。
+          if (vendor) { res.writeHead(404); return res.end('404 ' + pathname) }
+          // 字体/纸纹/贴图没 vendor：CSS 给空表，图片给 1px 占位，其余 404（页面会走 fallback）
+          if (/\.css$/i.test(pathname)) { res.writeHead(200, {'Content-Type': 'text/css'}); return res.end('/* placeholder */') }
+          if (/\.(png|jpe?g|webp)$/i.test(pathname)) { res.writeHead(200, {'Content-Type': MIME[extname(file).toLowerCase()] || 'image/png'}); return res.end(PLACEHOLDER_PNG) }
+          if (/\.(ttf|otf|woff2?)$/i.test(pathname) && SYSTEM_FONT) {
+            res.writeHead(200, {'Content-Type': 'font/ttf'})
+            return res.end(readFileSync(SYSTEM_FONT))
+          }
+          res.writeHead(404); return res.end('404 ' + pathname)
+        }
+        res.writeHead(200, {'Content-Type': MIME[extname(file).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-store'})
+        res.end(readFileSync(file))
+      } catch (error) {
+        res.writeHead(500); res.end(String(error))
+      }
+    })
+    server.listen(0, '127.0.0.1', () => done(server))
+  })
+}
+
+function findChrome(browserExecutable) {
+  return [browserExecutable, process.env.DRAWAI_CHROME_PATH,
+    'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+    'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find((path) => path && existsSync(path))
+}
+
+export async function captureStyleFrames({slug, times: explicitTimes, count = 8, browserExecutable, directory, signal} = {}) {
+  if (typeof slug !== 'string' || !/^[a-z0-9][a-z0-9-]*$/i.test(slug)) throw new Error('slug 无效：' + slug)
+  const demo = join(UPSTREAM, 'demos', slug)
+  if (!existsSync(join(demo, 'index.html'))) throw new Error('这个风格没有可截帧的上游 demo：' + slug + '（只有说明、没有 index.html）')
+  const missing = missingModules(slug)
+  if (missing.length) {
+    throw new Error('这个 demo 的依赖没装在本机（' + missing.join(', ') + '），页面加载不到模块，截不了帧。'
+      + '三条路：① 改用 action:"source" 读 demos/' + slug + '/ 下的源码与 cues.json 反推动效（多数情况够用）；'
+      + '② 在插件目录跑 `npm i --no-save opentype.js simplex-noise topojson-client d3` 后重试（这几个包只为截参考帧，不进 package.json）；'
+      + '③ 换一个不依赖它们的 demo。')
+  }
+
+  const misses = []
+  const server = await startStaticServer(misses)
+  const port = server.address().port
+  const executable = findChrome(browserExecutable)
+  signal?.throwIfAborted()
+  const browser = await openBrowser('chrome', {browserExecutable: executable, logLevel: 'error'})
+  try {
+    const page = await browser.newPage({context: () => null, logLevel: 'error', indent: false, pageIndex: 0, onBrowserLog: null, onLog: () => {}})
+    await page.setViewport({width: 1920, height: 1080, deviceScaleFactor: 1})
+    await page.goto({url: 'http://127.0.0.1:' + port + '/demos/' + slug + '/index.html', timeout: 60000})
+    // 就绪等待 30 秒：实测最慢的能截的 demo 8.4 秒就绪；真出问题的页面不会在第 31 秒突然变好。
+    // 超时要把"缺了哪些资源"一起报出来，并分清是缺 npm 包还是上游素材没 vendored——两者的处理办法不一样。
+    try {
+      await page.evaluate(() => new Promise((resolve, reject) => {
+        const started = Date.now()
+        const tick = () => {
+          if (window.__ready === true) return resolve(true)
+          if (Date.now() - started > 30000) return reject(new Error('__timeout__'))
+          setTimeout(tick, 100)
+        }
+        tick()
+      }))
+    } catch {
+      const lost = [...new Set(misses)]
+      const modules = lost.filter((path) => path.startsWith('/node_modules/')).slice(0, 4)
+      const assets = lost.filter((path) => !path.startsWith('/node_modules/') && !/favicon|fonts\.css/.test(path)).slice(0, 4)
+      throw new Error('上游 demo 没有就绪（30 秒）'
+        + (modules.length ? '；缺 npm 包：' + modules.join(', ') : '')
+        + (assets.length ? '；缺上游素材：' + assets.join(', ') + '（这些没有 vendored，不是配置问题）' : '')
+        + (modules.length || assets.length ? '' : '；模块可能抛错')
+        + '。改用 action:"source" 读 demos/' + slug + '/ 下的源码与 cues.json 反推动效，通常比等截帧更省事。')
+    }
+    const meta = await page.evaluate(() => ({
+      width: window.DEMO?.width || 1920,
+      height: window.DEMO?.height || 1080,
+      fps: window.DEMO?.fps || 30,
+      duration: window.DEMO?.duration || 10,
+      hasRenderAt: typeof window.renderAt === 'function',
+    }))
+    if (!meta.hasRenderAt) throw new Error('这个 demo 没有 window.renderAt(t)，无法按时间取帧；改用 action:"source" 读源码')
+    const width = Math.max(320, Math.min(2560, Math.round(meta.width)))
+    const height = Math.max(240, Math.min(1440, Math.round(meta.height)))
+    const fps = Math.max(1, Math.round(meta.fps || 30))
+    await page.setViewport({width, height, deviceScaleFactor: 1})
+    const times = pickTimes(slug, count, explicitTimes, Number(meta.duration) || 10)
+    if (!times.length) throw new Error('没有可用的时间点（cues.json 里的时间都超出片长）')
+
+    const dir = directory || join(tmpdir(), 'dsh-drawai', 'style-frames', slug)
+    mkdirSync(dir, {recursive: true})
+    const files = []
+    for (const [index, t] of times.entries()) {
+      signal?.throwIfAborted()
+      await page.evaluate(async (time, fpsValue) => {
+        await window.renderAt?.(time)
+        // 两帧 rAF：让画面里基于 frame 的绘制与 CSS/WAAPI 都落到同一时刻
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 30))))
+        void fpsValue
+      }, t, fps)
+      const result = await page._client().send('Page.captureScreenshot', {
+        format: 'png', captureBeyondViewport: false,
+        clip: {x: 0, y: 0, width, height, scale: 1},
+      })
+      const data = Buffer.from((result.value || result).data, 'base64')
+      if (data.length > 12 * 1024 * 1024) throw new Error('参考帧体积过大：' + t + 's')
+      const file = join(dir, 'frame-' + String(index).padStart(2, '0') + '-' + t.toFixed(2) + 's.png')
+      writeFileSync(file, data)
+      files.push({time: t, frame: Math.round(t * fps), path: file, bytes: data.length})
+    }
+    const notes = []
+    if (misses.length) notes.push('缺上游资源（已用占位兜底，画面里的字体/纸纹可能与原片不同）：' + [...new Set(misses)].slice(0, 8).join(', '))
+    notes.push('这些是参考帧：写场景前逐张看，按 STYLE.md 的效果配方逐项对照（转场/冲击/相机/颗粒/二次运动），别只对"形"。')
+    return {slug, width, height, fps, duration: meta.duration, times, directory: dir, files, notes}
+  } finally {
+    await browser.close({silent: true}).catch(() => {})
+    await new Promise((done) => server.close(done))
+  }
+}
