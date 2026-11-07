@@ -43,7 +43,7 @@ const MXFILE_PATH = 'src/mxfile.js'
  * 抛 MODULE_NOT_FOUND —— 而那一刻插件已经"装好了"，报错在启动期，很难联想到构建。
  * 所以新增这类模块时：源文件放 src/、在这里登记一行，构建器同时做存在性校验。
  */
-const HOST_ONLY_MODULES = ['src/shotcard-core.js', 'src/mgstyle-core.js', 'src/shotcard-reference.js', 'src/motion-session.js', 'src/motion-library.js', 'src/motion-source.js', 'src/motion-project.js', 'src/motion-core.js', 'src/motion-tasks.js', 'src/motion-render-worker.js', 'src/document-core.js', 'src/document-commands.js', 'src/canvas-format.js', 'src/raster.js', 'src/trace-image.js', 'src/media.js', 'src/video-trace-worker.js', 'src/video-trace-pool.js', 'src/video-export.js', 'src/video-export-worker.js', 'src/performance-log.js', 'src/performance-metrics.js', 'src/video-trace-reuse.js', 'src/task-coordinator.js', 'src/task-patches.js', 'src/drawing-tasks.js', 'src/drawing-runner.js', 'src/drawing-results.js', 'src/comfyui-workflow.mjs', 'src/comfyui-default-workflow.mjs', 'src/imagegen.mjs']
+const HOST_ONLY_MODULES = ['src/ffmpeg-manager.js', 'src/shotcard-core.js', 'src/mgstyle-core.js', 'src/shotcard-reference.js', 'src/motion-session.js', 'src/motion-library.js', 'src/motion-source.js', 'src/motion-project.js', 'src/motion-core.js', 'src/motion-tasks.js', 'src/motion-render-worker.js', 'src/document-core.js', 'src/document-commands.js', 'src/canvas-format.js', 'src/raster.js', 'src/trace-image.js', 'src/media.js', 'src/video-trace-worker.js', 'src/video-trace-pool.js', 'src/video-export.js', 'src/video-export-worker.js', 'src/performance-log.js', 'src/performance-metrics.js', 'src/video-trace-reuse.js', 'src/task-coordinator.js', 'src/task-patches.js', 'src/drawing-tasks.js', 'src/drawing-runner.js', 'src/drawing-results.js', 'src/comfyui-workflow.mjs', 'src/comfyui-default-workflow.mjs', 'src/imagegen.mjs']
 HOST_ONLY_MODULES.push('src/motion-capture.js', 'src/motion-film-review.js', 'src/motion-agent-protocol.js', 'src/motion-agent-files.js', 'src/motion-vision.js', 'src/audio-media.js', 'src/audio-service.js')
 
 
@@ -116,7 +116,7 @@ export function composeClientBody() {
     + 'const mgCatalog = ' + mgCatalogJson.replaceAll('`', '\\u0060') + ';\n' + mgCore + '\n' + readFileSync('src/motion-core.js', 'utf8').replace(/^import .*$/gm, '').replace(/^export /gm, '')
   return kernelInline() + routingInline() + '\nconst motionCore = (() => {\n' + motion + '\nreturn { catalog, shotCatalog, mgCatalog, resolveShotStyle, searchShotCards, isShotCardNode, shotCardData, shotCardSelections, resolveMgStyle, searchMgStyles, isMgStyleNode, mgStyleData, mgStyleSelection, MOTION_ROLES, isAudioNode, audioNodeData, audioNodeSettings, validateAudioTimeline, motionSettings, isMotionNode, motionNodeData, bindMotionReference, motionReferenceEdges, motionReferenceRole, motionInput, motionInputKey, assertMotionEditable, validateMotionPlan, applyMotionResult }\n})()\n' + '\nconst documentCore = (() => {\nconst normalizeDrawioDoc = styleKernel.normalizeDrawioDoc\n' + documentCore + '\nreturn { cloneDocument, emptyDocument, normalizeDocument, documentTransaction }\n})()\n' + commands.replaceAll('documentTransaction(current,', 'documentCore.documentTransaction(current,') + '\nconst documentCommands = createDocumentCommands({ mutate: (draft, command) => command.mutate(draft) })\n' + '\n\nfunction applyTaskPatches' + patches + '\n\n' + timing + '\n\n' + queue + '\nconst drawingQueue = createDrawingQueue()\n\nconst canvasSessions = (() => {\n' + sessions +
     '\nreturn createCanvasSessionStore({ onClose: (sessionId, path) => drawingQueue.closeScope(sessionId, path), onDispose: () => drawingQueue.dispose(), onApplied: (id) => drawingQueue.applied(id), onSaved: (id) => drawingQueue.saved(id), onRestore: (id) => drawingQueue.restore(id) })\n})()\n\nconst videoPlayer = (() => {\n' + player +
-    '\nreturn { createVideoController, VideoSurface, VideoControls, VideoPreview }\n})()\n\n' + readFileSync('src/background-task-panel.js', 'utf8') + '\n' + readFileSync('src/audio-panel.js', 'utf8') + '\n' + readFileSync('src/motion-panel.js', 'utf8') + '\n' + readFileSync('src/shotcard-panel.js', 'utf8') + '\n' + readFileSync('src/mgstyle-panel.js', 'utf8') + '\n\n' + body
+    '\nreturn { createVideoController, VideoSurface, VideoControls, VideoPreview }\n})()\n\n' + readFileSync('src/background-task-panel.js', 'utf8') + '\n' + readFileSync('src/audio-panel.js', 'utf8') + '\n' + readFileSync('src/motion-panel.js', 'utf8') + '\n' + readFileSync('src/shotcard-panel.js', 'utf8') + '\n' + readFileSync('src/mgstyle-panel.js', 'utf8') + '\n' + readFileSync('src/table-node.js', 'utf8') + '\n\n' + body
 }
 
 /** 从内核尾部的 `export { ... }` 列表里取出符号名（单源：符号表不用手抄第二遍）。 */
@@ -291,6 +291,7 @@ export function buildAll() {
 
   assertParses([
     'lib/index.js',
+    'lib/client.js',
     'lib/style-kernel.js',
     'lib/mxfile.js',
     ...HOST_ONLY_MODULES.map((source) => source.replace(/^src\//, 'lib/')),

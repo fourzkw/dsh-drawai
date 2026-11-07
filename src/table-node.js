@@ -7,22 +7,23 @@ function parseCanvasTable(node) {
   const escaped = !!(node.data && node.data.drawaiTableEscaped === '1')
   const split = (line) => {
     const input = line.trim()
-    if (!input.startsWith('|') || !input.endsWith('|')) return null
-    const cells = []; let value = ''
-    for (let i = 1; i < input.length - 1; i++) {
+    if (!input.startsWith('|')) return null
+    const cells = []; let value = ''; let lastSeparator = false
+    for (let i = 1; i < input.length; i++) {
       const ch = input[i]
-      if (escaped && ch === '\\' && i + 1 < input.length - 1) {
+      if (escaped && ch === '\\' && i + 1 < input.length) {
         const next = input[++i]
         value += next === 'n' ? '\n' : next === '|' || next === '\\' ? next : '\\' + next
-      } else if (ch === '|') { cells.push(value.trim()); value = '' }
-      else value += ch
+        lastSeparator = false
+      } else if (ch === '|') { cells.push(value.trim()); value = ''; lastSeparator = true }
+      else { value += ch; if (!/\s/.test(ch)) lastSeparator = false }
     }
-    cells.push(value.trim())
+    if (!lastSeparator || value.trim()) cells.push(value.trim())
     return cells
   }
   const header = split(lines[0]), separator = split(lines[1])
   if (!header || header.length < 2 || !separator || separator.length !== header.length ||
-      !separator.every(cell => /^:?-{3,}:?$/.test(cell))) return null
+      !separator.every(cell => /^:?-{2,}:?$/.test(cell))) return null
   const rows = [header]
   for (const line of lines.slice(2)) {
     if (!line.trim()) continue
@@ -78,4 +79,31 @@ function tableNodeSvg(node, geo, model) {
     y += row.height
   })
   return children
+}
+
+function TableNodeEditor(props) {
+  const [model, setModel] = React.useState(() => ({ ...props.model, rows: props.model.rows.map(row => row.slice()) }))
+  const [activeRow, setActiveRow] = React.useState(1)
+  const [activeColumn, setActiveColumn] = React.useState(0)
+  const update = (r, c, value) => setModel(prev => ({ ...prev, rows: prev.rows.map((row, i) => i === r ? row.map((v, j) => j === c ? value : v) : row) }))
+  const addRow = () => setModel(prev => ({ ...prev, rows: prev.rows.concat([prev.rows[0].map(() => '')]) }))
+  const deleteRow = () => { if (activeRow < 1) return; setModel(prev => ({ ...prev, rows: prev.rows.filter((_, i) => i !== activeRow) })); setActiveRow(0) }
+  const addColumn = () => setModel(prev => ({ ...prev, rows: prev.rows.map(row => row.concat('')) }))
+  const deleteColumn = () => { if (model.rows[0].length <= 2) return; setModel(prev => ({ ...prev, rows: prev.rows.map(row => row.filter((_, i) => i !== activeColumn)) })); setActiveColumn(0) }
+  return React.createElement('div', { className: 'drawai-table-editor', role: 'dialog', 'aria-label': '编辑表格',
+    onPointerDown: e => e.stopPropagation(), onDoubleClick: e => e.stopPropagation(), onKeyDown: e => { e.stopPropagation(); if (e.key === 'Escape') props.onCancel(); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); props.onSave(model) } } },
+    React.createElement('div', { className: 'drawai-table-editor-bar' },
+      React.createElement('strong', null, model.heading || '编辑表格'),
+      React.createElement('button', { type: 'button', onClick: addRow }, '添加行'),
+      React.createElement('button', { type: 'button', onClick: deleteRow, disabled: activeRow < 1 }, '删除当前行'),
+      !model.storyboard && React.createElement('button', { type: 'button', onClick: addColumn }, '添加列'),
+      !model.storyboard && React.createElement('button', { type: 'button', onClick: deleteColumn, disabled: model.rows[0].length <= 2 }, '删除当前列'),
+      React.createElement('button', { type: 'button', onClick: props.onCancel }, '取消'),
+      React.createElement('button', { type: 'button', onClick: () => props.onSave(model) }, '保存')),
+    props.hasFormatting && React.createElement('p', { className: 'drawai-table-note' }, '修改单元格会清除原文字的局部样式。'),
+    React.createElement('div', { className: 'drawai-table-scroll' },
+      React.createElement('table', null, React.createElement('tbody', null,
+        model.rows.map((row, r) => React.createElement('tr', { key: r }, row.map((value, c) => React.createElement(r ? 'td' : 'th', { key: c },
+          React.createElement('textarea', { 'aria-label': (r ? '第' + r + '行' : '表头') + '第' + (c + 1) + '列', value, rows: 3,
+            onFocus: () => { setActiveRow(r); setActiveColumn(c) }, onChange: e => update(r, c, e.target.value) })))))))))
 }

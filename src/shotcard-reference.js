@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { ffmpegBinary } from './video-export.js'
+import { ensureFfmpeg } from './ffmpeg-manager.js'
 import { motionCardContract } from './motion-library.js'
 const exec = promisify(execFile)
 
@@ -29,7 +29,7 @@ export async function prepareReferenceFrames(composition, directory, options = {
         }
         writeFileSync(video + '.tmp', Buffer.concat(chunks)); renameSync(video + '.tmp', video)
       }
-      const binary = options.ffmpegPath || ffmpegBinary()
+      const binary = options.ffmpegPath || await ensureFfmpeg({ signal: options.signal })
       let info = ''
       try { const probe = await exec(binary, ['-hide_banner', '-i', video], { windowsHide: true, timeout: 15000, signal: options.signal }); info = probe.stderr }
       catch (error) { info = error.stderr || ''; if (!info) throw error }

@@ -13,7 +13,7 @@ import { promisify } from 'node:util'
 import { open as openFile } from 'node:fs/promises'
 import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { basename, extname, join } from 'node:path'
-import { ffmpegBinary } from '../video-export.js'
+import { ensureFfmpeg } from '../ffmpeg-manager.js'
 import { parseProjectJson } from './json.js'
 
 const exec = promisify(execFile)
@@ -27,8 +27,9 @@ const MAX_BYTES = 24 * 1024 * 1024
 const MAX_VIDEO_BYTES = 256 * 1024 * 1024
 export const MEDIA_EXT = new Set([...IMAGE_EXT, ...AUDIO_EXT, ...VIDEO_EXT, ...VECTOR_EXT])
 
-function run(args, options = {}) {
-  return exec(ffmpegBinary(), args, { windowsHide: true, timeout: 60000, maxBuffer: 8 * 1024 * 1024, ...options })
+async function run(args, options = {}) {
+  const binary = await ensureFfmpeg({ signal: options.signal })
+  return exec(binary, args, { windowsHide: true, timeout: 60000, maxBuffer: 8 * 1024 * 1024, ...options })
 }
 
 export function assetsDirectory(projectDir) {

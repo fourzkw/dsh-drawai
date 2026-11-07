@@ -13,6 +13,8 @@
  */
 
 const React = require('react')
+// 0.4.0 暂停文生图，保留实现和已有节点数据以便后续恢复。
+const IMAGEGEN_ENABLED = false
 const { createVideoController, VideoSurface, VideoControls, VideoPreview } = videoPlayer
 
 /**
@@ -603,6 +605,7 @@ const CSS = [
   // 背景透明、颜色与字号由 inline style 按**这个节点**给（见 renderDiagram 的 labelTextBox）。
   '.drawai-edit{position:absolute;z-index:5;box-sizing:border-box;outline:2px solid #1a73e8;outline-offset:-2px;border:none;border-radius:4px;background:transparent;color:#000;font-family:Helvetica, Arial, sans-serif;font-size:12px;line-height:14px;text-align:center;padding:0;margin:0;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text}',
   '.drawai-canvas-edit{outline:none;border:0;border-radius:0;background:transparent;box-shadow:none}',
+  '.drawai-table-editor{position:absolute;z-index:30;inset:12px;display:flex;flex-direction:column;min-width:0;min-height:0;padding:12px;gap:8px;border:1px solid var(--dsw-alias-border-l2,#d5dbe4);border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:0 8px 28px #20273830}.drawai-table-editor-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.drawai-table-editor-bar strong{margin-right:auto}.drawai-table-editor-bar button{padding:5px 8px;border:1px solid var(--dsw-alias-border-l2,#d5dbe4);border-radius:6px;background:transparent;color:inherit;cursor:pointer}.drawai-table-editor-bar button:disabled{opacity:.45}.drawai-table-note{margin:0;font-size:11px;opacity:.7}.drawai-table-scroll{flex:1;min-height:0;overflow:auto}.drawai-table-scroll table{border-collapse:collapse;min-width:100%;table-layout:fixed}.drawai-table-scroll td,.drawai-table-scroll th{border:1px solid #cbd2dd;min-width:120px;padding:4px}.drawai-table-scroll th{background:#eef2f8}.drawai-table-scroll textarea{box-sizing:border-box;width:100%;min-width:112px;min-height:60px;padding:4px;border:0;background:transparent;color:inherit;font:12px/1.4 sans-serif;resize:vertical;user-select:text}.drawai-table-scroll th textarea{color:#263143;font-weight:bold}',
   '.drawai-rich-edit{overflow:auto;min-height:24px}',
   '.drawai-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}',
   '.drawai-trace-surface{position:relative;width:100%;height:100%;overflow:hidden}.drawai-trace-surface>svg{display:block;pointer-events:none}.drawai-trace-progress{position:absolute;left:8px;right:8px;bottom:8px;pointer-events:none;line-height:0}.drawai-trace-progress progress{display:block;width:100%;height:5px;accent-color:#386bff}',
@@ -1297,7 +1300,8 @@ function nodeBoxOf(node) {
   const stored = numberOr(node.h, FALLBACK_NODE_H)
   const x = numberOr(node.x, 0)
   const y = numberOr(node.y, 0)
-  const need = nodeTextFitHeight(node)
+  const table = parseCanvasTable(node)
+  const need = table ? tableNodeLayout(node, table).height : nodeTextFitHeight(node)
   if (need > stored) return { x: x, y: y, w: w, h: snapTo(need, GRID), stored: stored }
   return { x: x, y: y, w: w, h: stored, stored: stored }
 }
@@ -3006,6 +3010,7 @@ const SHAPE_LIBRARY = [
  * 不要靠 shapeFamilyOf('rounded') 判断（那永远是图形族）。
  */
 function shapeFamilyOf(shape) {
+  if (shape === 'table') return 'table'
   if (shape === 'text') return 'text'
   if (shape === 'section' || shape === 'swimlane') return 'section'
   if (shape === 'svg') return 'svg'
@@ -3109,6 +3114,7 @@ function railIcon(kind) {
   if (kind === 'text') {
     return svg(React.createElement('path', { d: 'M6 6.5h12M12 6.5V18' }))
   }
+  if (kind === 'table') return svg(React.createElement('path', { d: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14M15 5v14' }))
   if (kind === 'tasks') {
     return svg([
       React.createElement('path', { key: 'checks', d: 'M3 6l1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2' }),
@@ -5003,7 +5009,8 @@ function VideoExportJobs(props) {
     button(collapsed ? '展开' : '收起', () => setCollapsed(!collapsed))),
   collapsed ? null : props.jobs.map((job) => React.createElement('div', { key: job.token, className: 'drawai-video-task-detail' },
     React.createElement('strong', null, job.clip + ' · ' + job.format.toUpperCase() + ' · ' +
-      ({ rendering: '正在渲染', encoding: '正在编码', done: '已保存', error: '导出失败' }[job.status] || job.status)),
+      ({ preparing: '正在准备 FFmpeg', queued: '等待开始', rendering: '正在渲染', encoding: '正在编码', done: '已保存', error: '导出失败' }[job.status] || job.status)),
+    job.message ? React.createElement('small', { role: 'status' }, job.message) : null,
     ['rendering', 'encoding'].includes(job.status) ? React.createElement('small', null,
       (job.status === 'rendering' ? job.received : job.encoded) + (job.count ? '/' + job.count : '') + ' 帧；切换页面后仍会继续') : null,
     job.path ? React.createElement('small', { style: { overflowWrap: 'anywhere', userSelect: 'text' } }, '已保存：' + job.path) : null,
@@ -6756,7 +6763,10 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     // 画出来的标签会从它底下透出来，两层字叠在一起。以前没这问题只是因为那个单行 input
     // 带白底、把标签盖住了 —— 换成透明 textarea 之后必须显式让位。
     const editingHere = ui !== undefined && ui !== null && ui.editingNodeId === node.id
-    if (box.label && !editingHere && !(ui && (motionCore.isShotCardNode(node)||motionCore.isMgStyleNode(node)||motionCore.isAudioNode(node)))) {
+    const tableModel = parseCanvasTable(node)
+    if (tableModel && !editingHere) {
+      groupChildren.push(...tableNodeSvg(node, geo, tableModel))
+    } else if (box.label && !editingHere && !(ui && (motionCore.isShotCardNode(node)||motionCore.isMgStyleNode(node)||motionCore.isAudioNode(node)))) {
       const labelStyle = typeof node.style === 'string' ? node.style : ''
       const labelFontSize = styleNumber(labelStyle, 'fontSize', FSIZE)
       const labelFill = colorOf(node, mode).font
@@ -7622,6 +7632,7 @@ function CanvasView(props) {
   const editingState = React.useState(null)
   const editing = editingState[0]
   const setEditing = editingState[1]
+  const [tableEditor, setTableEditor] = React.useState(null)
   const richEditorRef = React.useRef(null)
   const richDirtyRef = React.useRef(false)
   const richFormatRef = React.useRef(false)
@@ -8316,6 +8327,7 @@ function CanvasView(props) {
    * 返回宿主结果（含 dataUri/width/height/seed/elapsedMs），失败 throw 中文信息给面板显示。
    */
   async function generateImageGen(source, options) {
+    if (!IMAGEGEN_ENABLED) throw new Error('文生图功能暂未开放')
     const current = docRef.current
     if (current === null) throw new Error('请先新建或打开一张画布')
     const node = source && typeof source.id === 'string' ? nodeById(source.id) : null
@@ -9549,6 +9561,36 @@ function CanvasView(props) {
    * 于是编辑框里的断行与字号跟提交后画出来的标签一模一样（需求"输入时的效果与
    * 输入完成后统一"）。定位仍然换算到**画布容器**的坐标系（画布是定位上下文）。
    */
+  function openTableEditor(id) {
+    const node = nodeById(id)
+    const model = parseCanvasTable(node)
+    if (!node || !model || !filterEditableIds(docRef.current, [id]).includes(id)) return
+    setEditing(null)
+    setSelectedIds([id])
+    setMenu(null)
+    setTableEditor({ id, model, original: node.label, path: target, page: pageIndex, hasFormatting: typeof node.labelHtml === 'string' })
+  }
+
+  function saveTableEditor(model) {
+    if (!tableEditor) return
+    const node = nodeById(tableEditor.id)
+    if (target !== tableEditor.path || pageIndex !== tableEditor.page || !node || node.label !== tableEditor.original) {
+      setSaveNote('表格已被其他修改更新，请重新打开后编辑')
+      return
+    }
+    if (JSON.stringify(model) !== JSON.stringify(tableEditor.model)) {
+      applyLocal((next) => {
+        const changed = next.nodes.find(item => item.id === tableEditor.id)
+        if (!changed) return
+        changed.label = serializeCanvasTable(model)
+        changed.data = { ...changed.data, drawaiTableEscaped: '1' }
+        if (typeof changed.labelHtml === 'string') changed.labelHtml = null
+        changed.h = Math.max(Number(changed.h) || 0, tableNodeLayout(changed, model).height)
+      })
+    }
+    setTableEditor(null)
+  }
+
   function openNodeEditor(id) {
     const node = nodeById(id)
     if (node === null) return
@@ -10342,6 +10384,8 @@ function CanvasView(props) {
   /** 新节点：形状与配色都落成 drawio 的 style 键，高度**一开始就装得下自己的标签**。 */
   function freshNode(id, shape, styleName, userX, userY, label) {
     if(shape==='audio')return {id,label:'音频',x:userX,y:userY,w:280,h:110,style:'rounded=1;fillColor=#e1f3ee;strokeColor=#5a9e8a;',data:motionCore.audioNodeData()}
+    if (shape === 'table') return { id, label: '| 标题 1 | 标题 2 | 标题 3 |\n| --- | --- | --- |\n| 内容 | 内容 | 内容 |',
+      style: styleWithNodeShape('', 'text'), x: snap(userX - 300), y: snap(userY - 75), w: 600, h: 150, data: { drawaiTable: '1' } }
     const isText = shape === 'text'
     const isSvg = shape === 'svg'
     const isVideo = shape === 'video'
@@ -11386,6 +11430,7 @@ function CanvasView(props) {
    * `generateImageGen` 换成真图（同节点原地替换，不新建节点）。
    */
   function insertImageGenNode() {
+    if (!IMAGEGEN_ENABLED) { setSaveNote('文生图功能暂未开放'); return }
     const current = docRef.current
     if (current === null) { setSaveNote('请先新建或打开一张画布'); return }
     if (activeLayerLocked()) { setSaveNote('当前图层已锁定：先解锁或换一层再放节点'); return }
@@ -11538,8 +11583,16 @@ function CanvasView(props) {
   async function uploadAudioFile(file,id,x,y) {
     if(!hasPath||!docRef.current){setSaveNote('请先保存画布');return}
     const control=new AbortController();if(!videoImportsRef.current)videoImportsRef.current=new Set();videoImportsRef.current.add(control)
-    let token
+    let token, poll=null
     const api=(action,args)=>mediaAction(action,args,{throwOnError:true,signal:control.signal})
+    const noteFfmpeg=(state)=>{
+      const p=state&&state.progress, mb=(n)=>n>=1048576?(n/1048576).toFixed(n>=10485760?0:1)+' MB':Math.max(1,Math.round((Number(n)||0)/1024))+' KB'
+      if(state&&state.status==='ready')return
+      if(!p){setSaveNote('正在准备 FFmpeg…');return}
+      if(p.phase==='download'){setSaveNote(p.total?'正在下载 FFmpeg '+Math.round((p.received||0)/p.total*100)+'%（'+mb(p.received)+' / '+mb(p.total)+'）':'正在下载 FFmpeg（'+mb(p.received)+'）');return}
+      if(p.phase==='waiting'){setSaveNote('另一个任务正在准备 FFmpeg，等待中…');return}
+      setSaveNote(({resolve:'正在查找 FFmpeg…',verify:'正在校验下载的 FFmpeg…',extract:'正在解压 FFmpeg…',check:'正在检查 FFmpeg 功能…',ready:'FFmpeg 已就绪'}[p.phase])||p.message||'正在准备 FFmpeg…')
+    }
     try {
       if(id){motionCore.assertMotionEditable(docRef.current,id);if(!motionCore.isAudioNode(nodeById(id)))throw new Error('请选择音频节点')}
       else if(activeLayerLocked())throw new Error('当前图层已锁定')
@@ -11549,11 +11602,13 @@ function CanvasView(props) {
         const base64=await readVideoChunk(file.slice(offset,offset+1024*1024),control.signal)
         await api('audio-upload-chunk',{token,offset,base64});setSaveNote('音频上传 '+Math.round(Math.min(offset+1024*1024,file.size)/file.size*100)+'%')
       }
+      setSaveNote('正在准备 FFmpeg（首次使用会自动下载）…')
+      poll=setInterval(()=>{api('media-ffmpeg-status',{}).then(noteFfmpeg).catch(()=>{})},600)
       const result=await api('audio-upload-finish',{token})
       if(control.signal.aborted)throw new Error('音频导入已取消')
       applyAudioResult(id,result,x,y)
     }catch(e){setSaveNote(e.message||String(e))}
-    finally{if(token)mediaAction('audio-upload-release',{token}).catch(()=>{});videoImportsRef.current.delete(control)}
+    finally{clearInterval(poll);if(token)mediaAction('audio-upload-release',{token}).catch(()=>{});videoImportsRef.current.delete(control)}
   }
 
   function insertMediaFiles(files, userX, userY) {
@@ -12728,7 +12783,7 @@ function CanvasView(props) {
   }
 
   function renderSelectionToolbar() {
-    if (!active || doc === null || view === null || menu !== null || placeEdgeKind !== null || placeTool !== null) return null
+    if (!active || doc === null || view === null || tableEditor !== null || menu !== null || placeEdgeKind !== null || placeTool !== null) return null
     const ids = filterEditableIds(doc, selectedIds)
     const nodes = doc.nodes.filter((n) => ids.indexOf(n.id) >= 0)
     const edges = doc.edges.filter((e) => ids.indexOf(e.id) >= 0)
@@ -12746,6 +12801,13 @@ function CanvasView(props) {
     const top = (bounds.y - view.y) * scale
     const bottom = (bounds.y + bounds.h - view.y) * scale
     const width = 460
+    if (nodes.length === 1 && edges.length === 0 && isTableNode(nodes[0])) {
+      const node = nodes[0]
+      return React.createElement(NodeToolCard, { canvasRef, className: 'drawai-selection-toolbar', role: 'toolbar', 'aria-label': '表格操作', fallbackTop: bottom + 12,
+        style: { width: '96px', left: center - 48 + 'px', top: top - 72 + 'px' } },
+        React.createElement('button', { type: 'button', className: 'drawai-toolbar-button', onClick: () => openTableEditor(node.id), 'aria-label': '编辑表格' },
+          railIcon('table'), React.createElement('span', { className: 'drawai-color-label' }, '编辑表格')))
+    }
     if(nodes.length===1&&edges.length===0&&motionCore.isAudioNode(nodes[0])){
       const node=nodes[0]
       return React.createElement(NodeToolCard,{canvasRef,className:'drawai-selection-toolbar',role:'toolbar','aria-label':'音频节点操作',fallbackTop:bottom+12,style:{left:center-36+'px',top:top-72+'px',width:'72px'}},React.createElement(ToolbarPopover,{label:'音频设置',group:'drawai-audio-'+uid,icon:React.createElement('span',{'aria-hidden':true},'♫'),renderPanel:()=>React.createElement(AudioPanel,{key:node.id,node,maxHeight:Math.max(180,Math.min(560,size.h-100)),
@@ -12915,24 +12977,6 @@ function CanvasView(props) {
         onEnqueue: hasPath ? enqueueImageTrace : undefined,
       }))
     }
-    if (nodes.length === 1 && edges.length === 0 && !isVideoNodeData(nodes[0].data) &&
-      nodeShapeFromStyle(styleOf(nodes[0])) === 'image' && styleGet(styleOf(nodes[0]), 'drawaiGen', '') === '1') {
-      const genNode = nodes[0]
-      const genStyle = styleOf(genNode)
-      controls.push(React.createElement(ImageGenControl, {
-        key: 'image-gen-' + genNode.id, group: 'drawai-colors-' + uid,
-        source: {
-          id: genNode.id,
-          prompt: typeof genNode.label === 'string' ? genNode.label : '',
-          width: styleNumber(genStyle, 'drawaiGenWidth', 1024),
-          height: styleNumber(genStyle, 'drawaiGenHeight', 1024),
-          steps: styleNumber(genStyle, 'drawaiGenSteps', IMAGEGEN_DEFAULT_STEPS),
-          seed: styleNumber(genStyle, 'drawaiGenSeed', 0),
-        },
-        onGenerate: (options) => generateImageGen({ id: genNode.id }, options),
-        onOpenPrefs: () => openPrefsPanel(),
-      }))
-    }
     if (nodes.length > 0) {
       // 只有基础图形之间可以直接换形；SVG/图片/文字/分区保留自身类别。
       const canChangeShape = nodes.every((n) => isBasicShapeStyle(styleOf(n)))
@@ -13096,25 +13140,10 @@ function CanvasView(props) {
       )
     }
 
+    chips.push(railIconButton('rail-table','table',placeTool==='table','表格',()=>{setPlaceTool(placeTool==='table'?null:'table');setPlaceEdgeKind(null);setMenu(null)},null))
     chips.push(railIconButton('rail-audio','audio',placeTool==='audio','音频：添加音效、音乐或旁白节点',()=>{setPlaceTool('audio');setPlaceEdgeKind(null);setMenu(null)},null))
     chips.push(railIconButton('rail-shotcards', 'shotcards', !!shotLibrary, '镜头卡库：搜索样式并添加到画布', () => setShotLibrary({}), null))
     chips.push(railIconButton('rail-mgstyles', 'mgstyles', !!mgLibrary, '整片风格库：一条片子选一种 MG 视觉语言', () => setMgLibrary({}), null))
-
-    // 「文生图」：不参与放置族，点一下就在视野中心放一个带占位图的文生图节点。
-    const imageGenSelected = selectedIds.some((id) => {
-      const node = nodeById(id)
-      return node !== null && node !== undefined && nodeImageGen(node)
-    })
-    chips.push(
-      railIconButton(
-        'rail-imagegen',
-        'imagegen',
-        imageGenSelected,
-        imageGenSelected ? '文生图（已选中文生图节点）' : '文生图：插入节点并写提示词',
-        () => insertImageGenNode(),
-        null,
-      ),
-    )
 
     const activeTaskCount = backgroundDrawingJobs.concat(videoExportJobs, motionJobs).filter((job) =>
       !['succeeded', 'done', 'cancelled', 'failed', 'error', 'retained', 'interrupted'].includes(job.status)).length
@@ -14030,139 +14059,6 @@ function CanvasView(props) {
           patchPrefs({ defaultColor: style })
         }, prefs.defaultColor || menuStyle),
       )
-      // ---- 文生图（ComfyUI / OpenAI 兼容接口）----
-      const imagegenProvider = prefs.imagegenProvider === 'openai' ? 'openai' : 'comfyui'
-      const prefsText = (key, placeholder, type) =>
-        React.createElement('input', {
-          key: key,
-          className: 'drawai-edit doc-menu-input',
-          type: type || 'text',
-          spellCheck: false,
-          defaultValue: String(prefs[key] === undefined || prefs[key] === null ? '' : prefs[key]),
-          placeholder: placeholder,
-          style: { width: '100%' },
-          onBlur: (event) => patchPrefs({ [key]: event.target.value }),
-          onKeyDown: (event) => {
-            event.stopPropagation()
-            if (event.key === 'Enter') event.target.blur()
-          },
-        })
-      const prefsNumber = (key, fallback, min, max) =>
-        React.createElement('input', {
-          key: key,
-          className: 'drawai-edit doc-menu-input',
-          type: 'number',
-          min: min,
-          max: max,
-          defaultValue: String(numberOr(prefs[key], fallback)),
-          style: { width: '72px' },
-          onBlur: (event) => {
-            const value = clampNumber(Math.round(numberOr(event.target.value, fallback)), min, max)
-            event.target.value = String(value)
-            patchPrefs({ [key]: value })
-          },
-          onKeyDown: (event) => {
-            event.stopPropagation()
-            if (event.key === 'Enter') event.target.blur()
-          },
-        })
-      rows.push(React.createElement('div', { className: 'drawai-note', style: { marginTop: '12px', fontWeight: 600 } }, '文生图'))
-      rows.push(
-        React.createElement(
-          'label',
-          { className: 'drawai-menu-row', style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-          React.createElement('span', null, '服务'),
-          React.createElement(
-            'select',
-            {
-              className: 'drawai-edit doc-menu-input',
-              value: imagegenProvider,
-              style: { flex: 1 },
-              onChange: (event) => patchPrefs({ imagegenProvider: event.target.value === 'openai' ? 'openai' : 'comfyui' }),
-            },
-            React.createElement('option', { value: 'comfyui' }, 'ComfyUI（本地）'),
-            React.createElement('option', { value: 'openai' }, 'OpenAI 兼容接口'),
-          ),
-        ),
-      )
-      if (imagegenProvider === 'comfyui') {
-        rows.push(React.createElement('div', { className: 'drawai-note' }, 'ComfyUI 地址'))
-        rows.push(prefsText('imagegenComfyUrl', 'http://127.0.0.1:8188'))
-      } else {
-        rows.push(React.createElement('div', { className: 'drawai-note' }, '接口地址'))
-        rows.push(prefsText('imagegenOpenaiUrl', 'https://api.openai.com/v1'))
-        rows.push(React.createElement('div', { className: 'drawai-note' }, 'API Key'))
-        rows.push(prefsText('imagegenOpenaiKey', 'sk-…', 'password'))
-        rows.push(React.createElement('div', { className: 'drawai-note' }, '模型'))
-        rows.push(prefsText('imagegenOpenaiModel', 'gpt-image-1'))
-      }
-      rows.push(React.createElement('div', { className: 'drawai-note' }, '默认尺寸 / 步数'))
-      rows.push(
-        React.createElement(
-          'div',
-          { className: 'drawai-menu-row', style: { display: 'flex', alignItems: 'center', gap: '6px' } },
-          prefsNumber('imagegenWidth', 1024, IMAGEGEN_MIN_SIDE, IMAGEGEN_MAX_SIDE),
-          React.createElement('span', { 'aria-hidden': true }, '×'),
-          prefsNumber('imagegenHeight', 1024, IMAGEGEN_MIN_SIDE, IMAGEGEN_MAX_SIDE),
-          React.createElement('span', { style: { marginLeft: '8px' } }, '步数'),
-          prefsNumber('imagegenSteps', IMAGEGEN_DEFAULT_STEPS, 1, IMAGEGEN_MAX_STEPS),
-        ),
-      )
-      rows.push(React.createElement('div', { className: 'drawai-note' }, '工作流 JSON（留空 = 内置默认；ComfyUI UI / API 格式都行）'))
-      rows.push(
-        React.createElement('textarea', {
-          key: 'imagegen-workflow-' + imagegenWorkflowRev,
-          className: 'drawai-edit',
-          'aria-label': '文生图工作流 JSON',
-          spellCheck: false,
-          defaultValue: String(prefs.imagegenWorkflow || ''),
-          placeholder: '粘贴 ComfyUI 工作流 JSON（留空 = 内置默认）',
-          style: {
-            width: '100%',
-            minHeight: '88px',
-            boxSizing: 'border-box',
-            fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
-            fontSize: '11px',
-            lineHeight: '1.45',
-            resize: 'vertical',
-          },
-          onBlur: (event) => patchPrefs({ imagegenWorkflow: event.target.value }),
-          onKeyDown: (event) => event.stopPropagation(),
-        }),
-      )
-      rows.push(
-        React.createElement(
-          'div',
-          { className: 'drawai-menu-row', style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-          React.createElement('button', { className: 'drawai-btn', disabled: imagegenStatus.busy === true, onClick: () => loadImageGenDefaultWorkflow() }, '载入默认工作流'),
-          React.createElement(
-            'button',
-            {
-              className: 'drawai-btn',
-              onClick: () => {
-                patchPrefs({ imagegenWorkflow: '' })
-                setImagegenWorkflowRev((rev) => rev + 1)
-                setImagegenStatus({ busy: false, error: false, text: '已清空，将使用内置默认工作流' })
-              },
-            },
-            '清空',
-          ),
-        ),
-      )
-      rows.push(
-        React.createElement(
-          'div',
-          { className: 'drawai-menu-row', style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-          React.createElement('button', { className: 'drawai-btn', disabled: imagegenStatus.busy === true, onClick: () => checkImageGenStatus() }, imagegenStatus.busy === true ? '检测中…' : '检测连接'),
-          React.createElement('span', {
-            className: 'drawai-note',
-            role: 'status',
-            'aria-live': 'polite',
-            style: { margin: 0, color: imagegenStatus.error === true ? '#d1242f' : undefined },
-          }, imagegenStatus.text || ''),
-        ),
-      )
-      rows.push(React.createElement('div', { className: 'drawai-note' }, 'API Key 以明文存在本机 localStorage（dsh-drawai.prefs），共用电脑上别填。'))
       rows.push(
         React.createElement(
           'div',
@@ -14395,6 +14291,7 @@ function CanvasView(props) {
     const target = event === null || event === undefined ? null : event.target
     if (isSelectableTextTarget(target)) return
     const closest = target !== null && target !== undefined && typeof target.closest === 'function' ? target.closest.bind(target) : null
+    if (closest !== null && closest('.drawai-table-editor') !== null) return
     // Formatting controls must not steal focus or clear the selected text in
     // the contenteditable before the command is applied (capture runs first).
     if (closest !== null && (closest('.drawai-selection-toolbar') !== null || closest('.drawai-palette-panel') !== null)) {
@@ -14652,6 +14549,8 @@ function CanvasView(props) {
       for (const cell of cells) if (cell.id === editing.id) cell.label = editing.text
     }
     const canvasChildren = [renderDiagram(previewDoc, mode, uid, svgRef, ui, view)]
+    if (tableEditor !== null) canvasChildren.push(React.createElement(TableNodeEditor, { key: 'table-editor-' + tableEditor.id, model: tableEditor.model,
+      hasFormatting: tableEditor.hasFormatting, onSave: saveTableEditor, onCancel: () => setTableEditor(null) }))
     const selectionToolbar = renderSelectionToolbar()
     if (selectionToolbar !== null) canvasChildren.push(selectionToolbar)
     const menuNode = renderMenu()

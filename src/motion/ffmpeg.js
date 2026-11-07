@@ -6,11 +6,12 @@
 import { existsSync, openSync, closeSync, readFileSync } from 'node:fs'
 import { join, isAbsolute } from 'node:path'
 import { spawn } from 'node:child_process'
-import { ffmpegBinary } from '../video-export.js'
+import { ensureFfmpeg, ffmpegPathSync } from '../ffmpeg-manager.js'
 
-export function runFfmpeg(args, options = {}) {
+export async function runFfmpeg(args, options = {}) {
   const cwd = options.cwd || process.cwd()
   const logPath = isAbsolute(options.log || '') ? options.log : join(cwd, options.log || 'ff.log')
+  const binary = options.binary || await ensureFfmpeg({ signal: options.signal, onProgress: options.onProgress })
   return new Promise((resolve, reject) => {
     let fd
     try {
@@ -19,7 +20,7 @@ export function runFfmpeg(args, options = {}) {
       reject(error)
       return
     }
-    const child = spawn(ffmpegBinary(), ['-hide_banner', '-nostdin', '-y', ...args], {
+    const child = spawn(binary, ['-hide_banner', '-nostdin', '-y', ...args], {
       cwd, windowsHide: true, stdio: ['ignore', 'ignore', fd],
     })
     const timer = setTimeout(() => child.kill(), options.timeoutMs || 300000)
@@ -38,5 +39,5 @@ export function runFfmpeg(args, options = {}) {
 }
 
 export function ffmpegAvailable() {
-  return existsSync(ffmpegBinary())
+  return existsSync(ffmpegPathSync())
 }

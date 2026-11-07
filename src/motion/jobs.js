@@ -62,9 +62,13 @@ export class RenderJobs {
   }
 
   // 进度只在内存里刷：每 1% 写一次盘既慢又没意义。
-  progress(job, phase, value) {
+  progress(job, phase, value, message) {
+    const changed = phase && phase !== job.phase
     if (phase) job.phase = phase
+    if (message) job.message = message
+    else if (changed) job.message = ''
     if (Number.isFinite(value)) job.progress = value
+    if (changed) this.save(job)
     return job
   }
 

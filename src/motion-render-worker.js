@@ -1,5 +1,4 @@
-import { bundle } from '@remotion/bundler'
-import { openBrowser, selectComposition, renderMedia, renderStill, makeCancelSignal } from '@remotion/renderer'
+import { ensureVideoRuntime, videoRuntimeRequire } from './motion/video-runtime.js'
 import { existsSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, isAbsolute, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -7,16 +6,25 @@ import { prepareMotionProject } from './motion-project.js'
 import { runFfmpeg } from './motion/ffmpeg.js'
 
 let cancelled = false, running = false
-const { cancelSignal, cancel } = makeCancelSignal()
+const runtimeAbort = new AbortController()
+let cancel = () => {}
 const send = (message) => { if (process.connected) process.send(message) }
 process.on('message', async (request) => {
-  if (request.type === 'cancel') { cancelled = true; cancel(); return }
+  if (request.type === 'cancel') { cancelled = true; runtimeAbort.abort(new Error('已取消动效生成')); cancel(); return }
   if (running) return
   running = true
   let browser
   const outDir = request.bundleDir || join(dirname(request.output), 'bundle')
   const cacheFile = join(outDir, '.drawai-bundle-key')
   try {
+    const runtimeDirectory = await ensureVideoRuntime({signal:runtimeAbort.signal, onProgress:message => send({type:'progress', ...message, progress:0})})
+    if (cancelled) throw new Error('已取消动效生成')
+    const require = videoRuntimeRequire(runtimeDirectory)
+    const { bundle } = require('@remotion/bundler')
+    const { openBrowser, selectComposition, renderMedia, renderStill, makeCancelSignal } = require('@remotion/renderer')
+    const cancellation = makeCancelSignal()
+    const cancelSignal = cancellation.cancelSignal
+    cancel = cancellation.cancel
     // 同一个工程连续预览/渲染时复用上次的 bundle：预览从 30 秒降到 3 秒，
     // 改一个场景文件只会让 key 变化一次。request.bundleKey 由调用方按源码计算。
     const reuse = request.reuseBundle === true && request.bundleKey && existsSync(join(outDir, 'index.html'))
@@ -26,7 +34,7 @@ process.on('message', async (request) => {
       serveUrl = outDir
       send({ type: 'progress', phase: 'bundling', progress: .1 })
     } else {
-      const project = prepareMotionProject(request.composition, request.projectDirectory || join(dirname(request.output), 'project'), {preserveSources:request.preserveSources===true})
+      const project = prepareMotionProject(request.composition, request.projectDirectory || join(dirname(request.output), 'project'), {preserveSources:request.preserveSources===true, runtimeDirectory})
       serveUrl = await bundle({ ...project, outDir, ignoreRegisterRootWarning: true,
         publicDir: request.publicDir, onProgress: (progress) => send({ type: 'progress', phase: 'bundling', progress: progress / 100 * .1 }) })
       const index = join(outDir, 'index.html')

@@ -65,13 +65,17 @@ async function request(action, extra = {}) {
   await route.handler(req, { writeHead(code) { status = code }, end(text) { payload = JSON.parse(text) } })
   return { status, payload }
 }
-async function wait(scope, token) {
-  const until = Date.now() + 30000
+async function waitFor(scope, token, statuses, timeout = 30000) {
+  const until = Date.now() + timeout
   let state = manager.status(scope, token)
-  while (['rendering', 'encoding'].includes(state.status) && Date.now() < until) {
+  while (!statuses.includes(state.status) && Date.now() < until) {
     await new Promise((resolve) => setTimeout(resolve, 10))
     state = manager.status(scope, token)
   }
+  return state
+}
+async function wait(scope, token) {
+  const state = await waitFor(scope, token, ['done', 'error', 'interrupted'])
   assert.equal(state.status, 'done', state.error)
   return state
 }
@@ -100,9 +104,15 @@ try {
       '<svg xmlns="http://www.w3.org/2000/svg" width="65" height="49"><rect x="16" y="13" width="32" height="23" fill="rgb(' + [index * 7, index * 7, index * 7].join(',') + ')"/></svg>')
     const scope = { sessionId: 'owner', drawioAbs, clip: 'clip' }
     const job = await manager.start(scope, format)
+    const running = await waitFor(scope, job.token, ['rendering', 'encoding', 'done'])
+    assert.ok(['rendering', 'encoding', 'done'].includes(running.status), running.error)
     const cache = join(root, '.drawai-cache', 'video-exports')
-    assert.equal(readdirSync(cache).length, 1, 'default export cache is inside the canvas workspace')
-    assert.ok(existsSync(join(cache, readdirSync(cache)[0], 'output.' + format)), 'preflight proves FFmpeg can write the exact output path')
+    if (running.status !== 'done') {
+      assert.equal(readdirSync(cache).length, 1, 'default export cache is inside the canvas workspace')
+      assert.ok(existsSync(join(cache, readdirSync(cache)[0], 'output.' + format)), 'preflight proves FFmpeg can write the exact output path')
+    } else {
+      assert.ok(existsSync(running.path), 'finished export is stored under its final path')
+    }
     assert.throws(() => manager.status({ ...scope, sessionId: 'other' }, job.token), /不属于/)
     assert.equal(job.background, true)
     assert.equal(manager.list({ ...scope, sessionId: 'other' }).length, 0)
@@ -184,7 +194,7 @@ try {
   const errorDeadline = Date.now() + 5000
   let failed
   do { await new Promise((resolve) => setTimeout(resolve, 10)); failed = manager.status(badScope, badJob.token) }
-  while (['rendering', 'encoding'].includes(failed.status) && Date.now() < errorDeadline)
+  while (['preparing', 'queued', 'rendering', 'encoding'].includes(failed.status) && Date.now() < errorDeadline)
   assert.equal(failed.status, 'error')
   assert.match(failed.error, /外部/)
   assert.equal(failed.path, null, 'failed rendering cannot publish a partial export')
@@ -217,7 +227,17 @@ try {
   assert.equal((await request('media-video-export-list', { sessionId: 'other' })).payload.jobs.length, 0, 'job discovery is session scoped')
   assert.equal((await request('media-video-export-discard', { token: started.payload.token })).payload.ok, true)
   const missing = createVideoExportManager({ ffmpegPath: join(root, 'missing-ffmpeg') })
-  await assert.rejects(missing.start({ sessionId: 'owner', drawioAbs, clip: 'clip' }, 'mp4'), /未找到 FFmpeg/)
+  const missingScope = { sessionId: 'owner', drawioAbs, clip: 'clip' }
+  const missingJob = await missing.start(missingScope, 'mp4')
+  let missingState = missing.status(missingScope, missingJob.token)
+  const missingDeadline = Date.now() + 15000
+  while (['preparing', 'queued', 'rendering', 'encoding'].includes(missingState.status) && Date.now() < missingDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    missingState = missing.status(missingScope, missingJob.token)
+  }
+  assert.equal(missingState.status, 'error', '缺少 FFmpeg 时应异步失败并留下可诊断的任务记录')
+  assert.match(missingState.error, /未找到 FFmpeg|FFmpeg/)
+  await missing.discard(missingScope, missingJob.token)
   await missing.dispose()
   assert.deepEqual(readdirSync(join(root, '.drawai-cache', 'video-exports')), [], 'failed preflight also cleans its temporary directory')
   const reports = readdirSync(join(root, '.drawai-cache', 'performance')).map((name) => JSON.parse(readFileSync(join(root, '.drawai-cache', 'performance', name), 'utf8')))

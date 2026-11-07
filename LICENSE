@@ -38,6 +38,18 @@ SOFTWARE.
 
 本目录保存的是上游原文件，不能将插件自己的 MIT 许可笼统套用于这些第三方素材。字体文件未包含在内。
 
+## FFmpeg (runtime download, not bundled)
+DrawAI 不随包分发 FFmpeg，而是在首次真正需要时下载上游预编译构建并做完整性校验：
+
+| 平台 | 来源 | 版本 / 形式 | 许可 |
+| --- | --- | --- | --- |
+| Windows x64 | https://www.gyan.dev/ffmpeg/builds/ | 8.1.2 essentials build | GPL（含 libx264 等 GPL 组件） |
+| Windows ARM64 | https://github.com/BtbN/FFmpeg-Builds | autobuild 8.1.x，`gpl` | GPL-3.0-or-later |
+| Linux x64 / ARM64 | https://github.com/BtbN/FFmpeg-Builds | autobuild 8.1.x，`gpl` | GPL-3.0-or-later |
+| macOS Intel / Apple Silicon | https://www.osxexperts.net/ | 8.0 / 9.0.2 | GPL |
+
+FFmpeg 是独立可执行文件，由本插件以子进程方式调用；其许可不改变本插件源码的 MIT 许可，但再分发这些二进制时须遵守对应的 GPL 条款。下载只接受注册表中固定的版本、大小与 SHA-256，并在安装后试运行、检查所需编码器/滤镜；校验失败不会启用。上游页面与许可证全文以上述来源为准。
+
 ## Noto Sans SC and Noto Serif SC
 Noto Sans SC: © 2014–2021 Adobe, with Reserved Font Name Source.
 Noto Serif SC: © 2017–2023 Adobe.

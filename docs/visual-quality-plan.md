@@ -109,7 +109,7 @@
 
 | 事项 | 谁做 | 插件只做 |
 |---|---|---|
-| 交付级母版 / ProRes / 平台变体 | `<工程>/tools/polish.mjs` + 外部 ffmpeg | 出合格的 H.264（L0） |
+| 交付级母版 / ProRes / 平台变体 | `<工程>/tools/polish.mjs` + 外部 ffmpeg（脚本会先找 DrawAI 缓存） | 出合格的 H.264（L0） |
 | 音乐创作 | 外部（Freesound/CC0 或用户导入） | 摆放、duck、loudnorm、打印实测响度 |
 | 字体挤字与子集化 | 构建期 `pyftsubset` | **校验**：字体未注册即拒渲（L1） |
 | 位图纹理 / 贴图 | `motion_assets` 收进 `assets/` | 尺寸/色板/来源记录 |

@@ -10,7 +10,7 @@ function BackgroundTaskPanel(props) {
   const ended = (job) => ['succeeded', 'done', 'cancelled', 'failed', 'error', 'retained', ...(job.motion ? ['interrupted'] : [])].includes(job.status)
   const live = jobs.filter((job) => !ended(job)).length, needs = jobs.filter(attention).length
   const visible = jobs.filter((job) => filter === 'all' || (filter === 'active' ? !ended(job) || attention(job) : filter === 'attention' ? attention(job) : ended(job) && !attention(job)))
-  const labels = { queued: '等待中', running: '绘制中', paused: '已暂停', cancelling: '正在取消', interrupted: '等待恢复', failed: '绘制失败', cancelled: '已取消', succeeded: '已完成', rendering: '渲染中', encoding: '编码中', done: '已保存文件', error: '导出失败' }
+  const labels = { preparing: '准备 FFmpeg', queued: '等待中', running: '绘制中', paused: '已暂停', cancelling: '正在取消', interrupted: '等待恢复', failed: '绘制失败', cancelled: '已取消', succeeded: '已完成', rendering: '渲染中', encoding: '编码中', done: '已保存文件', error: '导出失败' }
   const phases = { preparing: '检查素材', probing: '探测视频', decoding: '解码抽帧', tracing: '绘制色块' }
   const invoke = async (job, action, value) => {
     setBusy(job.id || 'queue'); setError('')
@@ -56,7 +56,7 @@ function BackgroundTaskPanel(props) {
             ended(job) ? button('移除记录', () => invoke(job, 'remove')) : null,
             job.error ? button('复制错误', () => writeClipboardText(job.error).catch(() => {})) : null))
       }
-      const running = ['running', 'rendering', 'encoding'].includes(job.status)
+      const running = job.export ? ['preparing', 'queued', 'rendering', 'encoding'].includes(job.status) : job.status === 'running'
       const done = job.export ? job.status === 'rendering' ? job.received : job.encoded : job.done
       const total = job.export ? job.count : job.total
       const percent = total ? Math.min(100, Math.round((done || 0) / total * 100)) : 0
@@ -66,6 +66,7 @@ function BackgroundTaskPanel(props) {
       return React.createElement('article', { key: job.id, className: 'drawai-video-task-detail', style: { borderTop: '1px solid #8883', paddingTop: 10, marginTop: 8, userSelect: 'text' } },
         React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', gap: 8 } },
           React.createElement('strong', { style: { overflowWrap: 'anywhere' } }, job.label), React.createElement('small', { role: 'status' }, state)),
+        job.message ? React.createElement('small', { role: 'status', style: { display: 'block', overflowWrap: 'anywhere' } }, job.message) : null,
         !job.export ? React.createElement('small', null, ({ image: '图片绘制', video: '视频绘制', extract: '视频抽帧' }[job.kind]) + ' · ' + String(job.scope.path).split(/[\\/]/).pop() + ' · ' + (job.scope.pageName || '第 ' + (job.scope.page + 1) + ' 页') + (job.kind !== 'extract' ? ' · ' + job.options.colors + ' 色' : '')) : null,
         running ? React.createElement('div', null,
           React.createElement('progress', { value: percent, max: 100, style: { width: '100%' }, 'aria-label': job.label + '进度' }),

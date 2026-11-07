@@ -187,7 +187,7 @@ console.log('整组件渲染：状态形状不对时也不能整块降级\n')
   }
 
   // 面板的各种打开状态都不能炸
-  for (const mode of ['open', 'saveAs']) {
+  for (const mode of ['open', 'saveAs', 'prefs']) {
     const r = renderOnce({ 2: mode, 4: { files: [], error: '' } })
     ok(r.error === undefined, '面板 docMenu=' + mode + ' 渲染正常')
   }
@@ -589,7 +589,7 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
   // 放过的那一类按钮必须真的带这个类名，否则"点同一个按钮关不掉"
   ok(/className: 'drawai-btn drawai-menu-trigger'/.test(src), '开菜单的按钮带 drawai-menu-trigger 类（与处理器里的选择器对得上）')
   // 编辑框也要真的带那个类名（否则"点输入框自己"会被判成外面）
-  ok(/className: 'drawai-edit'/.test(src), '输入框带 drawai-edit 类（与处理器里的选择器对得上）')
+  ok(/className: 'drawai-edit(?:\s[^']*)?'/.test(src), '输入框带 drawai-edit 类（与处理器里的选择器对得上）')
   // Esc 同一套语义：菜单开着按 Esc 也该收掉
   const escStart = src.indexOf("event.key === 'Escape'", src.indexOf('function onKey(event)'))
   const escBranch = escStart >= 0 ? src.slice(escStart, escStart + 400) : ''
@@ -1182,11 +1182,11 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
   const importedKernel = Object.fromEntries(importedNames.map((name) => [name, styleKernel[name]]))
   const context = Object.assign({}, importedKernel, {
     doc, view: { x: 0, y: 0, w: 500, h: 500 }, size: { w: 260, h: 400 },
-    editing: null, menu: null, placeEdgeKind: null, placeTool: null,
+    editing: null, tableEditor: null, menu: null, placeEdgeKind: null, placeTool: null,
     selectedIds: ['a', 'b', 'e'], routeMemoryRef: { current: new Map() },
     React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
     filterEditableIds: (doc, ids) => ids,
-    nodeBoxOf: (n) => n,
+    nodeBoxOf: (n) => n, isTableNode: () => false,
     edgeRoutePoints: () => [{ x: 100, y: 30 }, { x: 150, y: 30 }],
     boxOfBoxes: () => ({ x: 0, y: 0, w: 250, h: 60 }),
     clampNumber: (v, min, max) => Math.min(max, Math.max(min, v)),

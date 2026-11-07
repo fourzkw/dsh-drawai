@@ -201,7 +201,7 @@ draft_content.json   draft:true 时额外写一份草稿（结构按剪映 36000
 
 - 2–60 秒、12–30 fps、边长 256–1920；默认 1920×1080 / 30fps。
 - 渲染需要浏览器：优先 `DRAWAI_CHROME_PATH`，Windows 上依次找 Chrome / Edge，都没有时由 Remotion 下载 Chromium。
-- 探针、拼图、抽音轨需要 FFmpeg（`_local/bin/ffmpeg.exe` 或 PATH 里的）。
+- 探针、拼图、抽音轨需要 FFmpeg：首次使用自动下载并校验，缓存到 `~/.dsh/drawai-ffmpeg/`；也可用 `DRAWAI_FFMPEG_PATH` 或系统 PATH 指定已有安装（缺功能会列出缺失项，不会静默替换）；代理环境可用 `DRAWAI_FFMPEG_MIRROR` 指向镜像。
 - 暂不支持：扩散式图生视频、shadcn/MotionWorkbench 式可视化时间线、上游演示依赖的字体与视频素材（需用自己的素材适配）。
 
 ### 离线环境（无网络）怎么办

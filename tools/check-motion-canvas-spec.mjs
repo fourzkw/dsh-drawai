@@ -154,7 +154,7 @@ console.log('8) readCanvasSpec 汇总问题')
 console.log('9) 表格单元格转义兼容视频工程')
 {
   const source = [
-    { intent: '咖啡 | 茶\\点心\n第二行', onScreen: 'C:\\new\\assets', copy: '字面量 \\n' },
+    { intent: '咖啡 | 茶\\点心\n第二行', onScreen: 'C:\\new\\assets', copy: '字面量 \\n 与 **星号** 和 `反引号`' },
     { intent: '下一镜', onScreen: '杯子', copy: '' },
   ]
   const label = SPEC_MARKERS.storyboard + '\n' + storyboardTable(source, { fps: 30, totalFrames: 60 })
