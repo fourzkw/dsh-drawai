@@ -1,0 +1,14 @@
+# npm tarball 里不要的东西
+#
+# 动效素材（字体 + 素材库）约 200MB，改成从 GitHub Release 下载：
+#   打包：node tools/build-assets-pack.mjs
+#   发布：docs/release.md 的「发布素材包」
+# 插件首次用到时自动下载到 ~/.dsh/drawai-assets/，npm 包里只留代码。
+lib/motion/fonts/
+lib/motion/media-library/
+
+# 构建产物与本地杂物
+dist/
+artifacts/
+*.log
+*.bak-*

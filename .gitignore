@@ -64,3 +64,8 @@ lib/motion/fonts/
 
 # 画布备份（.bak-flat / .bak-png / … ：体积大且是一次性回滚点）
 *.bak-*
+
+# 素材包产物（tools/build-assets-pack.mjs 生成的 145MB tar.gz，发到 GitHub Release 而不是进仓库）
+dist/
+.tmp-assets-test/
+.tmp-assets-fail/

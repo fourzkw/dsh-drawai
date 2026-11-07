@@ -12,11 +12,10 @@ import {createServer} from 'node:http'
 import {extname,join,normalize,resolve,sep} from 'node:path'
 import {tmpdir} from 'node:os'
 import {fileURLToPath} from 'node:url'
-import {BUNDLED_FONT_FACES} from './fonts.js'
+import {fontsDir, mediaLibraryRoot} from './asset-pack.js'
+import {fontFaces} from './fonts.js'
 
 const UPSTREAM = fileURLToPath(new URL('./mgstyles/upstream', import.meta.url))
-const BUNDLED_TEXTURES = fileURLToPath(new URL('./media-library/assets/textures', import.meta.url))
-const BUNDLED_FONTS = fileURLToPath(new URL('./fonts/', import.meta.url))
 const DEMO_FONT_ALIASES = {
   '/demos/03-isometric/assets/fonts/Unbounded-800-static.ttf': 'Unbounded',
   '/demos/07-liquid/assets/Fraunces-Liquid-72-900-Soft.ttf': 'Fraunces',
@@ -45,11 +44,17 @@ const PLACEHOLDER_PNG = Buffer.from(
 // 字体没 vendored 时用系统字体顶上：document.fonts.load() 才不会 reject（字形本来就从 glyphs.json 来，
 // 参考帧里字的形状可能略有出入，但不会整页 init 失败）。
 const SYSTEM_FONT = [
-  join(BUNDLED_FONTS, 'NotoSansSC-VF.ttf'),
+  ...(fontsDir() ? [join(fontsDir(), 'NotoSansSC-VF.ttf')] : []),
   'C:/Windows/Fonts/segoeui.ttf',
   'C:/Windows/Fonts/arial.ttf',
   'C:/Windows/Fonts/msyh.ttc',
 ].find((path) => existsSync(path))
+
+/** 素材库贴图目录：素材包没装好时返回 null。 */
+function texturesDir() {
+  const root = mediaLibraryRoot()
+  return root ? join(root, 'assets', 'textures') : null
+}
 
 function flattenNumbers(value, out) {
   if (typeof value === 'number' && Number.isFinite(value)) out.push(value)
@@ -113,20 +118,20 @@ function startStaticServer(misses) {
         if (pathname === '/assets/fonts/fonts.css') {
           misses.push('/assets/fonts/fonts.css（使用 DrawAI 内置字体，部分上游字体或字重可能不同）')
           res.writeHead(200, {'Content-Type': 'text/css; charset=utf-8'})
-          return res.end(BUNDLED_FONT_FACES.map(face => '@font-face{font-family:' + JSON.stringify(face.family) + ';src:url(' + JSON.stringify('/__drawai-fonts/' + face.file) + ');font-weight:' + face.weight + ';font-style:' + face.style + ';font-display:block}').join('\n'))
+          return res.end(fontFaces().map(face => '@font-face{font-family:' + JSON.stringify(face.family) + ';src:url(' + JSON.stringify('/__drawai-fonts/' + face.file) + ');font-weight:' + face.weight + ';font-style:' + face.style + ';font-display:block}').join('\n'))
         }
-        if (pathname.startsWith('/__drawai-fonts/') && BUNDLED_FONT_FACES.some(face => pathname === '/__drawai-fonts/' + face.file)) {
-          const file = join(BUNDLED_FONTS, pathname.split('/').at(-1))
+        if (pathname.startsWith('/__drawai-fonts/') && fontFaces().some(face => pathname === '/__drawai-fonts/' + face.file)) {
+          const file = join(fontsDir() || '', pathname.split('/').at(-1))
           if (!existsSync(file)) { res.writeHead(404); return res.end('missing bundled font') }
           res.writeHead(200, {'Content-Type': 'font/ttf'})
           return res.end(readFileSync(file))
         }
         if (DEMO_FONT_ALIASES[pathname]) {
-          const face = BUNDLED_FONT_FACES.find(item => item.family === DEMO_FONT_ALIASES[pathname] && item.style === 'normal')
-          if (face && existsSync(join(BUNDLED_FONTS, face.file))) {
+          const face = fontFaces().find(item => item.family === DEMO_FONT_ALIASES[pathname] && item.style === 'normal')
+          if (face && existsSync(join(fontsDir() || '', face.file))) {
             if (face.weight.includes(' ')) misses.push(pathname + '（使用同字体族可变字体，字重或轴值可能不同）')
             res.writeHead(200, {'Content-Type': 'font/ttf'})
-            return res.end(readFileSync(join(BUNDLED_FONTS, face.file)))
+            return res.end(readFileSync(join(fontsDir() || '', face.file)))
           }
         }
         const vendor = pathname.startsWith('/node_modules/')
@@ -138,8 +143,9 @@ function startStaticServer(misses) {
         if (existsSync(file) && statSync(file).isDirectory()) file = join(file, 'index.html')
         // Shared upstream textures are packaged separately from the text-only demo tree.
         if (!vendor && !existsSync(file) && pathname.startsWith('/assets/textures/')) {
-          const texture = resolve(BUNDLED_TEXTURES, pathname.slice('/assets/textures/'.length))
-          if (texture.startsWith(resolve(BUNDLED_TEXTURES) + sep) && existsSync(texture)) file = texture
+          const tdir = texturesDir()
+          const texture = tdir ? resolve(tdir, pathname.slice('/assets/textures/'.length)) : ''
+          if (tdir && texture.startsWith(resolve(tdir) + sep) && existsSync(texture)) file = texture
         }
         if (!existsSync(file)) {
           misses.push(pathname)

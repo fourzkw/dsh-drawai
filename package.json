@@ -34,6 +34,8 @@
   },
   "files": [
     "lib",
+    "!lib/motion/fonts",
+    "!lib/motion/media-library",
     "cordis.patch.yml"
   ],
   "keywords": [

@@ -1,5 +1,29 @@
 # 发布与收录流程 / Release & listing
 
+## 发布素材包（npm 包不再带字体与素材库）
+
+动效要用 46 个字体 + 116 个素材，解压后 201MB。它们**不进 git、也不进 npm 包**，改由 GitHub Release 托管，插件首次用到时自己下载。
+
+```powershell
+# 1. 打包（生成 dist/drawai-assets-v1.tar.gz 与 src/motion/asset-pack-lock.js）
+node tools/build-assets-pack.mjs
+
+# 2. 传到 GitHub Release（tag = assets-v1，需要能访问 github.com）
+node tools/publish-assets.mjs --dry-run   # 只看大小与 tag
+node tools/publish-assets.mjs
+```
+
+打包结果记在 `src/motion/asset-pack-lock.js`（`file` / `bytes` / `sha256` / `files`），插件用它校验下载物；**换素材就要重跑打包并重新发布**，否则哈希对不上会被拒绝。
+
+用户侧：
+
+- 下载缓存 `~/.dsh/drawai-assets/v1/`，校验通过写 `.ready.json`，之后离线可用。
+- 仓库里如果自带 `lib/motion/fonts`（开发态 / 源码安装），直接用它，不下载。
+- 下载失败或素材缺失时，动效工具会返回一段中文指引（重试 / 手动下载解压 / 设代理），并说明画布与图片功能不受影响。
+- 环境变量：`DRAWAI_ASSETS_DIR` 改缓存位置，`DRAWAI_ASSETS_URL` 指到镜像或内网地址。
+
+npm 包体积：`package.json` 的 `files` 用否定项排除 `lib/motion/fonts`、`lib/motion/media-library`，`npm pack` 从 704 文件 / 147.6MB 降到 545 文件 / 3.0MB（注意：单靠 `.npmignore` 无效，`files` 白名单优先）。
+
 ## 未发布：去掉内层制作 Agent（2026-11-03）
 
 - 删除 `src/motion-agent.js`、`src/motion-agent-tools.js`、`src/motion-planner.js`（约 50KB）与它们写出的 `.agent/state.json` / 192 份 receipts；`motion-tasks.js` 只保留任务记录与旧的遗留管线。
