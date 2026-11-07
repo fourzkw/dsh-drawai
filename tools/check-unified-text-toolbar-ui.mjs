@@ -35,9 +35,9 @@ try {
   const errors = []
   page.on('pageerror', error => errors.push(String(error)))
   await page.goto({ url: 'http://127.0.0.1:' + server.address().port, timeout: 30000 })
-  const waitFor = async predicate => {
+  const waitFor = async (predicate, arg) => {
     for (let i = 0; i < 120; i++) {
-      if (await page.evaluate(predicate)) return
+      if (await page.evaluate(predicate, arg)) return
       await new Promise(resolve => setTimeout(resolve, 30))
     }
     throw new Error('Timed out: ' + predicate + '\n' + errors.join('\n'))
@@ -121,7 +121,7 @@ try {
     await page._client().send('Input.insertText', { text: result })
     await page.evaluate(() => document.querySelector('.drawai-canvas').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 })))
     await waitFor(() => !document.querySelector('.drawai-edit'))
-    await waitFor(() => window.saved.nodes.find(node => node.id === id).label.endsWith(id === 'text' ? '已编辑文字' : '已编辑图形'))
+    await waitFor(id => window.saved.nodes.find(node => node.id === id).label.endsWith(id === 'text' ? '已编辑文字' : '已编辑图形'), id)
   }
   await waitFor(() => window.saved.nodes.find(node => node.id === 'shape').label === '普通图形文字已编辑图形')
   const savedText = await page.evaluate(() => window.saved.nodes.find(node => node.id === 'text'))

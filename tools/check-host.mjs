@@ -2347,5 +2347,25 @@ console.log('\nAI 修改富文本节点')
   await apply([{ op: 'setLabel', id: 'rich', label: '新的文字' }], { layout: 'none' })
   ok(current().nodes[0].label === '新的文字' && !current().nodes[0].labelHtml, '修改纯文字后不会显示或导出旧富文本')
 }
+console.log('\nAI 富文本整体字色和字号')
+{
+  store.clear()
+  seed({ version: 2, meta: { pinned: true }, nodes: [
+    { id: 'rich-style', label: '咖啡', labelHtml: '<b><font color="red" size="5">咖啡</font></b>', style: 'text;html=1;', x: 0, y: 0, w: 160, h: 60 },
+  ], edges: [] })
+  await apply([{ op: 'setStyle', id: 'rich-style', fontColor: '#0000ff' }], { layout: 'none' })
+  let node = current().nodes[0]
+  ok(!/color="red"/.test(node.labelHtml) && /size="5"/.test(node.labelHtml) && /<b>/.test(node.labelHtml), '整体字色移除局部颜色并保留字号与粗体')
+  await apply([{ op: 'setStyle', id: 'rich-style', fontSize: 24 }], { layout: 'none' })
+  node = current().nodes[0]
+  ok(!/size="5"/.test(node.labelHtml) && /<b>/.test(node.labelHtml) && styleGet(node.style, 'fontSize') === '24', '整体字号移除局部字号并保留粗体')
+  seed({ version: 2, meta: { pinned: true }, nodes: [
+    { id: 'shorthand', label: '文本', labelHtml: '<span style="font: italic 18px Arial">文本</span>', style: 'text;html=1;', x: 0, y: 0, w: 160, h: 60 },
+  ], edges: [] })
+  const before = store.get(WORKSPACE + '\\doc.drawio')
+  let rejected = false
+  try { await apply([{ op: 'setStyle', id: 'shorthand', fontSize: 24 }], { layout: 'none' }) } catch (error) { rejected = /font 简写/.test(error.message) }
+  ok(rejected && store.get(WORKSPACE + '\\doc.drawio') === before, '无法安全保留简写字体时不写入')
+}
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1

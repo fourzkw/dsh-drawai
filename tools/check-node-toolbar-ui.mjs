@@ -24,7 +24,7 @@ function Fixture({kind}) {
   const node=kind==='audio' ? {id:'audio',x:280,y:210,w:60,h:50,data:motionCore.audioNodeData()} :
     {id:'movie',label:'视频',x:280,y:210,w:60,h:50,data:motionCore.motionNodeData()};
   const doc={nodes:[node],edges:[]},selectedIds=[node.id],view={x:0,y:0,w:320,h:300},size={w:320,h:300};
-  const active=true,editing=null,menu=null,placeEdgeKind=null,placeTool=null,uid='fixture',hasPath=true;
+  const active=true,editing=null,tableEditor=null,menu=null,placeEdgeKind=null,placeTool=null,uid='fixture',hasPath=true;
   const nodeBoxOf=n=>n,filterEditableIds=(_doc,ids)=>ids,boxOfBoxes=boxes=>boxes[0];
   const mediaAction=async()=>({}),openAudioFilePicker=()=>{},videoImportsRef={current:null},applyAudioResult=()=>{};
   const applyLocal=()=>{},deleteById=()=>{},setSelectedIds=()=>{},openVideoFilePicker=()=>{window.fixtureState.uploads++};

@@ -603,6 +603,7 @@ const CSS = [
   // 背景透明、颜色与字号由 inline style 按**这个节点**给（见 renderDiagram 的 labelTextBox）。
   '.drawai-edit{position:absolute;z-index:5;box-sizing:border-box;outline:2px solid #1a73e8;outline-offset:-2px;border:none;border-radius:4px;background:transparent;color:#000;font-family:Helvetica, Arial, sans-serif;font-size:12px;line-height:14px;text-align:center;padding:0;margin:0;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text}',
   '.drawai-canvas-edit{outline:none;border:0;border-radius:0;background:transparent;box-shadow:none}',
+  '.drawai-table-editor{position:absolute;z-index:30;inset:12px;display:flex;flex-direction:column;min-width:0;min-height:0;padding:12px;gap:8px;border:1px solid var(--dsw-alias-border-l2,#d5dbe4);border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:0 8px 28px #20273830}.drawai-table-editor-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.drawai-table-editor-bar strong{margin-right:auto}.drawai-table-editor-bar button{padding:5px 8px;border:1px solid var(--dsw-alias-border-l2,#d5dbe4);border-radius:6px;background:transparent;color:inherit;cursor:pointer}.drawai-table-editor-bar button:disabled{opacity:.45}.drawai-table-note{margin:0;font-size:11px;opacity:.7}.drawai-table-scroll{flex:1;min-height:0;overflow:auto}.drawai-table-scroll table{border-collapse:collapse;min-width:100%;table-layout:fixed}.drawai-table-scroll td,.drawai-table-scroll th{border:1px solid #cbd2dd;min-width:120px;padding:4px}.drawai-table-scroll th{background:#eef2f8}.drawai-table-scroll textarea{box-sizing:border-box;width:100%;min-width:112px;min-height:60px;padding:4px;border:0;background:transparent;color:inherit;font:12px/1.4 sans-serif;resize:vertical;user-select:text}.drawai-table-scroll th textarea{color:#263143;font-weight:bold}',
   '.drawai-rich-edit{overflow:auto;min-height:24px}',
   '.drawai-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}',
   '.drawai-trace-surface{position:relative;width:100%;height:100%;overflow:hidden}.drawai-trace-surface>svg{display:block;pointer-events:none}.drawai-trace-progress{position:absolute;left:8px;right:8px;bottom:8px;pointer-events:none;line-height:0}.drawai-trace-progress progress{display:block;width:100%;height:5px;accent-color:#386bff}',
@@ -1297,7 +1298,8 @@ function nodeBoxOf(node) {
   const stored = numberOr(node.h, FALLBACK_NODE_H)
   const x = numberOr(node.x, 0)
   const y = numberOr(node.y, 0)
-  const need = nodeTextFitHeight(node)
+  const table = parseCanvasTable(node)
+  const need = table ? tableNodeLayout(node, table).height : nodeTextFitHeight(node)
   if (need > stored) return { x: x, y: y, w: w, h: snapTo(need, GRID), stored: stored }
   return { x: x, y: y, w: w, h: stored, stored: stored }
 }
@@ -3006,6 +3008,7 @@ const SHAPE_LIBRARY = [
  * 不要靠 shapeFamilyOf('rounded') 判断（那永远是图形族）。
  */
 function shapeFamilyOf(shape) {
+  if (shape === 'table') return 'table'
   if (shape === 'text') return 'text'
   if (shape === 'section' || shape === 'swimlane') return 'section'
   if (shape === 'svg') return 'svg'
@@ -3109,6 +3112,7 @@ function railIcon(kind) {
   if (kind === 'text') {
     return svg(React.createElement('path', { d: 'M6 6.5h12M12 6.5V18' }))
   }
+  if (kind === 'table') return svg(React.createElement('path', { d: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14M15 5v14' }))
   if (kind === 'tasks') {
     return svg([
       React.createElement('path', { key: 'checks', d: 'M3 6l1 1 2-2M3 12l1 1 2-2M3 18l1 1 2-2' }),
@@ -6756,7 +6760,10 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     // 画出来的标签会从它底下透出来，两层字叠在一起。以前没这问题只是因为那个单行 input
     // 带白底、把标签盖住了 —— 换成透明 textarea 之后必须显式让位。
     const editingHere = ui !== undefined && ui !== null && ui.editingNodeId === node.id
-    if (box.label && !editingHere && !(ui && (motionCore.isShotCardNode(node)||motionCore.isMgStyleNode(node)||motionCore.isAudioNode(node)))) {
+    const tableModel = parseCanvasTable(node)
+    if (tableModel && !editingHere) {
+      groupChildren.push(...tableNodeSvg(node, geo, tableModel))
+    } else if (box.label && !editingHere && !(ui && (motionCore.isShotCardNode(node)||motionCore.isMgStyleNode(node)||motionCore.isAudioNode(node)))) {
       const labelStyle = typeof node.style === 'string' ? node.style : ''
       const labelFontSize = styleNumber(labelStyle, 'fontSize', FSIZE)
       const labelFill = colorOf(node, mode).font
@@ -7622,6 +7629,7 @@ function CanvasView(props) {
   const editingState = React.useState(null)
   const editing = editingState[0]
   const setEditing = editingState[1]
+  const [tableEditor, setTableEditor] = React.useState(null)
   const richEditorRef = React.useRef(null)
   const richDirtyRef = React.useRef(false)
   const richFormatRef = React.useRef(false)
@@ -9549,6 +9557,36 @@ function CanvasView(props) {
    * 于是编辑框里的断行与字号跟提交后画出来的标签一模一样（需求"输入时的效果与
    * 输入完成后统一"）。定位仍然换算到**画布容器**的坐标系（画布是定位上下文）。
    */
+  function openTableEditor(id) {
+    const node = nodeById(id)
+    const model = parseCanvasTable(node)
+    if (!node || !model || !filterEditableIds(docRef.current, [id]).includes(id)) return
+    setEditing(null)
+    setSelectedIds([id])
+    setMenu(null)
+    setTableEditor({ id, model, original: node.label, path: target, page: pageIndex, hasFormatting: typeof node.labelHtml === 'string' })
+  }
+
+  function saveTableEditor(model) {
+    if (!tableEditor) return
+    const node = nodeById(tableEditor.id)
+    if (target !== tableEditor.path || pageIndex !== tableEditor.page || !node || node.label !== tableEditor.original) {
+      setSaveNote('表格已被其他修改更新，请重新打开后编辑')
+      return
+    }
+    if (JSON.stringify(model) !== JSON.stringify(tableEditor.model)) {
+      applyLocal((next) => {
+        const changed = next.nodes.find(item => item.id === tableEditor.id)
+        if (!changed) return
+        changed.label = serializeCanvasTable(model)
+        changed.data = { ...changed.data, drawaiTableEscaped: '1' }
+        if (typeof changed.labelHtml === 'string') changed.labelHtml = null
+        changed.h = Math.max(Number(changed.h) || 0, tableNodeLayout(changed, model).height)
+      })
+    }
+    setTableEditor(null)
+  }
+
   function openNodeEditor(id) {
     const node = nodeById(id)
     if (node === null) return
@@ -10342,6 +10380,8 @@ function CanvasView(props) {
   /** 新节点：形状与配色都落成 drawio 的 style 键，高度**一开始就装得下自己的标签**。 */
   function freshNode(id, shape, styleName, userX, userY, label) {
     if(shape==='audio')return {id,label:'音频',x:userX,y:userY,w:280,h:110,style:'rounded=1;fillColor=#e1f3ee;strokeColor=#5a9e8a;',data:motionCore.audioNodeData()}
+    if (shape === 'table') return { id, label: '| 标题 1 | 标题 2 | 标题 3 |\n| --- | --- | --- |\n| 内容 | 内容 | 内容 |',
+      style: styleWithNodeShape('', 'text'), x: snap(userX - 300), y: snap(userY - 75), w: 600, h: 150, data: { drawaiTable: '1' } }
     const isText = shape === 'text'
     const isSvg = shape === 'svg'
     const isVideo = shape === 'video'
@@ -12728,7 +12768,7 @@ function CanvasView(props) {
   }
 
   function renderSelectionToolbar() {
-    if (!active || doc === null || view === null || menu !== null || placeEdgeKind !== null || placeTool !== null) return null
+    if (!active || doc === null || view === null || tableEditor !== null || menu !== null || placeEdgeKind !== null || placeTool !== null) return null
     const ids = filterEditableIds(doc, selectedIds)
     const nodes = doc.nodes.filter((n) => ids.indexOf(n.id) >= 0)
     const edges = doc.edges.filter((e) => ids.indexOf(e.id) >= 0)
@@ -12746,6 +12786,13 @@ function CanvasView(props) {
     const top = (bounds.y - view.y) * scale
     const bottom = (bounds.y + bounds.h - view.y) * scale
     const width = 460
+    if (nodes.length === 1 && edges.length === 0 && isTableNode(nodes[0])) {
+      const node = nodes[0]
+      return React.createElement(NodeToolCard, { canvasRef, className: 'drawai-selection-toolbar', role: 'toolbar', 'aria-label': '表格操作', fallbackTop: bottom + 12,
+        style: { width: '96px', left: center - 48 + 'px', top: top - 72 + 'px' } },
+        React.createElement('button', { type: 'button', className: 'drawai-toolbar-button', onClick: () => openTableEditor(node.id), 'aria-label': '编辑表格' },
+          railIcon('table'), React.createElement('span', { className: 'drawai-color-label' }, '编辑表格')))
+    }
     if(nodes.length===1&&edges.length===0&&motionCore.isAudioNode(nodes[0])){
       const node=nodes[0]
       return React.createElement(NodeToolCard,{canvasRef,className:'drawai-selection-toolbar',role:'toolbar','aria-label':'音频节点操作',fallbackTop:bottom+12,style:{left:center-36+'px',top:top-72+'px',width:'72px'}},React.createElement(ToolbarPopover,{label:'音频设置',group:'drawai-audio-'+uid,icon:React.createElement('span',{'aria-hidden':true},'♫'),renderPanel:()=>React.createElement(AudioPanel,{key:node.id,node,maxHeight:Math.max(180,Math.min(560,size.h-100)),
@@ -13096,6 +13143,7 @@ function CanvasView(props) {
       )
     }
 
+    chips.push(railIconButton('rail-table','table',placeTool==='table','表格',()=>{setPlaceTool(placeTool==='table'?null:'table');setPlaceEdgeKind(null);setMenu(null)},null))
     chips.push(railIconButton('rail-audio','audio',placeTool==='audio','音频：添加音效、音乐或旁白节点',()=>{setPlaceTool('audio');setPlaceEdgeKind(null);setMenu(null)},null))
     chips.push(railIconButton('rail-shotcards', 'shotcards', !!shotLibrary, '镜头卡库：搜索样式并添加到画布', () => setShotLibrary({}), null))
     chips.push(railIconButton('rail-mgstyles', 'mgstyles', !!mgLibrary, '整片风格库：一条片子选一种 MG 视觉语言', () => setMgLibrary({}), null))
@@ -14395,6 +14443,7 @@ function CanvasView(props) {
     const target = event === null || event === undefined ? null : event.target
     if (isSelectableTextTarget(target)) return
     const closest = target !== null && target !== undefined && typeof target.closest === 'function' ? target.closest.bind(target) : null
+    if (closest !== null && closest('.drawai-table-editor') !== null) return
     // Formatting controls must not steal focus or clear the selected text in
     // the contenteditable before the command is applied (capture runs first).
     if (closest !== null && (closest('.drawai-selection-toolbar') !== null || closest('.drawai-palette-panel') !== null)) {
@@ -14652,6 +14701,8 @@ function CanvasView(props) {
       for (const cell of cells) if (cell.id === editing.id) cell.label = editing.text
     }
     const canvasChildren = [renderDiagram(previewDoc, mode, uid, svgRef, ui, view)]
+    if (tableEditor !== null) canvasChildren.push(React.createElement(TableNodeEditor, { key: 'table-editor-' + tableEditor.id, model: tableEditor.model,
+      hasFormatting: tableEditor.hasFormatting, onSave: saveTableEditor, onCancel: () => setTableEditor(null) }))
     const selectionToolbar = renderSelectionToolbar()
     if (selectionToolbar !== null) canvasChildren.push(selectionToolbar)
     const menuNode = renderMenu()

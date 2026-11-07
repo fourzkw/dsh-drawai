@@ -15,6 +15,8 @@
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { parseFragment as parseHtmlFragment, serialize as serializeHtml } from 'parse5'
+import postcss from 'postcss'
 import { readdir, readFile, writeFile, mkdir, stat } from 'node:fs/promises'
 import { createReadStream, existsSync, readFileSync, rmSync, writeFileSync, appendFileSync, renameSync, realpathSync, mkdirSync, cpSync, lstatSync } from 'node:fs'
 import { randomUUID, createHash } from 'node:crypto'
@@ -638,6 +640,50 @@ function nodeStyleFromOp(style, op, where) {
   if (has(op, 'fontColor')) out = stylePatch(out, { fontColor: fontColorValue(op.fontColor, where + ' fontColor') })
   if (has(op, 'keys')) out = stylePatch(out, styleKeysFromOp(op.keys, where))
   return out
+}
+
+/** Remove only the inline properties overridden by a whole-node text change. */
+export function clearRichTextOverrides(html, options = {}) {
+  if (typeof html !== 'string' || (!options.color && !options.size)) return html
+  const fragment = parseHtmlFragment(html)
+  let changed = false
+  const visit = node => {
+    if (Array.isArray(node.attrs)) {
+      if (node.tagName === 'font') {
+        const before = node.attrs.length
+        node.attrs = node.attrs.filter(attr => !(options.color && attr.name === 'color') && !(options.size && attr.name === 'size'))
+        changed ||= node.attrs.length !== before
+      }
+      const attr = node.attrs.find(item => item.name === 'style')
+      if (attr) {
+        let rule
+        try {
+          const parsed = postcss.parse('x{' + attr.value + '}')
+          if (parsed.nodes.length !== 1 || parsed.first.type !== 'rule' || parsed.first.nodes.some(item => item.type !== 'decl' && item.type !== 'comment')) throw new Error('unsupported style')
+          rule = parsed.first
+        } catch { throw new Error('无法安全修改富文本中的 CSS 样式，请先在画布中编辑文字') }
+        // CSS font shorthand also controls family/weight and cannot be dropped
+        // without changing unrelated formatting. Do not silently destroy it.
+        if (options.size && rule.nodes.some(item => item.type === 'decl' && item.prop.toLowerCase() === 'font')) {
+          throw new Error('无法安全统一含 font 简写的富文本字号，请先在画布中编辑文字')
+        }
+        let cssChanged = false
+        rule.walkDecls(decl => {
+          const name = decl.prop.toLowerCase()
+          if ((options.color && name === 'color') || (options.size && name === 'font-size')) { decl.remove(); cssChanged = true }
+        })
+        if (cssChanged) {
+          changed = true
+          attr.value = rule.nodes.map(item => item.toString()).join(';')
+          if (!attr.value.trim()) node.attrs = node.attrs.filter(item => item !== attr)
+        }
+      }
+    }
+    for (const child of node.childNodes || []) visit(child)
+    if (node.content) visit(node.content)
+  }
+  visit(fragment)
+  return changed ? serializeHtml(fragment) : html
 }
 
 /**
@@ -1749,6 +1795,14 @@ async function executeOps(doc, ops, out, opctx) {
         const node = doc.nodes[ni]
         const nodeBase = node.style === undefined ? DEFAULT_NODE_STYLE : node.style
         const nextStyle = nodeStyleFromOp(nodeBase, op, 'ops[' + i + '] setStyle')
+        const keys = op.keys && typeof op.keys === 'object' && !Array.isArray(op.keys) ? op.keys : {}
+        const styleText = typeof op.style === 'string' ? op.style : ''
+        const colorChanged = has(op, 'fontColor') || has(keys, 'fontColor') || /(?:^|;)\s*fontColor\s*=/.test(styleText) ||
+          (nodeShapeFromStyle(nextStyle) === 'text' && styleText.length > 0 && !/[=;]/.test(styleText))
+        const sizeChanged = has(op, 'fontSize') || has(keys, 'fontSize') || /(?:^|;)\s*fontSize\s*=/.test(styleText)
+        if (typeof node.labelHtml === 'string' && (colorChanged || sizeChanged)) {
+          node.labelHtml = clearRichTextOverrides(node.labelHtml, { color: colorChanged, size: sizeChanged })
+        }
         if (nextStyle !== nodeBase) node.style = nextStyle
         if (has(op, 'w')) node.w = numberOr(op.w, node.w)
         if (has(op, 'h')) node.h = numberOr(op.h, node.h)
