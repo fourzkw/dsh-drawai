@@ -1,22 +1,16 @@
 import assert from 'node:assert/strict'
-import {motionAgentFixture} from './motion-agent-test-fixture.mjs'
-import {randomUUID} from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { resolve, join, relative, isAbsolute } from 'node:path'
 import { apply } from '../lib/index.js'
 import { buildCanvas, parseCanvas } from '../src/canvas-format.js'
-import { contentHash } from '../src/mxfile.js'
 import { motionNodeData } from '../src/motion-core.js'
 import {spawnSync} from 'node:child_process'
 import {ffmpegBinary} from '../src/video-export.js'
-import { Resvg } from '@resvg/resvg-js'
 
 mkdirSync('artifacts', { recursive: true })
 const root = mkdtempSync(resolve('artifacts/motion-host-')), path = join(root, 'canvas.drawai')
-let route, readonly = false, calls = 0, truncateScene = false
-let visionMode = false
-const visionRequests = [], visionAttachments = []
-const disposers = [], tools = [], messages = []
+let route, readonly = false
+const disposers = [], tools = []
 const initial = { meta: {}, nodes: [{ id: 'movie', label: '', x: 0, y: 0, w: 320, h: 180, style: '', data: motionNodeData() }], edges: [], layers: [{ id: '1' }] }
 initial.nodes[0].data.motion = { ...initial.nodes[0].data.motion, mode: 'scene', prompt: '制作一个标题渐显视频', duration: 2, fps: 12, width: 640, height: 360 }
 const save = (doc = initial) => writeFileSync(path, buildCanvas(doc, { format: 'drawai' }).text)
@@ -34,29 +28,8 @@ apply({ tools: { register: (tool) => {tools.push(tool); return () => {}} }, webS
   sandboxPolicy: { resolve: () => ({ mode: readonly ? 'read-only' : 'workspace-write', workspaceRoot: root }) },
   effect(fn) { const cleanup = fn(); if (typeof cleanup === 'function') disposers.push(cleanup); return cleanup },
   get(name) {
-    if(name==='attachments')return {saveImage:async image=>{visionAttachments.push(image);return {attachmentId:'vision-'+visionAttachments.length}}}
-    if (name === 'agents') return {get:(id)=>({followup:(message)=>messages.push({...message,sessionId:id})})}
-    if (name === 'sessionController') throw new Error('Canvas drawing must not require the main-session prompt service')
-    if (name !== 'llm') return undefined
-    return { resolveModelInfo:async()=>({inputModalities:['text','image']}),async *stream(request) {
-      calls++; assert.equal(request.provider, 'mock'); assert.equal(request.model, 'director')
-      if(request.system.startsWith('你是声音设计师')){
-        const source=JSON.parse(request.messages[0].content[0].text).sources[0]
-        yield {type:'text-delta',text:JSON.stringify({cues:[{referenceId:source.referenceId,shotId:'shot-1',offsetFrames:0,durationFrames:24,gainDb:-18,fadeIn:.2,fadeOut:.2,loop:true}]})};return
-      }
-      if(visionMode)visionRequests.push(request)
-      if(request.system.startsWith('你是 DrawAI 后台')){
-        yield* motionAgentFixture(request,{truncate:truncateScene,source:"import React from 'react';import {AbsoluteFill,useCurrentFrame} from 'remotion';export default function Scene(){const f=useCurrentFrame();return <AbsoluteFill style={{background:'#162340'}}><div style={{margin:40,width:80+f,height:80,background:'#80e9ce'}}/></AbsoluteFill>}"});return
-      }
-      if(request.system.startsWith('你是独立的')){yield {type:'text-delta',text:JSON.stringify({status:'passed',issues:[]})};yield {type:'finish',reason:{kind:'stop'}};return}
-      if (truncateScene && !request.system.startsWith('你是视频导演')) {
-        yield { type: 'finish', reason: { kind: 'max-tokens' } }; return
-      }
-      const shot = { recipeId: 'scene', startFrame: 0, durationFrames: 24, referenceIds: visionMode?['picture']:[], title: '一句话成片', subtitle: 'DrawAI 原生动效' }
-      const reply = !request.system.startsWith('你是视频导演') ? { sceneSource: "import React from 'react';import {AbsoluteFill,useCurrentFrame} from 'remotion';export default function Scene(){const f=useCurrentFrame();return <AbsoluteFill style={{background:'#162340'}}><svg width='640' height='360'><circle cx={180+f*8} cy={180+Math.sin(f/6)*60} r='55' fill='#80e9ce'/><path d='M0 300 Q160 200 320 290 T640 300V360H0Z' fill='#585f8a'/></svg></AbsoluteFill>}" } : { production: { brief: '测试成片' }, shots: [shot] }
-      yield { type: 'text-delta', text: request.system.startsWith('你是视频导演') ? JSON.stringify(reply) : reply.sceneSource }
-      yield { type: 'finish', reason: { kind: 'stop' } }
-    } }
+    if (name === 'llm' || name === 'sessionController') throw new Error('Audio tools must not require a background agent')
+    return undefined
   },
 })
 async function request(action, extra = {}) {
@@ -94,23 +67,64 @@ try {
   assert.equal((await request('audio-upload-chunk',{token:start.token,offset:0,base64:bytes.toString('base64')})).ok,true)
   const finish=await request('audio-upload-finish',{token:start.token});assert.equal(finish.ok,true,finish.error)
   await request('audio-upload-release',{token:start.token})
-  const settings=JSON.parse((await tools.find(t=>t.name==='motion_task').execute({action:'configure',path:'canvas.drawai',nodeId:'movie',settings:{audioMode:'manual',audioPrompt:'轻音乐'}},exec)).details)
-  assert.equal(settings.settings.audioMode,'manual')
+  const call = (name, args) => tools.find(t => t.name === name).execute({path:'canvas.drawai', nodeId:'movie', ...args}, exec)
+  const project = JSON.parse((await call('motion_project', {action:'create', segments:1,
+    spec:{width:640, height:360, fps:12, duration:2}})).details)
+  const timeline = () => JSON.parse(readFileSync(join(project.dir, 'timeline.json'), 'utf8'))
+  const addAudio = gainDb => call('motion_audio', {action:'add', audioNodeId:node.id, role:'bgm',
+    at:0, duration:2, gainDb, fadeIn:.2, fadeOut:.2, loop:true})
+  await addAudio(-20)
+  let cue = timeline().audio[0]
+  assert.equal(cue.gainDb, -20)
+  assert.equal(cue.role, 'bgm')
+  assert.equal(cue.durationInFrames, 24)
+  assert.equal(cue.loop, true)
+  assert.ok(existsSync(join(project.dir, 'assets', cue.file)), 'audio is copied into the project')
+  assert.match((await call('motion_audio', {action:'list'})).details, /bgm/)
+  readonly = true
+  await assert.rejects(addAudio(-25), /只读/)
+  await assert.rejects(call('motion_audio', {action:'remove', cueId:cue.id}), /只读/)
+  readonly = false
+  assert.equal(timeline().audio.length, 1, 'read-only operations leave the track unchanged')
   if(process.argv.includes('--render')){
-    const task=tools.find(t=>t.name==='motion_task')
-    const started=JSON.parse((await task.execute({action:'start',path:'canvas.drawai',nodeId:'movie',settings:{audioMode:'auto'}},exec)).details)
-    const done=async id=>{for(let i=0;i<1200;i++){const r=await request('motion-task-result',{taskId:id});if(['done','error','retained'].includes(r.job.status))return r;await new Promise(resolve=>setTimeout(resolve,100))}throw Error('render timeout')}
-    const generated=await done(started.id);assert.equal(generated.job.status,'done',generated.job.error);assert.equal(generated.job.qa.audio.status,'mixed')
-    assert.equal(generated.job.composition.audio.cues[0].referenceId,node.id)
-    await tool.execute({action:'configure',path:'canvas.drawai',nodeId:node.id,settings:{audioGainDb:-25}},exec)
-    await task.execute({action:'configure',path:'canvas.drawai',nodeId:'movie',settings:{audioMode:'manual'}},exec)
-    const remixed=await request('motion-task-remix',{taskId:started.id});assert.equal(remixed.ok,true,remixed.error)
-    const finished=await done(remixed.job.id);assert.equal(finished.job.status,'done',finished.job.error);assert.equal(finished.job.qa.audio.status,'mixed')
-    assert.notEqual(finished.output.data.mediaClip,generated.output.data.mediaClip)
-    const exported=await request('media-export-source',{clip:finished.output.data.mediaClip,variant:'noBgm'})
-    assert.equal(exported.ok,true,exported.error);assert.match(exported.path,/no-bgm.mp4$/)
-    console.log('Audio host live render: model → Remotion → AI sound plan → FFmpeg → canvas, remix → new version and no-BGM export passed.')
+    writeFileSync(join(project.dir, 'scene-0.tsx'), "import React from 'react';import {AbsoluteFill,useCurrentFrame} from 'remotion';export default function Scene(){const f=useCurrentFrame();return <AbsoluteFill style={{background:'#162340'}}><div style={{margin:40,width:80+f,height:80,background:'#80e9ce'}}/></AbsoluteFill>}")
+    const renderAndApply = async () => {
+      const started = JSON.parse((await call('motion_render', {action:'start'})).details)
+      const deadline = Date.now() + 180000
+      try {
+        while (Date.now() < deadline) {
+          const job = JSON.parse((await call('motion_render', {action:'status', jobId:started.jobId})).details)
+          if (job.status === 'done') {
+            const applied = JSON.parse((await call('motion_render', {action:'apply', jobId:job.id})).details)
+            const film = isAbsolute(applied.source) ? applied.source : join(applied.dir, applied.source)
+            assert.ok(existsSync(film), 'applied film exists')
+            const audio = spawnSync(ffmpegBinary(), ['-hide_banner', '-i', film,
+              '-map', '0:a:0', '-af', 'volumedetect', '-f', 'null', '-'], {windowsHide:true, encoding:'utf8'})
+            assert.equal(audio.status, 0, audio.stderr)
+            const mean = /mean_volume:\s*([\d.-]+) dB/.exec(audio.stderr)
+            assert.ok(mean && Number.isFinite(Number(mean[1])), 'rendered film contains non-silent audio')
+            assert.equal(parseCanvas(readFileSync(path,'utf8')).doc.nodes.find(n=>n.id==='movie').data.mediaClip, applied.clip)
+            return applied
+          }
+          assert.ok(!['failed','cancelled'].includes(job.status), job.error || job.status)
+          await new Promise(resolve=>setTimeout(resolve,100))
+        }
+        throw new Error('render timeout')
+      } catch (error) {
+        await call('motion_render', {action:'cancel', jobId:started.jobId})
+        throw error
+      }
+    }
+    await renderAndApply()
+    await call('motion_audio', {action:'remove', cueId:cue.id})
+    await addAudio(-25)
+    assert.equal(timeline().audio[0].gainDb, -25)
+    await renderAndApply()
+    console.log('Audio host live render: project audio → render/status/apply, gain update and re-render passed.')
   }
+  cue = timeline().audio[0]
+  await call('motion_audio', {action:'remove', cueId:cue.id})
+  assert.equal(timeline().audio.length, 0, 'audio removal is persisted')
   console.log('Audio host: actual tools import/connect/configure/read, upload routes, workspace/session ownership and read-only checks passed (SDK loader shim).')
 }finally {
   await Promise.allSettled(disposers.map(dispose=>Promise.resolve().then(dispose)))

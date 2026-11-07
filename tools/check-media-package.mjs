@@ -17,6 +17,9 @@ const files = new Set(packed.files.map(file => file.path))
 const root = 'lib/motion/media-library/'
 assert.ok(files.has('lib/motion/asset-pack.js'), '按需下载器未进入安装包')
 assert.ok(files.has('lib/motion/asset-pack-lock.js'), '素材包校验信息未进入安装包')
+for (const name of ['video-runtime.js', 'runtime/package.json', 'runtime/package-lock.json']) {
+  assert.ok(files.has('lib/motion/' + name), '独立视频环境文件未进入安装包：' + name)
+}
 assert.match(ASSETS_LOCK.file, /^drawai-assets-.+\.tar\.gz$/)
 assert.match(ASSETS_LOCK.sha256, /^[a-f0-9]{64}$/)
 assert.ok(ASSETS_LOCK.bytes > 0 && ASSETS_LOCK.files > 0, '素材包大小和文件数必须有效')

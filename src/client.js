@@ -13,6 +13,8 @@
  */
 
 const React = require('react')
+// 0.4.0 暂停文生图，保留实现和已有节点数据以便后续恢复。
+const IMAGEGEN_ENABLED = false
 const { createVideoController, VideoSurface, VideoControls, VideoPreview } = videoPlayer
 
 /**
@@ -5007,7 +5009,8 @@ function VideoExportJobs(props) {
     button(collapsed ? '展开' : '收起', () => setCollapsed(!collapsed))),
   collapsed ? null : props.jobs.map((job) => React.createElement('div', { key: job.token, className: 'drawai-video-task-detail' },
     React.createElement('strong', null, job.clip + ' · ' + job.format.toUpperCase() + ' · ' +
-      ({ rendering: '正在渲染', encoding: '正在编码', done: '已保存', error: '导出失败' }[job.status] || job.status)),
+      ({ preparing: '正在准备 FFmpeg', queued: '等待开始', rendering: '正在渲染', encoding: '正在编码', done: '已保存', error: '导出失败' }[job.status] || job.status)),
+    job.message ? React.createElement('small', { role: 'status' }, job.message) : null,
     ['rendering', 'encoding'].includes(job.status) ? React.createElement('small', null,
       (job.status === 'rendering' ? job.received : job.encoded) + (job.count ? '/' + job.count : '') + ' 帧；切换页面后仍会继续') : null,
     job.path ? React.createElement('small', { style: { overflowWrap: 'anywhere', userSelect: 'text' } }, '已保存：' + job.path) : null,
@@ -8324,6 +8327,7 @@ function CanvasView(props) {
    * 返回宿主结果（含 dataUri/width/height/seed/elapsedMs），失败 throw 中文信息给面板显示。
    */
   async function generateImageGen(source, options) {
+    if (!IMAGEGEN_ENABLED) throw new Error('文生图功能暂未开放')
     const current = docRef.current
     if (current === null) throw new Error('请先新建或打开一张画布')
     const node = source && typeof source.id === 'string' ? nodeById(source.id) : null
@@ -11426,6 +11430,7 @@ function CanvasView(props) {
    * `generateImageGen` 换成真图（同节点原地替换，不新建节点）。
    */
   function insertImageGenNode() {
+    if (!IMAGEGEN_ENABLED) { setSaveNote('文生图功能暂未开放'); return }
     const current = docRef.current
     if (current === null) { setSaveNote('请先新建或打开一张画布'); return }
     if (activeLayerLocked()) { setSaveNote('当前图层已锁定：先解锁或换一层再放节点'); return }
@@ -11578,8 +11583,16 @@ function CanvasView(props) {
   async function uploadAudioFile(file,id,x,y) {
     if(!hasPath||!docRef.current){setSaveNote('请先保存画布');return}
     const control=new AbortController();if(!videoImportsRef.current)videoImportsRef.current=new Set();videoImportsRef.current.add(control)
-    let token
+    let token, poll=null
     const api=(action,args)=>mediaAction(action,args,{throwOnError:true,signal:control.signal})
+    const noteFfmpeg=(state)=>{
+      const p=state&&state.progress, mb=(n)=>n>=1048576?(n/1048576).toFixed(n>=10485760?0:1)+' MB':Math.max(1,Math.round((Number(n)||0)/1024))+' KB'
+      if(state&&state.status==='ready')return
+      if(!p){setSaveNote('正在准备 FFmpeg…');return}
+      if(p.phase==='download'){setSaveNote(p.total?'正在下载 FFmpeg '+Math.round((p.received||0)/p.total*100)+'%（'+mb(p.received)+' / '+mb(p.total)+'）':'正在下载 FFmpeg（'+mb(p.received)+'）');return}
+      if(p.phase==='waiting'){setSaveNote('另一个任务正在准备 FFmpeg，等待中…');return}
+      setSaveNote(({resolve:'正在查找 FFmpeg…',verify:'正在校验下载的 FFmpeg…',extract:'正在解压 FFmpeg…',check:'正在检查 FFmpeg 功能…',ready:'FFmpeg 已就绪'}[p.phase])||p.message||'正在准备 FFmpeg…')
+    }
     try {
       if(id){motionCore.assertMotionEditable(docRef.current,id);if(!motionCore.isAudioNode(nodeById(id)))throw new Error('请选择音频节点')}
       else if(activeLayerLocked())throw new Error('当前图层已锁定')
@@ -11589,11 +11602,13 @@ function CanvasView(props) {
         const base64=await readVideoChunk(file.slice(offset,offset+1024*1024),control.signal)
         await api('audio-upload-chunk',{token,offset,base64});setSaveNote('音频上传 '+Math.round(Math.min(offset+1024*1024,file.size)/file.size*100)+'%')
       }
+      setSaveNote('正在准备 FFmpeg（首次使用会自动下载）…')
+      poll=setInterval(()=>{api('media-ffmpeg-status',{}).then(noteFfmpeg).catch(()=>{})},600)
       const result=await api('audio-upload-finish',{token})
       if(control.signal.aborted)throw new Error('音频导入已取消')
       applyAudioResult(id,result,x,y)
     }catch(e){setSaveNote(e.message||String(e))}
-    finally{if(token)mediaAction('audio-upload-release',{token}).catch(()=>{});videoImportsRef.current.delete(control)}
+    finally{clearInterval(poll);if(token)mediaAction('audio-upload-release',{token}).catch(()=>{});videoImportsRef.current.delete(control)}
   }
 
   function insertMediaFiles(files, userX, userY) {
@@ -12962,24 +12977,6 @@ function CanvasView(props) {
         onEnqueue: hasPath ? enqueueImageTrace : undefined,
       }))
     }
-    if (nodes.length === 1 && edges.length === 0 && !isVideoNodeData(nodes[0].data) &&
-      nodeShapeFromStyle(styleOf(nodes[0])) === 'image' && styleGet(styleOf(nodes[0]), 'drawaiGen', '') === '1') {
-      const genNode = nodes[0]
-      const genStyle = styleOf(genNode)
-      controls.push(React.createElement(ImageGenControl, {
-        key: 'image-gen-' + genNode.id, group: 'drawai-colors-' + uid,
-        source: {
-          id: genNode.id,
-          prompt: typeof genNode.label === 'string' ? genNode.label : '',
-          width: styleNumber(genStyle, 'drawaiGenWidth', 1024),
-          height: styleNumber(genStyle, 'drawaiGenHeight', 1024),
-          steps: styleNumber(genStyle, 'drawaiGenSteps', IMAGEGEN_DEFAULT_STEPS),
-          seed: styleNumber(genStyle, 'drawaiGenSeed', 0),
-        },
-        onGenerate: (options) => generateImageGen({ id: genNode.id }, options),
-        onOpenPrefs: () => openPrefsPanel(),
-      }))
-    }
     if (nodes.length > 0) {
       // 只有基础图形之间可以直接换形；SVG/图片/文字/分区保留自身类别。
       const canChangeShape = nodes.every((n) => isBasicShapeStyle(styleOf(n)))
@@ -13147,22 +13144,6 @@ function CanvasView(props) {
     chips.push(railIconButton('rail-audio','audio',placeTool==='audio','音频：添加音效、音乐或旁白节点',()=>{setPlaceTool('audio');setPlaceEdgeKind(null);setMenu(null)},null))
     chips.push(railIconButton('rail-shotcards', 'shotcards', !!shotLibrary, '镜头卡库：搜索样式并添加到画布', () => setShotLibrary({}), null))
     chips.push(railIconButton('rail-mgstyles', 'mgstyles', !!mgLibrary, '整片风格库：一条片子选一种 MG 视觉语言', () => setMgLibrary({}), null))
-
-    // 「文生图」：不参与放置族，点一下就在视野中心放一个带占位图的文生图节点。
-    const imageGenSelected = selectedIds.some((id) => {
-      const node = nodeById(id)
-      return node !== null && node !== undefined && nodeImageGen(node)
-    })
-    chips.push(
-      railIconButton(
-        'rail-imagegen',
-        'imagegen',
-        imageGenSelected,
-        imageGenSelected ? '文生图（已选中文生图节点）' : '文生图：插入节点并写提示词',
-        () => insertImageGenNode(),
-        null,
-      ),
-    )
 
     const activeTaskCount = backgroundDrawingJobs.concat(videoExportJobs, motionJobs).filter((job) =>
       !['succeeded', 'done', 'cancelled', 'failed', 'error', 'retained', 'interrupted'].includes(job.status)).length
@@ -14078,139 +14059,6 @@ function CanvasView(props) {
           patchPrefs({ defaultColor: style })
         }, prefs.defaultColor || menuStyle),
       )
-      // ---- 文生图（ComfyUI / OpenAI 兼容接口）----
-      const imagegenProvider = prefs.imagegenProvider === 'openai' ? 'openai' : 'comfyui'
-      const prefsText = (key, placeholder, type) =>
-        React.createElement('input', {
-          key: key,
-          className: 'drawai-edit doc-menu-input',
-          type: type || 'text',
-          spellCheck: false,
-          defaultValue: String(prefs[key] === undefined || prefs[key] === null ? '' : prefs[key]),
-          placeholder: placeholder,
-          style: { width: '100%' },
-          onBlur: (event) => patchPrefs({ [key]: event.target.value }),
-          onKeyDown: (event) => {
-            event.stopPropagation()
-            if (event.key === 'Enter') event.target.blur()
-          },
-        })
-      const prefsNumber = (key, fallback, min, max) =>
-        React.createElement('input', {
-          key: key,
-          className: 'drawai-edit doc-menu-input',
-          type: 'number',
-          min: min,
-          max: max,
-          defaultValue: String(numberOr(prefs[key], fallback)),
-          style: { width: '72px' },
-          onBlur: (event) => {
-            const value = clampNumber(Math.round(numberOr(event.target.value, fallback)), min, max)
-            event.target.value = String(value)
-            patchPrefs({ [key]: value })
-          },
-          onKeyDown: (event) => {
-            event.stopPropagation()
-            if (event.key === 'Enter') event.target.blur()
-          },
-        })
-      rows.push(React.createElement('div', { className: 'drawai-note', style: { marginTop: '12px', fontWeight: 600 } }, '文生图'))
-      rows.push(
-        React.createElement(
-          'label',
-          { className: 'drawai-menu-row', style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-          React.createElement('span', null, '服务'),
-          React.createElement(
-            'select',
-            {
-              className: 'drawai-edit doc-menu-input',
-              value: imagegenProvider,
-              style: { flex: 1 },
-              onChange: (event) => patchPrefs({ imagegenProvider: event.target.value === 'openai' ? 'openai' : 'comfyui' }),
-            },
-            React.createElement('option', { value: 'comfyui' }, 'ComfyUI（本地）'),
-            React.createElement('option', { value: 'openai' }, 'OpenAI 兼容接口'),
-          ),
-        ),
-      )
-      if (imagegenProvider === 'comfyui') {
-        rows.push(React.createElement('div', { className: 'drawai-note' }, 'ComfyUI 地址'))
-        rows.push(prefsText('imagegenComfyUrl', 'http://127.0.0.1:8188'))
-      } else {
-        rows.push(React.createElement('div', { className: 'drawai-note' }, '接口地址'))
-        rows.push(prefsText('imagegenOpenaiUrl', 'https://api.openai.com/v1'))
-        rows.push(React.createElement('div', { className: 'drawai-note' }, 'API Key'))
-        rows.push(prefsText('imagegenOpenaiKey', 'sk-…', 'password'))
-        rows.push(React.createElement('div', { className: 'drawai-note' }, '模型'))
-        rows.push(prefsText('imagegenOpenaiModel', 'gpt-image-1'))
-      }
-      rows.push(React.createElement('div', { className: 'drawai-note' }, '默认尺寸 / 步数'))
-      rows.push(
-        React.createElement(
-          'div',
-          { className: 'drawai-menu-row', style: { display: 'flex', alignItems: 'center', gap: '6px' } },
-          prefsNumber('imagegenWidth', 1024, IMAGEGEN_MIN_SIDE, IMAGEGEN_MAX_SIDE),
-          React.createElement('span', { 'aria-hidden': true }, '×'),
-          prefsNumber('imagegenHeight', 1024, IMAGEGEN_MIN_SIDE, IMAGEGEN_MAX_SIDE),
-          React.createElement('span', { style: { marginLeft: '8px' } }, '步数'),
-          prefsNumber('imagegenSteps', IMAGEGEN_DEFAULT_STEPS, 1, IMAGEGEN_MAX_STEPS),
-        ),
-      )
-      rows.push(React.createElement('div', { className: 'drawai-note' }, '工作流 JSON（留空 = 内置默认；ComfyUI UI / API 格式都行）'))
-      rows.push(
-        React.createElement('textarea', {
-          key: 'imagegen-workflow-' + imagegenWorkflowRev,
-          className: 'drawai-edit',
-          'aria-label': '文生图工作流 JSON',
-          spellCheck: false,
-          defaultValue: String(prefs.imagegenWorkflow || ''),
-          placeholder: '粘贴 ComfyUI 工作流 JSON（留空 = 内置默认）',
-          style: {
-            width: '100%',
-            minHeight: '88px',
-            boxSizing: 'border-box',
-            fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
-            fontSize: '11px',
-            lineHeight: '1.45',
-            resize: 'vertical',
-          },
-          onBlur: (event) => patchPrefs({ imagegenWorkflow: event.target.value }),
-          onKeyDown: (event) => event.stopPropagation(),
-        }),
-      )
-      rows.push(
-        React.createElement(
-          'div',
-          { className: 'drawai-menu-row', style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-          React.createElement('button', { className: 'drawai-btn', disabled: imagegenStatus.busy === true, onClick: () => loadImageGenDefaultWorkflow() }, '载入默认工作流'),
-          React.createElement(
-            'button',
-            {
-              className: 'drawai-btn',
-              onClick: () => {
-                patchPrefs({ imagegenWorkflow: '' })
-                setImagegenWorkflowRev((rev) => rev + 1)
-                setImagegenStatus({ busy: false, error: false, text: '已清空，将使用内置默认工作流' })
-              },
-            },
-            '清空',
-          ),
-        ),
-      )
-      rows.push(
-        React.createElement(
-          'div',
-          { className: 'drawai-menu-row', style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-          React.createElement('button', { className: 'drawai-btn', disabled: imagegenStatus.busy === true, onClick: () => checkImageGenStatus() }, imagegenStatus.busy === true ? '检测中…' : '检测连接'),
-          React.createElement('span', {
-            className: 'drawai-note',
-            role: 'status',
-            'aria-live': 'polite',
-            style: { margin: 0, color: imagegenStatus.error === true ? '#d1242f' : undefined },
-          }, imagegenStatus.text || ''),
-        ),
-      )
-      rows.push(React.createElement('div', { className: 'drawai-note' }, 'API Key 以明文存在本机 localStorage（dsh-drawai.prefs），共用电脑上别填。'))
       rows.push(
         React.createElement(
           'div',

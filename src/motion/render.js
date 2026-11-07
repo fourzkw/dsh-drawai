@@ -5,6 +5,7 @@
 //   2. 永远复用 bundle：预览和全片共用 .out/bundle/.drawai-bundle-key；
 //   3. 永远先出图：预览走 renderStill，几秒钟，不跑全片。
 
+import { videoRuntimeDirectory } from './video-runtime.js'
 import { fork } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
@@ -52,6 +53,7 @@ export function bundleKey(composition, projectDir) {
     walk()
   }
   hash.update(readFileSync(ENTRY))
+  hash.update(videoRuntimeDirectory())
   return hash.digest('hex')
 }
 
@@ -107,7 +109,7 @@ export function renderProject(dir, options = {}) {
   let cancelTimer
   const rendered = new Promise((resolve, reject) => {
     const finish = (fn, value) => { if (settled) return; settled = true; clearTimeout(cancelTimer); fn(value) }
-    const timeout = setTimeout(() => { child.kill(); finish(reject, new Error('渲染超过 ' + Math.round(timeoutFor(render, composition.durationFrames) / 60000) + ' 分钟，请拆小场景或在 timeline.json 的 render.timeoutMs 里放大预算')) }, options.timeoutMs || timeoutFor(render, composition.durationFrames))
+    const timeout = setTimeout(() => { child.kill(); finish(reject, new Error('渲染超过 ' + Math.round(timeoutFor(render, composition.durationFrames) / 60000) + ' 分钟，请拆小场景或在 timeline.json 的 render.timeoutMs 里放大预算')) }, options.timeoutMs || (timeoutFor(render, composition.durationFrames) + 11 * 60000))
     let stderr = ''
     child.stderr.on('data', (bytes) => { stderr = (stderr + bytes).slice(-4000) })
     child.on('message', (message) => {

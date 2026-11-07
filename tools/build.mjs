@@ -43,7 +43,7 @@ const MXFILE_PATH = 'src/mxfile.js'
  * 抛 MODULE_NOT_FOUND —— 而那一刻插件已经"装好了"，报错在启动期，很难联想到构建。
  * 所以新增这类模块时：源文件放 src/、在这里登记一行，构建器同时做存在性校验。
  */
-const HOST_ONLY_MODULES = ['src/shotcard-core.js', 'src/mgstyle-core.js', 'src/shotcard-reference.js', 'src/motion-session.js', 'src/motion-library.js', 'src/motion-source.js', 'src/motion-project.js', 'src/motion-core.js', 'src/motion-tasks.js', 'src/motion-render-worker.js', 'src/document-core.js', 'src/document-commands.js', 'src/canvas-format.js', 'src/raster.js', 'src/trace-image.js', 'src/media.js', 'src/video-trace-worker.js', 'src/video-trace-pool.js', 'src/video-export.js', 'src/video-export-worker.js', 'src/performance-log.js', 'src/performance-metrics.js', 'src/video-trace-reuse.js', 'src/task-coordinator.js', 'src/task-patches.js', 'src/drawing-tasks.js', 'src/drawing-runner.js', 'src/drawing-results.js', 'src/comfyui-workflow.mjs', 'src/comfyui-default-workflow.mjs', 'src/imagegen.mjs']
+const HOST_ONLY_MODULES = ['src/ffmpeg-manager.js', 'src/shotcard-core.js', 'src/mgstyle-core.js', 'src/shotcard-reference.js', 'src/motion-session.js', 'src/motion-library.js', 'src/motion-source.js', 'src/motion-project.js', 'src/motion-core.js', 'src/motion-tasks.js', 'src/motion-render-worker.js', 'src/document-core.js', 'src/document-commands.js', 'src/canvas-format.js', 'src/raster.js', 'src/trace-image.js', 'src/media.js', 'src/video-trace-worker.js', 'src/video-trace-pool.js', 'src/video-export.js', 'src/video-export-worker.js', 'src/performance-log.js', 'src/performance-metrics.js', 'src/video-trace-reuse.js', 'src/task-coordinator.js', 'src/task-patches.js', 'src/drawing-tasks.js', 'src/drawing-runner.js', 'src/drawing-results.js', 'src/comfyui-workflow.mjs', 'src/comfyui-default-workflow.mjs', 'src/imagegen.mjs']
 HOST_ONLY_MODULES.push('src/motion-capture.js', 'src/motion-film-review.js', 'src/motion-agent-protocol.js', 'src/motion-agent-files.js', 'src/motion-vision.js', 'src/audio-media.js', 'src/audio-service.js')
 
 
@@ -291,6 +291,7 @@ export function buildAll() {
 
   assertParses([
     'lib/index.js',
+    'lib/client.js',
     'lib/style-kernel.js',
     'lib/mxfile.js',
     ...HOST_ONLY_MODULES.map((source) => source.replace(/^src\//, 'lib/')),

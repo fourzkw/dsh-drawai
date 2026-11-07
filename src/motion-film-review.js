@@ -2,11 +2,11 @@ import {mkdirSync,readFileSync,readdirSync,writeFileSync} from 'node:fs'
 import {join} from 'node:path'
 import {execFile} from 'node:child_process'
 import {promisify} from 'node:util'
-import {ffmpegBinary} from './video-export.js'
+import {ensureFfmpeg} from './ffmpeg-manager.js'
 import {agentHash,agentAtomicJson} from './motion-agent-files.js'
 import {streamAgentTurn,agentMessage} from './motion-agent-protocol.js'
 const exec=promisify(execFile)
-const run=(args,signal)=>exec(ffmpegBinary(),['-hide_banner','-nostdin',...args],{windowsHide:true,signal,timeout:180000,maxBuffer:8*1024*1024})
+const run=async(args,signal)=>{const binary=await ensureFfmpeg({signal});return exec(binary,['-hide_banner','-nostdin',...args],{windowsHide:true,signal,timeout:180000,maxBuffer:8*1024*1024})}
 
 // Decode the actual delivered file, including its final mixed audio. Visual
 // semantics use ordered contact sheets; listening is a separate human verdict.

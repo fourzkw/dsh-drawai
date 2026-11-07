@@ -1,14 +1,13 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync, realpathSync } from 'node:fs'
 import { join, dirname, resolve, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createRequire } from 'node:module'
+import { videoRuntimeRequire } from './motion/video-runtime.js'
 import { validateMotionSources, sceneComponentPath } from './motion-source.js'
 import { shotcraftModuleMap } from './motion-library.js'
 import { enforceMotionCards } from './motion-library.js'
 import { enforceMgStyle } from './motion-library.js'
 import { validateMotionPlan } from './motion-core.js'
 import { parseProjectJson } from './motion/json.js'
-const require = createRequire(import.meta.url)
 
 // Agent projects are edited on disk. Read their sources before validating or
 // building; never restore a stale inline source over an agent's changes.
@@ -73,7 +72,15 @@ export function prepareMotionProject(composition, directory, options = {}) {
     })
   } }
   alias['@drawai/motion$'] = fileURLToPath(new URL('./motion/reference-media.jsx', import.meta.url))
-  const modules = [...new Set(['react', 'remotion', '@remotion/motion-blur'].map((name) => dirname(require.resolve(name + '/package.json')).replace(/[\\/]@remotion[\\/][^\\/]+$/, '').replace(/[\\/](?:react|remotion)$/, '')))]
-  return { entryPoint, webpackOverride: (config) => ({ ...config, plugins: [...(config.plugins || []), libraryImports], resolve: { ...config.resolve,
-    alias: { ...config.resolve?.alias, ...alias }, modules: [...modules, ...(config.resolve?.modules || ['node_modules'])] } }) }
+  // Resolve the runtime lazily: creating a project only writes its files, and
+  // the video runtime may not be initialized yet (it is installed on first use).
+  const runtimeModules = () => {
+    const require = videoRuntimeRequire(options.runtimeDirectory)
+    return [...new Set(['react', 'remotion', '@remotion/motion-blur'].map((name) => dirname(require.resolve(name + '/package.json')).replace(/[\\/]@remotion[\\/][^\\/]+$/, '').replace(/[\\/](?:react|remotion)$/, '')))]
+  }
+  return { entryPoint, webpackOverride: (config) => {
+    const modules = runtimeModules()
+    return { ...config, plugins: [...(config.plugins || []), libraryImports], resolve: { ...config.resolve,
+      alias: { ...config.resolve?.alias, ...alias }, modules: [...modules, ...(config.resolve?.modules || ['node_modules'])] } }
+  } }
 }

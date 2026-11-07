@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { ffmpegBinary } from '../video-export.js'
+import { ensureFfmpeg } from '../ffmpeg-manager.js'
 import { renderProject, outputPath } from './render.js'
 import { readTimeline } from './project.js'
 
@@ -33,7 +33,8 @@ export async function contactSheet(images, options = {}) {
     const width = options.width === undefined ? 640 : Number(options.width)
     const filter = (width > 0 ? 'scale=' + width + ':-2:flags=lanczos,' : '')
       + 'tile=' + cols + 'x' + rows + ':padding=8:margin=8:color=0x101010'
-    await exec(ffmpegBinary(), ['-hide_banner', '-loglevel', 'error', '-y', '-i', join(work, 'frame-%d.png'),
+    const binary = await ensureFfmpeg()
+    await exec(binary, ['-hide_banner', '-loglevel', 'error', '-y', '-i', join(work, 'frame-%d.png'),
       '-frames:v', '1', '-vf', filter, output],
       { windowsHide: true, timeout: 60000 })
     if (!existsSync(output)) throw new Error('拼图失败')
@@ -50,7 +51,8 @@ function dirnameOf(file) {
 
 async function cropFile(file, crop) {
   const out = file.replace(/\.png$/i, '-crop.png')
-  await exec(ffmpegBinary(), ['-hide_banner', '-loglevel', 'error', '-y', '-i', file,
+  const binary = await ensureFfmpeg()
+  await exec(binary, ['-hide_banner', '-loglevel', 'error', '-y', '-i', file,
     '-vf', 'crop=' + crop.w + ':' + crop.h + ':' + crop.x + ':' + crop.y, out], { windowsHide: true, timeout: 60000 })
   return existsSync(out) ? out : file
 }

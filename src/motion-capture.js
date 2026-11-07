@@ -1,4 +1,4 @@
-import {openBrowser} from '@remotion/renderer'
+import { loadVideoModule } from './motion/video-runtime.js'
 import {existsSync,mkdirSync,writeFileSync} from 'node:fs'
 import {join} from 'node:path'
 import {randomUUID,createHash} from 'node:crypto'
@@ -11,6 +11,7 @@ export async function captureMotionPage(args,{directory,signal,browserExecutable
   if(!Array.isArray(args.elements??[])||(args.elements||[]).length>20||!Array.isArray(args.steps??[])||(args.steps||[]).length>16)throw new Error('单页最多20个切片、16个操作')
   const executable=[browserExecutable,process.env.DRAWAI_CHROME_PATH,'C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(p=>p&&existsSync(p))
   signal?.throwIfAborted()
+  const { openBrowser } = await loadVideoModule('@remotion/renderer', {signal})
   const browser=await openBrowser('chrome',{browserExecutable:executable,logLevel:'error'})
   const abort=()=>{void browser.close({silent:true}).catch(()=>{})};signal?.addEventListener('abort',abort,{once:true})
   try{

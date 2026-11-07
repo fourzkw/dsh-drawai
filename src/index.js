@@ -39,6 +39,7 @@ import { getRoutingRuntime } from './routing/node-runtime.js'
 import { motionInput, motionInputKey, assertMotionEditable, applyMotionResult, isMotionNode, motionNodeData, motionSettings, mergeMotionSettings, isAudioNode, audioNodeData, audioNodeSettings, motionReferenceEdges, motionReferenceRole, unlinkedShotCards } from './motion-core.js'
 import { createAudioService } from './audio-service.js'
 import { frozenAudioFile, importAudioFile } from './audio-media.js'
+import { ffmpegState } from './ffmpeg-manager.js'
 import { shotCardCatalog, enforceMotionCards, motionCardContract, mgStyleCatalog, mgStyleKit, mgStyleSources, mgStyleFile, mgStyleFileSize } from './motion-library.js'
 import { searchShotCards, resolveShotStyle, shotCardData, isShotCardNode } from './shotcard-core.js'
 import { searchMgStyles, resolveMgStyle, mgStyleData, isMgStyleNode } from './mgstyle-core.js'
@@ -73,7 +74,6 @@ import { listThemes, resolveTheme, writeTheme, readTheme } from './motion/theme.
 import { VOICE_CHOICES, VOICE_DEFAULTS, alignNarration, checkNarration, describeNarration, edgeAvailable, parseScript, planNarration, readScript, sayNarration, totalSpeechSeconds } from './motion/voice.js'
 import { motionSessionNotice } from './motion-session.js'
 import { decodeRaster } from './raster.js'
-import { DEFAULT_T2I_WORKFLOW_NAME, defaultWorkflow, generateImage, imagegenStatus } from './imagegen.mjs'
 import {
   TRACE_DEFAULTS,
   TRACE_PRESET_NAMES,
@@ -4885,37 +4885,9 @@ function sanitizeNewName(raw) {
       return
     }
 
-    // action: 'imagegen-generate' —— 一次文生图（本地 ComfyUI 或 OpenAI 兼容的生图 API）。
-    // 只把图片以 data URI 返回，不写画布：客户端拿到后走它唯一的 applyLocal 通道落节点，
-    // 这样 .drawio 的 revision 校验与撤销栈仍然只有一个写者（客户端）。
-    if (body.action === 'imagegen-generate') {
-      if (sessionId === undefined || sessionOf(sessionId) === undefined || workspaceRootOf(sessionId) === undefined) {
-        sendJson(res, 403, { ok: false, error: '无法确定当前会话工作区' })
-        return
-      }
-      try {
-        const generated = await generateImage(body)
-        sendJson(res, 200, { ok: true, ...generated })
-      } catch (error) {
-        sendJson(res, 400, { ok: false, error: messageOf(error) })
-      }
-      return
-    }
-
-    // action: 'imagegen-status' —— 设置页「检测连接」：连不上不算失败，用 online:false 报告。
-    if (body.action === 'imagegen-status') {
-      try {
-        sendJson(res, 200, { ok: true, ...(await imagegenStatus(body)) })
-      } catch (error) {
-        sendJson(res, 400, { ok: false, error: messageOf(error) })
-      }
-      return
-    }
-
-    // action: 'imagegen-default-workflow' —— 把内置默认文生图工作流（ComfyUI UI 格式）交给设置页，
-    // 「载入默认」和「看看长什么样」都靠它，省得在客户端里再抄一份 75KB 的 JSON。
-    if (body.action === 'imagegen-default-workflow') {
-      sendJson(res, 200, { ok: true, name: DEFAULT_T2I_WORKFLOW_NAME, workflow: defaultWorkflow() })
+    // 文生图暂时关闭：旧客户端也不能发起生成、探测或工作流请求。
+    if (['imagegen-generate', 'imagegen-status', 'imagegen-default-workflow'].includes(body.action)) {
+      sendJson(res, 503, { ok: false, error: '文生图功能暂未开放' })
       return
     }
 
@@ -5543,6 +5515,9 @@ function sanitizeNewName(raw) {
       const drawioAbs = absoluteHint(mediaTarget, rawPath)
       const clip = sanitizeClipId(body.clip)
       try {
+        if (body.action === 'media-ffmpeg-status') {
+          sendJson(res, 200, { ok: true, ...ffmpegState() }); return
+        }
         if (body.action.startsWith('media-video-export-')) {
           const scope = { sessionId, drawioAbs, clip }
           let result
@@ -6780,7 +6755,7 @@ function sanitizeNewName(raw) {
         const next = job.kind === 'pilot' && job.status === 'done'
           ? '样片文件不会自动显示在画布：在当前画布页创建或复用独立「样片」视频节点，记下其 ID，然后调用 motion_render {action:"apply",nodeId:"样片节点 ID",jobId:"' + job.id + '",source:"pilot"}；核对结果并告知用户。'
           : undefined
-        return { summary: '渲染任务：' + job.status + (mix ? ' · ' + mix : ''), details: JSON.stringify({ ...job, ...(next ? { next } : {}) }) }
+        return { summary: '渲染任务：' + job.status + (job.message ? ' · ' + job.message : '') + (mix ? ' · ' + mix : ''), details: JSON.stringify({ ...job, ...(next ? { next } : {}) }) }
       }
       if (args.action === 'cancel') {
         if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
@@ -6873,7 +6848,7 @@ function sanitizeNewName(raw) {
       const job = motionJobs.create({ kind, dir, nodeId: node.id })
       const handle = renderProject(dir, { operation, frames: args.frames, frameRange: ranged ? args.range : undefined,
         output: outputPath(dir, outputName),
-        onProgress: (message) => motionJobs.progress(job, message.phase, message.progress) })
+        onProgress: (message) => motionJobs.progress(job, message.phase, message.progress, message.message) })
       motionJobs.attach(job, handle)
       const renderLine = handle.render ? describeRenderSettings(handle.render) : ''
       return { summary: '已开始渲染' + (kind === 'pilot' ? '样片' : '') + '（' + job.id + '）' + (renderLine ? ' · ' + renderLine : '')

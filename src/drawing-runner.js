@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync, renameSync, mkdtempSync, rmSync, realpathSync } from 'node:fs'
 import { join, relative, isAbsolute } from 'node:path'
 import { createHash } from 'node:crypto'
-import { ffmpegBinary } from './video-export.js'
+import { ensureFfmpeg } from './ffmpeg-manager.js'
 import { ensureClipPack, writeManifest, clipDirFor, mediaRootFor, frameFileName, STILLS_DIR, stillFileName } from './media.js'
 
 function checkMediaDirectory(job, path) {
@@ -10,9 +10,10 @@ function checkMediaDirectory(job, path) {
   if (isAbsolute(rel) || rel.startsWith('..')) throw new Error('媒体目录超出工作区')
 }
 
-export async function runMediaCommand(args, signal, onProgress, binary = ffmpegBinary()) {
+export async function runMediaCommand(args, signal, onProgress, binary) {
+  const executable = binary || await ensureFfmpeg({ signal })
   return new Promise((resolve, reject) => {
-    const child = spawn(binary, ['-hide_banner', '-nostdin', '-nostats', ...args], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(executable, ['-hide_banner', '-nostdin', '-nostats', ...args], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = '', stderr = ''
     const abort = () => child.kill()
     signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort()
@@ -73,7 +74,8 @@ export function planDrawingVideo(options, info, extract = false) {
 async function* rawVideoFrames(job, signal, binary, perf) {
   const decodeDone = perf?.start('decodePipelineWall')
   const { plan } = job, offset = job.done || 0
-  const child = spawn(binary || ffmpegBinary(), ['-hide_banner', '-nostdin', '-loglevel', 'error',
+  const executable = binary || await ensureFfmpeg({ signal })
+  const child = spawn(executable, ['-hide_banner', '-nostdin', '-loglevel', 'error',
     '-ss', String(plan.from), ...inputArgs(job.input), '-map', '0:v:0', '-an', '-sn',
     '-filter_threads', '1', '-vf', 'tpad=stop_mode=clone:stop_duration=' + (1 / plan.fps) + ',fps=fps=' + plan.fps + ':start_time=0:round=near,scale=' + plan.w + ':' + plan.h + ':flags=bicubic,setsar=1,format=rgba,trim=start_frame=' + offset + ',setpts=PTS-STARTPTS',
     '-frames:v', String(plan.count - offset), '-fps_mode', 'passthrough', '-threads', '1', '-pix_fmt', 'rgba', '-f', 'rawvideo', 'pipe:1'],

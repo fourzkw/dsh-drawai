@@ -2179,52 +2179,12 @@ console.log('\n大图画布自动写回使用独立预算')
   const control = await api({ action: 'list', sessionId: 's1', padding: image })
   ok(control.status === 413, '普通控制请求仍受 4MB 限制')
 }
-console.log('\n文生图路由（imagegen）')
+console.log('\n文生图路由暂时关闭')
 {
-  // 路由只做三件事：校验会话、调 provider、把结果包成 JSON。provider 内部的 ComfyUI 交互
-  // 已有 check-imagegen 覆盖，这里补的是「接线」——action 分发、会话校验、错误码、返回形状。
-  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=='
-  const realFetch = globalThis.fetch
-  const json = (value) => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } })
-  globalThis.fetch = async (url) => {
-    const text = String(url)
-    if (text.endsWith('/prompt')) return json({ prompt_id: 'p1' })
-    if (text.includes('/queue')) return json({ queue_running: [], queue_pending: [] })
-    if (text.includes('/history/p1')) {
-      return json({ p1: { status: { completed: true }, outputs: { 5: { images: [{ filename: 'drawai_0001.png', subfolder: 'drawai/gen', type: 'output' }] } } } })
-    }
-    if (text.includes('/view?')) return new Response(Buffer.from(PNG, 'base64'), { status: 200, headers: { 'content-type': 'image/png' } })
-    throw new Error('自测没预料到的请求：' + text)
+  for (const action of ['imagegen-generate', 'imagegen-status', 'imagegen-default-workflow']) {
+    const result = await api({ action, sessionId: 's1', prompt: 'test' })
+    ok(result.status === 503 && result.payload.ok === false && /文生图功能暂未开放/.test(result.payload.error), action + ' 明确返回功能未开放')
   }
-  // 用 API 格式工作流测路由：不走 /object_info，速度最快；UI 格式的转换由 check-imagegen 管。
-  const workflow = {
-    1: { class_type: 'EmptyLatentImage', inputs: { width: 512, height: 512, batch_size: 1 } },
-    2: { class_type: 'CLIPTextEncode', inputs: { text: '旧提示词', clip: ['3', 0] } },
-    3: { class_type: 'CheckpointLoaderSimple', inputs: { ckpt_name: 'x.safetensors' } },
-    4: { class_type: 'KSampler', inputs: { model: ['3', 0], positive: ['2', 0], negative: ['2', 0], latent_image: ['1', 0], seed: 0, steps: 20, cfg: 7, sampler_name: 'euler', scheduler: 'normal', denoise: 1 } },
-    5: { class_type: 'SaveImage', inputs: { images: ['4', 0], filename_prefix: 'drawai/gen' } },
-  }
-  try {
-    const good = await api({ action: 'imagegen-generate', sessionId: 's1', provider: 'comfyui', comfyUrl: 'http://127.0.0.1:8188', prompt: '一只在草地上打滚的橘猫', width: 512, height: 512, steps: 8, seed: 7, workflow })
-    ok(good.status === 200 && good.payload.ok === true, 'imagegen-generate 返回 ok:true')
-    ok(typeof good.payload.dataUri === 'string' && good.payload.dataUri.startsWith('data:image/png;base64,'), '返回可直接落节点的 PNG data URI')
-    ok(good.payload.seed === 7 && good.payload.steps === 8, 'seed/steps 原样回报（客户端要回填面板）')
-    ok(good.payload.prompt === '一只在草地上打滚的橘猫', '提示词原样回报')
-  } finally {
-    globalThis.fetch = realFetch
-  }
-  // 错误路径：会话不存在 → 403；提示词为空 → 400。两者都不能把 fetch 打出去。
-  globalThis.fetch = async () => { throw new Error('不该发请求') }
-  try {
-    const noSession = await api({ action: 'imagegen-generate', sessionId: 'nope', provider: 'comfyui', prompt: 'x' })
-    ok(noSession.status === 403 && noSession.payload.ok === false, '没有会话工作区时拒绝生成（403）')
-    const emptyPrompt = await api({ action: 'imagegen-generate', sessionId: 's1', provider: 'comfyui', prompt: '   ' })
-    ok(emptyPrompt.status === 400 && emptyPrompt.payload.ok === false, '空提示词在宿主侧就报错（400）')
-  } finally {
-    globalThis.fetch = realFetch
-  }
-  const defaultWorkflowOut = await api({ action: 'imagegen-default-workflow' })
-  ok(defaultWorkflowOut.status === 200 && defaultWorkflowOut.payload.workflow !== undefined, 'imagegen-default-workflow 能把内置工作流交给设置页')
 }
 
 console.log('\n原生文档与自动迁移端到端')
