@@ -21,11 +21,11 @@
 7. **视频复刻** —— 选中已导入视频，点击悬浮工具条「绘制复刻」自主设置画质、帧率、完整视频或起止范围，自动抽帧并绘制成 SVG 视频；显示预计帧数、实际进度与帧预览，支持取消，原视频保留。支持 SVG 帧序列包，以及保留原帧率、白底和片段音频的 MP4 / WebM 离线导出；也可导出白底、循环播放的无声 GIF。渲染、编码和保存由宿主后台执行，切换标签或刷新网页后仍继续，完成文件自动保存到画布旁（编码需 FFmpeg）。详见[视频节点说明](docs/video-nodes.md)。
 8. **文生图节点** —— 右侧元素条「文生图」放一个节点，写段提示词就出图：后端可以是本机 **ComfyUI**（默认 Qwen-Image 2.1 工作流，也能换成你自己的），也可以是任意 **OpenAI 兼容**的生图 API。图片是节点内容，提示词就是图片下方那行文字，改完可原地重新生成。
 
-9. **节点绘制视频** —— 选中视频节点，先用 `shotcraft_search` 挑几张镜头卡连到它（连线顺序=镜头顺序，卡片时长=段长），再说一句要做什么：`motion_project` 按卡片排好时间轴，并把**分镜表**（每镜做什么/屏幕上出现什么/配什么字）写进工程；先只写 `scene-0`、`motion_preview` 看一张**定调帧**把风格定住，再铺开写其余场景。AI 在对话里直接读写 `scene-*.tsx`，`motion_render` 在后台渲染，完成后 `motion_render apply` 把成片落成画布上能播的 clip pack。**只有对话里这一个 agent**：没有第二套后台 agent、不需要轮询、不用等任务面板。详见[动效视频说明](docs/motion-video.md)。
+9. **节点绘制视频** —— 选中视频节点，先用 `shotcraft_search` 挑几张镜头卡连到它（连线顺序=镜头顺序，卡片时长=段长；**卡必须连**，断连的卡会被 `motion_project create` 直接拒绝），再说一句要做什么：`motion_project` 按卡片排好时间轴，并把**分镜表**（每镜做什么/屏幕上出现什么/配什么字）写进工程；先只写 `scene-0`、`motion_preview` 看一张**定调帧**把风格定住，再铺开写其余场景。AI 在对话里直接读写 `scene-*.tsx`，`motion_render` 在后台渲染，完成后 `motion_render apply` 把成片落成画布上能播的 clip pack。**只有对话里这一个 agent**：没有第二套后台 agent、不需要轮询、不用等任务面板。详见[动效视频说明](docs/motion-video.md)。
 
-10. **音频、音效、旁白与踩点** —— 把 BGM、旁白挂进时间轴（`motion_audio add`），渲染时由画面侧一起播放，淡入淡出与「旁白期间压低 BGM」都在音量曲线上算；旁白用 `motion_voice` 合成（脚本一句一行，台词决定镜头多长，字幕自动进 `timeline.subtitles`）；音效可用 `motion_sfx` 从 Freesound 搜（**不按许可过滤**，每条结果带许可标签，用哪条由人决定），下载时复核许可并自动写 `FREESOUND-CREDITS.md`。`motion_audio analyze` 给出 BPM 与等距节拍网格，`motion_audio apply` 把切镜吸到拍子上，`motion_audio_verify` 再从成片音轨回测对拍误差。详见[声音制作说明](docs/motion-audio.md)。
+10. **音频、音效、旁白与踩点** —— 把 BGM、旁白挂进时间轴（`motion_audio add`），渲染时由画面侧一起播放，淡入淡出与「旁白期间压低 BGM」都在音量曲线上算；旁白用 `motion_voice` 合成（脚本一句一行，台词决定镜头多长，字幕自动进 `timeline.subtitles`）；音效可用 `motion_sfx` 从 Freesound 搜（**不按许可过滤**，每条结果带许可标签，用哪条由人决定），下载时保存来源和许可信息至音频素材索引，需署名时根据索引自行整理。`motion_audio analyze` 给出 BPM 与等距节拍网格，`motion_audio apply` 把切镜吸到拍子上，`motion_audio_verify` 再从成片音轨回测对拍误差。详见[声音制作说明](docs/motion-audio.md)。
 
-11. **素材捕获与看帧验收** —— 图片、音频、视频可捕获进工程 `assets/`（`motion_assets`，附尺寸、色板、峰值），**产品界面还能用 `motion_assets page` 让无头 Chrome 把一段 HTML 模板或网址截成 2 倍图**，场景里用 `staticFile()` 引用；`motion_preview` 一次渲染多帧拼成一张图直接回给对话，不用等整片渲染就能看版式。详见[动效视频说明](docs/motion-video.md)。
+11. **素材捕获与看帧验收** —— 图片、音频、视频可捕获进工程 `assets/`（`motion_assets`，附尺寸、色板、峰值），**产品界面还能用 `motion_assets page` 让无头 Chrome 把一段 HTML 模板或网址截成 2 倍图**（截到登录页/错误页/空白页会直接报错，不会静默存一张假界面），场景里用 `staticFile()` 引用；`motion_preview` 一次渲染多帧拼成一张图直接回给对话，不用等整片渲染就能看版式。详见[动效视频说明](docs/motion-video.md)。
 
 ![整体界面：右侧栏画布与多标签](docs/picture/整体界面图.png)
 
@@ -73,7 +73,7 @@ dsh plugin --profile web add github:fourzkw/dsh-drawai
 | **`motion_project`** | 建/打开视频工程：按挂上来的镜头卡排时间轴，写 `timeline.json` 与 `scene-*.tsx` 桩 |
 | **`motion_preview`** | 渲染指定几帧并拼成一张图直接回图（首次打包 10–30 秒，之后复用缓存） |
 | **`motion_render`** | `start` 立刻返回 jobId、后台渲染；`status`/`list`/`cancel`；`apply` 把成片回填成画布 clip pack |
-| **`motion_assets`** | 素材进工程 `assets/`：`list`/`capture`（图/音/视频）/`crop`/`palette`/`page`（无头 Chrome 截 HTML 或网址） |
+| **`motion_assets`** | `list` 看工程素材，`library` 搜插件纹理和乐器采样，`use` 按需导入；另支持 `capture`、`crop`、`palette`、`page` 等 |
 | **`motion_audio`** | 音轨增删与对齐：`list`/`add`/`remove`/`analyze`（节拍网格）/`apply`（钉帧） |
 | **`motion_sfx`** | 音效采购：`search`（Freesound，不按许可过滤，结果带许可）/`get`（下载 + 详情页许可复核 + 署名清单）/`list` |
 | **`motion_audio_verify`** | 从成片音轨回测每拍偏差，超过 2 帧判不合格 |
@@ -92,7 +92,7 @@ dsh plugin --profile web add github:fourzkw/dsh-drawai
 | **SVG 图形节点** | 节点内容直接是一段 **SVG 标记**（图标 / logo / 示意图这种形状词汇表里没有的东西）：右键「SVG 内容…」贴进去即可，或让模型用 `addNode {shape:"svg", svg:"<svg viewBox…>…</svg>"}`。落盘是 drawio **原生**的图片形状（`shape=image` + `image=data:image/svg+xml,<百分号编码>`），所以 drawio 桌面版打开同样画得出来；标记只喂给 `<image>`（独立文档，脚本不执行、也不碰页面 DOM） |
 | **内嵌位图** | 从剪贴板粘贴或拖入 PNG / JPEG / GIF / WebP，画布会**真的画出来**（同为 `shape=image` + data URI）。`diagram_read` 把 base64 省略成 `«image N 字符»`，不撑爆上下文 |
 | **位图矢量化 traceImage** | 让模型照着工作区里一张图**逐像素**描成 SVG 内容节点（读像素 → 按必填的 `removeBg` 决定是否泛洪抠底 → k-means 调色板 → 3× 超采样归类 → 按颜色取像素级闭合轮廓 → 每色一条 nonzero path）。形状词汇表表达不了的照片 / 插画走这条，而不是让模型手写一段近似 SVG 冒充复刻 |
-| **文本** | 双击节点就地改字。「T 文字」是独立的文字节点；支持字号与字色。图片和视频节点不显示文字 |
+| **文本** | 双击节点就地改字。「T 文字」是独立文字节点，编辑时可选中文字设置粗体、斜体、下划线、删除线、预设字色和字号；图形及连线标签仍为纯文本。图片和视频节点不显示文字 |
 | **连线** | 四选一画法（直线 / 直角折线 / 圆角折线 / 曲线）× 线型（含虚线间距）× 箭头（单向 / 双向 / 无 / 反向）× 颜色 × 引出段长度；自环；悬空端（从节点脱开后成为自由端点，还能再拖回去） |
 | **连线上的文字** | 双击改、按住拖（半格 + 贴线吸附）、右键「标签居中」；**线在文字的位置真的断开**（不盖白底） |
 | **选中与移动** | 框选 / Shift 加选 / `Ctrl+A`；整体拖动（折点与自由端点跟着同一个位移走）；对齐辅助线；多选对齐与分布 |
@@ -275,6 +275,10 @@ id / layer / parent、选区能上报给模型、写回是逐单元的、画布�
 
 **就地文字编辑**：双击节点或连线标签开始编辑，`Enter` / `Shift+Enter` 换行，点击外部或 `Ctrl+Enter`（Mac 为 `Command+Enter`）完成，`Esc` 取消。输入法确认文字不会提前完成编辑。
 
+独立文字节点支持部分 draw.io 富文本格式，并可在 `.drawai` 保存及 `.drawio` 往返中保留。导入的复杂 HTML 经安全过滤后显示，表格、链接和局部背景等尚不完整；图形与连线标签仍按纯文本显示。混合字号的换行与对齐可能和 draw.io 不完全一致。
+
+选中文字节点后调整「字色」或「字号」，会统一整段文字的对应属性，保留粗体、斜体等其他格式；双击进入编辑并选中部分文字后设置格式，仅影响选中的文字。工具栏与弹出面板会尽量留在窗口内。
+
 编辑框与显示标签共用文字区域、字体、行高和缩放：普通节点居中，分区标题左上对齐；换行在浏览器中按实际字体宽度计算，编辑中的节点撑高会先预览再提交。连线标签也支持多行显示，并按实际字号设置编辑框与连线避让区域。
 
 **连线工具与修改入口**：悬停右侧连线图标选择直线、直角折线、圆角折线或曲线，然后在空白处拖拽确定起终点；直接点击连线图标使用上次选择的类型。连线工具用于新建；修改已有连线请选中后使用浮动工具栏的「线型」，也可使用右键菜单。
@@ -285,7 +289,8 @@ id / layer / parent、选区能上报给模型、写回是逐单元的、画布�
 - **生效方式**：宿主侧只在 `dsh web` 启动时加载，换 `lib/index.js` 必须**重启**；客户端是独立 bundle，刷新页面即可。
 - **界面语言**：目前只有简体中文，还没有 i18n。
 - **大图性能**：几百个单元时的重渲染与路由开销还没测过。
-- **数据与网络**：画布本身只读写工作区里的 `.drawio` 文件；**文生图**会按你在偏好里的配置请求本机 ComfyUI 或你填的 OpenAI 兼容生图 API；**`motion_sfx`** 会访问 `freesound.org`（搜索）与 `cdn.freesound.org`（下载音效预览），只在你明确让它找音效时才发生。除此之外不发网络请求、不读凭据、没有安装期脚本；API key 只存在浏览器 localStorage，宿主进程不保存。
+- **数据与网络**：画布文件和视频工程保存在工作区；文生图会请求配置的 ComfyUI 或兼容 API，音效搜索会访问 Freesound，网页素材收集会访问指定网站及品牌素材服务，Edge TTS 旁白和首次获取 Chromium 也可能联网。API key 存在浏览器 localStorage，宿主进程不保存；没有安装期脚本。
+- **视频素材**：发布包内含 9 张纹理、102 个乐器采样和常用中英文字体；新建视频工程带基础中文字体，其他字体按工程引用复制。另有程序生成的纸纹、颗粒等基础素材。通过 `motion_assets library` 检索，再用 `motion_assets use` 导入当前工程，不依赖其他工程或固定磁盘路径；文件与上游哈希不一致时会提示并使用本地文件。导入图片和音频时需要可用的 FFmpeg；素材来源与许可集中记录在 [统一说明](LICENSE)。
 
 ## 已知限制 / Limitations
 

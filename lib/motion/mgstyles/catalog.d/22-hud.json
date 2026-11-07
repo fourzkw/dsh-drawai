@@ -1,0 +1,28 @@
+{
+  "slug": "22-hud",
+  "name": "赛博 HUD·FUI",
+  "oneLiner": "96% 的黑底上一束青，401px 扫描环配乱码定值的等宽数字，全程轻微 glitch。",
+  "signature": [
+    "96% 画面是 #020A0D，只剩 1–1.5px 青线、11–21px 全大写等宽字与一束辉光",
+    "中央 401px 扫描环：40 段 4–34° 长短弧 + 四角 34px 直角框",
+    "数字先乱码后定值：scramble 5 帧、roll 4 帧、flick 4 帧才稳",
+    "一切都不太干净：3px 扫描线 ±5%、径向色差、54 条 glitch 切片、0.028 颗粒",
+    "锁定瞬间整屏压成橙调 vec3(1.0, 0.40, 0.0)"
+  ],
+  "palette": {
+    "page": "#020A0D",
+    "surface": "#0E3A42",
+    "field": "#0B7C8C",
+    "text": "#E8FEFF",
+    "muted": "#6B8C93",
+    "accent": "#00E5FF",
+    "border": "#FF2A1F"
+  },
+  "colors": ["#020A0D", "#0E3A42", "#0B7C8C", "#00E5FF", "#E8FEFF", "#FF2A1F", "#FF2A8A"],
+  "fonts": {
+    "display": "\"Rajdhani\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+    "text": "\"Chakra Petch\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+    "mono": "\"JetBrains Mono\",monospace"
+  },
+  "rhythm": { "bpm": 120, "fps": 30, "duration": 10, "aspect": "16:9", "cutFrames": 5 }
+}

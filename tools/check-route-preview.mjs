@@ -104,10 +104,10 @@ function onHalfGrid(v) {
 const internals = loadInternals()
 const hotPad = internals.HOT_PAD
 
-// A new auto edge commits the validated preview, including generated waypoints.
+// A new manual edge keeps the preview's intermediate points.
 function commitPreview(nodes, edge, preview) {
-  edge.style = styleWithRoutingMode(edge.style, 'auto')
-  edge.__routePreview = preview.points
+  edge.style = styleWithRoutingMode(edge.style, 'manual')
+  edge.points = preview.points.slice(1, -1).map(point => ({ ...point }))
   const next = { nodes, edges: [edge] }
   internals.updateDocumentRoutes(null, next)
   return next
@@ -185,7 +185,7 @@ console.log('\n预览 == 落盘（逐点一致 / 同一条 routeEdge 通路）')
     drawn.length === route.points.length &&
     drawn.every((p, i) => Math.abs(p.x - route.points[i].x) < 0.51 && Math.abs(p.y - route.points[i].y) < 0.51)
   ok(same, '预览折线与落盘（端点约束写进 style）折线逐点一致（' + route.points.length + ' 个点）')
-  ok(Array.isArray(committed.points), '自动模式生成的折点落盘，连接点约束仍独立保存在 style')
+  ok(Array.isArray(committed.points), '手动模式保存预览折点，连接点约束仍独立保存在 style')
   const storedSides = internals.sidesFromStyle(committed.style)
   ok(storedSides.source === 'e' && storedSides.target === route.sides.to, '两端约束确实落在 style 的 exit*/entry* 上')
   ok(orthogonal(drawn), '落盘折线正交')
@@ -196,12 +196,9 @@ console.log('\n预览 == 落盘（逐点一致 / 同一条 routeEdge 通路）')
   ok(previewCost.hits === storedCost.hits && Math.abs(previewCost.length - storedCost.length) < 0.51, '预览与落盘代价一致（hits ' + previewCost.hits + '）')
 }
 
-console.log('\n障碍避让：能绕开时确实绕开')
+console.log('\n手动模式：预览不调用障碍避让')
 {
-  // 单独造一个"绕开很便宜"的场景：挡路方块正好压在 A 的水平出线上，指针在它右边。
-  // 路由器是软惩罚（穿一个盒子要付代价），所以这种场景下它必然会绕。
-  // 注意不能要求"任何情况下都不穿盒" —— 盒挤满时穿一个是算法给出的最优解，
-  // 预览的职责是**如实反映**这个最优解，而不是比落盘更聪明（那才会让松手瞬间跳变）。
+  // 挡路节点的增减不应让手动预览调用求解器或自动修改路径。
   const docA = {
     nodes: [
       { id: 'a', x: 0, y: 0, w: 120, h: 56 },
@@ -210,41 +207,24 @@ console.log('\n障碍避让：能绕开时确实绕开')
     edges: [],
   }
   const geoA = internals.buildGeometry(docA)
-  const block = geoA.byId.block.geo
-  const crossesBox = (pts, box) => {
-    let n = 0
-    for (let i = 1; i < pts.length; i += 1) {
-      const x1 = Math.min(pts[i - 1].x, pts[i].x)
-      const x2 = Math.max(pts[i - 1].x, pts[i].x)
-      const y1 = Math.min(pts[i - 1].y, pts[i].y)
-      const y2 = Math.max(pts[i - 1].y, pts[i].y)
-      if (x1 < box.x + box.w && x2 > box.x && y1 < box.y + box.h && y2 > box.y) n += 1
-    }
-    return n
-  }
-
-  // (a) 自由路由（没有指定引出边）：这里避让必须生效 —— 六选一里有一条干净的。
+  // (a) 没有指定引出边时，正常画出正交线，但不使用自动避障。
+  const solvesBefore = internals.routingEngine.solves
   const free = internals.routePreview(
     { id: 'a', geo: geoA.byId.a.geo, label: 'a' },
     { id: '__cursor', geo: { x: 600, y: 48, w: 0, h: 0 }, boxes: geoA.boxes, bounds: geoA.bounds },
     null,
   )
-  ok(free.length >= 3, '自由路由绕行时有折点（' + free.length + ' 个点）')
-  ok(crossesBox(free, block) === 0, '自由路由绕开了挡路节点')
+  ok(free.length >= 2 && orthogonal(free), '自由预览仍是正交线（' + free.length + ' 个点）')
+  const unobstructed = internals.routePreview(
+    { id: 'a', geo: geoA.byId.a.geo, label: 'a' },
+    { id: '__cursor', geo: { x: 600, y: 48, w: 0, h: 0 }, boxes: [geoA.byId.a], bounds: geoA.bounds }, null)
+  ok(JSON.stringify(free) === JSON.stringify(unobstructed) && internals.routingEngine.solves === solvesBefore, '添加挡路节点不会启动自动避障或修改手动预览')
 
-  // (b) 指定引出侧也要避障；预览和落盘共用同一套修复逻辑。
+  // (b) 指定引出侧时保留从节点边框向外的方向。
   const seeded = internals.routePreviewFor(docA, geoA, { x: 600, y: 48 }, 'a', geoA.byId.a.geo, { from: 'a', side: 'e' }, hotPad, 'a')
   ok(seeded.points.length >= 2 && finite(seeded.points) && orthogonal(seeded.points), '钉住引出侧时预览依然正交且有限')
-  // 折线从**形状边框**起笔（视觉上就是贴着形状出来的），但要经过该侧的 stub 折点 —— 那个 stub 才是
-  // 真正钉住"从这一边引出"的东西（和 onNodePointerUp 落盘时写的 points 是同一个点）。
-  // stub 坐标直接用产物里的函数算（它是单源）：手抄一遍公式的话，吸附规则一变这里就假失败。
-  const stub = { x: geoA.byId.a.geo.x + geoA.byId.a.geo.w + 10, y: geoA.byId.a.geo.y + geoA.byId.a.geo.h / 2 }
-  const onPath = seeded.points.some((p, i) => {
-    const q = seeded.points[i + 1]
-    return q && Math.abs(Math.abs(p.x - stub.x) + Math.abs(p.y - stub.y) + Math.abs(q.x - stub.x) + Math.abs(q.y - stub.y) - Math.abs(p.x - q.x) - Math.abs(p.y - q.y)) < 0.51
-  })
-  ok(onPath, '钉住引出侧时折线经过该侧的 stub（与落盘一致）')
-  ok(crossesBox(seeded.points, block) === 0, '钉住引出侧时同样绕开挡路节点')
+  ok(seeded.points[1].x > seeded.points[0].x && Math.abs(seeded.points[1].y - seeded.points[0].y) < 0.51, '钉住东侧时首段向右引出')
+  ok(internals.routingEngine.solves === solvesBefore, '指定引出侧也不调用自动避障')
   ok(Math.abs(seeded.points[0].x - (geoA.byId.a.geo.x + geoA.byId.a.geo.w)) < 0.51, '折线从形状边框起笔')
 
   // (c) 差分：同一条 routeEdge 直接算，必须给出同一条折线（预览没有自己另搞一套）。

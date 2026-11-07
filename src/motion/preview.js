@@ -11,6 +11,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { ffmpegBinary } from '../video-export.js'
 import { renderProject, outputPath } from './render.js'
+import { readTimeline } from './project.js'
 
 const exec = promisify(execFile)
 
@@ -28,8 +29,12 @@ export async function contactSheet(images, options = {}) {
   try {
     images.forEach((file, index) => copyFileSync(file, join(work, 'frame-' + (index + 1) + '.png')))
     const output = join(work, 'sheet.png')
+    // width:0 = 不缩放。1:1 看锯齿/色带时必须关掉缩放，否则锯齿先被重采样抹平了。
+    const width = options.width === undefined ? 640 : Number(options.width)
+    const filter = (width > 0 ? 'scale=' + width + ':-2:flags=lanczos,' : '')
+      + 'tile=' + cols + 'x' + rows + ':padding=8:margin=8:color=0x101010'
     await exec(ffmpegBinary(), ['-hide_banner', '-loglevel', 'error', '-y', '-i', join(work, 'frame-%d.png'),
-      '-frames:v', '1', '-vf', 'scale=640:-2:flags=lanczos,tile=' + cols + 'x' + rows + ':padding=8:margin=8:color=0x101010', output],
+      '-frames:v', '1', '-vf', filter, output],
       { windowsHide: true, timeout: 60000 })
     if (!existsSync(output)) throw new Error('拼图失败')
     return output
@@ -43,15 +48,38 @@ function dirnameOf(file) {
   return index > 0 ? file.slice(0, index) : '.'
 }
 
+async function cropFile(file, crop) {
+  const out = file.replace(/\.png$/i, '-crop.png')
+  await exec(ffmpegBinary(), ['-hide_banner', '-loglevel', 'error', '-y', '-i', file,
+    '-vf', 'crop=' + crop.w + ':' + crop.h + ':' + crop.x + ':' + crop.y, out], { windowsHide: true, timeout: 60000 })
+  return existsSync(out) ? out : file
+}
+
+// 裁切参数归一化：给的中心点/宽高可能越界，先按工程尺寸夹住。
+// 只给中心点（cx/cy）也行，默认取画面 1/3 大小 —— 局部的默认值就该够看细节。
+export function normalizeCrop(crop, timeline) {
+  if (!crop || typeof crop !== 'object') return null
+  const width = Number(timeline?.width) || 1920
+  const height = Number(timeline?.height) || 1080
+  const clamp = (value, low, high) => Math.min(Math.max(Math.round(Number(value) || 0), low), high)
+  const w = clamp(crop.w || width / 3, 16, width)
+  const h = clamp(crop.h || height / 3, 16, height)
+  const x = clamp(crop.x !== undefined ? crop.x : (Number(crop.cx) || width / 2) - w / 2, 0, width - w)
+  const y = clamp(crop.y !== undefined ? crop.y : (Number(crop.cy) || height / 2) - h / 2, 0, height - h)
+  return { x, y, w, h }
+}
+
 // 渲染 + 拼图 + 转附件，一次做完。
 // 返回的 attachment 由调用方的 render() 拼成 {type:'image', attachment} 内容块。
 export async function previewProject(dir, options = {}) {
   const frames = options.frames
   if (!Array.isArray(frames) || !frames.length) throw new Error('frames 必填，例如 [0, 60, 120]')
   const result = await renderProject(dir, { operation: 'still', frames, onProgress: options.onProgress }).promise
-  const rendered = (result.frames || []).map((item) => item.filename ? join(dir, '.out', 'qa', item.filename) : null).filter(Boolean)
+  let rendered = (result.frames || []).map((item) => item.filename ? join(dir, '.out', 'qa', item.filename) : null).filter(Boolean)
   if (!rendered.length) throw new Error('没有渲染出可预览的帧')
-  const sheet = await contactSheet(rendered, { cols: options.cols })
+  const crop = normalizeCrop(options.crop, readTimeline(dir))
+  if (crop) rendered = await Promise.all(rendered.map((file) => cropFile(file, crop)))
+  const sheet = await contactSheet(rendered, { cols: options.cols, width: crop ? 0 : 640 })
   const bytes = await import('node:fs').then((fs) => fs.readFileSync(sheet))
   const attachments = options.attachments
   const attachment = attachments?.saveImage
@@ -60,6 +88,7 @@ export async function previewProject(dir, options = {}) {
   return {
     frames: rendered.map((file, index) => ({ frame: Number(frames[index]), file, bytes: statSync(file).size })),
     sheet,
+    crop,
     attachment,
     output: outputPath(dir, 'preview.png'),
   }

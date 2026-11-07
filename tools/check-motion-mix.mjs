@@ -1,4 +1,4 @@
-// 混音后级 + 音轨电平的自检。
+﻿// 混音后级 + 音轨电平的自检。
 //
 //   node tools/check-motion-mix.mjs [工程目录]
 //
@@ -107,9 +107,9 @@ const mix = await normalizeMix(copy, { cwd: work, log: join(work, 'mix.log') })
 console.log('  ' + describeMix(mix))
 
 check('确实做了归一化', () => assert.equal(mix.applied, true, mix.reason || '没标记为已处理'))
-check('响度落到 -16 LUFS 附近（±1）', () => {
+check('响度落到 -14 LUFS 附近（±1，插件默认已改交付值）', () => {
   assert.ok(mix.after.integratedLufs !== null, '没量到响度')
-  assert.ok(Math.abs(mix.after.integratedLufs - (-16)) <= 1, '归一化后是 ' + mix.after.integratedLufs + ' LUFS')
+  assert.ok(Math.abs(mix.after.integratedLufs - (-14)) <= 1, '归一化后是 ' + mix.after.integratedLufs + ' LUFS')
 })
 check('真峰值压到 -1.0 dBFS 以下', () => {
   assert.ok(mix.after.truePeakDb !== null, '没量到真峰值')

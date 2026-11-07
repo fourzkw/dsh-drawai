@@ -16,8 +16,12 @@ import { existsSync, renameSync, rmSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { runFfmpeg } from './ffmpeg.js'
 
-/** 目标响度：网络视频常用 -16 LUFS / 真峰值 -1.5 dBFS。 */
-export const MIX_DEFAULTS = { normalize: true, lufs: -16, truePeak: -1.5, lra: 11 }
+/**
+ * 目标响度：交付规范是 −14 LUFS / 真峰值 ≤ −1 dBTP（网络平台上传标准）。
+ * 早先取 −16 / −1.5 是「保守一点」的折中；既然插件出的就是交付件，默认就该是交付值。
+ * 要旧行为可以在 timeline.json 的 audioMix 里显式写回。
+ */
+export const MIX_DEFAULTS = { normalize: true, lufs: -14, truePeak: -1, lra: 11 }
 
 /** 从 loudnorm 的 stderr 里取最后一段 JSON（前面还有滤镜的日志行）。 */
 export function parseLoudnormJson(text) {
@@ -81,39 +85,51 @@ export async function normalizeMix(file, options = {}) {
   if (!measured) throw new Error('loudnorm 没给出测量结果，无法归一化')
 
   // 限幅器比目标再低 1dB：AAC 编码会在取样间造出新的过冲。
-  // 实测 limit 卡在 -1.0 时编完量回来是 -0.9，卡在 -2.0 时是 -1.0（都还贴着目标），
-  // 所以留 1dB 余量，让成片落在 -1.5 附近。
-  const limitDb = settings.truePeak - 1.0
-  const filter = [
-    'loudnorm=I=' + settings.lufs + ':TP=' + settings.truePeak + ':LRA=' + settings.lra,
-    'measured_I=' + measured.input_i,
-    'measured_TP=' + measured.input_tp,
-    'measured_LRA=' + measured.input_lra,
-    'measured_thresh=' + measured.input_thresh,
-    'offset=' + (measured.target_offset || 0),
-    'linear=true',
-    'print_format=summary',
-  ].join(':') + ',alimiter=limit=' + Math.pow(10, limitDb / 20).toFixed(4) + ':attack=5:release=50:level=0'
-
+  // 但过冲的大小取决于素材（-14 LUFS 比 -16 压得更狠，过冲也更大），
+  // 所以不能靠固定余量赌：编完量一次，还在目标之上就按实测差值再压一轮。
+  let limitDb = settings.truePeak - 1.0
+  let after = null
   const temporary = join(dirname(file), basename(file, '.mp4') + '.mixing.mp4')
-  try {
-    await runFfmpeg([
-      '-i', file,
-      '-map', '0:v:0',
-      '-map', '0:a:0',
-      '-af', filter,
-      '-c:v', 'copy',
-      '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
-      '-movflags', '+faststart',
-      temporary,
-    ], { cwd, log, timeoutMs: options.timeoutMs })
-    renameSync(temporary, file)
-  } catch (error) {
-    rmSync(temporary, { force: true })
-    throw error
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    // 第一轮：loudnorm 归一到目标 + 限幅。第二轮只挂限幅器 ——
+    // 文件已经是目标响度了，再跑一遍 loudnorm 会拿上一轮的测量值再加一次增益（实测 +1.2 LU）。
+    const limiter = 'alimiter=limit=' + Math.pow(10, limitDb / 20).toFixed(4) + ':attack=5:release=50:level=0'
+    const filter = attempt === 0
+      ? [
+        'loudnorm=I=' + settings.lufs + ':TP=' + settings.truePeak + ':LRA=' + settings.lra,
+        'measured_I=' + measured.input_i,
+        'measured_TP=' + measured.input_tp,
+        'measured_LRA=' + measured.input_lra,
+        'measured_thresh=' + measured.input_thresh,
+        'offset=' + (measured.target_offset || 0),
+        'linear=true',
+        'print_format=summary',
+      ].join(':') + ',' + limiter
+      : limiter
+
+    try {
+      await runFfmpeg([
+        '-i', file,
+        '-map', '0:v:0',
+        '-map', '0:a:0',
+        '-af', filter,
+        '-c:v', 'copy',
+        '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
+        '-movflags', '+faststart',
+        temporary,
+      ], { cwd, log, timeoutMs: options.timeoutMs })
+      renameSync(temporary, file)
+    } catch (error) {
+      rmSync(temporary, { force: true })
+      throw error
+    }
+    after = await measureLoudness(file, { cwd, log: log.replace(/\.log$/, '-after.log') })
+    const overshoot = after.truePeakDb === null ? 0 : after.truePeakDb - settings.truePeak
+    if (overshoot <= 0) break
+    // 第二轮只压限幅器，不再重算 loudnorm 的测量值：响度已经到位了。
+    limitDb -= overshoot + 0.3
   }
-  const after = await measureLoudness(file, { cwd, log: log.replace(/\.log$/, '-after.log') })
-  return { applied: true, before, after, settings, measured }
+  return { applied: true, before, after, settings, measured, limitDb }
 }
 
 /** 一行给人看的结论。 */

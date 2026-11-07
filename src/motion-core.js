@@ -1,7 +1,8 @@
 import { isShotCardNode } from './shotcard-core.js'
+import { isMgStyleNode } from './mgstyle-core.js'
 /* Serializable motion documents shared by the host and canvas. Scene sources are rendered only by the worker. */
 export const MOTION_VERSION = 1
-export const MOTION_ROLES = ['material', 'copy', 'instruction', 'style', 'layout', 'shotcard', 'audio']
+export const MOTION_ROLES = ['material', 'copy', 'instruction', 'style', 'layout', 'shotcard', 'mgstyle', 'audio']
 const motionClone = (value) => JSON.parse(JSON.stringify(value))
 const motionStable = (value) => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
   ? Object.fromEntries(Object.keys(item).sort().map((key) => [key, item[key]])) : item)
@@ -93,12 +94,25 @@ export function motionReferenceEdges(doc, nodeId) {
 export function motionReferenceRole(doc, edge) {
   if (isAudioNode(doc.nodes.find((item) => item.id === edge.from))) return 'audio'
   if (isShotCardNode(doc.nodes.find((item) => item.id === edge.from))) return 'shotcard'
+  if (isMgStyleNode(doc.nodes.find((item) => item.id === edge.from))) return 'mgstyle'
   if (edge.data?.motionReference?.role !== undefined) return edge.data.motionReference.role
   const node = doc.nodes.find((item) => item.id === edge.from)
   const style = node?.style || ''
   if (/(?:^|;)text(?:=[^;]*)?(?:;|$)/.test(style)) return 'copy'
   if (/(?:^|;)(?:group(?:=[^;]*)?|container=1)(?:;|$)/.test(style) || doc.nodes.some((item) => item.parent === edge.from)) return 'layout'
   return 'material'
+}
+
+// 没连到任何视频节点的镜头卡。连线同时是「参考关系」和「排期依据」：
+// 断连的卡既不会进 assets，也不会进 timeline——多数时候是漏了 addEdge，不是有意为之。
+export function unlinkedShotCards(doc) {
+  const linked = new Set()
+  for (const edge of doc.edges || []) {
+    if (isMotionNode(doc.nodes.find((node) => node.id === edge.to))) linked.add(edge.from)
+  }
+  return (doc.nodes || [])
+    .filter((node) => isShotCardNode(node) && !linked.has(node.id))
+    .map((node) => ({ nodeId: node.id, cardId: node.data?.shotCardId, label: node.label || '' }))
 }
 
 export function bindMotionReference(doc, sourceId, targetId, role = 'material', edgeId) {

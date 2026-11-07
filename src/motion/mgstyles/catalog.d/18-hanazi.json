@@ -1,0 +1,28 @@
+{
+  "slug": "18-hanazi",
+  "name": "综艺花字",
+  "oneLiner": "竖屏三层描边花字：白边 + 彩边 + 硬挤出，弹簧入场，字字都歪。",
+  "signature": [
+    "每字三层描边：白 7.6% / 彩 7.0% / 挤出 9.3%（相对 172px 字高）",
+    "逐字弹簧入场，第 5 帧峰值 1.15，8 帧到位，错峰 2 帧",
+    "所有花字带 -7°~+6° 歪斜与 ±16px 基线抖动",
+    "1080×1920 一行 5 字，字距 = 字高，不用 letter-spacing",
+    "装饰只有手绘几何：四角星/爆炸框/放射线/汗滴，无 emoji"
+  ],
+  "palette": {
+    "page": "#1B1B22",
+    "surface": "#1E2A78",
+    "field": "#0E1440",
+    "text": "#FFFFFF",
+    "muted": "#A9C4E0",
+    "accent": "#FFE14D",
+    "border": "#FFFFFF"
+  },
+  "colors": ["#1E2A78", "#FFE14D", "#FF3D7F", "#1A1030", "#2CCBF2", "#FFFFFF", "#FF9A1F"],
+  "fonts": {
+    "display": "\"Luckiest Guy\",\"Resource Han Rounded\",\"Noto Sans SC\",sans-serif",
+    "text": "\"Douyin Sans\",\"LXGW Marker Gothic\",\"Noto Sans SC\",sans-serif",
+    "mono": "\"JetBrains Mono\",monospace"
+  },
+  "rhythm": { "bpm": 120, "fps": 30, "duration": 10, "aspect": "9:16", "cutFrames": 15 }
+}

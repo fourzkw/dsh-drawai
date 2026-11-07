@@ -57,6 +57,7 @@ const {
   styleWithArrow,
   styleWithColorName,
   styleWithImageDataUri,
+  styleWithMediaMarkup,
   styleWithSvgMarkup,
   styleWithTextColorName,
   styleWithoutSvgMarkup,
@@ -71,7 +72,7 @@ const {
   copyData,
 } = styleKernel
 
-const NEW_EDGE_STYLE = styleWithRoutingMode(DEFAULT_EDGE_STYLE, 'auto')
+const NEW_EDGE_STYLE = styleWithRoutingMode(styleWithLineKind(DEFAULT_EDGE_STYLE, 'rounded'), 'manual')
 
 /** Solve before committing; rendering/hit testing/export only read the stored route. */
 function updateDocumentRoutes(before, next) {
@@ -216,7 +217,6 @@ function imageFilesFromDataTransfer(data) {
   return out
 }
 
-const VIDEO_FILE_MAX_BYTES = 48 * 1024 * 1024
 function videoFileExtension(file) {
   if (!file) return null
   const match = /\.(mp4|webm|mov|mkv)$/i.exec(file.name || '')
@@ -243,7 +243,7 @@ function hasMediaFileDrag(data) {
 
 async function readVideoFile(file, signal) {
   if (!videoFileExtension(file)) throw new Error('支持 MP4 / WebM / MOV / MKV 视频文件')
-  if (!Number.isFinite(file.size) || file.size <= 0 || file.size > VIDEO_FILE_MAX_BYTES) throw new Error('视频文件须在 48MB 以内且不能为空')
+  if (!Number.isSafeInteger(file.size) || file.size <= 0) throw new Error('视频文件不能为空')
   const url = URL.createObjectURL(file), video = document.createElement('video')
   video.muted = true; video.playsInline = true; video.preload = 'auto'
   try {
@@ -305,7 +305,7 @@ function applyImportedVideoToDoc(doc, result, at, layerId, targetId) {
     const node = doc.nodes.find((item) => item.id === targetId)
     if (!node || !isVideoNodeData(node.data)) throw new Error('目标视频节点已删除或更改')
     motionCore.assertMotionEditable(doc, targetId)
-    node.style = styleWithSvgMarkup(node.style || '', result.poster, '1')
+    node.style = styleWithMediaMarkup(node.style || '', result.poster, '1')
     node.data = { ...node.data, ...videoDataForNew(result.clip, result.w, result.h), mediaKind: 'raster', mediaDuration: String(result.duration),
       ...(node.data.motion ? { motion: { ...node.data.motion, requestId: 'import:' + result.clip, lastJobId: '', inputKey: '' } } : {}) }
     return node.id
@@ -318,7 +318,7 @@ function applyImportedVideoToDoc(doc, result, at, layerId, targetId) {
   while (used.has('n' + index)) index++
   const size = fitImageNodeSize(result.w, result.h)
   const node = { id: 'n' + index, label: '', x: snapTo(at.x - size.w / 2, GRID), y: snapTo(at.y - size.h / 2, GRID), w: size.w, h: size.h,
-    style: styleWithSvgMarkup('', result.poster, '1'), data: Object.assign(videoDataForNew(result.clip, result.w, result.h), { mediaKind: 'raster', mediaDuration: String(result.duration) }) }
+    style: styleWithMediaMarkup('', result.poster, '1'), data: Object.assign(videoDataForNew(result.clip, result.w, result.h), { mediaKind: 'raster', mediaDuration: String(result.duration) }) }
   if (layerId !== null) node.layer = layerId
   const host = sectionAtPoint(doc, at.x, at.y, null)
   if (host) node.parent = host.id
@@ -602,12 +602,15 @@ const CSS = [
   // 用 `outline` 而不是 `border`：边框会占掉 2px 内容宽度，断行位置就跟最终效果差一个字符。
   // 背景透明、颜色与字号由 inline style 按**这个节点**给（见 renderDiagram 的 labelTextBox）。
   '.drawai-edit{position:absolute;z-index:5;box-sizing:border-box;outline:2px solid #1a73e8;outline-offset:-2px;border:none;border-radius:4px;background:transparent;color:#000;font-family:Helvetica, Arial, sans-serif;font-size:12px;line-height:14px;text-align:center;padding:0;margin:0;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text}',
+  '.drawai-canvas-edit{outline:none;border:0;border-radius:0;background:transparent;box-shadow:none}',
+  '.drawai-rich-edit{overflow:auto;min-height:24px}',
   '.drawai-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}',
   '.drawai-trace-surface{position:relative;width:100%;height:100%;overflow:hidden}.drawai-trace-surface>svg{display:block;pointer-events:none}.drawai-trace-progress{position:absolute;left:8px;right:8px;bottom:8px;pointer-events:none;line-height:0}.drawai-trace-progress progress{display:block;width:100%;height:5px;accent-color:#386bff}',
   '.drawai-motion-toolbar{overflow:visible!important;padding:16px!important}.drawai-video-methods{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid #8883;padding-bottom:12px}.drawai-video-method{font:inherit;font-size:12px;padding:6px 8px;border:0;border-radius:6px;color:inherit;background:transparent}.drawai-video-method.active{background:#7c6df21a;color:var(--dsw-alias-brand-primary,#6956de);font-weight:600}.drawai-video-method:disabled{opacity:.45}.drawai-motion-task-heading{display:flex;align-items:center;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:1px solid #8883;font-size:12px;font-weight:600}.drawai-motion-panel select{max-width:100%;min-width:0}.drawai-motion-panel input,.drawai-motion-panel select{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,#fff);border:1px solid var(--dsw-alias-border-l2,#dde1e8);border-radius:5px;padding:4px}',
   '.drawai-video-surface{position:relative;width:100%;height:100%;background:transparent;overflow:hidden}.drawai-video-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);min-width:44px;min-height:44px;border:1px solid #ffffff80;border-radius:24px;background:#101827bf;color:#fff;font-size:18px;cursor:pointer;z-index:1}.drawai-video-play:disabled{cursor:wait}.drawai-video-chrome{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;align-items:center;gap:8px;padding:10px 10px 8px;box-sizing:border-box;background:linear-gradient(transparent,#000000bf);color:#fff;font:11px/1.2 sans-serif}.drawai-video-chrome-toggle{flex:0 0 auto;min-width:28px;min-height:28px;border:0;border-radius:4px;background:transparent;color:#fff;cursor:pointer;font-size:12px;padding:2px 4px;line-height:1}.drawai-video-chrome-toggle:hover,.drawai-video-chrome-toggle:focus-visible{background:#ffffff24}.drawai-video-chrome-progress{flex:1 1 auto;min-width:0;height:4px;margin:0;accent-color:#fff;cursor:pointer}.drawai-video-chrome-time{flex:0 0 auto;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.9}.drawai-video-message{position:absolute;bottom:0;left:0;right:0;padding:6px;background:#000c;color:#fff;font:12px/1.4 sans-serif;pointer-events:none}.drawai-video-toolbar{overflow:visible!important;max-height:none}.drawai-video-controls{display:flex;flex-wrap:wrap;align-items:center;gap:6px;width:100%;box-sizing:border-box;font:12px/1.4 sans-serif}.drawai-video-controls button,.drawai-video-controls select,.drawai-video-more summary{min-height:30px;border:1px solid var(--dsw-alias-border-l2,#dde1e8);border-radius:6px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;padding:4px 7px;cursor:pointer}.drawai-video-controls button:disabled{opacity:.4;cursor:default}.drawai-video-controls input[type=range]{flex:1 1 120px;min-width:70px;max-width:100%;accent-color:#386bff}.drawai-video-controls label{display:flex;align-items:center;white-space:nowrap}.drawai-video-time{font-variant-numeric:tabular-nums;white-space:nowrap}.drawai-video-more{position:relative}.drawai-video-more summary{list-style:none}.drawai-video-more>div{position:absolute;right:0;top:100%;display:flex;flex-direction:column;min-width:140px;gap:4px;padding:6px;border-radius:8px;background:var(--dsw-alias-bg-overlay,#fff);box-shadow:0 6px 24px #0003;z-index:10}.drawai-video-preview{position:absolute;inset:0;z-index:1100;display:flex;flex-direction:column;gap:12px;padding:16px;box-sizing:border-box;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35)}.drawai-video-preview-media{flex:1;min-height:0;overflow:hidden}.drawai-video-close{align-self:flex-end;cursor:pointer;background:transparent;color:inherit;border:0;padding:6px}',
   '.drawai-motion-toolbar{padding:0!important;background:transparent!important;border:0!important;box-shadow:none!important;overflow:visible!important}.drawai-video-composer{--vc-bg:#fff;--vc-fg:#353332;--vc-muted:#918d88;--vc-line:#e5e2df;--vc-chip:#f3f1ee;width:100%;box-sizing:border-box;padding:18px;border:1px solid var(--vc-line);border-radius:20px;background:var(--vc-bg);color:var(--vc-fg);box-shadow:0 10px 28px #00000010;font-size:13px}.drawai-video-composer[data-tone=dark]{--vc-bg:#211f1d;--vc-fg:#e6e3df;--vc-muted:#a39d97;--vc-line:#44403c;--vc-chip:#34312e}.drawai-video-reference-heading{font-weight:600;font-size:12px;margin-bottom:10px}.drawai-video-references{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap}.drawai-video-reference{width:58px;height:62px;position:relative;display:flex;align-items:center;justify-content:center;border:1px solid var(--vc-line);border-radius:13px;background:var(--vc-chip);overflow:hidden}.drawai-video-reference>img{width:100%;height:100%;object-fit:cover}.drawai-video-reference>span{position:absolute;bottom:0;left:0;right:0;padding:3px 4px;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--vc-chip)}.drawai-video-reference>small{display:none}.drawai-video-ref-picker{position:relative}.drawai-video-ref-picker>summary{width:58px;height:62px;display:flex;align-items:center;justify-content:center;list-style:none;cursor:pointer;border:1px solid var(--vc-line);border-radius:13px}.drawai-video-ref-picker>summary::-webkit-details-marker,.drawai-video-settings>summary::-webkit-details-marker{display:none}.drawai-video-ref-menu,.drawai-video-settings-menu{position:absolute;z-index:5;top:calc(100% + 8px);left:0;width:220px;max-height:260px;overflow:auto;background:var(--vc-bg);color:var(--vc-fg);border:1px solid var(--vc-line);border-radius:12px;padding:12px;box-shadow:0 8px 24px #0003}.drawai-video-ref-menu strong{display:block;margin-bottom:8px}.drawai-video-ref-menu p{font-size:12px;line-height:1.6}.drawai-video-reference-note{font-size:10px;color:var(--vc-muted);line-height:1.5;margin-top:8px}.drawai-video-prompt{display:block;box-sizing:border-box;resize:vertical;width:100%;min-height:150px;padding:18px 2px 12px;border:0;outline:0;background:transparent;color:var(--vc-fg);font:inherit;line-height:1.7}.drawai-video-prompt::placeholder{color:var(--vc-muted)}.drawai-video-composer-footer{display:grid;grid-template-columns:minmax(100px,1fr) auto 40px;gap:8px;align-items:center;margin-top:10px}.drawai-video-composer .drawai-video-method-select{width:100%;min-width:0;height:36px;border-radius:20px;padding:5px 10px;background:var(--vc-chip);border:1px solid var(--vc-line);color:var(--vc-fg);font:inherit;font-size:12px;cursor:pointer}.drawai-video-settings{position:relative;min-width:0}.drawai-video-settings>summary{display:flex;gap:5px;align-items:center;white-space:nowrap;list-style:none;cursor:pointer;font-size:11px;border-radius:20px;background:var(--vc-chip);padding:9px 8px}.drawai-video-settings>summary svg{width:15px;height:15px;flex-shrink:0}.drawai-video-settings-menu{left:auto;right:0;top:auto;bottom:calc(100% + 8px);width:200px}.drawai-video-settings-menu>label{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0;font-size:12px}.drawai-video-settings-menu input,.drawai-video-settings-menu select{max-width:110px;background:var(--vc-chip)!important;border-color:var(--vc-line)!important;color:var(--vc-fg)!important}.drawai-video-submit{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--vc-line);background:#e7e0ff;color:#6650c9;font-size:0;cursor:pointer}.drawai-video-submit:disabled{background:var(--vc-chip);color:var(--vc-muted);opacity:.55;cursor:default}.drawai-video-submit:focus-visible,.drawai-video-ref-picker>summary:focus-visible,.drawai-video-settings>summary:focus-visible{outline:2px solid #7c6df2;outline-offset:3px}.drawai-video-project{border-top:1px solid var(--vc-line);margin-top:14px;padding-top:12px;font-size:12px}.drawai-video-composer .drawai-motion-task-heading{border-color:var(--vc-line);font-size:11px}.drawai-video-composer .drawai-export-info{color:var(--vc-muted);font-size:11px}.drawai-video-action-toolbar{overflow:visible!important;padding:4px!important;border-radius:18px!important;background:#fff!important;color:#292a2d!important}.drawai-video-actions{display:flex;gap:2px;align-items:center;position:relative;width:100%;justify-content:center}.drawai-video-action{border:0;background:transparent;color:inherit;display:flex;align-items:center;justify-content:center;gap:7px;padding:10px 12px;border-radius:12px;white-space:nowrap;font:inherit;font-size:13px;cursor:pointer}.drawai-video-action:hover{background:#f2f1f5}.drawai-video-info{position:absolute;left:0;top:calc(100% + 12px);padding:14px;min-width:200px;background:#fff;color:#292a2d;border:1px solid #e1dfe5;border-radius:12px;box-shadow:0 8px 24px #0002;line-height:1.8;font-size:12px}',
   '.drawai-selection-toolbar{position:absolute;z-index:6;box-sizing:border-box;display:flex;flex-wrap:nowrap;align-items:stretch;gap:2px;padding:5px 6px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:0 8px 28px #20273814,0 2px 6px #20273808}',
+  '.drawai-video-composer{--vc-bg:var(--dsw-alias-bg-overlay,#fff);--vc-fg:var(--dsw-alias-label-primary,#282c35);--vc-muted:var(--dsw-alias-label-secondary,#737a86);--vc-line:var(--dsw-alias-border-l2,#e1e3e8);--vc-chip:var(--dsw-alias-bg-layer-2,#f0f1f3);padding:14px;border-radius:12px;box-shadow:0 8px 28px #20273814,0 2px 6px #20273808}.drawai-video-composer[data-tone=dark]{--vc-bg:var(--dsw-alias-bg-overlay,#25262a);--vc-fg:var(--dsw-alias-label-primary,#eceef2);--vc-muted:var(--dsw-alias-label-secondary,#a4a8b0);--vc-line:var(--dsw-alias-border-l2,#45474d);--vc-chip:var(--dsw-alias-bg-layer-2,#34363c)}.drawai-video-composer-footer{grid-template-columns:auto minmax(0,1fr)}.drawai-video-action-toolbar{padding:5px 6px!important;border-radius:12px!important;background:var(--dsw-alias-bg-overlay,#fff)!important;color:var(--dsw-alias-label-primary,#282c35)!important}.drawai-video-info{background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);border-color:var(--dsw-alias-border-l2,#e1e3e8)}',
   '.drawai-video-actions{display:flex;align-items:stretch;gap:2px;width:100%;min-width:0}.drawai-toolbar-button{flex:1 0 38px;min-width:38px;border:0;background:transparent;color:inherit;font:inherit}.drawai-toolbar-button:disabled{opacity:.45;cursor:default}.drawai-toolbar-button:disabled:hover{background:transparent}.drawai-video-export-options{display:flex;flex-direction:column;gap:8px}.drawai-video-export-options .drawai-choice-button{min-height:34px;text-align:left;padding:7px 10px}',
   '.drawai-style-control{display:flex;align-items:center;gap:5px;font-size:11px;white-space:nowrap;padding-left:8px;border-left:1px solid var(--dsw-alias-border-l2,#e1e3e8)}',
   '.drawai-style-control select,.drawai-style-control input{box-sizing:border-box;height:30px;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:7px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;max-width:100px;padding:2px 5px}',
@@ -841,6 +844,187 @@ function imageGenCaptionHeight(node, text, width) {
  * 一个节点里，标签**能不能按宽度换行**。与渲染那一处读的是同一个键
  * （drawio 的语义：`whiteSpace=nowrap` 不换行，其余含缺省都换行）。
  */
+// Imported draw.io markup is untrusted. Copy only text and a small, inert set of
+// formatting elements; never insert the source HTML into the live document.
+function sanitizeLabelHtml(html) {
+  if (typeof document === 'undefined' || typeof document.createElement !== 'function') return ''
+  const template = document.createElement('template')
+  template.innerHTML = String(html || '')
+  const out = document.createElement('div')
+  const allowed = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'DEL', 'SUB', 'SUP', 'SPAN', 'DIV', 'P', 'BR', 'UL', 'OL', 'LI', 'FONT', 'A', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE', 'BLOCKQUOTE', 'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TD', 'TH'])
+  const discard = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'SVG', 'MATH', 'IMG', 'VIDEO', 'AUDIO', 'LINK', 'META'])
+  const color = (value) => /^(?:#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]{1,20})$/i.test(value || '') ? value : ''
+  const fontFamily = (value) => /^[\p{L}\p{N}\s,'"_-]{1,160}$/u.test(value || '') ? value : ''
+  function copy(source, target) {
+    for (const child of Array.from(source.childNodes || [])) {
+      if (child.nodeType === 3) { target.appendChild(document.createTextNode(child.nodeValue || '')); continue }
+      if (child.nodeType !== 1 || discard.has(child.tagName)) continue
+      if (!allowed.has(child.tagName)) { copy(child, target); continue }
+      const element = document.createElement(child.tagName.toLowerCase())
+      const css = child.style
+      if (css) {
+        const fg = color(css.color), bg = color(css.backgroundColor)
+        if (fg) element.style.color = fg
+        if (bg) element.style.backgroundColor = bg
+        if (/^(?:normal|bold|[1-9]00)$/.test(css.fontWeight)) element.style.fontWeight = css.fontWeight
+        if (/^(?:normal|italic|oblique)$/.test(css.fontStyle)) element.style.fontStyle = css.fontStyle
+        if (/^(?:none|underline|line-through|underline line-through|line-through underline)$/.test(css.textDecoration)) element.style.textDecoration = css.textDecoration
+        if (/^(?:left|right|center|justify)$/.test(css.textAlign)) element.style.textAlign = css.textAlign
+        if (/^\d{1,3}(?:\.\d+)?(?:px|pt|em|%)$/.test(css.fontSize)) element.style.fontSize = css.fontSize
+        const family = fontFamily(css.fontFamily)
+        if (family) element.style.fontFamily = family
+      }
+      if (child.tagName === 'FONT') {
+        const fg = color(child.getAttribute('color'))
+        if (fg) element.setAttribute('color', fg)
+        const size = child.getAttribute('size')
+        if (/^[1-7]$/.test(size || '')) element.setAttribute('size', size)
+        const face = fontFamily(child.getAttribute('face'))
+        if (face) element.setAttribute('face', face)
+      }
+      if (child.tagName === 'A') {
+        const href = (child.getAttribute('href') || '').trim()
+        if (/^(?:https?:\/\/|mailto:|#)/i.test(href)) element.setAttribute('href', href)
+      }
+      if (child.tagName === 'TD' || child.tagName === 'TH') {
+        for (const name of ['colspan', 'rowspan']) {
+          const value = child.getAttribute(name)
+          if (/^[1-9]\d{0,2}$/.test(value || '')) element.setAttribute(name, value)
+        }
+      }
+      copy(child, element)
+      target.appendChild(element)
+    }
+  }
+  copy(template.content, out)
+  return out.innerHTML
+}
+
+// Node-level formatting applies to the whole text. Remove only the affected
+// inline property so that character-level overrides cannot silently defeat it.
+// Parse in an inert template and leave other (including imported) markup intact.
+function clearRichLabelFormatting(cell, options) {
+  if (!cell || typeof cell.labelHtml !== 'string' ||
+      typeof document === 'undefined' || typeof document.createElement !== 'function') return
+  const template = document.createElement('template')
+  template.innerHTML = cell.labelHtml
+  let changed = false
+  for (const element of template.content.querySelectorAll('*')) {
+    for (const [enabled, property] of [[options.color, 'color'], [options.size, 'size']]) {
+      if (enabled && element.tagName === 'FONT' && element.hasAttribute(property)) {
+        element.removeAttribute(property)
+        changed = true
+      }
+    }
+    for (const [enabled, property] of [[options.color, 'color'], [options.size, 'font-size']]) {
+      if (enabled && element.style && element.style.getPropertyValue(property)) {
+        element.style.removeProperty(property)
+        if (!(element.getAttribute('style') || '').trim()) element.removeAttribute('style')
+        changed = true
+      }
+    }
+  }
+  if (changed) cell.labelHtml = template.innerHTML
+}
+
+function labelHtmlText(html) {
+  let text = String(html || '').replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:div|p|tr|li|h[1-6])\s*>/gi, '\n')
+    .replace(/<\/(?:td|th)\s*>/gi, ' ').replace(/<(?:td|th)\b[^>]*>/gi, '').replace(/<[^>]*>/g, '')
+  const decoder = document.createElement('textarea')
+  decoder.innerHTML = text
+  text = decoder.value
+  return text.split('\n').map((line) => line.replace(/[^\S\n]+/g, ' ').trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+function plainLabelHtml(text) {
+  return String(text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
+}
+
+// Render rich labels as SVG text rather than foreignObject: Chromium marks an
+// SVG image containing HTML as cross-origin, which breaks PNG export.
+function labelHtmlElements(html, options) {
+  const safe = sanitizeLabelHtml(html)
+  if (!safe) return []
+  const template = document.createElement('template')
+  template.innerHTML = safe
+  const opts = options || {}
+  const baseSize = opts.fontSize || FSIZE
+  const lines = [{ runs: [], width: 0, height: labelLineHeight(baseSize) }]
+  let line = lines[0]
+  const nextLine = () => { line = { runs: [], width: 0, height: labelLineHeight(baseSize) }; lines.push(line) }
+  function put(text, style) {
+    for (const ch of Array.from(text.replace(/\s+/g, ' '))) {
+      const size = style.fontSize || baseSize
+      let width = textWidth(ch, size)
+      if (labelMeasureContext && typeof labelMeasureContext.measureText === 'function') {
+        labelMeasureContext.font = (style.fontStyle || 'normal') + ' ' + (style.fontWeight || 'normal') + ' ' + size + 'px ' + (style.fontFamily || FONT)
+        width = labelMeasureContext.measureText(ch).width
+      }
+      if (opts.wrap !== false && line.width + width > opts.width && line.runs.length) nextLine()
+      const previous = line.runs[line.runs.length - 1]
+      const sig = JSON.stringify(style)
+      if (previous && previous.sig === sig) { previous.text += ch; previous.width += width }
+      else line.runs.push({ text: ch, style, sig, width })
+      line.width += width
+      line.height = Math.max(line.height, labelLineHeight(size))
+    }
+  }
+  function walk(parent, inherited) {
+    for (const child of Array.from(parent.childNodes || [])) {
+      if (child.nodeType === 3) { put(child.nodeValue || '', inherited); continue }
+      if (child.nodeType !== 1) continue
+      const tag = child.tagName
+      if (tag === 'BR') { nextLine(); continue }
+      const style = Object.assign({}, inherited)
+      if (tag === 'B' || tag === 'STRONG') style.fontWeight = 'bold'
+      if (tag === 'I' || tag === 'EM') style.fontStyle = 'italic'
+      if (tag === 'U') style.textDecoration = 'underline'
+      if (tag === 'S' || tag === 'STRIKE' || tag === 'DEL') style.textDecoration = 'line-through'
+      if (tag === 'A' && child.hasAttribute('href')) { style.textDecoration = 'underline'; if (!style.color) style.color = '#1a73e8' }
+      if (tag === 'SUP' || tag === 'SUB') { style.baselineShift = tag === 'SUP' ? 'super' : 'sub'; style.fontSize = (style.fontSize || baseSize) * .75 }
+      if (child.style) {
+        for (const name of ['color', 'backgroundColor', 'fontWeight', 'fontStyle', 'textDecoration', 'fontFamily']) if (child.style[name]) style[name] = child.style[name]
+        const size = child.style.fontSize
+        if (/^\d+(?:\.\d+)?px$/.test(size)) style.fontSize = parseFloat(size)
+        else if (/^\d+(?:\.\d+)?pt$/.test(size)) style.fontSize = parseFloat(size) * 4 / 3
+        else if (/^\d+(?:\.\d+)?%$/.test(size)) style.fontSize = (inherited.fontSize || baseSize) * parseFloat(size) / 100
+        else if (/^\d+(?:\.\d+)?em$/.test(size)) style.fontSize = (inherited.fontSize || baseSize) * parseFloat(size)
+      }
+      if (tag === 'FONT') {
+        if (child.getAttribute('color')) style.color = child.getAttribute('color')
+        if (child.getAttribute('face')) style.fontFamily = child.getAttribute('face')
+        const size = Number(child.getAttribute('size'))
+        if (size >= 1 && size <= 7) style.fontSize = [0, 10, 13, 16, 18, 24, 32, 48][size]
+      }
+      walk(child, style)
+      if (['DIV', 'P', 'LI', 'PRE', 'BLOCKQUOTE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TR'].includes(tag)) nextLine()
+    }
+  }
+  walk(template.content, {})
+  if (lines.length > 1 && !line.runs.length) lines.pop()
+  let y = opts.y
+  const result = []
+  lines.forEach((item, index) => {
+    const x = opts.align === 'left' ? opts.x : opts.align === 'right' ? opts.x + opts.width - item.width : opts.x + (opts.width - item.width) / 2
+    y += item.height / 2
+    let runX = x
+    item.runs.forEach((run, i) => {
+      if (run.style.backgroundColor) result.push(React.createElement('rect', { key: 'rich-bg-' + index + '-' + i, x: runX,
+        y: y - item.height / 2, width: run.width, height: item.height, fill: run.style.backgroundColor,
+        fillOpacity: opts.opacity, pointerEvents: 'none' }))
+      runX += run.width
+    })
+    result.push(React.createElement('text', { key: 'rich-line-' + index, x, y, fontFamily: FONT, fontSize: baseSize,
+      fill: opts.color, fillOpacity: opts.opacity, dominantBaseline: 'middle', pointerEvents: 'none', style: { whiteSpace: 'pre' } },
+    item.runs.map((run, i) => React.createElement('tspan', { key: i, fill: run.style.color, fontSize: run.style.fontSize,
+      fontWeight: run.style.fontWeight, fontStyle: run.style.fontStyle, fontFamily: run.style.fontFamily, textDecoration: run.style.textDecoration,
+      baselineShift: run.style.baselineShift }, run.text))))
+    y += item.height / 2
+  })
+  return result
+}
+
 function labelWraps(node) {
   const style = typeof node.style === 'string' ? node.style : ''
   return styleGet(style, 'whiteSpace', 'wrap') !== 'nowrap'
@@ -2971,6 +3155,13 @@ function railIcon(kind) {
     ])
   }
   if (kind === 'shotcards') return svg([React.createElement('rect', { key: 'back', x: 3, y: 3, width: 14, height: 11, rx: 2 }), React.createElement('rect', { key: 'front', x: 7, y: 9, width: 14, height: 12, rx: 2 }), React.createElement('path', { key: 'play', d: 'M12 12l5 3-5 3z' })])
+  // 整片风格：三联色卡 + 一条节奏线
+  if (kind === 'mgstyles') return svg([
+    React.createElement('rect', { key: 'a', x: 3, y: 4, width: 6, height: 9, rx: 1.5 }),
+    React.createElement('rect', { key: 'b', x: 9.5, y: 4, width: 6, height: 9, rx: 1.5 }),
+    React.createElement('rect', { key: 'c', x: 16, y: 4, width: 5, height: 9, rx: 1.5 }),
+    React.createElement('path', { key: 'beat', d: 'M3 19h4l2-3 3 5 3-7 2 5h4' }),
+  ])
   if (kind === 'edge') {
     // 线条族入口：对齐参考图的直角折线 + 开叉箭头。
     return svg([
@@ -3636,11 +3827,14 @@ function ColorPalette(props) {
     if (typeof panel.showPopover === 'function' && !panel.matches(':popover-open')) panel.showPopover()
     const anchor = details.getBoundingClientRect()
     const preferredWidth = props.options && props.label === '字号' ? 156 : 320
-    panel.style.width = preferredWidth + 'px'
-    panel.style.maxHeight = 'none'
-    panel.style.left = anchor.left - 12 + 'px'
+    const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight
+    panel.style.width = Math.min(preferredWidth, Math.max(0, vw - 16)) + 'px'
+    panel.style.maxHeight = Math.max(0, vh - 16) + 'px'
+    const width = panel.offsetWidth || preferredWidth, height = panel.getBoundingClientRect().height
+    panel.style.left = Math.max(8, Math.min(anchor.left - 12, vw - width - 8)) + 'px'
     const below = anchor.bottom + 12
-    panel.style.top = below + 'px'
+    const preferredTop = below + height > vh - 8 && anchor.top - 12 - height >= 8 ? anchor.top - 12 - height : below
+    panel.style.top = Math.max(8, Math.min(preferredTop, vh - height - 8)) + 'px'
   }
   const close = () => {
     if (closeTimerRef.current !== null) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null }
@@ -3957,21 +4151,23 @@ function exportOutputSize(width, height, options) {
 }
 
 /** 从现有 SVG 渲染树生成独立文档，避免导出被视口、选区手柄或隐藏状态绑住。 */
-function svgTreeToDom(tree, owner) {
+function svgTreeToDom(tree, owner, namespace) {
   const document = owner
   if (tree === null || tree === undefined || typeof tree === 'boolean') return null
   if (typeof tree !== 'object') return document.createTextNode(String(tree))
   if (Array.isArray(tree)) {
     const fragment = document.createDocumentFragment()
-    for (const item of tree) { const node = svgTreeToDom(item, document); if (node) fragment.appendChild(node) }
+    for (const item of tree) { const node = svgTreeToDom(item, document, namespace); if (node) fragment.appendChild(node) }
     return fragment
   }
   const props = tree.props || {}
-  if (typeof tree.type !== 'string') return svgTreeToDom(props.children || tree.children || [], document)
-  const element = document.createElementNS('http://www.w3.org/2000/svg', tree.type)
+  if (typeof tree.type !== 'string') return svgTreeToDom(props.children || tree.children || [], document, namespace)
+  const ns = namespace || 'http://www.w3.org/2000/svg'
+  const element = document.createElementNS(ns, tree.type)
   const attributes = { className: 'class', strokeWidth: 'stroke-width', strokeLinecap: 'stroke-linecap', strokeLinejoin: 'stroke-linejoin',
     strokeDasharray: 'stroke-dasharray', strokeDashoffset: 'stroke-dashoffset', strokeOpacity: 'stroke-opacity', fillOpacity: 'fill-opacity',
     fillRule: 'fill-rule', textAnchor: 'text-anchor', dominantBaseline: 'dominant-baseline', fontFamily: 'font-family', fontSize: 'font-size',
+    fontWeight: 'font-weight', fontStyle: 'font-style', textDecoration: 'text-decoration', baselineShift: 'baseline-shift',
     markerEnd: 'marker-end', markerStart: 'marker-start', pointerEvents: 'pointer-events', clipPath: 'clip-path' }
   for (const [key, value] of Object.entries(props)) {
     if (value === null || value === undefined || ['children', 'key', 'ref'].includes(key) || key.startsWith('on')) continue
@@ -3979,14 +4175,65 @@ function svgTreeToDom(tree, owner) {
     else if (key === 'xlinkHref') element.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', String(value))
     else element.setAttribute(attributes[key] || key, String(value))
   }
-  const children = svgTreeToDom(props.children !== undefined ? props.children : tree.children || [], document)
+  const childNs = tree.type === 'foreignObject' ? 'http://www.w3.org/1999/xhtml' : ns
+  const children = svgTreeToDom(props.children !== undefined ? props.children : tree.children || [], document, childNs)
   if (children) element.appendChild(children)
   return element
 }
 
-function encodeExportPng(node, output) {
+/**
+ * 光栅导出前的 SVG 副本：把"活的"部件摘掉。
+ *
+ * 为什么要有这一步：画布上的视频 / 音频节点是 foreignObject 里**真正的** <video>、
+ * <audio>，源是 blob: 的。整棵 SVG 序列化后当图片加载时，Chrome 把这些外部引用
+ * 算作跨源资源，canvas 立刻被标脏，随后 `toDataURL()` 抛
+ * `SecurityError: Tainted canvases may not be exported.` —— 导出一张 PNG 或让 AI
+ * "看一眼"都会失败。
+ *
+ * 而 foreignObject 在 SVG-as-image 里本来就画不出来（Chrome 不渲染它），所以摘掉
+ * 不会让画面少任何东西，只是让导出从"整张失败"变成"成功"。
+ *
+ * 判据用两种：含 video / audio 的 foreignObject 整块摘；其余仍指向 blob: 的元素
+ * 逐个摘（万一将来有别的活体挂件复用 blob: 源）。
+ */
+function rasterSafeSvg(node, aggressive) {
+  const clone = node.cloneNode(true)
+  // foreignObject 在 SVG-as-image 里 Chrome 本来就不渲染，但里面的 <video>(blob:)、
+  // <img>(远端地址)、<canvas> 都会把 canvas 标脏。默认只摘"有活件"的那几个，
+  // 保留纯 HTML 覆盖层（镜头卡卡面），导出图才和画布长得一样；万一仍被标脏，
+  // 调用方会带 aggressive=true 再来一次，把所有覆盖层都摘掉。
+  for (const object of Array.from(clone.querySelectorAll('foreignObject'))) {
+    const heavy = aggressive === true ||
+      object.querySelector('video') !== null ||
+      object.querySelector('audio') !== null ||
+      object.querySelector('canvas') !== null ||
+      Array.from(object.querySelectorAll('img')).some((img) => (img.getAttribute('src') || '').indexOf('data:') !== 0)
+    if (heavy) object.remove()
+  }
+  // 2) 任何非 data: 的外部引用一律摘掉：blob: / http(s): / file: 都会标脏。
+  for (const element of Array.from(clone.querySelectorAll('*'))) {
+    for (const name of ['src', 'href']) {
+      const value = element.getAttribute(name) || ''
+      if (value !== '' && value.indexOf('data:') !== 0 && value.charAt(0) !== '#') element.removeAttribute(name)
+    }
+    const xlink = element.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || ''
+    if (xlink !== '' && xlink.indexOf('data:') !== 0 && xlink.charAt(0) !== '#') element.remove()
+  }
+  return clone
+}
+
+/** 光栅导出用的标记文本：与直接序列化等价，只是先过一遍 rasterSafeSvg。 */
+function rasterSafeMarkup(node, aggressive) {
+  return new XMLSerializer().serializeToString(rasterSafeSvg(node, aggressive))
+}
+
+function encodeExportPng(node, output, aggressive) {
   return new Promise((resolve, reject) => {
-    const markup = new XMLSerializer().serializeToString(node)
+    const retry = (error) => {
+      if (aggressive === true) { reject(error); return }
+      encodeExportPng(node, output, true).then(resolve, reject)
+    }
+    const markup = rasterSafeMarkup(node, aggressive === true)
     const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }))
     const image = new Image()
     image.onload = () => {
@@ -3997,10 +4244,10 @@ function encodeExportPng(node, output) {
         const context = canvas.getContext('2d')
         if (!context) { reject(new Error('无法创建导出画布')); return }
         context.drawImage(image, 0, 0, output.width, output.height)
-        canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('PNG 编码失败')), 'image/png')
-      } catch (error) { reject(error) }
+        canvas.toBlob((blob) => blob ? resolve(blob) : retry(new Error('PNG 编码失败')), 'image/png')
+      } catch (error) { retry(error) }
     }
-    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('导出图像加载失败')) }
+    image.onerror = () => { URL.revokeObjectURL(url); retry(new Error('导出图像加载失败')) }
     image.src = url
   })
 }
@@ -4226,7 +4473,7 @@ function applyVideoTraceToDoc(doc, source, result) {
   const id = 'n' + index
   const output = Object.assign({}, node, { id, x: node.x + node.w + 24, label: (node.label || '视频') + ' · SVG 复刻',
     data: Object.assign({}, node.data, videoDataForNew(result.clip, result.w, result.h), { mediaFps: String(result.fps) }),
-    style: styleWithSvgMarkup(node.style || '', result.poster, '1') })
+    style: styleWithMediaMarkup(node.style || '', result.poster, '1') })
   doc.nodes.push(output)
   ensureDrawOrder(doc)
   return id
@@ -4297,18 +4544,26 @@ function ImageTracePanel(props) {
   )
 }
 
-/** Top-layer tools follow canvas coordinates without clipping or viewport clamping. */
+/** Keep floating tools near their canvas anchor and within the visible window. */
 function NodeToolCard(props) {
   const ref = React.useRef(null)
-  const { canvasRef, children, ...attributes } = props
+  const { canvasRef, children, fallbackTop, ...attributes } = props
   React.useEffect(() => {
     const panel = ref.current, canvas = props.canvasRef.current
     if (!panel || !canvas) return
     if (typeof panel.showPopover === 'function' && !panel.matches(':popover-open')) panel.showPopover()
     const position = () => {
       const anchor = canvas.getBoundingClientRect()
-      panel.style.left = anchor.left + parseFloat(props.style.left) + 'px'
-      panel.style.top = anchor.top + parseFloat(props.style.top) + 'px'
+      const margin = 8
+      const width = panel.offsetWidth || 0, height = panel.offsetHeight || 0
+      const viewportWidth = window.innerWidth || document.documentElement.clientWidth
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+      const preferredLeft = anchor.left + (parseFloat(props.style.left) || 0)
+      let preferredTop = anchor.top + (parseFloat(props.style.top) || 0)
+      const alternativeTop = anchor.top + Number(fallbackTop)
+      if (preferredTop < margin && Number.isFinite(Number(fallbackTop)) && alternativeTop + height <= viewportHeight - margin) preferredTop = alternativeTop
+      panel.style.left = Math.max(margin, Math.min(preferredLeft, viewportWidth - width - margin)) + 'px'
+      panel.style.top = Math.max(margin, Math.min(preferredTop, viewportHeight - height - margin)) + 'px'
     }
     position()
     window.addEventListener('resize', position)
@@ -4318,7 +4573,7 @@ function NodeToolCard(props) {
     return () => { observer?.disconnect(); window.removeEventListener('resize', position); window.removeEventListener('scroll', position, true) }
   })
   return React.createElement('div', { ...attributes, ref, popover: 'manual',
-    style: { ...props.style, position: 'fixed', inset: 'auto', margin: 0, maxWidth: 'none', maxHeight: 'none' },
+    style: { ...props.style, position: 'fixed', inset: 'auto', margin: 0, maxWidth: 'calc(100vw - 16px)' },
     onPointerDown: (event) => event.stopPropagation(), onDoubleClick: (event) => event.stopPropagation(),
     onKeyDown: (event) => event.stopPropagation() }, children)
 }
@@ -4336,11 +4591,14 @@ function ToolbarPopover(props) {
     if (details === null || panel === null || !details.open || disabled) return
     if (typeof panel.showPopover === 'function' && !panel.matches(':popover-open')) panel.showPopover()
     const anchor = details.getBoundingClientRect()
-    panel.style.width = '352px'
-    panel.style.maxHeight = 'none'
-    panel.style.left = anchor.left - 12 + 'px'
+    const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight
+    panel.style.width = Math.min(352, Math.max(0, vw - 16)) + 'px'
+    panel.style.maxHeight = Math.max(0, vh - 16) + 'px'
+    const width = panel.offsetWidth || 352, height = panel.getBoundingClientRect().height
+    panel.style.left = Math.max(8, Math.min(anchor.left - 12, vw - width - 8)) + 'px'
     const below = anchor.bottom + 12
-    panel.style.top = below + 'px'
+    const preferredTop = below + height > vh - 8 && anchor.top - 12 - height >= 8 ? anchor.top - 12 - height : below
+    panel.style.top = Math.max(8, Math.min(preferredTop, vh - height - 8)) + 'px'
   }
   const close = () => {
     if (closeTimerRef.current !== null) { clearTimeout(closeTimerRef.current); closeTimerRef.current = null }
@@ -5478,12 +5736,8 @@ function hitNodeAt(doc, geometry, x, y, padding, excludeId) {
  * 三种目标形态：
  *  - seed 非空：用户指定的引出边（和 onNodePointerUp 落盘时一样）——先把该侧的 stub 钉住，
  *    再从这个 stub 路由过去，否则算法会另挑一边，预览和结果就对不上；
- *  - 目标是一个真实节点（吸附命中）：用它的 geo，但 id 换成 '__preview' —— routeEdge 用 id 做过
- *    障碍排除，沿用真 id 会把"预览的落点"和"图上的那个节点"混为一谈；
- *    用独立 id 还能保证目标节点被当成障碍物参与避让，预览更接近真实走线。
- *    **例外：目标就是起点自己**（自环）—— 这时必须沿用真 id，才能走进自环分支。
- *  - 目标是空白处的指针：造一个零尺寸的虚拟盒，于是 routeEdge 会从它现有的 6 个候选里挑一个
- *    L 形/绕行走法 —— 预览在空白处也是折线，而不是斜线。
+ *  - 目标是节点或空白：用节点几何或零尺寸虚拟盒生成普通正交路径，不自动避让其他节点。
+ *  - 目标就是起点自己（自环）：沿用真实 id，让自环分支生成环形路径。
  */
 /**
  * 预览用的路由：把"这一帧选中的两端"当**约束**喂给 routeEdge。
@@ -5491,7 +5745,7 @@ function hitNodeAt(doc, geometry, x, y, padding, excludeId) {
  * seed = { source, target, jetty }（侧名或 null）。与落盘写进 style 的 exitX/exitY、
  * entryX/entryY 是同一批值 —— 这是"预览即结果"的根据。
  */
-function routePreview(fromBox, target, seed, existingEdges) {
+function routePreview(fromBox, target, seed) {
   if (fromBox === undefined || fromBox === null || target === null || target === undefined) return null
   if (fromBox.id !== target.id) {
     let style = NEW_EDGE_STYLE
@@ -5501,15 +5755,9 @@ function routePreview(fromBox, target, seed, existingEdges) {
       if (Number.isFinite(seed.jetty)) style = stylePatch(style, { jettySize: String(seed.jetty) })
     }
     const edge = { id: '__preview', style }
-    const boxes = target.boxes.slice()
-    if (!boxes.some((box) => box.id === fromBox.id)) boxes.push(fromBox)
-    if (fromBox.geo.w > 0 && fromBox.geo.h > 0) edge.from = fromBox.id
-    else edge.sourcePoint = { x: fromBox.geo.x, y: fromBox.geo.y }
-    if (target.geo.w > 0 && target.geo.h > 0) {
-      edge.to = target.id
-      if (!boxes.some((box) => box.id === target.id)) boxes.push(target)
-    } else edge.targetPoint = { x: target.geo.x, y: target.geo.y }
-    return automaticPreview(edge, boxes, existingEdges)
+    // New connections use a simple editable orthogonal path; do not invoke obstacle avoidance.
+    const targetBox = { id: target.id, geo: target.geo }
+    return routeEdgeStyled(fromBox, targetBox, [], target.bounds, edge)
   }
   // 自环（指针回到起点节点上）：**沿用真实 id**，让 routeEdge 走它的自环分支。
   // 普通情况用 '__preview' 这个独立 id：routeEdge 拿 id 做障碍排除，沿用真 id 会把
@@ -5565,7 +5813,7 @@ function routePreviewFor(doc, geometry, cursor, fromId, fromGeo, seed, padding, 
   const targetGeo = hot === null ? { x: cursor.x, y: cursor.y, w: 0, h: 0 } : hot.geo
   const targetBox = { id: hot === null ? '__cursor' : hot.id, geo: targetGeo, boxes: geometry.boxes, bounds: geometry.bounds }
   // 两侧选中的端点作为**约束**喂给同一条路由：预览与落盘共用 chainForRoute，不存在两套判据。
-  const clean = routePreview(fromBox, targetBox, { source: seedSide, target: toSide, jetty: null }, doc.edges)
+  const clean = routePreview(fromBox, targetBox, { source: seedSide, target: toSide, jetty: null })
   if (clean === null) return null
   return {
     points: clean,
@@ -6438,6 +6686,17 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
           React.createElement('div', { style: { fontSize: 11, lineHeight: 1.7, overflow: 'hidden', opacity: .65 } }, style?.description || card?.summary),
           React.createElement('small', { style: { marginTop: 'auto', opacity: .65 } }, '双击预览 · 连线到视频'))))
     }
+    if (ui && motionCore.isMgStyleNode(node)) {
+      const style = motionCore.mgCatalog.styles.find((item) => item.slug === node.data.mgStyleSlug) || {}
+      const chip = (role, color) => React.createElement('span', { key: role, style: { width: 16, height: 16, borderRadius: 4, background: color, border: '1px solid #0002', display: 'inline-block' } })
+      groupChildren.push(React.createElement('foreignObject', { key: 'mgstyle-face', x: geo.x + 1, y: geo.y + 1, width: Math.max(0, geo.w - 2), height: Math.max(0, geo.h - 2), pointerEvents: 'none' },
+        React.createElement('div', { xmlns: 'http://www.w3.org/1999/xhtml', style: { height: '100%', boxSizing: 'border-box', overflow: 'hidden', padding: 14, borderRadius: 10,
+          background: mode === 'dark' ? '#2d2a20' : '#fdf6e3', color: mode === 'dark' ? '#efe3c2' : '#5a4a1a', display: 'flex', flexDirection: 'column', gap: 8 } },
+          React.createElement('small', null, '整片风格' + (style.rhythm?.aspect ? ' · ' + style.rhythm.aspect : '') + (style.rhythm?.fps ? ' · ' + style.rhythm.fps + 'fps' : '')),
+          React.createElement('strong', { style: { fontSize: 15, overflowWrap: 'anywhere' } }, style.name || node.data.mgStyleSlug || '未选风格'),
+          React.createElement('div', { style: { display: 'flex', gap: 4 } }, ['page', 'text', 'accent', 'field'].map((role) => style.palette?.[role] ? chip(role, style.palette[role]) : null)),
+          React.createElement('small', { style: { marginTop: 'auto', opacity: .65 } }, '双击换风格 · 连线到视频'))))
+    }
     if (ui && motionCore.isMotionNode(node) && !videoMetaOf(node)) {
       groupChildren.push(React.createElement('foreignObject', { key: 'video-node-title', x: geo.x + 8, y: geo.y - 25, width: geo.w - 16, height: 20, pointerEvents: 'none' },
         React.createElement('div', { xmlns: 'http://www.w3.org/1999/xhtml', style: { color: mode === 'dark' ? '#b8b2ad' : '#66605b', fontSize: 12, fontWeight: 600 } }, node.label || '视频')))
@@ -6497,7 +6756,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     // 画出来的标签会从它底下透出来，两层字叠在一起。以前没这问题只是因为那个单行 input
     // 带白底、把标签盖住了 —— 换成透明 textarea 之后必须显式让位。
     const editingHere = ui !== undefined && ui !== null && ui.editingNodeId === node.id
-    if (box.label && !editingHere && !(ui && (motionCore.isShotCardNode(node)||motionCore.isAudioNode(node)))) {
+    if (box.label && !editingHere && !(ui && (motionCore.isShotCardNode(node)||motionCore.isMgStyleNode(node)||motionCore.isAudioNode(node)))) {
       const labelStyle = typeof node.style === 'string' ? node.style : ''
       const labelFontSize = styleNumber(labelStyle, 'fontSize', FSIZE)
       const labelFill = colorOf(node, mode).font
@@ -6512,7 +6771,11 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
       for (let li = 0; li < lines.length; li += 1) {
         spans.push(React.createElement('tspan', { key: 'l' + li, x: cx, dy: li === 0 ? 0 : lineHeight }, lines[li]))
       }
-      groupChildren.push(
+      const safeHtml = nodeShowsLabel(node) && typeof node.labelHtml === 'string' ? sanitizeLabelHtml(node.labelHtml) : ''
+      if (safeHtml) {
+        groupChildren.push(...labelHtmlElements(safeHtml, { x: boxText.x, y: boxText.y, width: boxText.w, align: labelAlign,
+          fontSize: labelFontSize, color: labelFill, wrap: labelWraps(node), opacity: clampNumber(styleNumber(labelStyle, 'textOpacity', 100), 0, 100) / 100 }))
+      } else groupChildren.push(
         React.createElement(
           'text',
           {
@@ -7111,6 +7374,7 @@ function clipboardLabelText(clip) {
 /** 节点深拷贝（标签/样式都是字符串，几何是数字 —— 浅拷就够，但要显式列出来）。 */
 function cloneClipNode(node) {
   const copy = { id: node.id, label: node.label, style: node.style, x: node.x, y: node.y, w: node.w, h: node.h }
+  if (typeof node.labelHtml === 'string') copy.labelHtml = node.labelHtml
   // 图层与自定义数据也要跟着复制 —— 否则"复制到一个新图层"或"复制带数据的节点"会丢东西
   // （数据是 drawio 用户对象上的属性，丢了 drawio 那边就查不到了）。
   if (typeof node.layer === 'string' && node.layer.length > 0) copy.layer = node.layer
@@ -7124,6 +7388,7 @@ function cloneClipNode(node) {
 function cloneClipEdge(edge) {
   const copy = { id: edge.id, from: edge.from, to: edge.to }
   if (typeof edge.label === 'string') copy.label = edge.label
+  if (typeof edge.labelHtml === 'string') copy.labelHtml = edge.labelHtml
   if (typeof edge.style === 'string') copy.style = edge.style
   if (Array.isArray(edge.points)) copy.points = edge.points.map((p) => ({ x: p.x, y: p.y }))
   if (edge.sourcePoint !== undefined && edge.sourcePoint !== null) copy.sourcePoint = { x: edge.sourcePoint.x, y: edge.sourcePoint.y }
@@ -7357,6 +7622,16 @@ function CanvasView(props) {
   const editingState = React.useState(null)
   const editing = editingState[0]
   const setEditing = editingState[1]
+  const richEditorRef = React.useRef(null)
+  const richDirtyRef = React.useRef(false)
+  const richFormatRef = React.useRef(false)
+  const richSelectionRef = React.useRef(null)
+  React.useEffect(() => {
+    if (!editing || !editing.rich || !richEditorRef.current) return
+    const editor = richEditorRef.current
+    editor.innerHTML = editing.initialHtml === null ? plainLabelHtml(editing.text) : sanitizeLabelHtml(editing.initialHtml)
+    editor.focus()
+  }, [editing && editing.id, editing && editing.rich])
   const connectFromState = React.useState(null)
   const connectFrom = connectFromState[0]
   const setConnectFrom = connectFromState[1]
@@ -7619,7 +7894,9 @@ function CanvasView(props) {
   const prefs = prefsState[0]
   const setPrefs = prefsState[1]
   const [shotLibrary, setShotLibrary] = React.useState(null)
+  const [mgLibrary, setMgLibrary] = React.useState(null)
   React.useEffect(() => { setShotLibrary(null) }, [target, pageIndex])
+  React.useEffect(() => { setMgLibrary(null) }, [target, pageIndex])
   const [motionJobs, setMotionJobs] = React.useState([])
   const motionFocusRef = React.useRef('')
   React.useEffect(() => {
@@ -7862,7 +8139,7 @@ function CanvasView(props) {
     const request = async (action, extra) => {
       const pending = new AbortController()
       // start 要取得清理令牌后才能取消；清理/释放请求也不跟随任务取消。
-      const cancellable = ['media-source-bytes', 'media-trace-frame', 'media-trace-frame-chunk', 'media-trace-finish'].includes(action)
+      const cancellable = ['media-source-url', 'media-trace-frame', 'media-trace-frame-chunk', 'media-trace-finish'].includes(action)
       const abort = () => pending.abort()
       const timer = action === 'media-trace-frame' ? null : setTimeout(abort, 60000)
       if (cancellable) control.signal.addEventListener('abort', abort, { once: true })
@@ -7876,21 +8153,17 @@ function CanvasView(props) {
         return result
       } finally { requestDone(); clearTimeout(timer); control.signal.removeEventListener('abort', abort) }
     }
-    let pack = null, blobUrl = null, committed = false, currentFrame = -1
+    let pack = null, committed = false, currentFrame = -1
     const pendingFrames = []
     const video = document.createElement('video')
     video.muted = true; video.playsInline = true; video.preload = 'auto'
     setVideoTraceJob({ busy: true, done: 0, total: 1, message: '正在读取视频…', options })
     videoController.suspend()
     try {
-      const bytesResult = await request('media-source-bytes', { clip: source.clip })
+      const sourceResult = await request('media-source-url', { clip: source.clip })
       check()
-      const sourceDone = perf.start('sourceBase64Decode')
-      const binary = atob(bytesResult.base64), bytes = new Uint8Array(binary.length)
-      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
-      sourceDone()
-      blobUrl = URL.createObjectURL(new Blob([bytes], { type: bytesResult.mime || 'video/mp4' }))
-      await perf.measure('sourceLoad', () => waitForVideoTraceEvent(video, 'loadeddata', control.signal, () => { video.src = blobUrl; video.load() }))
+      if (!sourceResult?.url) throw new Error('无法读取源视频地址')
+      await perf.measure('sourceLoad', () => waitForVideoTraceEvent(video, 'loadeddata', control.signal, () => { video.src = sourceResult.url; video.load() }))
       const plan = videoTracePlan(options, video.duration, video.videoWidth, video.videoHeight)
       pack = await request('media-trace-start', { fps: plan.fps, count: plan.count, w: plan.w, h: plan.h, maxBytes: plan.maxBytes, sourceClip: source.clip, sourceOffset: plan.from })
       perf.enable(pack.performanceEnabled)
@@ -7985,7 +8258,6 @@ function CanvasView(props) {
       perf.report()
       while (pendingFrames.length) await pendingFrames.shift().catch(() => {})
       video.pause(); video.removeAttribute('src'); video.load()
-      if (blobUrl) URL.revokeObjectURL(blobUrl)
       if (videoTraceRun.current === control) videoTraceRun.current = null
       queueContext?.signal.removeEventListener('abort', cancelQueued)
     }
@@ -8144,6 +8416,7 @@ function CanvasView(props) {
   function motionRoleFor(node) {
     if(motionCore.isAudioNode(node))return 'audio'
     if (motionCore.isShotCardNode(node)) return 'shotcard'
+    if (motionCore.isMgStyleNode(node)) return 'mgstyle'
     const shape = nodeShapeFromStyle(node.style || '')
     return shape === 'text' ? 'copy' : shape === 'section' || docRef.current.nodes.some((item) => item.parent === node.id) ? 'layout' : 'material'
   }
@@ -8184,19 +8457,29 @@ function CanvasView(props) {
     setSaveNote('已添加镜头参考，把箭头连到视频节点即可（连线顺序就是镜头顺序）')
   }
 
-  function createMotionFromSelection() {
-    if (activeLayerLocked()) { setSaveNote('当前图层已锁定'); return }
-    const sources = selectedIds.filter((id) => nodeById(id)), id = nextNodeId(docRef.current)
-    const box = contentBounds(docRef.current)
+  // 整片风格：一条片子一种。节点摆在视频节点上方，建工程时当色板 + 施工说明用。
+  function addMgStyle(style) {
+    if (!style) throw new Error('请选择一种整片风格')
+    if (activeLayerLocked()) throw new Error('当前图层已锁定')
+    let added = null
     applyLocal((next) => {
-      const node = freshNode(id, 'video', 'plain', box.maxX + NEW_VIDEO_W / 2 + 40, (box.minY + box.maxY) / 2)
-      if (activeLayerId) node.layer = activeLayerId
-      next.nodes.push(node)
-      for (const source of sources) motionCore.bindMotionReference(next, source, id, motionRoleFor(nodeById(source)), nextEdgeId(next))
+      if (mgLibrary.targetId) motionCore.assertMotionEditable(next, mgLibrary.targetId)
+      if (mgLibrary.replaceId) motionCore.assertMotionEditable(next, mgLibrary.replaceId)
+      const targetNode = next.nodes.find((node) => node.id === mgLibrary.targetId)
+      const existing = next.nodes.find((node) => node.id === mgLibrary.replaceId)
+      const id = mgLibrary.replaceId || nextNodeId(next)
+      const node = existing || { id, x: targetNode ? targetNode.x : (view?.x || 0) + 40,
+        y: targetNode ? targetNode.y - 260 : (view?.y || 0) + 40, w: 300, h: 120 }
+      node.label = '整片风格\n' + style.name
+      node.style = 'rounded=1;arcSize=10;fillColor=#fdf6e3;strokeColor=#c9a227;fontColor=#5a4a1a;whiteSpace=wrap;fontSize=14;'
+      node.data = motionCore.mgStyleData(motionCore.mgCatalog, style.slug)
+      if (!existing) { if (activeLayerId) node.layer = activeLayerId; next.nodes.push(node) }
+      if (targetNode) motionCore.bindMotionReference(next, id, targetNode.id, 'mgstyle', nextEdgeId(next))
+      added = id
       ensureDrawOrder(next)
     })
-    setSelectedIds([id]); setMenu(null)
-    setSaveNote('已创建视频节点：挂上镜头卡后，在对话里让 AI 建工程、出片')
+    setSelectedIds(added ? [added] : [])
+    setSaveNote('已添加整片风格，把箭头连到视频节点。建工程时用它当色板与施工说明')
   }
 
   async function motionPreviews(input) {
@@ -8250,7 +8533,7 @@ function CanvasView(props) {
       onShowTasks: () => patchPrefs({ showTaskList: true }),
       onExportProject: () => downloadBlob(new Blob([JSON.stringify({ format: 'drawai-motion', version: 1, composition: node.data.motion.composition }, null, 2)], { type: 'application/json;charset=utf-8' }), 'drawai-motion-project.json'),
       onExport: async (clip,variant) => { const result = await mediaAction('media-export-source', { clip,variant }, { throwOnError: true }); setSaveNote('已导出 ' + result.path) },
-      onLoadFilm:clip=>mediaAction('media-source-bytes',{clip},{throwOnError:true}),
+      onLoadFilm:clip=>mediaAction('media-source-url',{clip},{throwOnError:true}),
       onReviewFilm:async(taskId,review)=>{
         await mediaAction('motion-task-review-film',{taskId,review},{throwOnError:true})
         const result=await mediaAction('motion-task-list',{}, {throwOnError:true});setMotionJobs(result.jobs||[])
@@ -8350,12 +8633,12 @@ function CanvasView(props) {
     const current = docRef.current
     if (current === null) return
     const transaction = documentCommands.execute(current, { type: 'mutate', mutate })
-    // A newly inserted orthogonal edge defaults to auto; existing documents are untouched.
+    // A newly inserted orthogonal edge defaults to manual; existing documents are untouched.
     const existing = new Set(current.edges.map((edge) => edge.id))
     for (const edge of transaction.doc.edges) {
       if (!existing.has(edge.id) && isOrthogonalEdgeStyle(edge.style || '') &&
         !Array.isArray(edge.points) && styleGet(edge.style || '', 'libavoidRouting', null) === null &&
-        styleGet(edge.style || '', 'drawaiRoutingMode', null) === null) edge.style = styleWithRoutingMode(edge.style || DEFAULT_EDGE_STYLE, 'auto')
+        styleGet(edge.style || '', 'drawaiRoutingMode', null) === null) edge.style = styleWithRoutingMode(edge.style || DEFAULT_EDGE_STYLE, 'manual')
     }
     const routeBoxes = buildGeometry(transaction.doc).boxes
     for (const edge of transaction.doc.edges) {
@@ -9238,7 +9521,7 @@ function CanvasView(props) {
     // 用户选中的两个端点写进 style 的 exitX/exitY 与 entryX/entryY（drawio 的固定连接点）。
     // v1 是把桩点塞进 edge.points —— 那等于把"接在哪一侧"伪装成一个折点，
     // 端点一动它就成了过期坐标（宿主重排时只能清掉，约束也就丢了）。
-    let style = DEFAULT_EDGE_STYLE
+    let style = NEW_EDGE_STYLE
     if (typeof linking.side === 'string' && linking.side.length > 0) style = styleWithSide(style, 'source', linking.side)
     if (typeof entrySide === 'string' && entrySide.length > 0) style = styleWithSide(style, 'target', entrySide)
 
@@ -9253,8 +9536,7 @@ function CanvasView(props) {
         }
       }
       const fresh = { id: 'e' + (max + 1), from: linking.from, to: id, style: style }
-      if (preview && Array.isArray(preview.points)) fresh.__routePreview = preview.points
-      if (preview?.relatedRoutes) fresh.__routePeers = preview.relatedRoutes
+      if (preview && Array.isArray(preview.points)) fresh.points = preview.points.slice(1, -1).map(point => ({ x: point.x, y: point.y }))
       if (activeLayerId !== null && activeLayerId !== undefined) fresh.layer = activeLayerId
       next.edges.push(fresh)
     })
@@ -9269,10 +9551,13 @@ function CanvasView(props) {
    */
   function openNodeEditor(id) {
     const node = nodeById(id)
+    if (node === null) return
+    if (isTableNode(node)) { openTableEditor(id); return }
     if (motionCore.isShotCardNode(node)) { setShotLibrary({ replaceId: node.id, initialSelection: { cardId: node.data.shotCardId, styleKey: node.data.shotStyleKey } }); return }
+    if (motionCore.isMgStyleNode(node)) { setMgLibrary({ replaceId: node.id, initialSelection: { slug: node.data.mgStyleSlug } }); return }
     const svg = svgRef.current
     const canvas = canvasRef.current
-    if (node === null || svg === null || canvas === null || !nodeShowsLabel(node)) return
+    if (svg === null || canvas === null || !nodeShowsLabel(node)) return
     const ctm = svg.getScreenCTM()
     if (ctm === null) return
     const rect = canvas.getBoundingClientRect()
@@ -9280,9 +9565,11 @@ function CanvasView(props) {
     setMenu(null)
     const text = typeof node.label === 'string' ? node.label : ''
     const box = nodeEditorBox(node, text, ctm, { left: rect.left, top: rect.top }, mode)
-    setEditing(
-      Object.assign({ kind: 'node', id: id, text: text }, box),
-    )
+    richDirtyRef.current = false
+    richFormatRef.current = false
+    richSelectionRef.current = null
+    setEditing(Object.assign({ kind: 'node', id: id, text: text, rich: true,
+      initialHtml: typeof node.labelHtml === 'string' ? node.labelHtml : null }, box))
   }
 
   function onNodeDoubleClick(id, event) {
@@ -9375,7 +9662,7 @@ function CanvasView(props) {
     clearConnect()
     if (link === null || current === null || point === null) return
     if (nodeById(link.from) === null) return
-    let style = DEFAULT_EDGE_STYLE
+    let style = NEW_EDGE_STYLE
     if (typeof link.side === 'string' && link.side.length > 0) style = styleWithSide(style, 'source', link.side)
     applyLocal((next) => {
       let max = 0
@@ -9385,7 +9672,7 @@ function CanvasView(props) {
         if (m !== null && parseInt(m[1], 10) > max) max = parseInt(m[1], 10)
       }
       next.edges.push({ id: 'e' + (max + 1), from: link.from, targetPoint: { x: point.x, y: point.y }, style: style,
-        ...(preview?.points ? { __routePreview: preview.points, __routePeers: preview.relatedRoutes } : {}) })
+        ...(preview?.points ? { points: preview.points.slice(1, -1).map(point => ({ x: point.x, y: point.y })) } : {}) })
     })
     setSaveNote('连出一条悬空端：把它的端点拖到节点上就接上了')
   }
@@ -9838,9 +10125,15 @@ function CanvasView(props) {
    * **返回数据**而不是触发下载：图片不进用户的工作区、也不进下载目录，直接回执给宿主。
    * 复用同一条路径是刻意的 —— 两处各画一遍迟早会不一样。
    */
-  function renderPngPayload(node, width, height, scale) {
+  function renderPngPayload(node, width, height, scale, aggressive) {
     return new Promise((resolve, reject) => {
-      const markup = new XMLSerializer().serializeToString(node)
+      const safe = rasterSafeSvg(node, aggressive === true)
+      // 诊断用：修复 canvas 污染期间把"摘掉了多少、还剩多少外部引用"带进错误里，
+      // 否则只能看到 Chrome 那句笼统的 tainted 报错，无法判断代码到底跑没跑。
+      const stripped = node.querySelectorAll('foreignObject').length - safe.querySelectorAll('foreignObject').length
+      const markup = new XMLSerializer().serializeToString(safe)
+      const blobRefs = (markup.match(/blob:/g) || []).length
+      const imageRefs = (markup.match(/<image/g) || []).length
       const url = URL.createObjectURL(new Blob([markup], { type: 'image/svg+xml;charset=utf-8' }))
       const image = new Image()
       image.onload = () => {
@@ -9870,7 +10163,11 @@ function CanvasView(props) {
           resolve({ base64: dataUrl.slice(comma + 1), width: px, height: py })
         } catch (error) {
           URL.revokeObjectURL(url)
-          reject(error)
+          if (aggressive !== true) {
+            renderPngPayload(node, width, height, scale, true).then(resolve, reject)
+            return
+          }
+          reject(new Error((error && error.message ? error.message : String(error)) + ' [diag stripped=' + stripped + ' blob=' + blobRefs + ' image=' + imageRefs + ' chars=' + markup.length + ']'))
         }
       }
       image.onerror = () => {
@@ -10696,18 +10993,27 @@ function CanvasView(props) {
   function commitEdit() {
     const current = editing
     if (current === null) return
-    const label = String(current.text)
+    let label = String(current.text)
+    let html = null
+    if (current.rich && richEditorRef.current && richDirtyRef.current) {
+      const editor = richEditorRef.current
+      if (current.initialHtml !== null || richFormatRef.current) {
+        html = sanitizeLabelHtml(editor.innerHTML)
+        label = labelHtmlText(html)
+      } else label = String(editor.innerText || '').replace(/\r/g, '')
+    }
     setEditing(null)
     // 文字没改就**不要写**：不然"点开编辑框、又点空白处关掉"会平白多一步撤销历史
     // （用户按 Ctrl+Z 时屏幕毫无变化，看起来像撤销坏了）。
     const before = current.kind === 'edge' ? edgeById(current.id) : nodeById(current.id)
     const beforeLabel = before === null || before === undefined ? null : typeof before.label === 'string' ? before.label : ''
-    if (beforeLabel === label) return
+    if (beforeLabel === label && (!current.rich || !richDirtyRef.current || (html === null && current.initialHtml === null))) return
     if (current.kind === 'edge') {
       applyLocal((next) => {
         for (let i = 0; i < next.edges.length; i += 1) {
           if (next.edges[i].id !== current.id) continue
           next.edges[i].label = label
+          next.edges[i].labelHtml = null
           break
         }
       })
@@ -10717,6 +11023,8 @@ function CanvasView(props) {
       for (let i = 0; i < next.nodes.length; i += 1) {
         if (next.nodes[i].id !== current.id) continue
         next.nodes[i].label = label
+        if (html !== null) next.nodes[i].labelHtml = html
+        else if (typeof next.nodes[i].labelHtml === 'string') next.nodes[i].labelHtml = null
         break
       }
     })
@@ -11133,7 +11441,7 @@ function CanvasView(props) {
       const file = input.files && input.files[0]
       cleanup()
       if (!file || control.signal.aborted) return
-      if (!videoFileExtension(file) || file.size <= 0 || file.size > VIDEO_FILE_MAX_BYTES) { setSaveNote('请选择 48MB 以内的 MP4 / WebM / MOV / MKV 视频'); return }
+      if (!videoFileExtension(file) || !Number.isSafeInteger(file.size) || file.size <= 0) { setSaveNote('请选择非空的 MP4 / WebM / MOV / MKV 视频'); return }
       if (targetId) { insertVideoFiles([file], 0, 0, targetId); return }
       pendingVideoRef.current = file
       setPlaceEdgeKind(null); setSelectedIds([]); setPlaceTool('video'); setMenu(null)
@@ -12238,14 +12546,10 @@ function CanvasView(props) {
             max: Math.max(1, Math.min(1200, Math.floor(Number(planOrEvery.max) || 360))),
           }
         : null
-    const src = await mediaAction('media-source-bytes', { clip: meta.clip })
+    const src = await mediaAction('media-source-url', { clip: meta.clip })
     if (src === null) return
-    const bin = atob(src.base64)
-    const bytes = new Uint8Array(bin.length)
-    for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i)
-    const blobUrl = URL.createObjectURL(new Blob([bytes], { type: src.mime || 'video/webm' }))
     const video = document.createElement('video')
-    video.src = blobUrl
+    video.src = src.url
     video.muted = true
     video.playsInline = true
     await new Promise((resolve, reject) => {
@@ -12303,11 +12607,7 @@ function CanvasView(props) {
       written += 1
       if (plan !== null && (i % 10 === 0 || i === times.length - 1)) setSaveNote('抽帧 ' + written + '/' + times.length + ' …')
     }
-    try {
-      URL.revokeObjectURL(blobUrl)
-    } catch (error) {
-      // ignore
-    }
+    video.pause(); video.removeAttribute('src'); video.load()
     if (plan !== null && plan.requestId.length > 0) {
       await mediaAction('media-extract-result', { requestId: plan.requestId, written: written, error: failure })
     }
@@ -12387,8 +12687,48 @@ function CanvasView(props) {
     setSaveNote(shot.kind === 'svg' ? '已把当前 SVG 帧抽到右侧' : '已把当前帧抽成右侧的图像节点')
   }
 
+  function rememberRichSelection() {
+    const editor = richEditorRef.current
+    const selection = window.getSelection && window.getSelection()
+    if (!editor || !selection || !selection.rangeCount) return
+    const range = selection.getRangeAt(0)
+    if (editor.contains(range.commonAncestorContainer)) richSelectionRef.current = range.cloneRange()
+  }
+
+  function applyRichCommand(command, value) {
+    const editor = richEditorRef.current
+    if (!editor) return
+    editor.focus({ preventScroll: true })
+    const selection = window.getSelection && window.getSelection()
+    const saved = richSelectionRef.current
+    if (selection && saved && editor.contains(saved.commonAncestorContainer)) {
+      selection.removeAllRanges(); selection.addRange(saved)
+    }
+    // execCommand only accepts seven legacy sizes. Convert the selected
+    // result to pixels so the toolbar's normal size choices remain exact.
+    const applied = command === 'fontSize'
+      ? document.execCommand('fontSize', false, '7')
+      : document.execCommand(command, false, value || null)
+    if (!applied) return
+    if (command === 'fontSize') {
+      const range = selection && selection.rangeCount ? selection.getRangeAt(0) : null
+      for (const font of editor.querySelectorAll('font[size="7"]')) {
+        if (range && !range.intersectsNode(font)) continue
+        font.removeAttribute('size'); font.style.fontSize = String(value) + 'px'
+      }
+    }
+    richDirtyRef.current = true; richFormatRef.current = true
+    rememberRichSelection()
+  }
+
+  function onEditorBlur(event) {
+    const target = event.relatedTarget
+    if (target && typeof target.closest === 'function' && target.closest('.drawai-selection-toolbar,.drawai-palette-panel')) return
+    commitEdit()
+  }
+
   function renderSelectionToolbar() {
-    if (!active || doc === null || view === null || editing !== null || menu !== null || placeEdgeKind !== null || placeTool !== null) return null
+    if (!active || doc === null || view === null || menu !== null || placeEdgeKind !== null || placeTool !== null) return null
     const ids = filterEditableIds(doc, selectedIds)
     const nodes = doc.nodes.filter((n) => ids.indexOf(n.id) >= 0)
     const edges = doc.edges.filter((e) => ids.indexOf(e.id) >= 0)
@@ -12408,21 +12748,24 @@ function CanvasView(props) {
     const width = 460
     if(nodes.length===1&&edges.length===0&&motionCore.isAudioNode(nodes[0])){
       const node=nodes[0]
-      return React.createElement(NodeToolCard,{canvasRef,className:'drawai-selection-toolbar',style:{left:Math.max(8,Math.min(center-180,size.w-370))+'px',top:Math.max(12,Math.min(bottom+12,size.h-620))+'px',width:'360px'}},React.createElement(AudioPanel,{key:node.id,node,maxHeight:Math.max(180,Math.min(560,size.h-100)),
+      return React.createElement(NodeToolCard,{canvasRef,className:'drawai-selection-toolbar',role:'toolbar','aria-label':'音频节点操作',fallbackTop:bottom+12,style:{left:center-36+'px',top:top-72+'px',width:'72px'}},React.createElement(ToolbarPopover,{label:'音频设置',group:'drawai-audio-'+uid,icon:React.createElement('span',{'aria-hidden':true},'♫'),renderPanel:()=>React.createElement(AudioPanel,{key:node.id,node,maxHeight:Math.max(180,Math.min(560,size.h-100)),
         onRead:clip=>mediaAction('audio-read',{clip},{throwOnError:true}),onSearch:query=>mediaAction('audio-search',{query},{throwOnError:true}),
         onGet:async id=>{const control=new AbortController();if(!videoImportsRef.current)videoImportsRef.current=new Set();videoImportsRef.current.add(control);try{const result=await mediaAction('audio-get',{id},{throwOnError:true,signal:control.signal});if(control.signal.aborted)throw new Error('画布已切换');applyAudioResult(node.id,result)}finally{videoImportsRef.current.delete(control)}},
-        onUpload:()=>openAudioFilePicker(node.id),onCreateVideo:createMotionFromSelection,
+        onUpload:()=>openAudioFilePicker(node.id),
         onChange:patch=>{motionCore.assertMotionEditable(docRef.current,node.id);motionCore.audioNodeSettings({...node.data,...patch});applyLocal(next=>{const n=next.nodes.find(n=>n.id===node.id);n.data={...n.data,...patch}})}
-      }))
+      })}))
     }
     if (nodes.length === 1 && edges.length === 0 && motionCore.isShotCardNode(nodes[0])) {
       const node = nodes[0]
-      return React.createElement(NodeToolCard, { canvasRef, className: 'drawai-selection-toolbar', style: { left: center - 180 + 'px', top: bottom + 12 + 'px', width: '360px' } },
-        React.createElement('strong', null, '镜头参考'),
-        React.createElement('div', { style: { fontSize: 12, margin: '8px 0' } }, node.data.shotCardId + ' · ' + node.data.shotStyleKey),
-        React.createElement('button', { className: 'drawai-btn', onClick: () => setShotLibrary({ replaceId: node.id, initialSelection: { cardId: node.data.shotCardId, styleKey: node.data.shotStyleKey } }) }, '预览 / 更换样式'),
-        React.createElement('button', { className: 'drawai-btn', onClick: createMotionFromSelection }, '制作动效'),
-        React.createElement('p', { style: { fontSize: 12, opacity: .7 } }, '用箭头连接到视频节点，可同时连接多张卡。'))
+      return React.createElement(NodeToolCard, { canvasRef, className: 'drawai-selection-toolbar', role: 'toolbar', 'aria-label': '镜头参考操作', fallbackTop: bottom + 12, style: { left: center - 48 + 'px', top: top - 72 + 'px', width: '96px' } },
+        React.createElement('button', { type: 'button', className: 'drawai-toolbar-button', title: '预览或更换镜头参考', onClick: () => setShotLibrary({ replaceId: node.id, initialSelection: { cardId: node.data.shotCardId, styleKey: node.data.shotStyleKey } }) },
+          railIcon('video'), React.createElement('span', { className: 'drawai-color-label' }, '更换镜头')))
+    }
+    if (nodes.length === 1 && edges.length === 0 && motionCore.isMgStyleNode(nodes[0])) {
+      const node = nodes[0]
+      return React.createElement(NodeToolCard, { canvasRef, className: 'drawai-selection-toolbar', role: 'toolbar', 'aria-label': '整片风格操作', fallbackTop: bottom + 12, style: { left: center - 48 + 'px', top: top - 72 + 'px', width: '96px' } },
+        React.createElement('button', { type: 'button', className: 'drawai-toolbar-button', title: '选择整片风格', onClick: () => setMgLibrary({ replaceId: node.id, initialSelection: { slug: node.data.mgStyleSlug } }) },
+          React.createElement('span', { className: 'drawai-value-icon', 'aria-hidden': true }, '◈'), React.createElement('span', { className: 'drawai-color-label' }, '更换风格')))
     }
     if (nodes.length === 1 && edges.length === 0 && isVideoNodeData(nodes[0].data)) {
       const node = nodes[0]
@@ -12433,16 +12776,13 @@ function CanvasView(props) {
         left: center - mediaWidth / 2 + 'px',
         top: top - 72 + 'px' }
       if (!meta && motionNode) {
-        const composerWidth = 360
-        return React.createElement(React.Fragment, null,
-          React.createElement(NodeToolCard, { key: 'video-actions-' + node.id, canvasRef, className: 'drawai-selection-toolbar drawai-video-action-toolbar',
-            style: { width: '420px', left: center - 210 + 'px', top: top - 66 + 'px' } },
-            React.createElement(VideoNodeToolbar, { node, onDelete: () => { deleteById(node.id); setSelectedIds([]) },
-              onEdit: () => rootRef.current?.querySelector('.drawai-video-prompt')?.focus(), onUpload: () => openVideoFilePicker(node.id) })),
-          React.createElement(NodeToolCard, { key: 'video-composer-' + node.id, canvasRef, className: 'drawai-selection-toolbar drawai-motion-toolbar',
-            'aria-label': '视频节点工具卡片', style: { width: composerWidth + 'px', left: center - composerWidth / 2 + 'px', top: bottom + 16 + 'px' } }, renderMotionPanel(node)))
+        return React.createElement(NodeToolCard, { key: 'video-actions-' + node.id, canvasRef, className: 'drawai-selection-toolbar drawai-video-action-toolbar',
+          fallbackTop: bottom + 12, style: { width: '360px', left: center - 180 + 'px', top: top - 72 + 'px' } },
+          React.createElement(ToolbarPopover, { label: '编辑', group: 'drawai-video-' + uid, icon: videoWorkbenchIcon('edit'), renderPanel: () => renderMotionPanel(node) }),
+          React.createElement(VideoNodeToolbar, { node, hideEdit: true, onDelete: () => { deleteById(node.id); setSelectedIds([]) },
+            onUpload: () => openVideoFilePicker(node.id) }))
       }
-      const motionControl = motionNode ? React.createElement(ToolbarPopover, { label: '绘制视频', group: 'drawai-video-' + uid, icon: railIcon('video'), renderPanel: () => renderMotionPanel(node) }) : React.createElement('button', { type: 'button', className: 'drawai-btn', onClick: createMotionFromSelection }, '制作动效')
+      const motionControl = motionNode ? React.createElement(ToolbarPopover, { label: '绘制视频', group: 'drawai-video-' + uid, icon: railIcon('video'), renderPanel: () => renderMotionPanel(node) }) : null
       const reportError = (error) => setSaveNote('媒体操作失败：' + (error.message || String(error)))
       const actions = [
         { label: '绘制复刻…', primary: true, mediaKind: 'raster', disabled: () => !hasPath || !meta || meta.kind !== 'raster',
@@ -12463,7 +12803,7 @@ function CanvasView(props) {
           if (result) setSaveNote('已导出源视频 ' + result.path)
         } },
       ]
-      return React.createElement(NodeToolCard, { canvasRef, className: 'drawai-selection-toolbar drawai-video-toolbar', style: position },
+      return React.createElement(NodeToolCard, { canvasRef, className: 'drawai-selection-toolbar drawai-video-toolbar', fallbackTop: bottom + 12, style: position },
         motionControl, React.createElement(VideoControls, { compact: true, controller: videoController, node, meta, actions, onError: reportError,
           renderDraw: (action, state, icon) => React.createElement(ToolbarPopover, {
             key: 'video-draw-' + node.id, label: '绘制复刻', icon, group: 'drawai-video-' + uid,
@@ -12493,7 +12833,11 @@ function CanvasView(props) {
     // 每个对象只更新本次指定的键，混合选区保留各自其余样式。
     const patch = (change, targets = ids, coalesceKey) => applyLocal((next) => {
       for (const cell of next.nodes.concat(next.edges)) {
-        if (targets.indexOf(cell.id) >= 0) cell.style = stylePatch(styleOf(cell), change)
+        if (targets.indexOf(cell.id) < 0) continue
+        if (has(change, 'fontColor') || has(change, 'fontSize')) {
+          clearRichLabelFormatting(cell, { color: has(change, 'fontColor'), size: has(change, 'fontSize') })
+        }
+        cell.style = stylePatch(styleOf(cell), change)
       }
     }, coalesceKey)
     const uniform = (targets, read) => {
@@ -12530,12 +12874,15 @@ function CanvasView(props) {
         onOpacityEnd: () => { lastCoalesceRef.current = null },
         customColors: prefs.customColors,
         onOpen: () => setPrefs((current) => Object.assign({}, current, { customColors: customColorList(loadDrawaiPrefs().customColors) })),
-        onPick: (color) => patch({ [key]: color }, targets.map((cell) => cell.id)),
+        onPick: (color) => {
+          if (key === 'fontColor' && editing && editing.rich && targets.some((cell) => cell.id === editing.id)) {
+            applyRichCommand('foreColor', color === 'none' ? fallback : color)
+          } else patch({ [key]: color }, targets.map((cell) => cell.id))
+        },
         onSaveColor: (color) => patchPrefs({ customColors: customColorList(customColorList(loadDrawaiPrefs().customColors).concat(color)) }),
       })
     }
     const controls = []
-    if (nodes.length) controls.push(React.createElement('button', { key: 'motion-create', type: 'button', className: 'drawai-toolbar-button', onClick: createMotionFromSelection }, '制作动效'))
     if (nodes.length === 1 && edges.length === 0 && nodeImageExportInfo(nodes[0])) {
       const node = nodes[0]
       const info = nodeImageExportInfo(node)
@@ -12608,16 +12955,36 @@ function CanvasView(props) {
     const strokeCells = cells.filter((cell) => edges.includes(cell) || (!isVideoNodeData(cell.data) && !['text', 'svg', 'image'].includes(nodeShapeFromStyle(styleOf(cell)))))
     if (strokeCells.length) controls.push(color('描边', 'strokeColor', strokeCells, '#000000'))
     const labelCells = cells.filter((cell) => edges.includes(cell) || nodeShowsLabel(cell))
+    const richNode = nodes.length === 1 && edges.length === 0 && nodeShowsLabel(nodes[0]) ? nodes[0] : null
+    if (richNode) {
+      const formats = [['粗体', 'B', 'bold', 'b'], ['斜体', 'I', 'italic', 'i'], ['下划线', 'U', 'underline', 'u'], ['删除线', 'S', 'strikeThrough', 's']]
+      for (const [label, face, command, tag] of formats) controls.push(React.createElement('button', {
+        key: 'text-' + command, type: 'button', className: 'drawai-toolbar-button', title: label, 'aria-label': label,
+        onClick: () => {
+          if (editing && editing.rich && editing.id === richNode.id) { applyRichCommand(command); return }
+          applyLocal((next) => {
+            const target = next.nodes.find((item) => item.id === richNode.id)
+            if (!target) return
+            const html = typeof target.labelHtml === 'string' ? target.labelHtml : plainLabelHtml(target.label || '')
+            const template = document.createElement('template'); template.innerHTML = html
+            const child = template.content.childNodes.length === 1 ? template.content.firstChild : null
+            if (child && child.nodeType === 1 && child.tagName.toLowerCase() === tag) target.labelHtml = child.innerHTML
+            else target.labelHtml = '<' + tag + '>' + html + '</' + tag + '>'
+          })
+        },
+      }, React.createElement('span', { className: 'drawai-value-icon', style: command === 'bold' ? { fontWeight: 'bold' } : command === 'italic' ? { fontStyle: 'italic' } : command === 'underline' ? { textDecoration: 'underline' } : { textDecoration: 'line-through' } }, face),
+      React.createElement('span', { className: 'drawai-color-label' }, label)))
+    }
     if (labelCells.length > 0) controls.push(color('字色', 'fontColor', labelCells, '#000000'))
     if (labelCells.length > 0) controls.push(select('字号', uniform(labelCells, (cell) => String(styleGet(styleOf(cell), 'fontSize', edges.indexOf(cell) >= 0 ? '10' : '12'))),
-      [10, 12, 14, 18, 24, 36, 48, 72].map((n) => [String(n), String(n)]), (value) => patch({ fontSize: value }),
+      [10, 12, 14, 18, 24, 36, 48, 72].map((n) => [String(n), String(n)]), (value) => editing && editing.rich ? applyRichCommand('fontSize', value) : patch({ fontSize: value }),
       React.createElement('label', { className: 'drawai-font-custom' }, '自定义字号',
       React.createElement('input', { type: 'number', min: 8, max: 72, 'aria-label': '字号', placeholder: '混合',
         key: ids.join(',') + cells.map((cell) => styleGet(styleOf(cell), 'fontSize', '')).join(','),
         defaultValue: uniform(cells, (cell) => String(styleGet(styleOf(cell), 'fontSize', edges.indexOf(cell) >= 0 ? '10' : '12'))),
         onBlur: (event) => {
           const value = clampFontSize(event.target.value)
-          if (value !== null) patch({ fontSize: String(value) })
+          if (value !== null) { if (editing && editing.rich) applyRichCommand('fontSize', value); else patch({ fontSize: String(value) }) }
         },
         onKeyDown: (event) => {
           event.stopPropagation()
@@ -12635,9 +13002,15 @@ function CanvasView(props) {
     }
     return React.createElement(NodeToolCard, {
       canvasRef, className: 'drawai-selection-toolbar', role: 'toolbar', 'aria-label': '选区样式',
+      fallbackTop: bottom + 12,
       style: { width: width + 'px', left: center - width / 2 + 'px',
         top: top - 72 + 'px' },
       onPointerDown: (event) => event.stopPropagation(),
+      onMouseDown: (event) => {
+        if (!editing) return
+        const tag = event.target && event.target.tagName
+        if (tag !== 'INPUT' && tag !== 'SELECT' && tag !== 'TEXTAREA') event.preventDefault()
+      },
       onDoubleClick: (event) => event.stopPropagation(),
       onContextMenu: (event) => { event.preventDefault(); event.stopPropagation() },
     }, controls)
@@ -12725,6 +13098,7 @@ function CanvasView(props) {
 
     chips.push(railIconButton('rail-audio','audio',placeTool==='audio','音频：添加音效、音乐或旁白节点',()=>{setPlaceTool('audio');setPlaceEdgeKind(null);setMenu(null)},null))
     chips.push(railIconButton('rail-shotcards', 'shotcards', !!shotLibrary, '镜头卡库：搜索样式并添加到画布', () => setShotLibrary({}), null))
+    chips.push(railIconButton('rail-mgstyles', 'mgstyles', !!mgLibrary, '整片风格库：一条片子选一种 MG 视觉语言', () => setMgLibrary({}), null))
 
     // 「文生图」：不参与放置族，点一下就在视野中心放一个带占位图的文生图节点。
     const imageGenSelected = selectedIds.some((id) => {
@@ -12824,7 +13198,9 @@ function CanvasView(props) {
       )
     }
 
-    return React.createElement('div', { className: 'drawai-rail-wrap' }, rail, panel, shotLibrary ? React.createElement(ShotCardLibrary, { mode, ...shotLibrary, onClose: () => setShotLibrary(null), onAdd: addShotCards }) : null)
+    return React.createElement('div', { className: 'drawai-rail-wrap' }, rail, panel,
+      shotLibrary ? React.createElement(ShotCardLibrary, { mode, ...shotLibrary, onClose: () => setShotLibrary(null), onAdd: addShotCards }) : null,
+      mgLibrary ? React.createElement(MgStyleLibrary, { mode, ...mgLibrary, onClose: () => setMgLibrary(null), onAdd: addMgStyle }) : null)
   }
 
   /**
@@ -13077,6 +13453,7 @@ function CanvasView(props) {
                   for (const target of next.nodes) {
                     if (!nodeTargets.includes(target.id)) continue
                     const nodeStyle = target.style || ''
+                    if (labelOnlyColor) clearRichLabelFormatting(target, { color: true })
                     target.style = labelOnlyColor ? styleWithTextColorName(nodeStyle, color) : styleWithColorName(nodeStyle, color)
                   }
                 })
@@ -13111,7 +13488,13 @@ function CanvasView(props) {
             label: '字号',
             value: styleSummary(nodeStyle, 'fontSize'),
             body: fontSizeRow(nodeStyle, (v) => {
-              updateNode(nodeTargets, { style: stylePatch(nodeStyle, { fontSize: v === null ? null : String(v) }) })
+              applyLocal((next) => {
+                for (const target of next.nodes) {
+                  if (!nodeTargets.includes(target.id)) continue
+                  clearRichLabelFormatting(target, { size: true })
+                  target.style = stylePatch(target.style || '', { fontSize: v === null ? null : String(v) })
+                }
+              })
             }),
           },
         ]),
@@ -14012,6 +14395,12 @@ function CanvasView(props) {
     const target = event === null || event === undefined ? null : event.target
     if (isSelectableTextTarget(target)) return
     const closest = target !== null && target !== undefined && typeof target.closest === 'function' ? target.closest.bind(target) : null
+    // Formatting controls must not steal focus or clear the selected text in
+    // the contenteditable before the command is applied (capture runs first).
+    if (closest !== null && (closest('.drawai-selection-toolbar') !== null || closest('.drawai-palette-panel') !== null)) {
+      if (editing && editing.rich) rememberRichSelection()
+      return
+    }
     // ③ 在画布上按下 = "我要操作画布了"：把残留在别处（比如对话里）的文字选区清掉。
     //    不清的话，画布的新元素会因为"外面还有选中文字"而复制不了（见 clearStaleTextSelection）。
     clearStaleTextSelection(target, event === null || event === undefined ? undefined : event.button)
@@ -14301,13 +14690,13 @@ function CanvasView(props) {
       }
       const editorProps = {
         key: 'label-editor',
-        className: 'drawai-edit',
+        className: 'drawai-edit drawai-canvas-edit',
         autoFocus: true,
         value: editing.text,
         style: editorStyle,
         // 保留 kind 等全部字段：这里曾经重建对象时漏了 kind，于是"编辑过再平移"会走错分支。
         onChange: (event) => setEditing(Object.assign({}, editing, { text: event.target.value })),
-        onBlur: commitEdit,
+        onBlur: onEditorBlur,
         onKeyDown: (event) => {
           event.stopPropagation()
           // 输入法确认键不结束编辑；Enter / Shift+Enter 均换行。
@@ -14321,9 +14710,21 @@ function CanvasView(props) {
           }
         },
       }
-      canvasChildren.push(
-        React.createElement('textarea', Object.assign({ 'aria-label': '编辑标签' }, editorProps)),
-      )
+      if (editing.rich) {
+        canvasChildren.push(React.createElement('div', { key: 'label-editor', className: 'drawai-edit drawai-canvas-edit drawai-rich-edit',
+          ref: richEditorRef, role: 'textbox', 'aria-label': '编辑文字', 'aria-multiline': true,
+          contentEditable: true, suppressContentEditableWarning: true, style: editorStyle,
+          onInput: () => { richDirtyRef.current = true }, onBlur: onEditorBlur,
+          onMouseUp: rememberRichSelection, onKeyUp: rememberRichSelection,
+          onDrop: (event) => event.preventDefault(),
+          onPaste: (event) => { event.preventDefault(); document.execCommand('insertText', false, event.clipboardData.getData('text/plain')); richDirtyRef.current = true },
+          onKeyDown: (event) => {
+            event.stopPropagation()
+            if (event.isComposing || event.keyCode === 229) return
+            if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) { event.preventDefault(); commitEdit() }
+            else if (event.key === 'Escape') { event.preventDefault(); setEditing(null) }
+          } }))
+      } else canvasChildren.push(React.createElement('textarea', Object.assign({ 'aria-label': '编辑标签' }, editorProps)))
     }
     const canvasEl = React.createElement(
       'div',

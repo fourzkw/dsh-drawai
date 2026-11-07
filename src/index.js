@@ -15,9 +15,10 @@
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { readdir, readFile, writeFile, mkdir } from 'node:fs/promises'
-import { existsSync, rmSync, writeFileSync, appendFileSync, renameSync, realpathSync } from 'node:fs'
+import { readdir, readFile, writeFile, mkdir, stat } from 'node:fs/promises'
+import { createReadStream, existsSync, readFileSync, rmSync, writeFileSync, appendFileSync, renameSync, realpathSync, mkdirSync, cpSync, lstatSync } from 'node:fs'
 import { randomUUID, createHash } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 import { createDocumentCoordinator, createMediaWorkSlots } from './task-coordinator.js'
 import { createDrawingTaskManager } from './drawing-tasks.js'
 import { applyDrawingResult } from './drawing-results.js'
@@ -33,24 +34,33 @@ import { emptyDocument, normalizeDocument } from './document-core.js'
 import { createDocumentCommands } from './document-commands.js'
 import { createOrthogonalRouter } from './routing/router.js'
 import { getRoutingRuntime } from './routing/node-runtime.js'
-import { motionInput, motionInputKey, assertMotionEditable, applyMotionResult, isMotionNode, motionNodeData, motionSettings, mergeMotionSettings, isAudioNode, audioNodeData, audioNodeSettings, motionReferenceEdges, motionReferenceRole } from './motion-core.js'
+import { motionInput, motionInputKey, assertMotionEditable, applyMotionResult, isMotionNode, motionNodeData, motionSettings, mergeMotionSettings, isAudioNode, audioNodeData, audioNodeSettings, motionReferenceEdges, motionReferenceRole, unlinkedShotCards } from './motion-core.js'
 import { createAudioService } from './audio-service.js'
 import { frozenAudioFile, importAudioFile } from './audio-media.js'
-import { shotCardCatalog, enforceMotionCards, motionCardContract } from './motion-library.js'
+import { shotCardCatalog, enforceMotionCards, motionCardContract, mgStyleCatalog, mgStyleKit, mgStyleSources, mgStyleFile, mgStyleFileSize } from './motion-library.js'
 import { searchShotCards, resolveShotStyle, shotCardData, isShotCardNode } from './shotcard-core.js'
+import { searchMgStyles, resolveMgStyle, mgStyleData, isMgStyleNode } from './mgstyle-core.js'
+import { captureStyleFrames } from './motion/style-frames.js'
+import { assertEngineFidelity, assertQualityEvidence, ENGINE_LABEL, GATED_ENGINES } from './motion/style-engine.js'
 import { prepareReferenceFrames } from './shotcard-reference.js'
 import { inspectMotionFilm,motionSequenceReviewer } from './motion-film-review.js'
 import { createMotionTaskManager } from './motion-tasks.js'
 import { readSpec, validateSpec } from './motion/spec.js'
 import { createProject, readTimeline, writeTimeline, listFiles, registerProject } from './motion/project.js'
 import { renderProject, outputPath, outputInfo } from './motion/render.js'
+import { describeRenderSettings } from './motion/render-settings.js'
 import { previewProject } from './motion/preview.js'
-import { RenderJobs } from './motion/jobs.js'
-import { assetsDirectory, captureAsset, cropAsset, listAssets, colorsOf, probeAudio } from './motion/assets.js'
+import { RenderJobs, applyJobKind } from './motion/jobs.js'
+import { assetsDirectory, captureAsset, cropAsset, fetchAsset, listAssets, colorsOf, probeAudio } from './motion/assets.js'
+import { listMediaLibrary, importMediaLibrary } from './motion/media-catalog.js'
+import { parseProjectJson } from './motion/json.js'
 import { analyzeBeats, snapFrame } from './motion/beats.js'
+import { resolveSync, verifySync, assetPath, filmHash } from './motion/sync.js'
 import { addCue, cuePinnedAt, describeTrack, readTrack, removeCue } from './motion/audio.js'
 import { applyFilm, extractAudio } from './motion/apply.js'
+import { readCanvasSpec, validateCanvasSpec, scaffoldOps, findSpecNodes, storyboardTable, styleTemplate, SPEC_MARKERS } from './motion/canvas-spec.js'
 import { capturePage } from './motion/capture.js'
+import { collectPageAssets, gatherAssets } from './motion/collect.js'
 import { getSfx, listSfx, searchSfx, readManifest as readAudioManifest } from './motion/sfx.js'
 import { cueLevel, describeLevel, resolveGainDb, suggestedGainOf } from './motion/audiolevel.js'
 import { describeMix } from './motion/audiomix.js'
@@ -143,6 +153,7 @@ import {
   styleWithNodeShape,
   styleWithSide,
   styleWithSvgMarkup,
+  styleWithMediaMarkup,
   styleWithTextColorName,
   styleWithoutSvgMarkup,
   svgMarkupFromImageValue,
@@ -290,7 +301,22 @@ function edgePointFromOp(value, where) {
   return { x: x, y: y }
 }
 
-/** 扫描 `<prefix><n>` 形式的 id，返回 max+1 —— 多轮迭代不会打乱已有编号。 */
+/** 精确折点严格校验；不做取整、吸附或静默过滤。 */
+function edgeWaypointsFromOp(value, where) {
+  if (!Array.isArray(value) || value.length > 1000) throw new Error(where + ' points must be an array of at most 1000 {x, y} points')
+  return value.map((point, index) => {
+    if (!point || typeof point.x !== 'number' || typeof point.y !== 'number' ||
+      !Number.isFinite(point.x) || !Number.isFinite(point.y)) throw new Error(where + ' points[' + index + '] needs finite numeric x and y')
+    return { x: point.x, y: point.y }
+  })
+}
+
+function setExplicitWaypoints(edge, value, where) {
+  edge.points = edgeWaypointsFromOp(value, where)
+  edge.style = stylePatch(styleWithRoutingMode(edge.style || DEFAULT_EDGE_STYLE, 'manual'), { drawaiRouteStatus: null })
+}
+
+/** 扫描 `<prefix><n>` 形式的 id，返回 max+1。 */
 function nextId(list, prefix) {
   let max = 0
   const re = new RegExp('^' + prefix + '(\\d+)$')
@@ -1053,7 +1079,9 @@ async function executeOps(doc, ops, out, opctx) {
       registerAlias(op.as, id, 'ops[' + i + '] addNode')
       const shotSelection = op.shape === 'shotcard' ? resolveShotStyle(shotCardCatalog, op.cardId, op.styleKey) : null
       if (shotSelection && !label) label = '镜头参考\n' + shotSelection.label
-      const style = op.shape === 'audio' ? 'rounded=1;fillColor=#e1f3ee;strokeColor=#5a9e8a;whiteSpace=wrap;fontSize=14;' : shotSelection ? 'rounded=1;arcSize=12;fillColor=#eeeafa;strokeColor=#9482dc;fontColor=#44336b;whiteSpace=wrap;fontSize=14;' : nodeStyleFromOp(DEFAULT_NODE_STYLE, op, 'ops[' + i + '] addNode')
+      const mgSelection = op.shape === 'mgstyle' ? resolveMgStyle(mgStyleCatalog, op.slug) : null
+      if (mgSelection && !label) label = '整片风格\n' + mgSelection.name
+      const style = op.shape === 'audio' ? 'rounded=1;fillColor=#e1f3ee;strokeColor=#5a9e8a;whiteSpace=wrap;fontSize=14;' : shotSelection ? 'rounded=1;arcSize=12;fillColor=#eeeafa;strokeColor=#9482dc;fontColor=#44336b;whiteSpace=wrap;fontSize=14;' : mgSelection ? 'rounded=1;arcSize=10;fillColor=#fdf6e3;strokeColor=#c9a227;fontColor=#5a4a1a;whiteSpace=wrap;fontSize=14;' : nodeStyleFromOp(DEFAULT_NODE_STYLE, op, 'ops[' + i + '] addNode')
       const videoNode = op.shape === 'video'
       const svgNode = videoNode === false && nodeShapeFromStyle(style) === 'svg'
       const node = {
@@ -1064,10 +1092,11 @@ async function executeOps(doc, ops, out, opctx) {
         // svg 节点缺省是**正方形**：按标签文字估宽（estimateWidth）对图没有意义。
         // 空 label 的装饰面板也请显式给 w/h，否则会落到最短标签估宽（130）。
         // video 缺省 320×180（16:9 播放器框）。
-        w: numberOr(op.w, shotSelection ? 320 : videoNode ? DEFAULT_VIDEO_W : svgNode ? DEFAULT_SVG_W : estimateWidth(label)),
-        h: numberOr(op.h, shotSelection ? 210 : videoNode ? DEFAULT_VIDEO_H : svgNode ? DEFAULT_SVG_H : DEFAULT_H),
+        w: numberOr(op.w, shotSelection ? 320 : mgSelection ? 300 : videoNode ? DEFAULT_VIDEO_W : svgNode ? DEFAULT_SVG_W : estimateWidth(label)),
+        h: numberOr(op.h, shotSelection ? 210 : mgSelection ? 120 : videoNode ? DEFAULT_VIDEO_H : svgNode ? DEFAULT_SVG_H : DEFAULT_H),
       }
       if (shotSelection) node.data = shotCardData(shotCardCatalog, shotSelection.cardId, shotSelection.styleKey)
+      if (mgSelection) node.data = mgStyleData(mgStyleCatalog, mgSelection.slug)
       if (op.shape === 'audio') {
         node.data = audioNodeData(op.audioRole || 'sfx')
         if (op.audioClip) {
@@ -1107,6 +1136,20 @@ async function executeOps(doc, ops, out, opctx) {
             h: node.h,
           })
         }
+      }
+      // Additional canvas data must survive both native JSON and draw.io XML.
+      // Reject invalid XML attribute names and never overwrite built-in metadata.
+      if (has(op, 'data')) {
+        if (!op.data || typeof op.data !== 'object' || Array.isArray(op.data)) throw new Error('ops[' + i + '] addNode data must be an object of string values')
+        const additions = {}
+        for (const [key, value] of Object.entries(op.data)) {
+          if (!/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(key) || ['id', 'label', '__proto__', 'constructor', 'prototype'].includes(key) || typeof value !== 'string') {
+            throw new Error('ops[' + i + '] addNode data requires valid, non-reserved names and string values')
+          }
+          if (node.data && has(node.data, key)) throw new Error('ops[' + i + '] addNode data cannot override built-in field "' + key + '"')
+          additions[key] = value
+        }
+        node.data = Object.assign({}, node.data || {}, additions)
       }
       if (typeof op.layer === 'string' && op.layer.length > 0) node.layer = resolveLayerRef(op.layer, 'ops[' + i + '] addNode layer')
       // 位置：只有显式给了坐标才写入。缺省写 (0,0) 会让 placeMissing 以为"坐标齐全"而不补位，
@@ -1153,7 +1196,9 @@ async function executeOps(doc, ops, out, opctx) {
       if (typeof op.label === 'string' && op.label.length > 0) edge.label = op.label
       // 建边时就能带上画法：AI 想表达"这是一条异步/可选依赖"时，
       // 不该被迫先 addEdge 再补一次 setStyle（两次写盘、两次往返）。
-      edge.style = edgeStyleFromOp(styleWithRoutingMode(DEFAULT_EDGE_STYLE, 'auto'), op, 'ops[' + i + '] addEdge')
+      // 工作流节点之间默认使用圆角正交线；调用方指定的线型仍有优先权。
+      const defaultStyle = from !== undefined && to !== undefined ? styleWithLineKind(DEFAULT_EDGE_STYLE, 'rounded') : DEFAULT_EDGE_STYLE
+      edge.style = edgeStyleFromOp(styleWithRoutingMode(defaultStyle, 'manual'), op, 'ops[' + i + '] addEdge')
       // 线型是"语义 + 几何"两件事：直线不带折点（新边本来就没有）；曲线要看得见就得有个中点
       // （见 arcWaypointFor —— 两点直连的曲线在 drawio 里会退化成一条直线）。
       if (has(op, 'line') && normalizeLineKind(op.line, 'ops[' + i + '] addEdge') === 'curved') {
@@ -1161,11 +1206,18 @@ async function executeOps(doc, ops, out, opctx) {
         if (bow !== null) edge.points = [bow]
         edge.style = styleWithRoutingMode(edge.style, 'manual')
       }
+      if (has(op, 'points')) {
+        if (op.avoid === true) throw new Error('addEdge: points and avoid:true conflict; use manual points or automatic routing')
+        setExplicitWaypoints(edge, op.points, 'ops[' + i + '] addEdge')
+      }
       doc.edges.push(edge)
       recordCreated(id, 'edge', typeof edge.label === 'string' ? edge.label : undefined)
       const head = from !== undefined ? from : '(free ' + fromPoint.x + ',' + fromPoint.y + ')'
       const tail = to !== undefined ? to : '(free ' + toPoint.x + ',' + toPoint.y + ')'
       notes.push('+ edge ' + id + ' ' + head + ' -> ' + tail + styleNote(edge.style))
+      if (from !== undefined && to !== undefined && !has(op, 'points') && !Array.isArray(edge.points) && edgeStyleValueFromStyle(edge.style) !== 'none' && routingModeOf(edge) !== 'auto') {
+        notes.push('~ 连线 ' + id + ' 尚未明确指定折点：读回节点坐标后自行规划通道，用 setEdge {id:"' + id + '",points:[...]} 写入；对齐且无需拐弯可传空数组。')
+      }
       continue
     }
 
@@ -1383,7 +1435,7 @@ async function executeOps(doc, ops, out, opctx) {
     }
 
     if (kind === 'setEdge') {
-      // 重接一条边：只改 source/target（或某一端的自由点），**其它一切照旧** ——
+      // 重接或编辑折点；未显式指定的几何与样式保持原样。
       // id、标签、标签位置、折点、端点约束（exitX/entryX）都留着。
       // 以前只能 remove + addEdge 重画，那会把这些全丢掉。
       const ids = idList(op, i, 'setEdge')
@@ -1436,14 +1488,19 @@ async function executeOps(doc, ops, out, opctx) {
         edge[freeKey] = point
         touched += 1
       }
-      if (touched === 0) throw new Error('ops[' + i + '] setEdge needs "from"/"to" (node id) or "fromPoint"/"toPoint" (absolute point)')
+      if (has(op, 'points')) {
+        if (op.avoid === true) throw new Error('setEdge: points and avoid:true conflict; use manual points or automatic routing')
+        setExplicitWaypoints(edge, op.points, 'ops[' + i + '] setEdge')
+        touched += 1
+      }
+      if (touched === 0) throw new Error('ops[' + i + '] setEdge needs "from"/"to", "fromPoint"/"toPoint", or "points"')
       const head = typeof edge.from === 'string' ? edge.from : '(free ' + edge.sourcePoint.x + ',' + edge.sourcePoint.y + ')'
       const tail = typeof edge.to === 'string' ? edge.to : '(free ' + edge.targetPoint.x + ',' + edge.targetPoint.y + ')'
       const kept = []
-      if (Array.isArray(edge.points) && edge.points.length > 0) kept.push(edge.points.length + ' 个折点')
+      if (!has(op, 'points') && Array.isArray(edge.points) && edge.points.length > 0) kept.push(edge.points.length + ' 个折点')
       if (typeof edge.label === 'string' && edge.label.length > 0) kept.push('标签')
       recordChanged(id)
-      notes.push('~ edge ' + id + ' 改接为 ' + head + ' -> ' + tail + (kept.length > 0 ? '（' + kept.join('、') + '照旧）' : ''))
+      notes.push('~ edge ' + id + ' ' + head + ' -> ' + tail + (has(op, 'points') ? '，手动折点 ' + edge.points.length + ' 个' : '') + (kept.length > 0 ? '（' + kept.join('、') + '照旧）' : ''))
       continue
     }
 
@@ -1622,6 +1679,10 @@ async function executeOps(doc, ops, out, opctx) {
         const id = ids[k]
         const ni = findNode(id)
         if (ni >= 0) {
+          if (doc.nodes[ni].label !== label) {
+            delete doc.nodes[ni].labelHtml
+            if (doc.nodes[ni].data) delete doc.nodes[ni].data.drawaiTableEscaped
+          }
           doc.nodes[ni].label = label
           recordChanged(id)
           notes.push('~ node ' + id + ' label = "' + label + '"')
@@ -1629,6 +1690,7 @@ async function executeOps(doc, ops, out, opctx) {
         }
         const ei = findEdge(id)
         if (ei >= 0) {
+          if (doc.edges[ei].label !== label) delete doc.edges[ei].labelHtml
           doc.edges[ei].label = label
           recordChanged(id)
           notes.push('~ edge ' + id + ' label = "' + label + '"')
@@ -2329,20 +2391,56 @@ const SKILL_BODY = `# DrawAI 画布：怎么读、怎么改
 
 ## 视频节点与工作流编排
 
-画一条视频分九步，执行者就是你自己。**前三步不能跳**：定卡、分镜表、定调帧。
+画一条视频分十步，执行者就是你自己。**第 0 步（问人）、品牌素材、定卡并连卡、分镜表、样片，这五步不能跳**。
 
-1. 定镜头表（设计，不写代码）— 先用 shotcraft_search 按关键词/分类找准确的卡名与样式；**对选中的卡再用 cardId+styleKey 搜一次**，把它的配方（recipe：参数表、动效核心、已知坑）和 demo 源码读回来。跳过这一步，卡就只是个标签。然后用 diagram_apply addNode {shape:"shotcard",cardId,styleKey,x,y,as:"shot"} 建卡、addEdge 从卡连到视频节点，连线顺序就是镜头顺序。
-2. 写分镜表 — 建工程时把 storyboard 传进去：每段一句 {intent 这一镜要做什么, onScreen 屏幕上出现什么, copy 配什么字}，字符串数组也行。它会写进工程 storyboard.md，BRIEF.md 里也有一份。**没有分镜表不要开写场景**；功能点对不上镜头就先改表。
-3. 建工程 — motion_project {action:"create", nodeId, spec:{width,height,fps,duration}, prompt, storyboard}。它会读本节点上的镜头卡，按每张卡自己的时长（duration 里的「168f@30fps」）排 timeline.json，段数=卡数；没挂卡时返回里会明确写「均分，未挂镜头卡」。
-4. 定调帧（styleframe）— 只写 scene-0，然后 motion_preview {nodeId}（frames 省略=每段中点）看一帧。**这一帧定住纸色、字重、留白、动效气质再往下写**；不对就改 scene-0 重看，别写完四段再回头返工。
-5. 写画面 — 用 read/edit 直接改 scene-<n>.tsx，对照读回来的 demo 源码复刻动作顺序、缓动、错峰。一场景一文件，单文件不超过 120 行；共享原语放 components/，上游组件可直接 import（别名 @shotcraft/lib/DigitRoll、@shotcraft/demos/<路径>）。场景里写相对本段的帧号，时间轴只改 timeline.json 的 startFrame/durationFrames。
-6. 素材 — 需要真图时用 motion_assets：action:"capture" 把原始字节搬进 assets/（同时给尺寸与色板），action:"crop" 取局部，**action:"page" 用无头 Chrome 把一段 HTML 模板或网址截成 2 倍图**（写产品界面镜头用它，别自己先截图）。场景里 staticFile("文件名") 取。画布快照会被缩放重绘，精度要求高就走这一步。
-7. 看图 — motion_preview {nodeId, frames:[...]} 同一轮返回拼图：第一次要打包（10–30 秒），之后复用缓存只要几秒。改完必看，不要凭想象交付。
-8. 配声音与踩点 — 音频和画面同一条时间轴（timeline.json 的 audio[]），渲染时由 entry 统一挂 <Audio>，不是成片后再混。motion_audio {action:"add", nodeId, file 或 audioNodeId, role:"bgm"|"voice"|"sfx", at:秒, gainDb, fadeIn, fadeOut, duck} 放置音轨（素材没进工程会自动捕获）；role:"bgm" 默认 -10dB 且旁白自动避让。音效走 motion_sfx：search 不按许可过滤（结果带许可，用哪条由人决定），get 下载并在详情页复核许可、写 FREESOUND-CREDITS.md，返回里的 suggestedGainDb 直接当 gainDb 用。踩点用 motion_audio {action:"analyze"} 量 BPM/网格残差/重音三分类/音源峰值滞后，bpm 为 null 就别硬对；action:"apply" 把切点吸到拍子上，带 cueId 可把某条音轨钉到某一帧（自动扣音源滞后与 1.29 帧输出偏移）。
-9. 出片 — motion_render {action:"start"} 立刻返回 jobId，绝不等待；用 action:"status" 查进度。只渲几帧用 frames，只渲片段用 range。出片后 action:"apply" 把 film.mp4 回填成节点上的 clip pack（画布上直接能播）。
+0. 先问人，再动手 — **没问过风格就开工是最贵的错**。用 ask_user_question 一次问齐这四件事（不要每步都打断）：
+   - 风格与气质：暗底开发感 / 明亮克制 / 高饱和冲击 / 复古纸质 / 电影感黑金……有没有参考片、参考站；
+   - 主题与受众：给谁看（开发者、客户、投资人），最想让人记住的一件事是什么；
+   - 规格：时长、画幅（16:9 横屏 / 9:16 竖屏）、要不要旁白与字幕、要不要真声音乐；
+   - 品牌资产从哪来：官方 logo/字标、图标、产品界面截图 —— 用户直接给文件，还是授权你去官方站取。
+   能推断的先推断，写成默认项一起问（"我按 16:9 / 30s / 不要旁白来做，除非你说别的"）。用户回"你定"就自己定，然后明确说你定了什么。**风格没定之前不要 create 工程**；答案要落进 BRIEF.md 与分镜表。
+   问完不要直接开工：先给 **2–3 个风格方向**（每个 6 行以内：一句话概念 / 参考质感 / 运镜语汇 / 适合什么内容 / 不适合什么），让他选一个。给"暗底开发感 / 明亮克制"这种空词没有用，要给看得见的画面。
+
+1. 素材与品牌（先收集，再动笔）— 片子里会出现的一切"真东西"都先收齐，不许凭印象画：
+   - **要整个站点就用 gather**：motion_assets {action:"gather", url, brand, pages, limit, dryRun} 扫首页 + 导航里挑出的内页（默认 4 页），把 favicon、og:image、主视觉、产品截图、内联字标一次收齐，跨页聚合**实测配色**（hex + 出现次数）与字体，再补三条品牌 logo 兜底（Simple Icons 矢量 / Clearbit 512 / 高清 favicon），并给每页一张 2 倍视口截图。先 dryRun:true 看清单，再正式收（默认 12 张）。品牌名与域名都写不准时，只给 brand 也能先拿到 logo。
+   - **只关心一个页面就用 collect**：{action:"collect", url}，同样的扫描，只扫这一页（默认 8 张）。
+   - **官方品牌资产**：web_search 找「<品牌> brand guidelines / press kit / logo svg」→ read_page 读规范（最小留白、禁止变形、标准色、黑白版规则）→ logo 具体直链用 {action:"fetch", url} 取原始矢量（别截图、别重画）。
+   - **用户能给文件就用用户的**（{action:"capture", path}）；界面要分层或只截一块，用 {action:"page", url} 再 {action:"crop"}。
+   - 找不到官方素材就直说，把"用纯文字占位"当成待确认提案问用户 —— 不要默默换成一个"看起来像"的字体（一眼假，最掉价）；
+   - 截图里影响版面的水印、乱码，用 crop 裁掉或换素材。
+   收完先把返回的 colors 与 fonts 对进 theme.ts：**页面实测值**比凭感觉调色更像；fontSources 里 googleFonts 为 true 的可以照 cssUrl 去取真字体，其余退回系统字（在 BRIEF.md 里写明"字体非官方"）。素材不止图片：图标、纹理、产品界面、波形、色板都算，缺哪类就补哪一个 url。
+   规矩：不改比例、不改描边、不重上色（官方允许的黑白版除外）；字标的大小写、字重、字距按官方来。
+
+2. 定镜头表（设计，不写代码）— 先用 shotcraft_search 按关键词/分类找准确的卡名与样式；**对选中的卡再用 cardId+styleKey 搜一次**，把它的配方（recipe：参数表、动效核心、已知坑）和 demo 源码读回来。跳过这一步，卡就只是个标签。然后用 diagram_apply addNode {shape:"shotcard",cardId,styleKey,x,y,as:"shot"} 建卡、addEdge 从卡连到视频节点，连线顺序就是镜头顺序。**建了卡就必须连**：没连的卡不会进 assets、不参与排期，create 会直接报错——断连不是"只作参考"，是三样一起丢。
+   如果这条片子要的是**整片视觉语言**（扁平矢量、线条、等轴、拼贴、包豪斯、像素、HUD…），先用 mg_style {action:"list"} 挑一种，{action:"read", slug} 读它的施工包（判据/色板/节奏/移植 brief），再 diagram_apply addNode {shape:"mgstyle", slug} 连到视频节点。两者分工：风格管整片（色板、字体、节奏、动效语法），镜头卡管单镜运动方式，可以同时用；一条片子只用一种整片风格。
+   **引擎是硬约束**：read 返回里的 engines 就是上游真用的引擎（three / webgl2 / webgl / canvas2d / dom），engineFiles 是证据文件。上游用 three.js 或 WebGL2 的，移植必须真的跑同一套引擎——three 或 @remotion/three 在 canvas 上渲染，或原生 WebGL2 + GLSL；**不许用 CSS 3D、div 层叠、Canvas2D 渐变模糊「简化」替代**。STYLE.md 的「引擎契约」写了上游证据与逐引擎做法；motion_render 启动前会扫工程源码，重引擎缺失直接拒绝渲染。
+   **动效也是硬约束**：read 返回里的 motion 是从上游源码抽出来的动效画像（转场是 wipe 还是切、有没有 impact/冲击环、相机漂移、motion blur 几采样、颗粒多粗、有哪些二次运动）。**写场景前先 mg_style {action:"frames", slug} 取 8 张参考帧，用 read_image 逐张看**——brief 只写「是什么」，帧才写「怎么动」。STYLE.md 的「效果配方」是必做项：只把形状做对、转场用淡入淡出、落地不压不抖、颗粒几百个点，出来的就是「形似而动不像」，这是最常见也最贵的返工。
+3. 写分镜表（画布上是**一张表**，不是一镜一个节点）— motion_spec {action:"scaffold", nodeId, storyboard:[{intent 这一镜要做什么, onScreen 屏幕上出现什么, copy 配什么字, card 镜头卡}], style, narration} 返回把【分镜表】/【风格】/【旁白】摆到视频附近空位的 diagram_apply ops，ops 原样交给 diagram_apply（layout:"none"）。表是 Markdown 六列（镜头 | 帧区间 | 镜头卡 | 这一镜要做什么 | 屏幕上出现什么 | 文案 / 声音），**每一镜写成表里的一行**；帧区间写 \`0–35f\` 或 \`1.5s\`，各镜之和必须等于视频节点时长。
+   **绝对不要一镜建一个文本节点**——那样 motion_project 读不到分镜，画布上也不再是一张表（motion_spec {action:"validate"} 会把这件事故直接报出来）。**没有分镜表不要开写场景**；功能点对不上镜头就先改表。
+4. 建工程 — motion_project {action:"create", nodeId, spec:{width,height,fps,duration}, prompt}。没显式给 storyboard 时它**直接读画布上的【分镜表】**（所以上一步那张表就是真相源），按镜头卡排 timeline.json，段数=卡数；没挂卡时返回里会明确写「均分，未挂镜头卡」并给 warning。**想控制总时长不用断连**：显式给 spec.duration 时，卡片按相对时长等比缩放到总长，不会被卡的总和改短。
+5. 样片（pilot）— 除非用户明确要求跳过，先做可在画布播放的样片，便于及时检查：
+   - 先只写 scene-0，motion_preview {nodeId} 看一帧定调，把纸色、字重、留白、动效气质定住；不对就改 scene-0 重看，别写完四段再回头返工；
+   - 挑能代表整片风格的 3–6 秒：对主视频节点调用 motion_render {action:"start", nodeId:"主视频节点", range:[起,止]}，记下返回的 pilot jobId；需要时用同一主视频节点和 jobId 调 status，确认 done。文件 .out/pilot.mp4 出现或静帧预览成功都不代表已展示给用户；
+   - **样片渲染完成后必须主动回填**：在同一画布、同一页用 diagram_apply addNode {shape:"video", label:"样片", x, y, w:480, h:270} 新建节点并记住其 ID（已有合适样片节点时复用）；再调用 motion_render {action:"apply", nodeId:"样片节点 ID", jobId:"pilot jobId", source:"pilot"}。核对返回 kind=pilot、nodeId 和画布节点，向用户指出样片位置；失败则说明错误和文件路径。不要把样片写进主视频节点，主节点留给整片；
+   - 样片要有真实排版、真实字重、真实配色、至少一处动效，**不是静态海报**；发给用户的是**渲染出来的 mp4**（回填到节点），不是静帧拼图——拼图会把 1920 缩到 650 宽，细线全糊，双方都会误判；
+   - 用户要求先看样片再继续时，展示后等待反馈；用户已要求直接完成时可继续制作，不额外设置确认关卡。用户明确要求跳过样片时按其要求执行。
+6. 写画面 — 用 read/edit 直接改 scene-<n>.tsx，对照读回来的 demo 源码复刻动作顺序、缓动、错峰。一场景一文件，单文件不超过 120 行；共享原语放 components/，上游组件可直接 import（别名 @shotcraft/lib/DigitRoll、@shotcraft/demos/<路径>）。场景里写相对本段的帧号，时间轴只改 timeline.json 的 startFrame/durationFrames。
+7. 看图与补素材 — 改完必看，不要凭想象交付：motion_preview {nodeId, frames:[...]} 同一轮返回拼图，第一次要打包（10–30 秒），之后复用缓存只要几秒。**每镜写完做一次"同段对照"**：把 mg_style frames 的参考帧与 motion_preview 的成片帧并排看，按 STYLE.md「效果配方」逐项打勾（转场/冲击/相机/运动模糊/颗粒/二次运动），对不上就改，别等整片。缺真图时用 motion_assets：action:"capture" 把原始字节搬进 assets/（同时给尺寸与色板），action:"crop" 取局部，**action:"page" 用无头 Chrome 把一段 HTML 模板或网址截成 2 倍图**（写产品界面镜头用它，别自己先截图）。场景里 staticFile("文件名") 取。画布快照会被缩放重绘，精度要求高就走这一步。
+8. 配声音与踩点 — 音频和画面同一条时间轴（timeline.json 的 audio[]），渲染时由 entry 统一挂 <Audio>，不是成片后再混。motion_audio {action:"add", nodeId, file 或 audioNodeId, role:"bgm"|"voice"|"sfx", at:秒, gainDb, fadeIn, fadeOut, duck} 放置音轨（素材没进工程会自动捕获）；role:"bgm" 默认 -10dB 且旁白自动避让。音效优先检查用户素材和本地库；不合适时再用 motion_sfx：search 按声音需求搜索，get 下载并保存音频索引，返回里的 suggestedGainDb 直接当 gainDb 用。踩点用 motion_audio {action:"analyze"} 量 BPM/网格残差/重音三分类/音源峰值滞后，bpm 为 null 就别硬对；action:"apply" 把切点吸到拍子上，带 cueId 可把某条音轨钉到某一帧（自动扣音源滞后与 1.29 帧输出偏移）。
+9. 出片 — motion_render {action:"start"} 立刻返回 jobId，绝不等待；用 action:"status" 查进度。只渲几帧用 frames；range 渲出来的是**样片（pilot）**，不要拿它当整片。出片后 action:"apply" 把 film.mp4 回填成节点上的 clip pack（画布上直接能播）。
+   **成片必须自己写回**：motion_qa 一过就立刻 motion_render {action:"apply", nodeId:"主视频节点 id"} 回填到主视频节点——apply 找的是最近一次**整片** film 任务，不会拿样片顶替；不要等用户开口要，他看不到工作区里的 mp4，只看得见画布上的节点。回填后海报取片长 35% 处（深色片子 0.4s 是黑帧，缩略图会像空节点）。
+
+**最常翻车的六件事**：① 没问风格就开工，整片气质跑偏，返工最贵；② 拿系统字体假装品牌字标（用户一眼看出不是官方 logo）；③ 只有一张静帧就说"定调好了"，没出样片就让人看整片；④ 镜头卡建了却没连线——参考、顺序、段长一起丢，画布上看着"有卡"，工程里却没排期；⑤ 重引擎风格（three / WebGL2）用 CSS 或 Canvas2D 简化替代——静帧能骗、一动就露，render 会直接拦；⑥ 只做"形"不做"动"——形变过圆、转场靠淡入淡出、落地不压不抖、颗粒像噪点，没看参考帧就写场景，成品和上游差一个档。
+
+素材工作流：用户提供的素材和品牌资源优先；需要纸纹、颗粒、胶带、敲击或乐器单音时，先用 motion_assets {action:"list",nodeId} 看工程素材，再用 {action:"library",nodeId,query:"纸张"} 或 query:"钢琴" / "颗粒" 按需查插件素材库；选中后调用 {action:"use",nodeId,assetId:"返回条目的 id"} 导入，只能用返回的 file。图片在场景里用 staticFile(file)，声音再用 motion_audio {action:"add",nodeId,file,role:"sfx",at:秒} 上时间轴，仅导入不会自动出现在画面或声音里。VCSL 乐器采样是短单音，不是完整背景音乐；检查电平并在样片中试听。现有素材不合适时再找其他来源。素材来源和许可见返回信息，不要将未逐项列明的许可描述为已确认。
+插件素材随安装包提供，路径由 motion_assets 管理；上游路径只是素材 id，不是工作区中的磁盘路径。不要猜测插件或上游目录、从其他工程复制同名文件，也不要手写 assets/manifest.json。使用 library 返回的 id 调 use，由工具校验原文件并登记哈希和许可；导入失败时报告具体错误，排查插件安装或环境，不要静默绕过。
+以上素材工程配合 motion_project / motion_render；motion_task 使用单独的画布引用素材快照，不会自动读取此工程的 assets。要给 motion_task 使用，需将对应素材导入画布节点并连接视频节点，或使用 motion_project / motion_render 完成制作。
 
 音频素材：audio_asset search/get/import 添加音效、音乐或旁白节点；motion_audio add 也接受 file（本地 mp3/wav/m4a）或画布上的音频节点。生成音乐、TTS 与文本生成音效服务尚未接入。
-镜头卡是设计参考，不进成片；想换镜头顺序，改连线或改 timeline.json，不要改场景文件里的绝对帧号。
+镜头卡是设计参考，**不进成片画面**；但必须连到视频节点——连线决定它进不进 assets、排第几镜、这一镜多长。想换顺序改连线（或同时改 timeline.json），不要改场景文件里的绝对帧号。
+**引擎保真**：选了带引擎的风格，顺序是 读 engines/engineFiles → 用 mg_style action:"source" 读上游那套引擎的实现文件 → 在 scene-*.tsx 里真跑这套引擎（three/@remotion/three、原生 WebGL2+GLSL、或该风格本来就用的 Canvas2D/DOM）→ motion_preview 看帧 → 再出样片。brief 是移植说明，不是换实现的许可；确实要换，先在 STYLE.md 写「偏离：引擎 X 改为 Y，因为 Z」，render 会带 warning 通过。用 CSS/div/静态图冒充实 3D 或 shader，等于把这个风格的判据扔掉。
+**画布布局与连线**：先用 diagram_read 查看已有节点、画布尺寸和连线，保留用户已有的位置；按阅读方向分组，同类节点对齐、留出节点和文字间距，并为连线预留清晰通道。视频规格、视频/样片与镜头卡可分区，空间不足时选择另一侧或下方的空位。工作流用圆角折线，**不要使用自动避障**：AI 先确定节点实际 x/y/w/h，再选择合适的 exit/entry，根据画布坐标亲自规划水平/垂直通道和中间折点，以 addEdge {line:"rounded", points:[{x,y},...]} 写入；折点不包含端点。节点或参考的实际位置尚未确定时，先完成布局、diagram_read 读回坐标，再用 setEdge {id,points:[...]} 写入折点。必要时扩大间距，主动检查折线不穿节点或文字、不产生多余折返、交叉或重叠；对齐而不需要转弯时 points 可为空。使用 layout:"none" 保留已规划几何；用户要求自动布局时可先布局再重新规划连线。调整已有自动线时先 setStyle {avoid:false}，再 setEdge 指定折点；保留其他用户明确自定义的线型和未要求修改的手工路径。
+**折点与端点分开**：exit/entry 决定节点连接侧，插件会补端点及引出段；points 只填确实需要的中间转折，绝不放源/目标连接点或重复折点。例：A=(60,60,240,140) 右侧中点为 (300,130)，B=(400,40,480,270) 左侧中点为 (400,175)；从 A 右侧到 B 左侧可用 exit:"e",entry:"w",points:[{x:340,y:175}]，不要再加 {x:400,y:175}。若起终点沿进出方向对齐且通道畅通，使用 points:[]。连线后先读回坐标和折点，具备图像通道时用 diagram_read {render:true} 查看实际画布；出现折返、穿线或覆盖文字时用 setEdge 修正，再复查。预览不可用时如实说明未做视觉校验。
 参考图：diagram_apply 连接图片节点后会把画布快照冻结进工程 assets/，场景里通过 props.assets 取用。视频参数（宽高/fps/duration）在 motion_project create 时写入节点；用户指定时长必须显式传 duration（支持 9.3 等小数秒），不能只写在 prompt 里。
 旧任务记录用 motion_task list/status/cancel/apply/focus/remove 管理，不要再指望它 start。多页或多个视频时明确指定 page/nodeId。
 不要把这条流程想成"提交一个任务等结果"：你是在一个普通工程里写代码、看图、渲染，每一步都由本次对话直接完成。
@@ -2368,8 +2466,7 @@ const SKILL_BODY = `# DrawAI 画布：怎么读、怎么改
 2. **diagram_apply(path, ops, layout?, expectRevision?)** —— 再改。给一组结构化编辑，宿主**无损写回**：只改我们拥有的单元，
    文件其余部分（别的页、未知单元、自定义属性）逐字节保留。打开后原样保存 = 文件一个字节都不变。
 
-不传 path 时，优先改**用户当前打开的那张画布**（客户端上报的聚焦路径），最后才退回 demo.drawio。
-用户说"这张图"时通常不用传 path。改完可以再 read 一次自查。
+写入必须显式传 path。用户说"这张图"时，先用 diagram_read 读取当前聚焦画布，再把返回的 path 传给 diagram_apply；无法确认目标时先打开画布。改完可以再 read 一次自查。
 
 **当前是哪一张，有两个来源**：用户在画布面板里切换标签页时，宿主会把"当前画布 = <路径>"
 **注入到会话里**（你会看到一条 plugin 来源的上下文）；不放心时也不带 path 调一次
@@ -2383,13 +2480,15 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
 改过、或另一个会话动过）调用会**直接失败、一个字节都不写** —— 重新 read 一次拿新指纹再改。
 不传就是不检查（并发编辑时可能覆盖别人的改动，所以"读过再改"的流程里最好都传）。
 
+手动布线：先读取或确定节点位置，按画布实际 x/y/w/h 为每条工作流边设计避开节点和文字的水平/垂直通道；addEdge / setEdge 用 points:[{x,y},...] 按源端到目标端顺序指定中间折点（不含端点），绝对画布坐标、保留小数、不吸附网格，最多1000个。显式 points 切入手动模式；不要同时给 avoid:true。points:[] 清空并保持手动，省略 points 保留原折点。仅用户明确要求自动避障时使用 setStyle{avoid:true,clearPoints:true}；仅用户明确要求非正交逐段连线时使用 line:"straight"。先确定节点位置，再用 layout:"none" 写入并复查。
+
 ## ops 速查
-    {op:"addNode", label?, as?, shape?, svg?, style?, keys?, w?, h?, x?, y?, fontColor?}
-    {op:"addEdge", from?, to?, fromPoint?, toPoint?, as?, label?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, line?, avoid?, fontSize?, fontColor?, keys?}
+    {op:"addNode", label?, as?, shape?, svg?, style?, keys?, data?, w?, h?, x?, y?, fontColor?}
+    {op:"addEdge", from?, to?, fromPoint?, toPoint?, as?, label?, points?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, line?, avoid?, fontSize?, fontColor?, keys?}
     {op:"setLabel", id|ids, label}
     {op:"setLabelPos", id, x?, y?, dx?, dy?, center?}
     {op:"setStyle", id|ids, shape?, svg?, style?, keys?, w?, h?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, line?, avoid?, fontSize?, fontColor?, clearPoints?}
-    {op:"setEdge", id, from?, to?, fromPoint?, toPoint?}
+    {op:"setEdge", id, from?, to?, fromPoint?, toPoint?, points?}
     {op:"order", id|ids, to:"front"|"back"|"up"|"down"}
     {op:"duplicate", id|ids, dx?, dy?, withEdges?, layer?, as?}
     {op:"addLayer", name?, id?, visible?, as?}
@@ -2492,7 +2591,7 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
   偏移随保存、复制、撤销保留；移动节点时文字跟随，导出与适应内容包含节点外的文字。
   **视频节点（旁路媒体包）**：
   - **用户导入入口**：右侧「视频」先选本地文件，再点击画布放置；也可拖入视频或 Ctrl+V 粘贴剪贴板中的视频文件。
-    仅支持浏览器可解码的 MP4/WebM/MOV/MKV，单文件最多 48MB。画布须先保存，完整上传后才创建有封面的原视频节点，不创建空占位。
+    仅支持浏览器可解码的 MP4/WebM/MOV/MKV；视频分块上传。画布须先保存，完整上传后才创建有封面的原视频节点，不创建空占位。
   - addNode {shape:"video", fps?, w?, h?, mediaKind?, mediaClip?, x, y} → 海报 + \`*.media/<clip>/\`
   - listFrames / getFrame / setFrame / appendFrames / setMediaMeta / importMedia
   - extractFrames（看 stills 计划）/ traceFrame（stills → SVG 帧）
@@ -2567,14 +2666,15 @@ diagram_read —— 返回里的 path 就是它（这两条是一致的，同一
                     expectRevision:"<上一步 read 回来的 revision>" })
 
 ## 布局与坐标
-- **不要自己算坐标**：layout 选 dagre-tb（默认，贴合右栏窄高的形状）、dagre-lr（左到右）、
+- 工作流使用圆角折线；AI 自行根据节点坐标确定水平/垂直通道和 points 折点，不启用自动避障。按流程方向分层、同类对齐、间距一致，检查连线不穿节点或文字。保持用户明确指定的其他线型。
+- 简单流程优先使用自动布局：layout 选 dagre-tb（默认，贴合右栏窄高的形状）、dagre-lr（左到右）、
   grid（网格）、none（保留现有坐标，只给没有坐标的新节点补位）。
 - 只有"必须摆在某个位置"时才传 x/y（宿主仍会把它吸附到网格）。
 - 画布的吸附单位：**节点 10px，连线的折点/自由端点 5px**。手工摆过的画布带 meta.pinned，
   这时**不加 layout 就不会重排**（否则你一改图，人手工排好的版面就被冲掉）；想重排必须显式给 layout。
 - **ops 里自带几何时（addNode 给了 x/y、或者有 move）也不会重排** ——
   否则"把 n1 往右挪 40"会被布局立刻冲掉，看起来像工具坏了。
-- 显式重排会重算自动避障线；手动折点和固定连接点保留。新建正交线默认自动避障，avoid:false 关闭。
+- 显式重排会重算已启用自动避障的旧连线，手动折点和固定连接点保留；节点位置改变后由 AI 复核并按需更新手动折点。新建连线默认手动模式。
 - AI 改完的改动**不在用户本地的撤销历史里**（服务端推新版本时客户端会清空它，免得一次 Ctrl+Z
   把 AI 的改动悄悄顶掉）。宿主留了一个**回退栈**（最多 8 步），用户界面「编辑 → 撤销 AI 改动」
   每按一次退一步；read 返回里的 revertSteps 就是"还剩几步"，canRevert 是"还有没有"。
@@ -2632,7 +2732,7 @@ HTML 标签按纯文本显示、图层结构原样保留（画布把它们叠在
 const SKILL_SUMMARY = {
   name: 'drawai-canvas',
   description:
-    '读写 DrawAI 画布（.drawio）：diagram_read 看现状、diagram_apply 结构化改图；支持图像复刻、视频分段复刻及 SVG 帧序列导出。',
+    '读写 DrawAI 画布（.drawio）：diagram_read 看现状、diagram_apply 结构化改图；做视频先问清风格与品牌素材（motion_assets gather 可整站自动收集素材/配色/字体/logo）、出过样片再开拍；支持图像复刻、视频分段复刻及 SVG 帧序列导出。',
   whenToUse:
     '用户让你画流程图/架构图/泳道图、复刻图片或视频、将视频转为 SVG 帧动画，或让你读/改某张 .drawio 画布，或问"这张图里有什么""画布上怎么操作"时。',
 }
@@ -2876,9 +2976,7 @@ export function apply(ctx) {
       path: {
         type: 'string',
         description:
-          '工作区相对路径或绝对路径。**不传 = 用户当前打开的那张画布**（没打开任何画布时才退回 ' +
-          DEFAULT_PATH +
-          '）—— 想知道用户在看哪张，直接不传 path 调一次，返回里的 path 就是它。',
+          '工作区相对路径或绝对路径。不传时读取当前会话明确聚焦的画布；没有焦点时请指定 path。',
       },
       page: {
         type: 'number',
@@ -2984,6 +3082,9 @@ export function apply(ctx) {
                 label: { type: 'string', required: true },
                 shape: { type: 'string', required: true },
                 audio: { type: 'string' }, cardId: { type: 'string' }, styleKey: { type: 'string' }, shotCommit: { type: 'string' },
+                // 整片风格节点（shape=mgstyle）才会带这两项。漏声明一次，含风格节点的画布
+                // diagram_read 整次失败 —— 与 video 那组字段同一个坑。
+                slug: { type: 'string' }, mgStyleCommit: { type: 'string' },
                 style: { type: 'string', required: true },
                 // 内嵌 SVG 内容（shape 为 svg 的节点才有）：节点**画什么**就写在这里。
                 // 上面 style 里的 image= 被省略成 «svg N 字符» —— 别把它写回来（会被拦下），
@@ -3190,11 +3291,11 @@ export function apply(ctx) {
       },
     },
     async execute(args, exec) {
-      // 与 diagram_apply 同一条回退链：显式 path > 用户当前打开的画布 > DEFAULT_PATH。
-      // 两处必须一致 —— 否则 AI 会"读 A、写 B"。
+      // 读写都只接受显式路径或当前会话的焦点；未知目标时不猜 demo。
       const focus = focusedPathFor(sessionIdOf(exec))
       const path =
-        typeof args.path === 'string' && args.path.length > 0 ? args.path : focus !== undefined && focus.length > 0 ? focus : DEFAULT_PATH
+        typeof args.path === 'string' && args.path.trim().length > 0 ? args.path : focus
+      if (!path) throw new Error('未指定画布路径且当前会话没有聚焦画布，请传入 path 或先打开目标画布')
       assertCanvasPath(path)
       const pageArg =
         Number.isFinite(Number(args.page)) ? Number(args.page) : focusedPageFor(sessionIdOf(exec))
@@ -3266,9 +3367,10 @@ export function apply(ctx) {
         nodes.push({
           id: String(n.id),
           label: typeof n.label === 'string' ? n.label : String(n.id),
-          shape: isAudioNode(n) ? 'audio' : isShotCardNode(n) ? 'shotcard' : shapeName,
+          shape: isAudioNode(n) ? 'audio' : isShotCardNode(n) ? 'shotcard' : isMgStyleNode(n) ? 'mgstyle' : shapeName,
           ...(isAudioNode(n) ? {audio:JSON.stringify({data:n.data,settings:audioNodeSettings(n.data)})} : {}),
           ...(isShotCardNode(n) ? { cardId: n.data.shotCardId, styleKey: n.data.shotStyleKey, shotCommit: n.data.shotCommit } : {}),
+          ...(isMgStyleNode(n) ? { slug: n.data.mgStyleSlug, mgStyleCommit: n.data.mgStyleCommit } : {}),
           // 报告里把内嵌的 SVG / 位图 data URI 从 style 里省略，免得一次读取被撑爆；
           // 写回时带这个标记会被拦住（assertNoStyleElision）。
           style: styleForReport(style),
@@ -3420,10 +3522,10 @@ export function apply(ctx) {
     name: 'diagram_apply',
     description:
       '对工作区里的 DrawAI 画布文档施加一组结构化编辑（加节点/连边/改标签/改样式/移动/删除/高亮），然后自动布局并写回文件。布局默认由这里算；ops 里一旦自带几何（addNode 给了 x/y，或有 move）就不再重排，想重排请显式给 layout。' +
-      'ops 的每一项形如 {op:"addNode", label?, as?, shape?, svg?, style?, keys?, w?, h?, x?, y?, fontColor?} / ' +
-      '{op:"addEdge", from?, to?, fromPoint?, toPoint?, as?, label?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, line?, avoid?, fontSize?, fontColor?, keys?} / ' +
+      'ops 的每一项形如 {op:"addNode", label?, as?, shape?, svg?, style?, keys?, data?, w?, h?, x?, y?, fontColor?} / ' +
+      '{op:"addEdge", from?, to?, fromPoint?, toPoint?, as?, label?, points?, style?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, line?, avoid?, fontSize?, fontColor?, keys?} / ' +
       '{op:"setLabel", id|ids, label} / {op:"setLabelPos", id, x?, y?, dx?, dy?, center?} / {op:"setStyle", id|ids, shape?, svg?, style?, keys?, w?, h?, dash?, arrow?, color?, exit?, entry?, jettySize?, edgeStyle?, line?, avoid?, fontSize?, fontColor?, clearPoints?} / ' +
-      '{op:"setEdge", id, from?, to?, fromPoint?, toPoint?} / {op:"order", id|ids, to:"front"|"back"|"up"|"down"} / ' +
+      '{op:"setEdge", id, from?, to?, fromPoint?, toPoint?, points?} / {op:"order", id|ids, to:"front"|"back"|"up"|"down"} / ' +
       '{op:"duplicate", id|ids, dx?, dy?, withEdges?, layer?, as?} / {op:"addLayer", name?, as?} / {op:"setLayer", id|ids, layer} / {op:"setLayerProps", layer, name?, visible?, locked?} / ' +
       '{op:"export", format?:"svg"|"png", name?} / ' +
       '{op:"traceImage", image, removeBg, preset?, w?, h?, x?, y?, colors?, colorsDark?, colorsFill?, grid?, gridH?, scale?, epsilon?, minArea?, minRegionArea?, protectLuma?, majorityContrast?, bgColor?, as?, layer?} / ' +
@@ -3450,6 +3552,7 @@ export function apply(ctx) {
       '**一次改一组**就写 ids:[...]（setStyle/setLabel/move/remove 都收，move 的批量只收 dx/dy 相对位移）—— 用户说"把这几个换成绿色"时不要逐个发 op。' +
       '**引用刚建的那个**用 as:"名字"：{op:"addNode", label:"开始", as:"start"} 之后同一个 ops 数组里 from/to/id 可以直接写 "start"，不必猜自动分配的 n7。' +
       '镜头参考节点：先用 shotcraft_search 搜索，再 addNode {shape:"shotcard",cardId:"准确卡名",styleKey:"准确样式key",x,y,as:"ref"}；用 addEdge 从该节点连到视频，支持多卡。' +
+   '整片风格节点：先用 mg_style {action:"list"} 选好风格，再 addNode {shape:"mgstyle",slug:"09-bauhaus",x,y,as:"style"} 连到视频；一条片子只用一种，建工程时它的色板会写成 theme.ts、施工说明写成 STYLE.md。' +
       '**画图形（图标/logo/示意图）用 svg**：addNode {shape:"svg", svg:"<svg viewBox=…>…</svg>", w, h} 让节点的内容就是那段 SVG 标记' +
       '（不带字时可以不给 label）；setStyle {id, svg:"<svg…>"} 换图、{id, svg:null} 清掉回到矩形。' +
       '标记**必须带 viewBox**（否则放大缩小时图形不跟着变）、默认拉伸铺满节点框（要等比就用 keys:{imageAspect:1}）。' +
@@ -3464,18 +3567,19 @@ export function apply(ctx) {
       '文档里存的是 **drawio 的 style 键**（dashed/dashPattern/edgeStyle/jettySize/libavoidRouting/exitX·exitY·entryX·entryY/endArrow·startArrow/strokeColor/fillColor/shape=/rounded=/arcSize=…），默认值一律省略、认不出的键原样保留；' +
       '上面这些 shape/style/dash/arrow/color/exit/entry 是给模型用的**糖**，由宿主翻译成 style 键，绝不落盘。' +
       'style 既可以是调色板名（plain/blue/green/orange/yellow/red/purple/grey），也可以直接是一段 style 串；keys 用来写任意 drawio 键（值给 null = 删键回默认）。' +
+      '精确布线：addEdge / setEdge 支持 points:[{x,y},...]，按源端到目标端顺序指定中间折点（不含端点），绝对画布坐标、保留小数、不吸附网格，最多1000个。显式 points 切入手动模式，自动路由不会覆盖；不能同时给 avoid:true。points:[] 清空并保持手动，省略 points 保留原折点。仅在用户明确要求自动避障时使用 setStyle{avoid:true,clearPoints:true}。正交模式自行规划水平/垂直通道；仅在用户明确要求非正交逐段连线时使用 line:"straight"。先确定节点位置，再用 layout:"none" 写入。' +
+      '端点由连接侧决定，插件自行补引出段；points 不得包含起点、终点或重复点，直接对齐且通道畅通时用 points:[]。例如 A 的右侧连接点为 (300,130)、B 的左侧连接点为 (400,175)，指定 exit:"e",entry:"w",points:[{x:340,y:175}]；不要将 (400,175) 加为折点，否则可能折返。操作后读回坐标与折点，并在图像通道可用时用 diagram_read render:true 查看实际路径，必要时用 setEdge 调整；无法看图时如实说明。' +
       'setStyle 的 id 可以是节点也可以是连线：节点用 shape/style/keys/w/h/fontColor，连线用 dash（solid|dashed|dotted）、arrow（end 单向|both 双向|none 无箭头|start 反向）、color（**线本身**的颜色）、exit/entry（n|e|s|w 进出侧）、jettySize（引出段长度，数字或 auto）、edgeStyle（orthogonalEdgeStyle|none）、line（straight 直线|sharp 直角折线|rounded 圆角折线|curved 曲线）、avoid（是否参与避让路由）、fontSize（字号）、fontColor（**文字**颜色）、clearPoints（清掉折点）。' +
       'fontColor 给调色板名（plain/blue/green/orange/yellow/red/purple/grey）就按画布上"文字换色"那一支取色，给 #b85450 这类色值就原样写；fontColor:null 删键回缺省（黑字）。' +
-      '文档若带 meta.pinned（人手工摆过位置），不加 layout 就不会重排；显式重排会重算自动路线，保留手动折点和固定连接点。新建正交线默认自动避障，avoid:false 关闭；avoid:true 恢复自动求解。' +      '边引用了不存在的节点会直接报错，且失败发生在写盘之前。自环写成 from === to（与 drawio 一致）；自动布局会忽略自环，只摆节点。' +
-      '不传 path 时改的是**用户当前打开的那张画布**（没打开才退回 ' + DEFAULT_PATH + '）—— 用户说"这张图"时不用传 path。' +
+      '工作流新建节点连接默认圆角折线、手动模式。AI 先确定或读回节点坐标，自己规划水平/垂直通道，用 addEdge 的 points 传中间折点；先布局后连线，检查不穿节点、文字，不交叉或重叠。不要启用自动避障。文档若带 meta.pinned（人手工摆过位置），不加 layout 就不会重排；显式重排保留手动折点，移动节点后需复核并按需更新。' +      '边引用了不存在的节点会直接报错，且失败发生在写盘之前。自环写成 from === to（与 drawio 一致）；自动布局会忽略自环，只摆节点。' +
+      '写入必须显式传 path；不确定目标时先用 diagram_read 读取当前聚焦画布，使用其返回的 path。' +
       '多页文件用 page（0 起）指定要改哪一页；不传 = 用户正在看的那一页。其它页字节原样保留。',
     parameters: {
       path: {
         type: 'string',
+        required: true,
         description:
-          '工作区相对路径或绝对路径。**不传 = 用户当前打开的那张画布**（没打开任何画布时才退回 ' +
-          DEFAULT_PATH +
-          '）—— 想知道用户在看哪张，直接不传 path 调一次，返回里的 path 就是它。',
+          '必填：目标画布的工作区相对路径或绝对路径；先用 diagram_read 确定当前画布。',
       },
       page: {
         type: 'number',
@@ -3667,12 +3771,9 @@ export function apply(ctx) {
       },
     },
     async execute(args, exec) {
-      // 没有显式 path 时，优先用"用户当前打开的那张画布"（客户端上报的聚焦路径），
-      // 最后才退回 DEFAULT_PATH。这样"帮我在这张画布上画"改的就是屏幕上那张，
-      // 而不是工作区里的 demo.drawio（那个坑实测踩过）。
-      const focused = focusedPathFor(sessionIdOf(exec))
-      const path =
-        typeof args.path === 'string' && args.path.length > 0 ? args.path : focused !== undefined && focused.length > 0 ? focused : DEFAULT_PATH
+      // 写入必须显式给路径，避免聚焦上报延迟或缺失时误改另一张画布。
+      const path = typeof args.path === 'string' && args.path.trim().length > 0 ? args.path : ''
+      if (!path) throw new Error('未指定画布路径：请先用 diagram_read 确认目标画布，再显式传入 path')
       // **入参是宿主深冻结的**：dsh-tools 在 execute 之前把整份 arguments 深冻结
       // （`arguments: deepFreeze(snapshotJsonValue(exec.arguments))`，见 dsh-tools 的 tool 执行器），
       // 数组和里面的 op 对象都是 non-extensible。所以这里必须**复制成一份可扩展的数组**再用：
@@ -4210,7 +4311,7 @@ function sanitizeNewName(raw) {
    * 注入之后，模型在下一步就能直接看到，不用探。
    *
    * `agents` 是**可选**服务（走 ctx.get）：没有它的部署、或注入形状对不上老版本时，
-   * 都只是少了这条提示 —— 工具那条回退链（显式 path > 聚焦画布 > DEFAULT_PATH）仍然是兜底。
+   * 都只是少了这条提示 —— 工具仍然要求显式 path 或当前会话聚焦画布。
    */
   function notifyFocusedCanvas(sessionId, path) {
     if (typeof sessionId !== 'string' || sessionId.length === 0) return
@@ -4228,8 +4329,8 @@ function sanitizeNewName(raw) {
     injectedCanvas.set(sessionId, path)
     const text =
       path.length > 0
-        ? 'DrawAI 画布：用户现在打开的是 ' + path + '。diagram_read / diagram_apply 不传 path 时默认就操作这一张。'
-        : 'DrawAI 画布：用户关掉了画布（此刻没有打开任何一张）。不传 path 时工具会退回 ' + DEFAULT_PATH + '。'
+        ? 'DrawAI 画布：用户现在打开的是 ' + path + '。diagram_read 不传 path 可读取当前焦点；diagram_apply 写入时必须显式传 path。'
+        : 'DrawAI 画布：用户关掉了画布（此刻没有打开任何一张）。请先打开画布或明确指定 path。'
     try {
       // Session V4 要求 producer-owned source kind：字面量 `'plugin'` 会被拒
       // （format v4 message requires a producer-owned source kind）。
@@ -4262,6 +4363,7 @@ function sanitizeNewName(raw) {
   // 临时复刻包只由持有本次令牌的会话管理，取消不触及已有媒体。
   const videoTraceJobs = new Map()
   const videoUploadJobs = new Map()
+  const videoReadTickets = new Map()
   const videoExports = createVideoExportManager({ slots: mediaSlots })
   const motionFocus = new Map()
   const audioService = createAudioService()
@@ -4497,10 +4599,48 @@ function sanitizeNewName(raw) {
       job.cancelled = true
       wakeVideoTrace(job)
     }
-    videoTraceJobs.clear(); videoUploadJobs.clear()
+    videoTraceJobs.clear(); videoUploadJobs.clear(); videoReadTickets.clear()
     return Promise.all([drawingTasks.close(), videoExports.dispose(), motionTasks.close()]).finally(() => videoTracePool.close())
   })
   async function handleSave(req, res) {
+    if (req.method === 'GET') {
+      const origin = req.headers.origin
+      if (req.headers['sec-fetch-site'] === 'cross-site' || (origin && (() => { try { return new URL(origin).host !== req.headers.host } catch { return true } })())) {
+        sendJson(res, 403, { ok: false, error: 'cross-origin request rejected' }); return
+      }
+      let token
+      try { token = new URL(req.url, 'http://localhost').searchParams.get('video') } catch { token = null }
+      const ticket = videoReadTickets.get(token)
+      if (!ticket || Date.now() - ticket.time > 3600000 || !sessionOf(ticket.sessionId)) {
+        if (token) videoReadTickets.delete(token)
+        sendJson(res, 403, { ok: false, error: 'video access expired' }); return
+      }
+      try {
+        workspacePath({ sessionId: ticket.sessionId }, ticket.source)
+        const info = await stat(ticket.source)
+        if (!info.isFile() || !Number.isSafeInteger(info.size) || info.size < 1) throw new Error('video source unavailable')
+        const total = info.size, range = req.headers.range
+        let start = 0, end = total - 1
+        if (range) {
+          const match = /^bytes=(\d*)-(\d*)$/.exec(range)
+          if (!match || (!match[1] && !match[2])) { res.writeHead(416, { 'Content-Range': 'bytes */' + total }); res.end(); return }
+          if (!match[1]) { const suffix = Number(match[2]); start = Math.max(0, total - suffix) }
+          else { start = Number(match[1]); if (match[2]) end = Math.min(Number(match[2]), end) }
+          if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= total || end < start) {
+            res.writeHead(416, { 'Content-Range': 'bytes */' + total }); res.end(); return
+          }
+        }
+        ticket.time = Date.now()
+        const headers = { 'Content-Type': ticket.mime, 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes', 'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' }
+        if (range) headers['Content-Range'] = `bytes ${start}-${end}/${total}`
+        res.writeHead(range ? 206 : 200, headers)
+        const stream = createReadStream(ticket.source, { start, end })
+        stream.on('error', () => res.destroy())
+        res.on('close', () => stream.destroy())
+        stream.pipe(res)
+      } catch (error) { sendJson(res, 404, { ok: false, error: 'video source unavailable' }) }
+      return
+    }
     if (req.method !== 'POST') {
       sendJson(res, 405, { ok: false, error: 'POST only' })
       return
@@ -5364,8 +5504,8 @@ function sanitizeNewName(raw) {
         }
         if (body.action === 'media-upload-start') {
           const size = Number(body.size), w = Number(body.w), h = Number(body.h)
-          if (!['mp4', 'webm', 'mov', 'mkv'].includes(body.extension) || !Number.isInteger(size) || size <= 0 || size > 48 * 1024 * 1024 ||
-              !Number.isInteger(w) || !Number.isInteger(h) || Math.min(w, h) <= 0 || Math.max(w, h) > 16384) throw new Error('无效视频文件：须为 48MB 以内的 MP4/WebM/MOV/MKV')
+          if (!['mp4', 'webm', 'mov', 'mkv'].includes(body.extension) || !Number.isSafeInteger(size) || size <= 0 ||
+              !Number.isInteger(w) || !Number.isInteger(h) || Math.min(w, h) <= 0 || Math.max(w, h) > 16384) throw new Error('无效视频文件：须为非空的 MP4/WebM/MOV/MKV')
           for (const [key, job] of videoUploadJobs) if (Date.now() - job.time > 3600000) videoUploadJobs.delete(key)
           if (videoUploadJobs.size >= 16) throw new Error('导入任务过多，请稍后重试')
           const token = randomUUID(), newClip = 'video-' + randomUUID()
@@ -5675,7 +5815,7 @@ function sanitizeNewName(raw) {
           sendJson(res, 200, { ok: true, source: imported.rel, manifest: imported.manifest })
           return
         }
-        if (body.action === 'media-source-bytes') {
+        if (body.action === 'media-source-url' || body.action === 'media-source-bytes') {
           if (clip === null) {
             sendJson(res, 400, { ok: false, error: 'clip is required' })
             return
@@ -5687,16 +5827,20 @@ function sanitizeNewName(raw) {
             sendJson(res, 404, { ok: false, error: 'no source video in clip' })
             return
           }
-          const buf = await readFile(source.abs)
-          // 上限约 48MB：更大的片请用外部播放器；JSON base64 约膨胀 33%。
-          if (buf.length > 48 * 1024 * 1024) {
-            sendJson(res, 413, { ok: false, error: 'source too large for inline transfer (>48MB)' })
-            return
-          }
           const ext = source.rel.toLowerCase().split('.').pop()
           const mime =
             ext === 'mp4' ? 'video/mp4' : ext === 'webm' ? 'video/webm' : ext === 'mov' ? 'video/quicktime' : 'application/octet-stream'
-          sendJson(res, 200, { ok: true, rel: source.rel, mime: mime, base64: buf.toString('base64') })
+          if (body.action === 'media-source-url') {
+            workspacePath({ sessionId }, source.abs)
+            for (const [key, ticket] of videoReadTickets) if (Date.now() - ticket.time > 3600000) videoReadTickets.delete(key)
+            const token = randomUUID() + randomUUID()
+            videoReadTickets.set(token, { sessionId, source: source.abs, mime, time: Date.now() })
+            sendJson(res, 200, { ok: true, url: SAVE_PATH + '?video=' + token, mime })
+          } else {
+            // 兼容旧客户端；新客户端使用可分段读取的 URL，不再整片转 base64。
+            const buf = await readFile(source.abs)
+            sendJson(res, 200, { ok: true, rel: source.rel, mime, base64: buf.toString('base64') })
+          }
           return
         }
         if (body.action === 'media-pack-bundle') {
@@ -6044,8 +6188,72 @@ function sanitizeNewName(raw) {
     },
   })))
   ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'mg_style',
+    description: 'DrawAI 内置的 14 种整片 MG 动效风格（mg-styles 库）：扁平矢量 / 线条动画 / 等轴 2.5D / 逐帧手绘 / 拼贴 / 液态 / 形变 / 包豪斯 / 80s 复古 / 玻璃拟态 / 综艺花字 / 粗描边贴纸科普 / 像素 / 赛博 HUD。上游那支 04-3d-render（C4D/Blender 质感的 CGI 软着陆）没有收录：画面是 Blender 离线渲的，插件里没有同等质感的等价物——用 CSS 滤镜凑出来的 CGI 只会更假，需要那种质感就外部渲好当素材回灌（motion_assets capture / 参考段）。这是「整片风格」（一种片子的整体视觉语言），与 shotcraft_search 的「单镜动效卡」互补、可同时用。action:"list" 列出全部；"search" 按关键词检索；"read" 读某个风格的施工包（可检验判据 + 色板 + 字体 + 节奏 + 效果配方 + 上游提示词 + Remotion 移植 brief）；"source" 读上游成片源码正文；**"frames" 从上游 demo 按 cue 时间点抽参考帧**——动态、转场、冲击、颗粒这些只有看帧才知道，写场景前先取。选中后 diagram_apply 加 shape:"mgstyle" 节点并连到视频节点，motion_project 会把风格写进工程主题与 STYLE.md。',
+    parameters: { action: { type: 'string', enum: ['list', 'search', 'read', 'source', 'frames'], required: true },
+      slug: { type: 'string', description: '风格 slug，如 09-bauhaus' },
+      query: { type: 'string', description: 'search：关键词（中英文风格名、用途、视觉特征）' },
+      limit: { type: 'number', description: 'list/search 返回条数，默认 15/8' },
+      files: { type: 'array', items: { type: 'string' }, description: 'source：上游源码相对路径（如 demos/09-bauhaus/film.js）；不传则列出该风格全部文件' },
+      times: { type: 'array', items: { type: 'number' }, description: 'frames：指定时间点（秒），不传则按 cues.json 均匀抽 8 帧' },
+      count: { type: 'number', description: 'frames：默认抽几帧，8' } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { summary: { type: 'string', required: true }, details: { type: 'string', required: true } } },
+      render: (_args, value) => [{ type: 'text', text: value.summary + '\n' + value.details }] },
+    async execute(args) {
+      const action = args.action || 'list'
+      const pack = (style) => ({ slug: style.slug, name: style.name, en: style.en, oneLiner: style.oneLiner,
+        tags: style.tags, signature: style.signature, palette: style.palette, fonts: style.fonts, rhythm: style.rhythm,
+        engine: style.engine, engines: style.engines || [], engineNote: style.engineNote || '',
+        motion: style.motion || null,
+        aspect: style.rhythm?.aspect || '16:9', bpm: style.rhythm?.bpm ?? null,
+        node: { op: 'addNode', shape: 'mgstyle', slug: style.slug } })
+      if (action === 'list' || action === 'search') {
+        const limit = Math.min(20, Math.max(1, Math.floor(Number(args.limit) || (action === 'list' ? 15 : 8))))
+        const matches = action === 'list' ? mgStyleCatalog.styles.map(pack) : searchMgStyles(mgStyleCatalog, args.query).map(pack)
+        return { summary: action === 'list' ? '共 ' + matches.length + ' 种整片风格（' + mgStyleCatalog.commit.slice(0, 8) + '）'
+            : '找到 ' + matches.length + ' 种风格',
+          details: JSON.stringify({ total: matches.length, commit: mgStyleCatalog.commit, license: mgStyleCatalog.license,
+            hint: '选一个 slug 用 action:"read" 读施工包（brief 是移植说明书）；再 diagram_apply 加 shape:"mgstyle" 节点连到视频节点。一条片子只能选一种整片风格。',
+            styles: matches.slice(0, limit) }) }
+      }
+      if (!args.slug) throw new Error('read/source/frames 需要 slug；可以先用 action:"list" 看全部')
+      const style = resolveMgStyle(mgStyleCatalog, args.slug)
+      if (action === 'frames') {
+        const captured = await captureStyleFrames({ slug: style.slug, times: args.times, count: args.count })
+        return { summary: '已取 ' + captured.files.length + ' 张参考帧：' + captured.slug + '（' + captured.width + '×' + captured.height + ' @' + captured.fps + 'fps）',
+          details: JSON.stringify({ ...captured,
+            hint: '用 read_image 逐张看，再按 STYLE.md 的「效果配方」逐项对照写场景：转场是擦还是切、落地有没有冲击环/相机抖、运动模糊几采样、颗粒多粗、有没有二次运动。参考帧是拿来看效果的，不是逐像素复刻。' }) }
+      }
+      if (action === 'read') {
+        const kit = mgStyleKit({ slug: style.slug })
+        return { summary: '已读风格 ' + kit.name + '（' + kit.slug + '）',
+          details: JSON.stringify({ slug: kit.slug, name: kit.name, en: kit.en, oneLiner: kit.oneLiner,
+            signature: kit.signature, palette: kit.palette, colors: kit.colors, fonts: kit.fonts, rhythm: kit.rhythm,
+            engine: kit.engine, engines: kit.engines, engineNote: kit.engineNote, engineFiles: kit.engineFiles,
+            motion: kit.motion,
+            promptPath: kit.prompt, briefPath: kit.brief, briefSha256: kit.briefSha256,
+            sources: mgStyleSources(kit.slug).map((doc) => ({ path: doc.path, chars: doc.chars })),
+            frames: { action: 'frames', slug: kit.slug, hint: '按 cue 抽 8 帧参考图：动态/转场/冲击/颗粒看这套，比读 brief 准' },
+            hint: '要更细的实现细节用 action:"source" files:["…"] 读上游正文；brief 已经提炼过，先信 brief。引擎按 engines 里的来：three/webgl2 不许用 CSS 或 Canvas2D 简化替代，渲染前会扫工程源码拦截。**写场景前先 action:"frames" 取参考帧看动态**，只读 brief 会做成"形似而动不像"。',
+            brief: kit.brief, prompt: kit.promptSource, preservation: kit.preservation }) }
+      }
+      if (action === 'source') {
+        const files = Array.isArray(args.files) ? args.files.filter((item) => typeof item === 'string' && item) : []
+        const available = style.demos.map((path) => ({ path, bytes: mgStyleFileSize(path) }))
+        if (!files.length) return { summary: style.slug + ' 有 ' + available.length + ' 个上游文件', details: JSON.stringify({ slug: style.slug, files: available }) }
+        const documents = files.map((path) => {
+          if (!path.startsWith('demos/' + style.slug + '/') && path !== style.prompt) throw new Error('这个文件不属于 ' + style.slug + '：' + path)
+          const source = mgStyleFile(path)
+          return { path, chars: source.length, source: source.length > 120000 ? source.slice(0, 120000) + '\n/* …截断 ' + (source.length - 120000) + ' 字符… */' : source }
+        })
+        return { summary: '已读 ' + documents.length + ' 个上游文件', details: JSON.stringify({ slug: style.slug, documents }) }
+      }
+      throw new Error('未知 action：' + action)
+    },
+  })))
+  ctx.effect(() => ctx.tools.register(defineTool({
     name:'audio_asset',
-    description:'为画布搜索和导入音频。search 从 Freesound 搜索（不按许可过滤，结果带 license_label，用哪条由人决定）；get 按 fs:数字 下载并创建音频节点；import 从当前工作区导入 mp3/wav/m4a/aac/ogg/flac/webm，32MB/10分钟以内；targetId 可自动连接视频。configure 修改音频节点的 audioRole(sfx/bgm/voice)、audioGainDb、audioTrimStart/End(秒，End=0至末尾)、audioAt(全片秒)、audioFadeIn/Out(秒)、audioLoop(字符串0/1)。inspect 返回素材许可、哈希和检测结果。音频需要连接到视频；motion_task settings.audioMode=auto让AI安排镜头声音，manual使用节点参数或audioPlan，off静音；remix只重混已有成片。没有真实试听不得宣称听感通过。',
+    description:'为画布搜索和导入音频。search 从 Freesound 搜索；get 按 fs:数字 下载并创建音频节点；import 从当前工作区导入 mp3/wav/m4a/aac/ogg/flac/webm，32MB/10分钟以内；targetId 可自动连接视频。configure 修改音频节点的 audioRole(sfx/bgm/voice)、audioGainDb、audioTrimStart/End(秒，End=0至末尾)、audioAt(全片秒)、audioFadeIn/Out(秒)、audioLoop(字符串0/1)。inspect 返回素材来源、哈希和检测结果。音频需要连接到视频；motion_task settings.audioMode=auto让AI安排镜头声音，manual使用节点参数或audioPlan，off静音；remix只重混已有成片。没有真实试听不得宣称听感通过。',
     parameters:{action:{type:'string',enum:['search','get','import','configure','inspect'],required:true},path:{type:'string'},page:{type:'number'},query:{type:'string'},limit:{type:'number'},id:{type:'string'},file:{type:'string'},nodeId:{type:'string'},targetId:{type:'string'},role:{type:'string',enum:['sfx','bgm','voice']},settings:{type:'json'},x:{type:'number'},y:{type:'number'}},
     output:{schema:{type:'object',additionalProperties:false,properties:{summary:{type:'string',required:true},details:{type:'string',required:true}}},render:(_args,value)=>[{type:'text',text:value.summary+'\n'+value.details}]},
     async execute(args,exec){
@@ -6141,18 +6349,69 @@ function sanitizeNewName(raw) {
   //
   // 执行者是当前对话的主 agent：它有 read/grep/edit/pwsh，改的是普通 .tsx 小文件。
   const motionJobs = new RenderJobs()
-  const motionProjectPath = (scope, nodeId) => joinPath(dirnamePath(scope.drawioAbs), '.drawai-motion', nodeId)
+  const motionProjectPath = (scope, nodeId) => {
+    const canvas = process.platform === 'win32' ? scope.drawioAbs.toLowerCase() : scope.drawioAbs
+    const key = createHash('sha256').update(JSON.stringify([canvas, scope.pageId, nodeId])).digest('hex')
+    return joinPath(dirnamePath(scope.drawioAbs), '.drawai-motion', 'v2', key)
+  }
   const motionScope = async (args, exec) => {
     const sessionId = sessionIdOf(exec)
     const path = args.path || focusedPathFor(sessionId)
     if (!sessionOf(sessionId) || !workspaceRootOf(sessionId) || !isNativeCanvasPath(path)) throw new Error('请选择当前会话工作区中的 .drawai 画布')
     const target = await resolveTarget(path, sessionId)
     if (!ctx.fs.contains(await ctx.fs.resolve(workspaceRootOf(sessionId)), target)) throw new Error('画布路径超出工作区')
-    return { sessionId, path, drawioAbs: absoluteHint(target, path) }
+    const loaded = await loadDoc(path, sessionId, args.page)
+    return { sessionId, path, drawioAbs: absoluteHint(target, path), pageId: loaded.pageId || 'page-0' }
+  }
+  const workspacePath = (scope, file, mustExist = true) => {
+    const root = resolvePath(workspaceRootOf(scope.sessionId)), realRoot = realpathSync(root), target = resolvePath(file)
+    const within = (base, value) => { const rel = relativePath(base, value); return !isAbsolute(rel) && rel !== '..' && !/^\.\.[\\/]/.test(rel) }
+    if (!within(root, target)) throw new Error('路径超出工作区')
+    let existing = target
+    while (!existsSync(existing)) {
+      const parent = dirnamePath(existing)
+      if (parent === existing) throw new Error('无法验证路径')
+      existing = parent
+    }
+    if (!within(realRoot, realpathSync(existing))) throw new Error('真实路径超出工作区')
+    if (mustExist && !existsSync(target)) throw new Error('文件不存在：' + file)
+    return target
   }
   const projectDirOf = (node, scope) => {
     const stored = node.data?.motion?.project
-    return typeof stored === 'string' && stored ? joinPath(dirnamePath(scope.drawioAbs), stored) : motionProjectPath(scope, node.id)
+    const target = workspacePath(scope, motionProjectPath(scope, node.id), false)
+    if (existsSync(target)) return target
+    if (typeof stored !== 'string' || !stored) return target
+    const legacy = workspacePath(scope, resolvePath(dirnamePath(scope.drawioAbs), stored), false)
+    if (!existsSync(legacy) || legacy === target) return target
+    // Existing projects are copied once; keep the old directory untouched, including its outputs.
+    if (policyFor(scope.sessionId)?.mode === 'read-only') return legacy
+    mkdirSync(dirnamePath(target), { recursive: true })
+    const stage = workspacePath(scope, target + '.migrate-' + randomUUID(), false)
+    try {
+      cpSync(legacy, stage, { recursive: true, force: false, errorOnExist: true, filter: source => {
+        if (lstatSync(source).isSymbolicLink()) throw new Error('旧工程包含链接，请先检查后手动迁移：' + source)
+        return !relativePath(legacy, source).split(/[\\/]/).some(part => part === 'node_modules' || part === 'bundle')
+      } })
+      const jobFile = joinPath(stage, '.out', 'jobs.json')
+      if (existsSync(jobFile)) {
+        const records = parseProjectJson(readFileSync(jobFile, 'utf8'))
+        if (Array.isArray(records)) {
+          for (const job of records) {
+            if (!job || typeof job !== 'object') continue
+            job.dir = target
+            if (typeof job.output === 'string' && isAbsolute(job.output)) {
+              const rel = relativePath(legacy, job.output)
+              job.output = !isAbsolute(rel) && rel !== '..' && !/^\.\.[\\/]/.test(rel) ? joinPath(target, rel) : null
+            }
+          }
+          writeFileSync(jobFile, JSON.stringify(records, null, 2) + '\n', 'utf8')
+        }
+      }
+      if (existsSync(target)) throw new Error('工程迁移期间目标已出现，请重试')
+      renameSync(stage, target)
+    } catch (error) { if (existsSync(stage)) rmSync(stage, { recursive: true, force: true }); throw error }
+    return target
   }
   // 连到这个视频节点的镜头卡，顺序 = 画布上的连线顺序。
   const shotCardsOf = (doc, nodeId) => {
@@ -6166,10 +6425,33 @@ function sanitizeNewName(raw) {
     }
     return out
   }
+  // 连到这个视频节点的整片风格（一条片子一种；挂多个由 mgStyleSelection 报错）。
+  const mgStyleOf = (doc, nodeId) => {
+    for (const edge of motionReferenceEdges(doc, nodeId)) {
+      if (motionReferenceRole(doc, edge) !== 'mgstyle') continue
+      const source = doc.nodes.find((item) => item.id === edge.from)
+      if (!isMgStyleNode(source)) continue
+      return resolveMgStyle(mgStyleCatalog, source.data.mgStyleSlug)
+    }
+    return null
+  }
+  // 风格的节奏（fps / 时长 / 画幅）当规格缺省：选了一个风格，片子本来就该是这个节奏。
+  const rhythmSpec = (rhythm) => {
+    if (!rhythm) return {}
+    const out = {}
+    if (Number(rhythm.fps) >= 12 && Number(rhythm.fps) <= 30) out.fps = Number(rhythm.fps)
+    if (Number(rhythm.duration) >= 2 && Number(rhythm.duration) <= 60) out.duration = Number(rhythm.duration)
+    const aspect = String(rhythm.aspect || '')
+    if (aspect === '9:16') { out.width = 1080; out.height = 1920 }
+    else if (aspect === '4:5') { out.width = 1080; out.height = 1350 }
+    else if (aspect === '1:1') { out.width = 1080; out.height = 1080 }
+    else if (aspect === '16:9') { out.width = 1920; out.height = 1080 }
+    return out
+  }
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'motion_project',
-    description: '视频工程：把画布里的一个视频节点落成磁盘上的小文件工程（timeline.json + scene-<n>.tsx + assets/ + theme.ts）。create 建工程并返回文件清单与分镜表，之后用 read/edit/write 直接改场景文件；open 重新读时间轴、文件清单和主题；theme 换配色（重写 theme.ts，场景里用它的常量就一起变）。这里不启动任何模型，也不渲染。',
+    description: '视频工程：把画布里的一个视频节点落成磁盘上的小文件工程（timeline.json + scene-<n>.tsx + assets/ + theme.ts）。create 建工程并返回文件清单与分镜表，之后用 read/edit/write 直接改场景文件；open 重新读时间轴、文件清单和主题；theme 换配色（重写 theme.ts，场景里用它的常量就一起变）。这里不启动任何模型，也不渲染。按用户要求确定风格和素材；除非用户要求跳过，先制作 3–6 秒样片并回填到独立的样片视频节点，用户要求先审样时等待反馈。create 前镜头卡必须 addEdge 连到视频节点：连线同时是参考、镜头顺序和段长，画布上有断连的卡会直接报错。',
     parameters: {
       action: { type: 'string', enum: ['create', 'open', 'theme'], required: true },
       path: { type: 'string', description: '画布路径，省略时使用当前画布' },
@@ -6181,6 +6463,8 @@ function sanitizeNewName(raw) {
       storyboard: { type: 'json', description: '分镜表：[{intent:"这一镜要做什么", onScreen:"画面上出现什么", copy:"配字"}]，按镜头顺序；也可以给 ["一句话"] 简写。会写成 storyboard.md。' },
       theme: { type: 'string', description: '配色主题名：vintage-kraft / deep-ocean / obsidian-violet / modern-light / midnight / solar-pop / coral-burst / color-play / paper-ink。给了就在工程里生成 theme.ts，场景用 {{PAPER, INK, DUST, STAMP}} 引用。' },
       themeTokens: { type: 'json', description: '直接给一套色 {page,text,muted,accent,surface,field,border}（优先于 theme）。' },
+      style: { type: 'string', description: '整片风格 slug（mg_style list 里的 slug，如 09-bauhaus）。给了就用这个风格：色板当主题、节奏当规格缺省、施工说明与引擎契约写进 STYLE.md。也可以不传，改为在画布上连一个「整片风格」节点。' },
+      allowUnlinkedCards: { type: 'boolean', description: 'create 时允许画布上存在没连线的镜头卡（当作灵感，不进 assets/timeline）。默认不允许：断连的卡会同时漏掉参考与排期，所以直接报错，让你补 addEdge。' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { summary: { type: 'string', required: true }, details: { type: 'string', required: true } } },
       render: (_args, value) => [{ type: 'text', text: value.summary + '\n' + value.details }] },
@@ -6207,32 +6491,68 @@ function sanitizeNewName(raw) {
         }
         if (!isMotionNode(node)) throw new Error('请选择空视频或绘制视频节点')
         const before = { data: JSON.parse(JSON.stringify(node.data)), style: node.style }
-        const spec = readSpec({ ...(node.data.motion || {}), ...(args.spec || {}), ...(args.spec?.width ? {} : {}) })
+        const style = args.style ? resolveMgStyle(mgStyleCatalog, args.style) : mgStyleOf(loaded.doc, node.id)
+        const kit = style ? mgStyleKit({ slug: style.slug }) : null
+        // 规格优先级：风格节奏（最弱）< 节点上存的 < 这次显式给的
+        const spec = readSpec({ ...rhythmSpec(style?.rhythm), ...(node.data.motion || {}), ...(args.spec || {}) })
         const errors = validateSpec(spec)
         if (errors.length) throw new Error('视频规格不合法：' + errors.join('；'))
         const cards = shotCardsOf(loaded.doc, node.id)
+        // 镜头卡不连线 = 参考、顺序、段长三样一起丢。这里不靠"提示"，直接拦。
+        const unlinked = unlinkedShotCards(loaded.doc)
+        if (unlinked.length > 0 && !args.allowUnlinkedCards) {
+          throw new Error('有 ' + unlinked.length + ' 张镜头卡没连到视频节点（' + unlinked.map((item) => item.nodeId).join(', ') + '）：'
+            + '连线同时决定「进 assets 当参考」「镜头顺序」「每段时长」，断连的卡三样都不算。'
+            + '先读回节点坐标，自行规划正交折点，再 diagram_apply addEdge{from:"卡 id", to:"' + node.id + '", line:"rounded", points:[折点坐标]} 把它们连上；'
+            + '如果这些卡只是灵感、不参与排期，删掉它们，或传 allowUnlinkedCards:true 并在 BRIEF.md 里注明。')
+        }
+        // 分镜表的真相源在画布上：没显式给 storyboard 时读【分镜表】节点（一张表、每镜一行）。
+        // 这也是"分镜被拆成八条文本节点"能被发现的地方 —— readCanvasSpec 会把它们列出来。
+        const canvasSpec = readCanvasSpec(loaded.doc, { fps: spec.fps })
+        const storyboardInput = args.storyboard !== undefined
+          ? args.storyboard
+          : canvasSpec.storyboard.length > 0 ? canvasSpec.storyboard : undefined
         // 显式给了时长就以时长为总长：卡片之间按相对时长等比拉伸，不再被卡片总和改短。
         const durationGiven = Number(args.spec?.duration) > 0
-        const created = createProject(dir, { spec, prompt: args.prompt ?? node.data.motion?.prompt, segments: args.segments, cards, storyboard: args.storyboard,
-          theme: args.themeTokens || args.theme, fitFrames: durationGiven ? spec.totalFrames : 0 })
+        const created = createProject(dir, { spec, prompt: args.prompt ?? node.data.motion?.prompt, segments: args.segments, cards, storyboard: storyboardInput,
+          theme: args.themeTokens || args.theme, style: kit, fitFrames: durationGiven ? spec.totalFrames : 0 })
         registerProject(dir)
         const seconds = created.timeline.durationInFrames / created.timeline.fps
         node.data.motion = { ...(node.data.motion || {}), mode: spec.mode, width: created.timeline.width, height: created.timeline.height, fps: created.timeline.fps, duration: Math.round(seconds * 100) / 100,
           prompt: String(args.prompt ?? node.data.motion?.prompt ?? '').slice(0, 12000),
           project: relativePath(dirnamePath(scope.drawioAbs), dir) }
         await writeMotionDocument(loaded, scope.sessionId, node.id, before)
+        const warnings = [...(created.warnings || [])]
+        if (cards.length === 0) warnings.push(created.storyboard.length >= 2
+          ? '没有连镜头卡：段数按分镜表的 ' + created.storyboard.length + ' 行开，时长取表里的帧区间（没写就均分）；画面参考不来自画布。'
+          : '没有连镜头卡：时间轴按 segments 均分，镜头顺序与段长都不来自画布。要按卡排布就先 addEdge（见 next）。')
+        if (unlinked.length > 0) warnings.push('有 ' + unlinked.length + ' 张镜头卡未连线（' + unlinked.map((item) => item.nodeId).join(', ') + '）：按灵感处理，不进 assets、不进 timeline。')
         return { summary: '已建视频工程，' + created.timeline.shots.length + ' 段 / ' + seconds.toFixed(2) + ' 秒'
           + (cards.length
             ? '（' + (durationGiven ? '按 ' + cards.length + ' 张镜头卡等比拉到指定时长' : '按 ' + cards.length + ' 张镜头卡排布') + '）'
-            : '（均分，未挂镜头卡）')
+            : '（均分，未挂镜头卡 ⚠）')
+          + (unlinked.length ? '，' + unlinked.length + ' 张卡未连线' : '')
           + (created.storyboard.length ? '，分镜表 ' + created.storyboard.length + ' 行' : '，还没有分镜表')
-          + (created.theme ? '，主题 ' + created.theme : ''), details: JSON.stringify({
+          + (created.theme ? '，主题 ' + created.theme : '')
+          + (style ? '，风格 ' + style.name + (style.engines?.length ? '（引擎 ' + style.engines.map((engine) => ENGINE_LABEL[engine] || engine).join(' + ') + '）' : '') + '，施工说明见 STYLE.md' : ''), details: JSON.stringify({
           dir, files: created.files, timeline: created.timeline, cards, storyboard: created.storyboard,
+          ...(canvasSpec.nodes.storyboard ? { canvasSpec: { storyboardNode: canvasSpec.nodes.storyboard, rows: canvasSpec.storyboard.length } } : {}),
+          ...(canvasSpec.problems.length ? { canvasSpecProblems: canvasSpec.problems } : {}),
+          ...(style ? { style: { slug: style.slug, name: style.name, commit: style.commit, signature: style.signature, engine: style.engine, engines: style.engines, engineNote: style.engineNote } } : {}),
+          ...(warnings.length ? { warnings } : {}),
           next: [
+            ...(warnings.length ? warnings : []),
+            ...(style ? ['动手前先读工程里的 STYLE.md：判据、色板、节奏、引擎契约、要避的坑都在里面，凭风格名自由发挥就不像了。'] : []),
+            ...(style?.engines?.some((engine) => GATED_ENGINES.has(engine))
+              ? ['这个风格的上游是 ' + style.engines.map((engine) => ENGINE_LABEL[engine] || engine).join(' + ') + '：先把引擎骨架跑通（canvas + 真渲染器 + 后处理），再往里排内容；用 CSS 3D 或 Canvas2D 简化会在 motion_render 被拒绝。']
+              : []),
             created.storyboard.length
               ? '分镜表已写进 storyboard.md。'
-              : '还没分镜表：先想清楚每一镜"讲什么 / 画面出现什么 / 配什么字"，再 create 一次（或直接手写 storyboard.md），别边写代码边想内容。',
-            '第一步只写 scene-0（定调镜），写完 motion_preview{frames:[首段中点]} 看一张静帧确认风格，再往下写其余场景——风格跑偏时这样只返工一段。',
+              : '还没分镜表：先 motion_spec{action:"scaffold"} 在画布空位建一张【分镜表】节点，把每一镜写成表里的一行，再 create 一次（分镜表只能有一张，不要一镜一个节点）。',
+            ...(canvasSpec.problems.length ? ['画布规格要先修：' + canvasSpec.problems.join('；') + '（motion_spec{action:"validate"} 会逐条报）'] : []),
+            '开工前自检两件事：风格与色调是问过用户（或他明说你定）的吗？品牌 logo/字标是用户给的、或按官方规范取的原图吗？——没确认就回去补，这两件错了整片要重做。',
+            '先出定调帧：只写 scene-0 → motion_preview{frames:[首段中点]} 看一张静帧，确认纸色/字重/留白/动效气质。',
+            '做 3–6 秒样片：主节点 motion_render start + range，记下 pilot jobId → status 确认 done → diagram_apply 建或复用独立「样片」视频节点 → motion_render apply {nodeId:"样片节点 id",jobId:"pilot jobId",source:"pilot"}，确认回填并告知用户。用户明确跳过时除外；用户要求先审样时再等待反馈。',
             cards.length
               ? '顺序已按镜头卡时长排好：用 read 打开 scene-0.tsx 开始写第一段。'
               : '这个节点没有连镜头卡，时间轴按段数均分。要按卡排布：先 shotcraft_search 选卡 → diagram_apply addNode{shape:"shotcard"} + addEdge 连到本节点 → 删掉 timeline.json 后重新 create。',
@@ -6241,13 +6561,76 @@ function sanitizeNewName(raw) {
     },
   })))
 
+  // 画布规格三块：【分镜表】/【风格】/【旁白】。
+  //
+  // 以前这三块只活在对话里（或 storyboard.md 里），于是"分镜表"在画布上就变成
+  // **一镜一个文本节点**——八镜八条，谁也不觉得那是一张表，motion_project 也读不到。
+  // 这里给一个工具：建（scaffold）、读（read）、验（validate）。
+  ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'motion_spec',
+    description: '画布上的视频规格三块，用**一个节点**写清楚：\n【分镜表】一张 Markdown 六列表（镜头 | 帧区间 | 镜头卡 | 这一镜要做什么 | 屏幕上出现什么 | 文案 / 声音），每一镜一行——**不要一镜建一个节点**；\n【风格】一行一个键（page #F7F3EA / serif "Noto Serif SC" / materials: kraft）；\n【旁白】`## shot-N` 分节，一句一行。\naction:"scaffold" 返回把缺的块摆到视频附近空位的 diagram_apply ops（已有一张【分镜表】就不再建第二张）；"read" 读回来；"validate" 逐条报错（分镜被拆成多条、帧数之和对不上节点时长、镜号不连号…）。motion_project create 不给 storyboard 时会直接读这张表。',
+    parameters: {
+      action: { type: 'string', enum: ['scaffold', 'read', 'validate'], required: true },
+      path: { type: 'string', description: '画布路径，省略时使用当前画布' },
+      nodeId: { type: 'string', description: '视频节点 id（规格块的锚点）' },
+      page: { type: 'number' },
+      storyboard: { type: 'json', description: '分镜行 [{intent,onScreen,copy,card,durationFrames}]，或一段 markdown 表；省略时 scaffold 只出表头' },
+      style: { type: 'json', description: '风格：一段文本，或 {palette,fonts,materials}' },
+      narration: { type: 'string', description: '旁白脚本（## shot-N 分节，一句一行）' },
+      spec: { type: 'json', description: '视频规格 {width,height,fps,duration}，省略时读节点上的' },
+    },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { summary: { type: 'string', required: true }, details: { type: 'string', required: true } } },
+      render: (_args, value) => [{ type: 'text', text: value.summary + '\n' + value.details }] },
+    async execute(args, exec) {
+      const scope = await motionScope(args, exec)
+      const loaded = await loadDoc(scope.path, scope.sessionId, args.page)
+      const node = args.nodeId ? loaded.doc.nodes.find((item) => item.id === args.nodeId) : loaded.doc.nodes.find(isMotionNode)
+      if (!node) throw new Error('找不到视频节点' + (args.nodeId ? ' ' + args.nodeId : ''))
+      const spec = readSpec({ ...(node.data?.motion || {}), ...(args.spec || {}) })
+      if (args.action === 'scaffold') {
+        if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
+        const built = scaffoldOps(loaded.doc, { videoNode: node, storyboard: args.storyboard, style: args.style,
+          narration: args.narration, fps: spec.fps, totalFrames: spec.totalFrames })
+        if (built.ops.length === 0) {
+          return { summary: '规格块已经齐了（' + built.already.join('、') + '），不必再建',
+            details: JSON.stringify({ already: built.already, next: '直接 read / validate；要改就用 diagram_apply 的 setLabel' }) }
+        }
+        return { summary: '已生成 ' + built.ops.length + ' 个规格节点的 ops（' + built.created.join('、') + '）',
+          details: JSON.stringify({ ops: built.ops, created: built.created,
+            next: '把 ops 原样传给 diagram_apply（layout:"none"），然后 motion_spec{action:"validate"} 验一遍；分镜表只有这一张，每镜写成表里的一行。' }) }
+      }
+      if (args.action === 'validate') {
+        const result = validateCanvasSpec(loaded.doc, { spec })
+        const unlinked = unlinkedShotCards(loaded.doc)
+        if (unlinked.length > 0) {
+          result.errors.push('有 ' + unlinked.length + ' 张镜头卡没连到视频节点（' + unlinked.map((item) => item.nodeId).join(', ')
+            + '）：连线同时决定参考、镜头顺序和段长，断连等于三样都丢。addEdge 连上，或删掉这些卡')
+        }
+        return { summary: result.errors.length === 0
+            ? '规格没问题' + (result.warnings.length ? '（' + result.warnings.length + ' 条提醒）' : '')
+            : '规格有 ' + result.errors.length + ' 个问题要先修',
+          details: JSON.stringify({ errors: result.errors, warnings: result.warnings,
+            nodes: result.read.nodes, rows: result.read.storyboard.length,
+            next: result.errors.length ? '先 motion_spec{action:"scaffold"} 补一张【分镜表】/修掉重复节点，再用 diagram_apply setLabel 改表内容' : '' }) }
+      }
+      const read = readCanvasSpec(loaded.doc, { fps: spec.fps })
+      return { summary: '画布规格：分镜 ' + read.storyboard.length + ' 行'
+          + (read.nodes.style ? ' · 风格 ' + Object.keys(read.style.tokens).length + ' 个色' : '')
+          + (read.nodes.narration ? ' · 旁白 ' + read.narration.sections.length + ' 节' : '')
+          + (read.problems.length ? ' · ' + read.problems.length + ' 个问题' : ''),
+        details: JSON.stringify({ storyboard: read.storyboard, style: read.style, narration: read.narration,
+          nodes: read.nodes, problems: read.problems }) }
+    },
+  })))
+
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'motion_preview',
-    description: '渲染工程里的几帧并**直接返回拼图**（同一轮就能看见画面）。第一次调用要打包（约 10–30 秒），之后同一份源码复用缓存只要几秒。frames 是绝对帧号，例如 [0,60,120,180]；省略时取每段的中点（最多 6 帧），定调阶段只写 scene-0 时用它看一张定妆帧。',
+    description: '渲染工程里的几帧并**直接返回拼图**（同一轮就能看见画面）。第一次调用要打包（约 10–30 秒），之后同一份源码复用缓存只要几秒。frames 是绝对帧号，例如 [0,60,120,180]；省略时取每段的中点（最多 6 帧），定调阶段只写 scene-0 时用它看一张定妆帧。**要看画质（锯齿、色带、字重）就传 crop：只出 1:1 原尺寸局部**，拼图是缩过的，缩过的图看不出这些毛病。',
     parameters: {
-      path: { type: 'string' }, nodeId: { type: 'string', required: true },
+      path: { type: 'string' }, page: { type: 'number' }, nodeId: { type: 'string', required: true },
       frames: { type: 'json', description: '绝对帧号数组，最多 9 帧；省略 = 每段中点' },
       cols: { type: 'number', description: '拼图列数，默认 3' },
+      crop: { type: 'json', description: '只出局部：{x,y,w,h} 或 {cx,cy,w,h}，像素。传了就按 1:1 原尺寸返回（不缩放），用来判断 AA / 色带 / 字体' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: {
       summary: { type: 'string', required: true },
@@ -6258,7 +6641,8 @@ function sanitizeNewName(raw) {
       render: (_args, value) => [{ type: 'text', text: value.summary + '\n' + value.details }, ...(value.image ? [{ type: 'image', attachment: value.image }] : [])] },
     async execute(args, exec) {
       const scope = await motionScope(args, exec)
-      const loaded = await loadDoc(scope.path, scope.sessionId)
+      if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
+      const loaded = await loadDoc(scope.path, scope.sessionId, args.page)
       const node = loaded.doc.nodes.find((item) => item.id === args.nodeId)
       if (!node) throw new Error('找不到视频节点 ' + args.nodeId)
       const dir = projectDirOf(node, scope)
@@ -6267,8 +6651,8 @@ function sanitizeNewName(raw) {
         const timeline = readTimeline(dir)
         return timeline.shots.slice(0, 6).map((shot) => shot.startFrame + Math.floor(shot.durationFrames * 0.6))
       })()
-      const preview = await previewProject(dir, { frames, cols: args.cols, attachments: ctx.get?.('attachments') })
-      const payload = { summary: '已渲染 ' + frames.length + ' 帧并拼图', details: JSON.stringify({ frames: preview.frames, sheet: preview.sheet }) }
+      const preview = await previewProject(dir, { frames, cols: args.cols, crop: args.crop, attachments: ctx.get?.('attachments') })
+      const payload = { summary: '已渲染 ' + frames.length + ' 帧并拼图' + (preview.crop ? '（1:1 局部 ' + preview.crop.w + '×' + preview.crop.h + '）' : ''), details: JSON.stringify({ frames: preview.frames, sheet: preview.sheet, crop: preview.crop }) }
       const ref = preview.attachment
       if (ref && typeof ref.attachmentId === 'string') {
         const image = { attachmentId: String(ref.attachmentId) }
@@ -6285,64 +6669,136 @@ function sanitizeNewName(raw) {
 
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'motion_render',
-    description: '渲染工程。start 立即返回 jobId（后台跑，不要等）；status 查进度；list 列最近任务；cancel 取消；apply 把渲染好的 film.mp4 回填到视频节点（落成 clip pack，画布上直接能播）。frames 只渲染指定帧，range 渲染片段 [起,止]，都不传就是全片。',
+    description: '渲染工程。start 立即返回 jobId（后台跑，不要等）；**start 前会按 STYLE.md 的引擎契约扫工程源码，three / webgl2 风格缺真引擎会直接拒绝渲染**（样片也拦；确实要换实现先在 STYLE.md 写「偏离：引擎 …」）；range 渲的是**样片**（写 .out/pilot.mp4，任务 kind=pilot），不传就是整片（.out/film.mp4）；status 查进度；list 列最近任务；cancel 取消；apply 把渲好的片子回填到视频节点——**nodeId 决定回填到哪个节点**（样片回填到另建的「样片」节点，成片回填到主视频节点），不给 jobId 时主视频节点取整片、样片节点取样片。frames 只渲染指定帧。',
     parameters: {
       action: { type: 'string', enum: ['start', 'status', 'list', 'cancel', 'apply'], required: true },
-      path: { type: 'string' }, nodeId: { type: 'string' }, jobId: { type: 'string' },
+      path: { type: 'string' }, page: { type: 'number' }, nodeId: { type: 'string', description: 'start：从哪个视频节点对应的工程渲；apply：回填到哪个节点（省略时：主视频节点回填整片、另建的样片节点回填样片）' }, jobId: { type: 'string' },
+      source: { type: 'string', enum: ['film', 'pilot'], description: 'apply 时回填哪一种：film=整片（主视频节点）、pilot=样片（样片节点）' },
       frames: { type: 'json', description: '只渲染这些帧' },
-      range: { type: 'json', description: '帧区间 [from,to]' },
+      range: { type: 'json', description: '帧区间 [from,to]：渲样片（写 pilot.mp4）' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { summary: { type: 'string', required: true }, details: { type: 'string', required: true } } },
       render: (_args, value) => [{ type: 'text', text: value.summary + '\n' + value.details }] },
     async execute(args, exec) {
       const scope = await motionScope(args, exec)
       if (args.action === 'list') {
-        const jobs = motionJobs.list(motionProjectPath(scope, args.nodeId || 'node'))
+        const listed = await loadDoc(scope.path, scope.sessionId, args.page)
+        const listedNode = args.nodeId ? listed.doc.nodes.find(item => item.id === args.nodeId) : listed.doc.nodes.find(isMotionNode)
+        const jobs = listedNode ? motionJobs.list(projectDirOf(listedNode, scope)) : []
         return { summary: '最近渲染任务', details: JSON.stringify(jobs.slice(0, 10)) }
       }
-      const loaded = await loadDoc(scope.path, scope.sessionId)
+      const loaded = await loadDoc(scope.path, scope.sessionId, args.page)
       const node = args.nodeId ? loaded.doc.nodes.find((item) => item.id === args.nodeId) : loaded.doc.nodes.find(isMotionNode)
       if (!node) throw new Error('找不到视频节点')
-      const dir = projectDirOf(node, scope)
+      let dir = projectDirOf(node, scope)
       if (args.action === 'status') {
         const job = motionJobs.get(args.jobId)
-        if (!job) throw new Error('找不到任务 ' + args.jobId)
+        if (!job || job.dir !== dir) throw new Error('找不到当前工程的任务 ' + args.jobId)
         const mix = job.mix ? describeMix(job.mix) : (job.mixError ? '响度归一失败：' + job.mixError : '')
-        return { summary: '渲染任务：' + job.status + (mix ? ' · ' + mix : ''), details: JSON.stringify(job) }
+        const next = job.kind === 'pilot' && job.status === 'done'
+          ? '样片文件不会自动显示在画布：在当前画布页创建或复用独立「样片」视频节点，记下其 ID，然后调用 motion_render {action:"apply",nodeId:"样片节点 ID",jobId:"' + job.id + '",source:"pilot"}；核对结果并告知用户。'
+          : undefined
+        return { summary: '渲染任务：' + job.status + (mix ? ' · ' + mix : ''), details: JSON.stringify({ ...job, ...(next ? { next } : {}) }) }
       }
-      if (args.action === 'cancel') { motionJobs.cancel(args.jobId); return { summary: '已请求取消', details: JSON.stringify({ jobId: args.jobId }) } }
+      if (args.action === 'cancel') {
+        if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
+        const job = motionJobs.get(args.jobId)
+        if (!job || job.dir !== dir) throw new Error('找不到当前工程的任务 ' + args.jobId)
+        motionJobs.cancel(args.jobId); return { summary: '已请求取消', details: JSON.stringify({ jobId: args.jobId }) }
+      }
       if (args.action === 'apply') {
-        const job = args.jobId
-          ? motionJobs.get(args.jobId) || motionJobs.list(dir).find((item) => item.id === args.jobId)
-          : motionJobs.list(dir).find((item) => item.kind === 'film' && (item.status === 'done' || item.output))
+        // 目标节点可能是个没建过工程的「样片」节点：工程目录得从**主视频节点**取。
+        const targetId = args.nodeId || (args.jobId ? (motionJobs.get(args.jobId)?.nodeId || node.id) : node.id)
+        const targetNode = loaded.doc.nodes.find((item) => item.id === targetId)
+        const hasProject = (item) => typeof item?.data?.motion?.project === 'string' && !!item.data.motion.project
+        const candidates = loaded.doc.nodes.filter(item => isMotionNode(item) && hasProject(item))
+        let projectNode = hasProject(targetNode) ? targetNode : null
+        if (!projectNode && args.jobId) {
+          const matching = candidates.filter(item => {
+            const candidateDir = projectDirOf(item, scope)
+            return motionJobs.list(candidateDir).some(item => item.id === args.jobId && item.dir === candidateDir)
+          })
+          if (matching.length > 1) throw new Error('任务属于多个工程，请指定正确的源工程')
+          projectNode = matching[0] || null
+        }
+        if (!projectNode && candidates.length === 1) projectNode = candidates[0]
+        if (!projectNode && candidates.length > 1) throw new Error('画布有多个视频工程，回填样片时请提供对应的 jobId')
+        projectNode ||= node
+        dir = projectDirOf(projectNode, scope)
+        const jobs = motionJobs.list(dir).filter((item) => item.kind === 'film' || item.kind === 'pilot')
+        const finished = jobs.filter((item) => item.status === 'done' || item.output)
+        let job = args.jobId ? (motionJobs.get(args.jobId) || jobs.find((item) => item.id === args.jobId)) : null
+        if (args.jobId && (!job || job.dir !== dir)) throw new Error('找不到当前工程的任务 ' + args.jobId)
+        if (job && job.kind === 'still') throw new Error('任务 ' + job.id + ' 是静帧预览（still），不能当片子回填')
+        // 回填到哪个节点：**调用方说了算**（以前只要 job 带 nodeId 就忽略 args.nodeId，
+        // 于是"把样片 apply 到另建的样片节点"永远写回主节点 —— 实测出过这个事故）。
+        if (!job) {
+          // 主视频节点（motion_project 建过工程）等的是成片；另建的「样片」节点等的是样片。
+          // 以前两者都取"最新 done film"，而样片 range 渲染写的也是 film.mp4 —— 4 秒样片会被当成整片写进主节点。
+          const sampleTarget = targetNode !== undefined && !hasProject(targetNode)
+          const preferred = applyJobKind({ source: args.source, targetHasProject: !sampleTarget })
+          job = finished.find((item) => item.kind === preferred)
+          if (!job && preferred === 'pilot') {
+            throw new Error('这个节点还没有样片：先 motion_render{action:"start", range:[起,止]}（样片渲成 .out/pilot.mp4，任务 kind=pilot）')
+          }
+          if (!job) job = finished.find((item) => item.kind === 'film') || finished.find((item) => item.kind === 'pilot')
+        }
         if (!job) throw new Error('没有可回填的成片：先 motion_render start 出一版')
-        const film = job.output || outputPath(dir, 'film.mp4')
+        const film = workspacePath(scope, job.output || outputPath(dir, job.kind === 'pilot' ? 'pilot.mp4' : 'film.mp4'))
         if (!existsSync(film)) throw new Error('成片文件不在了：' + film + '（重新 motion_render start）')
         if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
         return documents.run(scope.drawioAbs, async () => {
           const live = await loadDoc(scope.path, scope.sessionId, args.page)
-          const target = live.doc.nodes.find((item) => item.id === (job.nodeId || node.id))
-          if (!target) throw new Error('成片对应的节点已被删除（' + job.nodeId + '）')
+          const target = live.doc.nodes.find((item) => item.id === targetId)
+          if (!target) throw new Error('要回填的节点已被删除（' + targetId + '）')
           const before = { data: JSON.parse(JSON.stringify(target.data)), style: target.style }
           const result = await applyFilm({ drawioAbs: scope.drawioAbs, doc: live.doc, node: target, film })
           target.data = { ...target.data, ...result.attrs }
-          if (result.poster) target.style = styleWithSvgMarkup(target.style || '', result.poster, '0')
-          if (!target.label) target.label = '成片'
+          // 海报是 PNG data URI：按型别分派（以前一律当 SVG 包一层，节点上就是空图）。
+          if (result.poster) target.style = styleWithMediaMarkup(target.style || '', result.poster, '0')
+          if (!target.label) target.label = job.kind === 'pilot' ? '样片' : '成片'
           await writeMotionDocument(live, scope.sessionId, target.id, before)
           const seconds = result.seconds > 0 ? result.seconds.toFixed(2) : '?'
-          return { summary: '成片已回填到节点 ' + target.id + '（' + result.width + '×' + result.height + ' · ' + seconds + 's · ' + (result.bytes / 1024 / 1024).toFixed(2) + 'MB）',
-            details: JSON.stringify({ jobId: job.id, nodeId: target.id, clip: result.clip, dir: result.dir, source: result.source,
+          return { summary: (job.kind === 'pilot' ? '样片' : '成片') + '已回填到节点 ' + target.id + '（' + result.width + '×' + result.height + ' · ' + seconds + 's · ' + (result.bytes / 1024 / 1024).toFixed(2) + 'MB）',
+            details: JSON.stringify({ jobId: job.id, kind: job.kind, nodeId: target.id, clip: result.clip, dir: result.dir, source: result.source,
               width: result.width, height: result.height, fps: result.fps, seconds: result.seconds, frames: result.frames, bytes: result.bytes,
               next: '画布上点播放就能看；要再改就去改 scene-*.tsx 再渲染一次，apply 会覆盖同一个 clip' }) }
         })
       }
       if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
       const operation = Array.isArray(args.frames) && args.frames.length ? 'still' : 'full'
-      const job = motionJobs.create({ kind: operation === 'still' ? 'still' : 'film', dir, nodeId: node.id })
-      const handle = renderProject(dir, { operation, frames: args.frames, frameRange: Array.isArray(args.range) ? args.range : undefined,
+      const ranged = Array.isArray(args.range) && args.range.length === 2
+      // 样片的输出必须跟整片分开：以前 range 渲染也写 film.mp4，下一次 apply 就会把 4 秒样片当整片塞进主节点。
+      const kind = operation === 'still' ? 'still' : ranged ? 'pilot' : 'film'
+      const outputName = kind === 'still' ? 'still.mp4' : kind === 'pilot' ? 'pilot.mp4' : 'film.mp4'
+      // 引擎保真：样片和成片都要用风格上游那一套引擎，不许「简化实现」骗过静帧。
+      const styleForGate = (() => {
+        const saved = readTimeline(dir).style
+        if (!saved) return null
+        const entry = mgStyleCatalog.styles.find((item) => item.slug === saved.slug)
+        return { ...saved,
+          engine: saved.engine || entry?.engine || null,
+          engines: saved.engines?.length ? saved.engines : (entry?.engines || []),
+          engineNote: saved.engineNote || entry?.engineNote || '',
+          engineFiles: saved.engineFiles?.length ? saved.engineFiles : (entry?.engineFiles || []) }
+      })()
+      const engineGate = kind === 'still' ? null : assertEngineFidelity(dir, styleForGate)
+      // 质量证据门：字体没注册直接拒渲；后处理/累积缺席带 warning 一起报出来。
+      const qualityGate = kind === 'still' ? null : assertQualityEvidence(dir, styleForGate)
+      const gateWarnings = [engineGate?.warning, ...(qualityGate?.warnings || [])].filter(Boolean)
+      const job = motionJobs.create({ kind, dir, nodeId: node.id })
+      const handle = renderProject(dir, { operation, frames: args.frames, frameRange: ranged ? args.range : undefined,
+        output: outputPath(dir, outputName),
         onProgress: (message) => motionJobs.progress(job, message.phase, message.progress) })
       motionJobs.attach(job, handle)
-      return { summary: '已开始渲染（' + job.id + '），用 motion_render status 查进度', details: JSON.stringify({ jobId: job.id, output: outputPath(dir, operation === 'still' ? 'still.mp4' : 'film.mp4') }) }
+      const renderLine = handle.render ? describeRenderSettings(handle.render) : ''
+      return { summary: '已开始渲染' + (kind === 'pilot' ? '样片' : '') + '（' + job.id + '）' + (renderLine ? ' · ' + renderLine : '')
+          + gateWarnings.map((warning) => ' ⚠ ' + warning).join('') + '，用 motion_render status 查进度',
+        details: JSON.stringify({ jobId: job.id, kind, output: outputPath(dir, outputName),
+          ...(handle.render ? { render: handle.render } : {}),
+          ...(engineGate ? { engine: { required: engineGate.required, detected: engineGate.detected, missing: engineGate.missing, deviation: engineGate.deviation } } : {}),
+          ...(qualityGate ? { quality: { fonts: qualityGate.fonts, warnings: qualityGate.warnings } } : {}),
+          next: kind === 'pilot' ? '用主节点和 jobId 查 status；完成后在同一画布页创建或复用独立样片视频节点，再 motion_render {action:"apply",nodeId:"样片节点 ID",jobId:"' + job.id + '",source:"pilot"} 回填并告知用户。' : '渲完 apply 到主视频节点' }) }
     },
   })))
 
@@ -6371,7 +6827,8 @@ function sanitizeNewName(raw) {
         return { summary: '帧检 ' + saved.verdict + '（' + saved.summary.fail + ' fail / ' + saved.summary.warn + ' warn）',
           details: JSON.stringify(saved) }
       }
-      const film = args.file ? (isAbsolute(args.file) ? args.file : joinPath(dir, args.file)) : outputPath(dir, 'film.mp4')
+      if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
+      const film = args.file ? workspacePath(scope, isAbsolute(args.file) ? args.file : joinPath(dir, args.file)) : workspacePath(scope, outputPath(dir, 'film.mp4'))
       if (!existsSync(film)) throw new Error('没有可检的片子：' + film + '（先 motion_render start 出一版）')
       const timeline = readTimeline(dir)
       const report = await runFrameQa({ dir, file: film, timeline, options: { freezeSeconds: args.freezeSeconds } })
@@ -6411,7 +6868,7 @@ function sanitizeNewName(raw) {
       if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
       const timeline = readTimeline(dir)
       const result = await exportPackage({ dir, timeline, name: args.name || 'jianying', draft: Boolean(args.draft),
-        subtitles: args.subtitles, film: args.file ? (isAbsolute(args.file) ? args.file : joinPath(dir, args.file)) : undefined })
+        subtitles: args.subtitles, film: args.file ? workspacePath(scope, isAbsolute(args.file) ? args.file : joinPath(dir, args.file)) : undefined })
       return { summary: '已导出 ' + result.shots.length + ' 镜 / ' + result.stems.length + ' 条音轨到 ' + result.folder
         + (result.subtitles ? '（含字幕 ' + result.subtitles + ' 条）' : '')
         + (result.missing.length ? '，缺 ' + result.missing.length + ' 个音频文件' : ''),
@@ -6428,31 +6885,40 @@ function sanitizeNewName(raw) {
   }
   const motionSourceFile = (args, scope, doc) => {
     if (typeof args.file === 'string' && args.file)
-      return isAbsolute(args.file) ? args.file : joinPath(dirnamePath(scope.drawioAbs), args.file)
+      return workspacePath(scope, isAbsolute(args.file) ? args.file : joinPath(dirnamePath(scope.drawioAbs), args.file))
     const node = doc.nodes.find((item) => item.id === args.sourceNodeId)
     if (!node) throw new Error('请给 file（工作区里的图片路径）或 sourceNodeId（画布上的素材节点）')
     if (!node.data?.drawaiMedia || node.data.mediaKind !== 'raster') throw new Error('这个节点不是位图素材')
     const clipDir = clipDirFor(scope.drawioAbs, node.data.mediaClip)
     const found = findSourceFile(clipDir, readManifest(clipDir))
     if (!found) throw new Error('这个素材节点没有源文件，请重新导入')
-    return found.abs
+    return workspacePath(scope, found.abs)
   }
 
   //   motion_assets   真素材进工程（原字节 + 尺寸 + 色板），场景用 staticFile 取
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'motion_assets',
-    description: '素材捕获：把真实字节搬进视频工程的 assets/。capture 收图片/音频/视频（量尺寸、色板、时长与峰值，写进 assets/manifest.json）；crop 先裁切再落地；page 用无头 Chrome 把一段 HTML 模板或一个网址截成 PNG 收进来（写产品界面镜头时用它，不用先自己截图）；palette 只读色板不落地；list 看已有哪些素材。场景里用 staticFile("文件名") 引用。画布快照会被缩放重绘，对品牌色/字体细节不保真，精度要求高时走这里。',
+    description: '视频工程素材：list 查看工程素材；library 按 query（如 纸张、颗粒、钢琴）或 category 搜索插件自带纹理及乐器采样；use 用 assetId 按需导入，返回 file，图片用 staticFile(file)，音频须另用 motion_audio add 上时间轴。素材库是可选来源，用户自带素材优先，采样是单音而非完整配乐；使用前查看许可。gather 按站点收集品牌素材、配色与字体，collect 扫单页；capture 收本地素材；fetch 下载原图；crop 裁切；page 截网页；palette 读色板。',
     parameters: {
-      action: { type: 'string', enum: ['list', 'capture', 'crop', 'palette', 'page'], required: true },
+      action: { type: 'string', enum: ['list', 'library', 'use', 'capture', 'gather', 'collect', 'fetch', 'crop', 'palette', 'page'], required: true, description: 'library 浏览插件自带纹理与乐器采样；use 按 assetId 将选定素材导入工程；list 查看工程内素材' },
       path: { type: 'string', description: '画布路径，省略时用当前画布' }, nodeId: { type: 'string', required: true, description: '视频节点 id（决定哪个工程）' },
       page: { type: 'number' },
       file: { type: 'string', description: '工作区里的图片路径（相对画布目录）' },
       sourceNodeId: { type: 'string', description: '画布上的位图素材节点 id（与 file 二选一）' },
       name: { type: 'string', description: '落地文件名（不含扩展名）' },
       caption: { type: 'string', description: '这条素材是什么，写进 manifest 供后续参考' },
+      assetId: { type: 'string', description: 'use：从 library 返回结果中选择的素材 id' },
+      query: { type: 'string', description: 'library：按文件名或中英文类别筛选' },
+      category: { type: 'string', description: 'library：精确类别（如 piano、paper、audio、image）' },
       x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number', description: 'crop 的区域（像素）' },
       html: { type: 'string', description: 'page：直接给 HTML 源文本（推荐，里面就是待截的界面）' },
-      url: { type: 'string', description: 'page：要截的网址，http(s) 或 file:' },
+      url: { type: 'string', description: 'gather：站点首页网址（会顺带扫导航里的内页）；collect：要收集素材的页面网址（http(s)）；fetch：要下载的素材地址（官方 logo 的 .svg/.png 直链）；page：要截的网址，http(s) 或 file:' },
+      urls: { type: 'array', items: { type: 'string' }, description: 'gather：直接指定要扫的多个页面（产品页/文档页/定价页各一张，最多 6 页）' },
+      brand: { type: 'string', description: 'gather：品牌名或域名（如 "github" / "github.com"），用来补 Simple Icons / Clearbit / 高清 favicon 三条 logo 来源' },
+      pages: { type: 'number', description: 'gather：最多扫几个页面，默认 4（上限 6）' },
+      limit: { type: 'number', description: 'gather 默认 12、collect 默认 8：最多下载几张' },
+      minWidth: { type: 'number', description: '候选图片的最小宽度，默认 240' },
+      dryRun: { type: 'boolean', description: 'gather/collect：只扫描不下载，先看候选清单' },
       width: { type: 'number', description: 'page：视口宽，默认 1440' },
       height: { type: 'number', description: 'page：视口高，默认 900' },
       scale: { type: 'number', description: 'page：像素比，默认 2（截出来是 2 倍图）' },
@@ -6464,12 +6930,46 @@ function sanitizeNewName(raw) {
       const { scope, loaded, dir } = await motionProjectOf(args, exec)
       if (args.action === 'list')
         return { summary: '工程素材 ' + listAssets(dir).length + ' 个', details: JSON.stringify(listAssets(dir).map(({ path: _path, ...rest }) => rest)) }
+      if (args.action === 'library') {
+        const items = listMediaLibrary({ query: args.query, category: args.category })
+        return { summary: '插件素材库 ' + items.length + ' 个', details: JSON.stringify(items) }
+      }
       if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
+      if (args.action === 'use') {
+        const entry = await importMediaLibrary(dir, args.assetId)
+        return { summary: '已导入插件素材 ' + entry.file + (entry.integrity?.warnings?.length ? '（素材校验有提示，详见返回信息）' : ''), details: JSON.stringify({ ...entry,
+          use: entry.kind === 'audio' ? 'motion_audio ' + JSON.stringify({ action: 'add', nodeId: args.nodeId, file: entry.file, role: 'sfx', at: 0 }) : 'staticFile(' + JSON.stringify(entry.file) + ')' }) }
+      }
       if (args.action === 'page') {
+        if (typeof args.url === 'string' && /^file:/i.test(args.url)) workspacePath(scope, fileURLToPath(args.url))
         const entry = await capturePage(dir, { html: args.html, url: args.url, name: args.name, caption: args.caption,
           width: args.width, height: args.height, scale: args.scale, wait: args.wait })
         return { summary: '已截屏 ' + entry.file + '（' + entry.width + '×' + entry.height + '）',
           details: JSON.stringify({ ...entry, use: 'staticFile("' + entry.file + '")', next: '场景里 <Img src={staticFile("' + entry.file + '")} />；截歪了就调 width/height/scale 再截一次' }) }
+      }
+      if (args.action === 'gather') {
+        const gathered = await gatherAssets(dir, { url: args.url, urls: args.urls, brand: args.brand, pages: args.pages,
+          limit: args.limit, minWidth: args.minWidth, width: args.width, dryRun: args.dryRun })
+        const count = gathered.dryRun ? (gathered.candidates || []).length : (gathered.downloaded || []).length
+        return { summary: (gathered.dryRun ? '扫到 ' : '已收集 ') + count + (gathered.dryRun ? ' 个候选' : ' 张素材')
+            + ' · ' + (gathered.pages || []).length + ' 页 · 配色 ' + (gathered.colors || []).length + ' 个 · 字体 ' + (gathered.fonts || []).length + ' 个',
+          details: JSON.stringify(gathered) }
+      }
+      if (args.action === 'collect') {
+        if (!args.url) throw new Error('collect 需要 url')
+        const collected = await collectPageAssets(dir, args.url, { limit: args.limit, minWidth: args.minWidth, width: args.width, dryRun: args.dryRun })
+        return { summary: (collected.dryRun ? '扫描到 ' : '已收集 ') + (collected.downloaded || collected.candidates || []).length
+            + (collected.dryRun ? ' 个候选' : ' 张素材') + (collected.screenshot ? ' + 视口截图' : '') + '：' + String(collected.title || args.url).slice(0, 60),
+          details: JSON.stringify(collected) }
+      }
+      if (args.action === 'fetch') {
+        if (!args.url) throw new Error('fetch 需要 url')
+        const entry = await fetchAsset(dir, args.url, { name: args.name, caption: args.caption })
+        return { summary: '已下载素材 ' + entry.file + (entry.kind === 'vector' ? '（矢量）' : ''),
+          details: JSON.stringify({ ...entry, use: 'staticFile("' + entry.file + '")',
+            next: entry.kind === 'vector'
+              ? '矢量素材放进 <Img src={staticFile("' + entry.file + '")} /> 即可，放大不糊；比例、配色、留白按品牌规范来，别改'
+              : '场景里 <Img src={staticFile("' + entry.file + '")} />；改完 motion_preview 看图' }) }
       }
       const source = motionSourceFile(args, scope, loaded.doc)
       if (args.action === 'palette') {
@@ -6486,10 +6986,10 @@ function sanitizeNewName(raw) {
     },
   })))
 
-  //   motion_sfx      音效采购：Freesound 搜索/下载/清单，带许可复核与署名文件
+  //   motion_sfx      音效采购：Freesound 搜索/下载与素材索引
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'motion_sfx',
-    description: '音效采购（Freesound）。search 按英文关键词搜，返回结果带时长/作者/许可（不按许可过滤，用哪条由人决定）；get 按 id 下载 HQ mp3 预览到 <工程>/assets/sfx/，复核详情页许可、量峰值与有效区间，写 assets/audio-manifest.json 与 FREESOUND-CREDITS.md；list 看已下载的音效。下载完用 motion_audio {action:"add", file:"sfx/xxx.mp3", role:"sfx"} 挂到轴上。',
+    description: '音效采购（Freesound）。search 按英文关键词搜，返回时长与作者；get 按 id 下载 HQ mp3 预览到 <工程>/assets/sfx/，量峰值与有效区间，维护一份 assets/audio-manifest.json；list 看已下载的音效。下载完用 motion_audio {action:"add", file:"sfx/xxx.mp3", role:"sfx"} 挂到轴上。',
     parameters: {
       action: { type: 'string', enum: ['search', 'get', 'list'], required: true },
       path: { type: 'string' }, nodeId: { type: 'string', required: true, description: '视频节点 id' },
@@ -6524,7 +7024,6 @@ function sanitizeNewName(raw) {
             suggestedGainDb: item.asset.analysis.suggestedGainDb,
             use: 'motion_audio {action:"add", file:"' + item.asset.file + '", role:"sfx", gainDb:' + item.asset.analysis.suggestedGainDb + '}' })),
           failed: bad,
-          credits: 'assets/FREESOUND-CREDITS.md',
         }) }
     },
   })))
@@ -6558,6 +7057,7 @@ function sanitizeNewName(raw) {
       const timeline = readTimeline(dir)
       const fps = timeline.fps
 
+      if (timeline.sync && args.action === 'apply') throw new Error('该工程已统一绑定，请通过 motion_sync bind 更新，避免旧吸附流程覆盖锚点')
       if (args.action === 'list') {
         const cues = readTrack(timeline)
         return { summary: cues.length ? '音频轨 ' + cues.length + ' 条' : '时间轴上还没有音频', details: describeTrack(cues, fps) }
@@ -6569,7 +7069,7 @@ function sanitizeNewName(raw) {
         if (typeof args.file === 'string' && args.file) {
           const candidate = isAbsolute(args.file) ? args.file : joinPath(dirnamePath(scope.drawioAbs), args.file)
           if (existsSync(candidate)) {
-            const entry = await captureAsset(dir, candidate, { caption: args.file })
+            const entry = await captureAsset(dir, workspacePath(scope, candidate), { caption: args.file })
             name = entry.file
           } else name = args.file.replace(/\\/g, '/')
         } else {
@@ -6578,7 +7078,7 @@ function sanitizeNewName(raw) {
           const entry = await captureAsset(dir, frozenAudioFile(scope.drawioAbs, audioNode.data.audioClip).file, { caption: 'audio node ' + audioNode.id })
           name = entry.file
         }
-        const assetFile = joinPath(assetsDirectory(dir), name)
+        const assetFile = workspacePath(scope, assetPath(dir, name))
         if (!existsSync(assetFile)) throw new Error('工程 assets/ 里没有这个音频：' + name)
         const probe = await probeAudio(assetFile)
         const seconds = Number(args.duration) || probe.seconds
@@ -6613,7 +7113,7 @@ function sanitizeNewName(raw) {
       }
 
       let file
-      if (typeof args.file === 'string' && args.file) file = isAbsolute(args.file) ? args.file : joinPath(dirnamePath(scope.drawioAbs), args.file)
+      if (typeof args.file === 'string' && args.file) file = workspacePath(scope, isAbsolute(args.file) ? args.file : joinPath(dirnamePath(scope.drawioAbs), args.file))
       else {
         const audioNode = loaded.doc.nodes.find((item) => item.id === args.audioNodeId)
         if (!audioNode?.data?.audioClip) throw new Error('请给 file（音频文件路径），或 audioNodeId 指向一个已用 audio_asset 导入的音频节点')
@@ -6661,41 +7161,63 @@ function sanitizeNewName(raw) {
     },
   })))
 
+  ctx.effect(() => ctx.tools.register(defineTool({
+    name: 'motion_sync',
+    description: '音乐拍点→切镜/动作→音效峰值统一绑定。bind 替换绑定表并分析音乐；list 查看解析结果；clear 解除绑定、保留当前排期。anchors:[{id,type:"cut"|"action",shotId,beat?:0起拍号,at?:源音乐秒,name?:动作名,visual?:{metric:"change"|"brightness",roi:{x,y,w,h}},sfx?:[{cueId,peakSeconds:素材源峰值秒}]}]。beat/at 二选一；动作场景接收 anchors，使用 anchors.<name> 本镜局部帧写关键帧。动作验收要选 ROI/metric，切镜默认测帧差。绑定后 motion_audio_verify 对照成片。音乐需要非循环音轨，音乐 from/trimStart 参与换算。',
+    parameters: {
+      action: {type:'string',enum:['bind','list','clear'],required:true},
+      nodeId: {type:'string',required:true}, path:{type:'string'},page:{type:'number'},
+      musicCueId:{type:'string'},anchors:{type:'json'},
+      outputOffsetSeconds:{type:'number',description:'具体渲染管线实测音轨延迟（秒），默认0；验收报告给出多点测得的偏移参考'},
+      toleranceFrames:{type:'number',description:'音画及音效误差容差，默认2帧，最大3帧'},
+    },
+    output: {schema:{type:'object',additionalProperties:false,properties:{summary:{type:'string',required:true},details:{type:'string',required:true}}},
+      render:(_args,value)=>[{type:'text',text:value.summary+'\n'+value.details}]},
+    async execute(args, exec) {
+      const {scope,dir}=await motionProjectOf(args,exec)
+      let timeline=readTimeline(dir)
+      if(args.action==='list') return {summary:'音乐同步绑定',details:JSON.stringify(timeline.sync||null)}
+      if(policyFor(scope.sessionId)?.mode==='read-only')throw new Error('当前会话为只读')
+      if(args.action==='clear') {
+        delete timeline.sync
+        for(const shot of timeline.shots)delete shot.anchors
+      } else {
+        const cue=timeline.audio.find(item=>item.id===args.musicCueId)
+        if(!cue)throw new Error('musicCueId 不存在；先 motion_audio add/list')
+        const analysis=await analyzeBeats(assetPath(dir,cue.file))
+        const tolerance=args.toleranceFrames??2
+        if(!Number.isFinite(tolerance)||tolerance<0||tolerance>3)throw new Error('toleranceFrames 必须在0–3内')
+        timeline.sync={version:1,musicCueId:cue.id,analysis,analysisSourceHash:filmHash(assetPath(dir,cue.file)),anchors:args.anchors,outputOffsetSeconds:args.outputOffsetSeconds??0,toleranceFrames:tolerance}
+        timeline=resolveSync(timeline)
+      }
+      writeTimeline(dir,timeline)
+      return {summary:args.action==='clear'?'已解除音乐绑定':'已绑定音乐、画面与音效；场景用 anchors.<name> 驱动动作关键帧',details:JSON.stringify(timeline.sync||{})}
+    },
+  })))
+
   //   motion_audio verify    渲后回测：成片里的声音到底偏了多少帧
   ctx.effect(() => ctx.tools.register(defineTool({
     name: 'motion_audio_verify',
-    description: '渲后回测：把成片的音轨抽回来重新量重音，和节拍网格比一遍，报告每拍偏差（帧）。偏差 >2 帧说明这条片子对不上拍，先查素材/偏移再交付。',
+    description: '音画对照验收：按 motion_sync 锚点，从成片匹配源音乐和音效波形、测切镜或动作ROI的实际变化帧，逐项报告音画及音效误差。无证据标 unverified，超容差 fail。报告写入 .out/qa/sync/report.json。',
     parameters: {
       path: { type: 'string' }, nodeId: { type: 'string', required: true, description: '视频节点 id' },
       page: { type: 'number' },
-      file: { type: 'string', description: '用于对照的源音频（默认用成片音轨自己量的网格）' },
+
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { summary: { type: 'string', required: true }, details: { type: 'string', required: true } } },
       render: (_args, value) => [{ type: 'text', text: value.summary + '\n' + value.details }] },
     async execute(args, exec) {
       const { scope, dir } = await motionProjectOf(args, exec)
+      if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
       const timeline = readTimeline(dir)
       const jobs = motionJobs.list(dir).filter((job) => job.kind === 'film' && job.status === 'done')
       const film = jobs.sort((a, b) => String(b.endedAt || b.createdAt).localeCompare(String(a.endedAt || a.createdAt)))[0]
       if (!film) throw new Error('还没有渲染完成的成片，先 motion_render start')
       const output = film.output || outputPath(dir, 'film.mp4')
       if (!existsSync(output)) throw new Error('成片文件不见了：' + output)
-      const qaDir = joinPath(dir, '.out', 'qa')
-      if (!existsSync(qaDir)) mkdir(qaDir, { recursive: true }).catch(() => {})
-      const wav = joinPath(qaDir, 'verify.wav')
-      await extractAudio(output, wav)
-      const heard = await analyzeBeats(wav)
-      if (!heard.grid) return { summary: '成片音轨里量不出稳定网格', details: JSON.stringify({ bpm: heard.bpm, beats: heard.beats.length }) }
-      const fps = timeline.fps
-      const period = heard.grid.periodMs / 1000
-      const rows = heard.beats.slice(0, 60).map((beat, index) => {
-        const expected = heard.grid.t0 + period * index
-        return { at: Number(beat.at.toFixed(3)), residualFrames: Number(((beat.at - expected) * fps).toFixed(2)) }
-      })
-      const worst = rows.reduce((acc, row) => Math.max(acc, Math.abs(row.residualFrames)), 0)
-      const cues = readTrack(timeline)
-      return { summary: '成片音轨 ' + (heard.bpm || '?') + ' BPM，' + (worst > 2 ? '最大偏差 ' + worst.toFixed(2) + ' 帧（超 2 帧，对不上拍）' : '偏差 ' + worst.toFixed(2) + ' 帧（合格）'),
-        details: JSON.stringify({ film: output, cues: cues.length, fps, grid: heard.grid, worstFrames: Number(worst.toFixed(2)), rows: rows.slice(0, 10) }) }
+      const report = await verifySync(dir, output, timeline)
+      return { summary: '成片音画对照：' + report.status + '（' + report.rows.length + ' 个锚点）',
+        details: JSON.stringify(report) }
     },
   })))
 
@@ -6748,6 +7270,8 @@ function sanitizeNewName(raw) {
 
       if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('这条画布是只读的，改不了旁白')
 
+      if (typeof args.script === 'string' && args.script.trim() && !args.script.trim().startsWith('#'))
+        workspacePath(scope, isAbsolute(args.script) ? args.script : joinPath(dir, args.script.trim()))
       const { markdown, source } = readScript(dir, args.script)
       const script = parseScript(markdown)
       if (!script.length) throw new Error('脚本里没解析出句子：需要 ## shot-1 这样的分节 + 一句一行')

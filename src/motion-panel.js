@@ -12,10 +12,11 @@ function videoWorkbenchIcon(name) {
 
 function VideoNodeToolbar(props) {
   const [info, setInfo] = React.useState(false)
-  const button = (icon, text, onClick) => React.createElement('button', { type: 'button', className: 'drawai-video-action', onClick }, videoWorkbenchIcon(icon), text)
+  const button = (icon, text, onClick, extra) => React.createElement('button', { type: 'button', className: 'drawai-toolbar-button',
+    title: text, 'aria-label': text, onClick, ...extra }, videoWorkbenchIcon(icon), React.createElement('span', null, text))
   return React.createElement('div', { className: 'drawai-video-actions', role: 'toolbar', 'aria-label': '视频节点操作' },
-    button('info', '信息', () => setInfo(!info)), button('delete', '删除', props.onDelete),
-    button('edit', '编辑', props.onEdit), button('video', '上传视频', props.onUpload),
+    props.hideEdit ? null : button('edit', '编辑', props.onEdit), button('video', '上传视频', props.onUpload),
+    button('info', '信息', () => setInfo(!info), { 'aria-expanded': info }), button('delete', '删除', props.onDelete),
     info ? React.createElement('div', { className: 'drawai-video-info', role: 'status' },
       React.createElement('strong', null, props.node.label || '视频'),
       React.createElement('div', null, props.node.data.mediaClip ? '已添加视频内容' : '空视频节点'),
@@ -26,7 +27,7 @@ function VideoNodeToolbar(props) {
 function MotionFilmReview({job,onLoad,onSave,onRevise}){
   const [url,setUrl]=React.useState(''),[error,setError]=React.useState(''),[busy,setBusy]=React.useState(false),[progress,setProgress]=React.useState({motion:0,sound:0}),[note,setNote]=React.useState(''),[confirmed,setConfirmed]=React.useState(false)
   const heard=React.useRef([]),previous=React.useRef(null),film=job.qa.film
-  React.useEffect(()=>()=>{if(url)URL.revokeObjectURL(url)},[url])
+  React.useEffect(()=>()=>{if(url?.startsWith('blob:'))URL.revokeObjectURL(url)},[url])
   const coverage=ranges=>{
     const sorted=ranges.slice().sort((a,b)=>a[0]-b[0]);let end=0,total=0
     for(const [from,to]of sorted){total+=Math.max(0,to-Math.max(end,from));end=Math.max(end,to)}return total
@@ -40,7 +41,7 @@ function MotionFilmReview({job,onLoad,onSave,onRevise}){
   }
   const load=async()=>{
     setBusy(true);setError('')
-    try{const result=await onLoad(job.clip),bytes=Uint8Array.from(atob(result.base64),c=>c.charCodeAt(0));setUrl(URL.createObjectURL(new Blob([bytes],{type:result.mime||'video/mp4'})));heard.current=[];previous.current=null;setProgress({motion:0,sound:0});setConfirmed(false)}catch(e){setError(e.message)}finally{setBusy(false)}
+    try{const result=await onLoad(job.clip);if(!result?.url)throw Error('无法读取成片地址');setUrl(result.url);heard.current=[];previous.current=null;setProgress({motion:0,sound:0});setConfirmed(false)}catch(e){setError(e.message)}finally{setBusy(false)}
   }
   const save=async status=>{
     setBusy(true);setError('')
@@ -89,7 +90,7 @@ function MotionPanel(props) {
   }
   const change = (key, value) => { setError(''); try { props.onChange({ [key]: value }) } catch (failure) { setError(failure.message) } }
   const candidates = props.doc.nodes.filter((node) => node.id !== props.node.id && !refs.some((edge) => edge.from === node.id))
-  return React.createElement('div', { className: 'drawai-motion-panel drawai-video-composer', 'data-tone': props.mode || 'light',
+  return React.createElement('div', { className: 'drawai-motion-panel drawai-video-composer', 'data-tone': props.mode || 'light', 'aria-label': '视频设置',
     onPointerDown: (event) => event.stopPropagation(), onDoubleClick: (event) => event.stopPropagation(), onKeyDown: (event) => event.stopPropagation() },
     React.createElement('div', { className: 'drawai-video-reference-heading' }, '参考内容', props.onShotLibrary ? React.createElement('button', { type: 'button', className: 'drawai-btn', onClick: props.onShotLibrary }, '添加镜头卡') : null),
     React.createElement('div', { className: 'drawai-video-references' },
@@ -109,9 +110,9 @@ function MotionPanel(props) {
             onClick: async (event) => { const details = event.currentTarget.closest('details'); try { await props.onReference?.(node.id); details.open = false } catch (failure) { setError(failure.message) } }
           }, node.label || node.id)) : React.createElement('p', null, '先在画布添加文字、图片或视频，再用箭头连接到此节点。')))),
     React.createElement('div', { className: 'drawai-video-reference-note', role: 'status', 'aria-label': '画布参考节点' },
-      refs.length ? '已识别 ' + refs.length + ' 个参考节点' : '暂无参考节点，将画布元素用箭头连接到此视频即可自动引用。'),
+      refs.length ? '已连接 ' + refs.length + ' 个参考节点' : '连接画布中的内容，可用作视频参考。'),
     stale ? React.createElement('div', { role: 'status', className: 'drawai-export-info' }, '描述或参考已变化，当前播放的是上一版视频。') : null,
-    React.createElement('textarea', { className: 'drawai-video-prompt', 'aria-label': '视频描述', placeholder: '描述要生成的视频内容',
+    React.createElement('textarea', { className: 'drawai-video-prompt', 'aria-label': '视频描述', placeholder: '描述视频内容与风格',
       value: motion.prompt || '', onChange: (event) => change('prompt', event.target.value) }),
     React.createElement('div', { className: 'drawai-video-composer-footer' },
       React.createElement('details', { className: 'drawai-video-settings' },
@@ -126,10 +127,10 @@ function MotionPanel(props) {
           React.createElement('label', null, '帧率', React.createElement('select', { 'aria-label': '视频帧率', value: motion.fps || 30, onChange: (event) => change('fps', Number(event.target.value)) },
             [12, 24, 25, 30].map((fps) => React.createElement('option', { key: fps, value: fps }, fps + ' fps')))))),
       React.createElement('div', { className: 'drawai-export-info', role: 'status', style: { flex: 1, minWidth: 0 } },
-        running ? labels[running.status] + (running.stageDetail?.tool ? ' · ' + running.stageDetail.tool : '') : '由对话主线制作：让 AI 建工程、改场景、看预览、渲染')),
+        running ? labels[running.status] + (running.stageDetail?.tool ? ' · ' + running.stageDetail.tool : '') : '在对话中描述想制作的视频')),
     React.createElement('details',{className:'drawai-video-project'},
       React.createElement('summary',null,'声音'),
-      React.createElement('p',{className:'drawai-export-info'},'声音挂在工程的时间轴上（timeline.json 的 audio[]），渲染时和画面一起播。让 AI 用 motion_audio add 加一条：旁白自动压低背景音乐，切镜可以吸到拍子上。'),
+      React.createElement('p',{className:'drawai-export-info'},'添加音频节点并连接到视频，然后在对话中安排音乐、音效或旁白。'),
       React.createElement('button',{type:'button',className:'drawai-btn',onClick:()=>{try{props.onAddAudio?.()}catch(e){setError(e.message)}}},'添加音频节点')),
     error ? React.createElement('div', { role: 'alert', className: 'drawai-imagegen-status err' }, error) : null,
     React.createElement('div', { className: 'drawai-motion-task-heading' }, '任务情况',

@@ -18,6 +18,7 @@ _local/
 /artifacts/
 /downloads/
 /.tools/
+/.tmp/
 /.tmp-video/
 
 # 本地 drawio webapp junction（见 README 开发一节）
@@ -50,3 +51,16 @@ out/
 reference-media/
 # 画布文件（*.drawio 已忽略，*.drawai 同理）
 *.drawai
+
+# 上游公开素材（纹理 / 乐器采样）：由 tools/vendor-motion-media.mjs 按固定 commit
+# 下载并校验 Git blob 哈希，约 66MB；lib 下同目录是构建副本。发布前跑一次即可。
+src/motion/media-library/
+lib/motion/media-library/
+
+# 随发布包提供的中英文字体（约 135MB，第三方，授权见 LICENSE）。
+# 本地保留即可；重新取回后 `npm run build` 会同步到 lib。
+src/motion/fonts/
+lib/motion/fonts/
+
+# 画布备份（.bak-flat / .bak-png / … ：体积大且是一次性回滚点）
+*.bak-*

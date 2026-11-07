@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs'
 import { composeClientBody, dedentBody, extractBody } from './build.mjs'
 
 const EXPECTED_INJECT = ['tools', 'fs', 'sessions', 'sandboxPolicy', 'webServer']
-const EXPECTED_TOOLS = ['shotcraft_search', 'audio_asset', 'diagram_read', 'motion_task', 'diagram_apply']
+const EXPECTED_TOOLS = ['shotcraft_search', 'mg_style', 'audio_asset', 'diagram_read', 'motion_task', 'motion_project', 'motion_spec', 'motion_preview', 'motion_render', 'motion_qa', 'motion_export', 'motion_assets', 'motion_sfx', 'motion_audio', 'motion_sync', 'motion_audio_verify', 'motion_voice', 'diagram_apply']
 const EXPECTED_ROUTE = '/drawai/api/save'
 
 let failures = 0
@@ -110,7 +110,7 @@ try {
 }
 
 const names = registered.map((tool) => tool.name)
-check('注册了五个工具', registered.length === 5, names.join(', '))
+check('注册工具集合与声明一致', registered.length === EXPECTED_TOOLS.length && names.every(name => EXPECTED_TOOLS.includes(name)), names.join(', '))
 for (const expected of EXPECTED_TOOLS) {
   check('注册了 ' + expected, names.includes(expected))
 }
@@ -136,6 +136,7 @@ for (const tool of registered) {
   if (tool.name === 'diagram_apply') {
     const required = Array.isArray(schema.required) ? schema.required : []
     check('diagram_apply 的 ops 是必填', required.includes('ops'), 'required=' + JSON.stringify(required))
+    check('diagram_apply 的 path 是必填', required.includes('path'), 'required=' + JSON.stringify(required))
     const layout = schema.properties.layout
     check('diagram_apply 的 layout 有 enum', layout !== undefined && Array.isArray(layout.enum), layout === undefined ? 'missing' : JSON.stringify(layout.enum))
   }

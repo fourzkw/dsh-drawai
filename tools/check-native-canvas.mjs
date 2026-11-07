@@ -60,6 +60,38 @@ assert.equal(doc.nodes[0].creation.references[0].role, 'firstFrame')
 assert.equal(transaction.doc.nodes[0].creation.references[0].role, 'style')
 assert.equal(parseCanvas(buildCanvas(emptyDocument(), { format: 'drawai' }).text).doc.layers.length, 1)
 
+// Rich labels survive a draw.io migration and edits, including a format-only
+// edit; a stale rich value can never replace a newer plain-text label.
+const richXml = '<mxfile><diagram name="P"><mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/>' +
+  '<mxCell id="t" value="Hello &lt;b&gt;world&lt;/b&gt;" style="text;html=1;" vertex="1" parent="1"><mxGeometry x="0" y="0" width="200" height="60" as="geometry"/></mxCell>' +
+  '</root></mxGraphModel></diagram></mxfile>'
+const richNative = migrateMxfile(richXml)
+const richDoc = parseCanvas(richNative).doc
+assert.equal(richDoc.nodes[0].label, 'Hello world')
+assert.equal(richDoc.nodes[0].labelHtml, 'Hello <b>world</b>')
+assert.equal(exportCanvasToMxfile(richNative), richXml)
+richDoc.nodes[0].labelHtml = 'Hello <i>world</i>'
+const richUpdated = applyCanvas(richNative, richDoc).text
+assert.equal(parseCanvas(richUpdated).doc.nodes[0].labelHtml, 'Hello <i>world</i>')
+assert.equal(parseMxfile(exportCanvasToMxfile(richUpdated)).doc.nodes[0].labelHtml, 'Hello <i>world</i>')
+richDoc.nodes[0].labelHtml = null
+const clearedXml = exportCanvasToMxfile(applyCanvas(richNative, richDoc).text)
+assert.equal(parseMxfile(clearedXml).doc.nodes[0].label, 'Hello world')
+assert.equal(parseMxfile(clearedXml).doc.nodes[0].labelHtml, undefined)
+richDoc.nodes[0].labelHtml = 'Hello <i>world</i>'
+richDoc.nodes[0].label = 'Changed by an older client'
+const plainXml = exportCanvasToMxfile(applyCanvas(richNative, richDoc).text)
+assert.equal(parseMxfile(plainXml).doc.nodes[0].label, 'Changed by an older client')
+assert.equal(parseMxfile(plainXml).doc.nodes[0].labelHtml, undefined)
+const newRichDoc = emptyDocument()
+newRichDoc.nodes.push({ id: 'new', label: 'One two', labelHtml: '<b>One</b> two', style: 'text;html=1;', x: 0, y: 0, w: 160, h: 40, data: { role: 'note' } })
+const newRich = buildCanvas(newRichDoc, { format: 'drawai' }).text
+assert.equal(parseMxfile(exportCanvasToMxfile(newRich)).doc.nodes[0].labelHtml, '<b>One</b> two')
+const wrappedDoc = parseMxfile(richXml).doc
+wrappedDoc.nodes[0].data = { role: 'note' }
+const { applyDocToMxfile } = await import('../src/mxfile.js')
+assert.equal(parseMxfile(applyDocToMxfile(richXml, wrappedDoc).text).doc.nodes[0].labelHtml, 'Hello <b>world</b>')
+
 mkdirSync(resolve('tmp'), { recursive: true })
 const directory = mkdtempSync(resolve('tmp/native-canvas-'))
 try {

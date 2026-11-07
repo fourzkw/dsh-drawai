@@ -1,15 +1,13 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { randomUUID, createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, writeFileSync, copyFileSync, statSync, realpathSync, existsSync, renameSync, readdirSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { join, dirname, basename, relative, isAbsolute, delimiter } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { mkdirSync, readFileSync, writeFileSync, copyFileSync, statSync, realpathSync, existsSync, renameSync, unlinkSync } from 'node:fs'
+import { join, dirname, basename, relative, isAbsolute } from 'node:path'
+import { searchSfx, getSfx } from './motion/sfx.js'
 import { ffmpegBinary } from './video-export.js'
 import { clipDirFor, ensureClipPack, mediaRootFor } from './media.js'
 import { audioNodeData, audioNodeSettings, validateAudioTimeline } from './motion-core.js'
 const exec = promisify(execFile)
-const require = createRequire(import.meta.url)
 const MAX_BYTES = 32 * 1024 * 1024
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const run = (args,signal,timeout=120000) => exec(ffmpegBinary(),args,{windowsHide:true,timeout,maxBuffer:2*1024*1024,signal})
@@ -54,13 +52,10 @@ export async function importAudioFile(drawioAbs,source,{name=basename(source),ro
   await run(['-hide_banner','-loglevel','error','-y','-i',join(dir,'audio.wav'),'-c:a','aac','-b:a','128k','-movflags','+faststart',join(dir,'preview.m4a')],signal)
   const bytes=readFileSync(join(dir,'audio.wav'))
   if(bytes.length>128*1024*1024)throw new Error('标准化音频过大')
-  const original='original'+(/\.[a-z0-9]{1,5}$/i.exec(basename(source))?.[0]||'.bin')
-  copyFileSync(source,join(dir,original))
   const {log,...analysis}=await analyzeAudio(join(dir,'audio.wav'),signal)
-  const manifest={version:1,name:String(name).slice(0,240),original,sha256:sha(bytes),sourceSha256:sha(readFileSync(source)),...analysis,provenance,
-    changes:['Decoded to stereo 48kHz PCM for mixing; original source retained'],createdAt:new Date().toISOString()}
-  writeFileSync(join(dir,'audio.json'),JSON.stringify(manifest,null,2));writeFileSync(join(dir,'analysis.log'),log)
-  writeFileSync(join(dir,'CREDITS.md'),JSON.stringify(provenance,null,2))
+  const manifest={version:1,name:String(name).slice(0,240),sha256:sha(bytes),sourceSha256:sha(readFileSync(source)),...analysis,provenance,
+    changes:['Decoded to stereo 48kHz PCM for mixing'],createdAt:new Date().toISOString()}
+  writeFileSync(join(dir,'audio.json'),JSON.stringify(manifest,null,2))
   return {clip,manifest,data:{...audioNodeData(role),audioClip:clip,audioName:manifest.name,audioDuration:String(manifest.duration),audioSha256:manifest.sha256}}
 }
 
@@ -90,8 +85,6 @@ export async function mixMotionAudio({input,composition,assets,publicDir,packDir
     if(plateSource)copyFileSync(picture,source)
     mkdirSync(join(packDir,'project'),{recursive:true})
     writeFileSync(join(packDir,'project','audio-plan.json'),JSON.stringify(plan,null,2))
-    writeFileSync(join(packDir,'project','audio-manifest.json'),'[]')
-    writeFileSync(join(packDir,'project','AUDIO-CREDITS.md'),'No audio assets used.\n')
     return {status:'silent',listening:'not-performed',variants:{picture:plateSource?'picture.mp4':'source.mp4',full:'source.mp4'}}
   }
   const manifest=[]
@@ -126,40 +119,28 @@ export async function mixMotionAudio({input,composition,assets,publicDir,packDir
     filters.push(cues.map((_,index)=>`[a${index}]`).join('')+`amix=inputs=${cues.length}:normalize=0,alimiter=limit=0.95:level=0:latency=1,apad,atrim=duration=${seconds}[mix]`)
     const script=join(packDir,'project','mix-'+filename+'.txt');mkdirSync(dirname(script),{recursive:true});writeFileSync(script,filters.join(';\n'))
     const temporary=join(packDir,filename+'.mixing.mp4')
+    try {
     const result=await run([...args,'-filter_complex_script',script,'-map','0:v:0','-map','[mix]','-c:v','copy','-c:a','aac','-ar','48000','-b:a','192k','-t',String(seconds),'-movflags','+faststart',temporary],signal,180000)
     logs.push(result.stderr);renameSync(temporary,join(packDir,filename))
+    } finally { if(existsSync(script))unlinkSync(script); if(existsSync(temporary))unlinkSync(temporary) }
   }
   await mix(plan.cues,'source.mp4')
   if(plan.cues.some(cue=>cue.role==='bgm'))await mix(plan.cues.filter(cue=>cue.role!=='bgm'),'no-bgm.mp4')
   const {log,...analysis}=await analyzeAudio(source,signal);logs.push(log)
   writeFileSync(join(packDir,'project','audio-plan.json'),JSON.stringify(plan,null,2))
   writeFileSync(join(packDir,'project','audio-manifest.json'),JSON.stringify([...new Map(manifest.map(item=>[item.referenceId,item])).values()],null,2))
-  writeFileSync(join(packDir,'project','AUDIO-CREDITS.md'),manifest.map(item=>JSON.stringify(item.provenance)).join('\n'))
-  writeFileSync(join(packDir,'project','audio-mix.log'),logs.join('\n'))
   return {status:'mixed',...analysis,listening:'not-performed',warnings:analysis.samplePeakDb===null||analysis.samplePeakDb<=-90?['成片音轨几乎静音，请试听检查']:[],
     variants:{full:'source.mp4',picture:'picture.mp4',...(plan.cues.some(cue=>cue.role==='bgm')?{noBgm:'no-bgm.mp4'}:{})}}
 }
 
+// 两个音效入口共用 JS 下载器，避免 Python 分支的许可拦截与重复清单。
 export async function sourceFreesound(action,args,directory,signal) {
-  mkdirSync(directory,{recursive:true})
-  const uvRoot=join(process.env.APPDATA||'', 'uv','python')
-  const uvPython=process.platform==='win32'&&existsSync(uvRoot)?readdirSync(uvRoot).filter(name=>name.startsWith('cpython-')).sort().reverse().map(name=>join(uvRoot,name,'python.exe')).find(existsSync):null
-  const python=process.env.DRAWAI_PYTHON_PATH||uvPython||'python'
-  const script=fileURLToPath(new URL('./motion/shotcraft/upstream/assets/scripts/sfx-source.py',import.meta.url))
-  const command=[script,action]
-  if(action==='search'){
-    if(typeof args.query!=='string'||!args.query.trim()||args.query.length>200)throw new Error('请提供音效搜索词')
-    command.push(args.query,'--limit',String(Math.max(1,Math.min(12,Math.floor(Number(args.limit)||5)))),'--pages','1')
-  }else{
-    if(!/^fs:\d+$/.test(args.id||''))throw new Error('请使用搜索返回的 fs:数字 ID')
-    command.push(args.id,'--out-dir',directory,'--workers','1')
+  signal?.throwIfAborted()
+  if(action==='search') {
+    const found=await searchSfx({...args,signal})
+    return {provider:'freesound',query:found.query,results:found.results.map(row=>({...row,name:row.title,duration:row.seconds,license_label:row.licenseLabel}))}
   }
-  command.push('--license',['cc0','by','any'].includes(args.license)?args.license:'any')
-  const binaryDirs=[dirname(ffmpegBinary())]
-  if(process.env.DRAWAI_FFPROBE_PATH)binaryDirs.push(dirname(process.env.DRAWAI_FFPROBE_PATH))
-  const platform=process.platform==='win32'?'win32-'+process.arch+'-msvc':process.platform==='darwin'?'darwin-'+process.arch:'linux-'+process.arch+'-gnu'
-  try{binaryDirs.push(dirname(require.resolve('@remotion/compositor-'+platform)))}catch{/* configured binaries or PATH */}
-  const env={...process.env,PYTHONIOENCODING:'utf-8',PATH:binaryDirs.join(delimiter)+delimiter+(process.env.PATH||'')}
-  const {stdout}=await exec(python,command,{windowsHide:true,timeout:120000,maxBuffer:2*1024*1024,signal,env})
-  return JSON.parse(stdout)
+  const result=await getSfx(directory,[args.id],{persist:false,signal})
+  signal?.throwIfAborted()
+  return {...result,results:result.results.map(row=>row.ok?{...row,asset:{...row.asset,file:'assets/'+row.asset.file}}:row)}
 }

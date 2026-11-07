@@ -22,6 +22,7 @@ import { dirname, resolve } from 'node:path'
 import { composeClientBody } from './build.mjs'
 import * as motionCore from '../src/motion-core.js'
 import { isShotCardNode } from '../src/shotcard-core.js'
+import { isMgStyleNode } from '../src/mgstyle-core.js'
 import * as styleKernel from '../src/style-kernel.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -576,7 +577,7 @@ console.log('\n点到外面：收掉下拉菜单，并提交/退出文字输入�
   ok(rest(runPointer(null, targetOutside, null)).length === 0, '没在编辑时不会平白提交一次')
   ok(rest(runPointer('file', targetOutside, EDIT)).join(',') === 'commit,menu:null,pos:null', '两件事可以同时发生：提交文字 + 收掉菜单')
   // 输入框的 blur 仍然是兜底（点浏览器外、Tab 走焦都会走它）
-  ok(/onBlur: commitEdit/.test(src), '输入框保留 onBlur 兜底（点击浏览器外/Tab 走焦也要提交）')
+  ok(/onBlur: onEditorBlur/.test(src) && /function onEditorBlur\(event\)[\s\S]*?commitEdit\(\)/.test(src), '输入框保留 onBlur 兜底，工具栏操作例外')
 
   // 接线：root 上必须真的挂了这个捕获处理器，否则函数写得再对也没人调
   ok(/onPointerDownCapture: onRootPointerDown/.test(src), 'root 上挂了 onPointerDownCapture（捕获阶段，早于画布自己的按下处理）')
@@ -1137,7 +1138,7 @@ console.log('\n「看一眼」：客户端渲成 PNG 回执给宿主（不下载
   // 体量不再由客户端预检截断：宿主对 render-result 单独放开了 body 上限。
   ok(src.indexOf("action: 'render-result'") > 0, "客户端会回执渲染结果（action: 'render-result'）")
   ok(/function reportRenderResult\(requestId, payload\)/.test(src), '有 reportRenderResult（这条路上唯一的上报出口）')
-  ok(/function renderPngPayload\(node, width, height, scale\)/.test(src), '有 renderPngPayload（渲成 base64，不触发下载）')
+  ok(/function renderPngPayload\(node, width, height, scale(?:, aggressive)?\)/.test(src), '有 renderPngPayload（渲成 base64，不触发下载）')
   const payloadAt = src.indexOf('function renderPngPayload(')
   const payloadSrc = payloadAt >= 0 ? src.slice(payloadAt, payloadAt + 1600) : ''
   ok(/toDataURL\('image\/png'\)/.test(payloadSrc), '用 canvas 的 toDataURL 取 PNG（不落文件）')
@@ -1197,13 +1198,15 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
     railShapeFace: (shape) => ({ type: 'svg', props: { 'data-shape': shape }, children: [] }),
     railEdgeFace: (kind) => ({ type: 'svg', props: { 'data-line': kind }, children: [] }),
     applyLocal: (mutate) => { mutations++; mutate(doc) },
+    clearRichLabelFormatting: () => {},
+    has: (value, key) => Object.prototype.hasOwnProperty.call(value, key),
     applyLineKind: (ids, kind) => { lineChange = { ids, kind } },
     updateEdge: () => {},
     lastCoalesceRef: { current: null },
     ColorPalette: 'color-palette', uid: 'test', prefs: { customColors: [] },
     customColorList: new Function('normalizeCustomColor', 'value', bodyOf('customColorList')).bind(null, new Function('value', bodyOf('normalizeCustomColor'))),
     loadDrawaiPrefs: () => ({ customColors: [] }), patchPrefs: () => {},
-    motionCore: { ...motionCore, isShotCardNode },
+    motionCore: { ...motionCore, isShotCardNode, isMgStyleNode },
     createMotionFromSelection: () => {},
     ImageTraceControl: 'image-trace-control',
     ToolbarPopover: 'toolbar-popover', NodeToolCard: 'node-tool-card', canvasRef: { current: null }, active: true,
@@ -1223,7 +1226,7 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
   const render = () => new Function(...Object.keys(context), src.slice(start, end) + '\nreturn renderSelectionToolbar()')(...Object.values(context))
   const flatten = (node) => Array.isArray(node) ? node.flatMap(flatten) : node && typeof node === 'object' ? [node].concat(flatten(node.children || [])) : []
   const tree = render()
-  ok(tree.props.role === 'toolbar' && tree.props.style.width === '460px', '浮动工具栏保持宽度，不限制在画布视口内')
+  ok(tree.props.role === 'toolbar' && tree.props.style.width === '460px', '普通选区使用一致的工具栏宽度')
   const controls = flatten(tree)
   const control = (label) => controls.find((el) => el.props.label === label || el.props['aria-label'] === label)
   ok(control('字号').props.value === '', '节点与边字号不同，显示混合状态')
@@ -1240,7 +1243,7 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
   fillPicker.props.onOpacityChange(45)
   ok(doc.nodes.every((n) => styleKernel.styleGet(n.style, 'fillOpacity') === '45') && styleKernel.styleGet(doc.edges[0].style, 'fillOpacity', '') === '', '填充透明度仅修改节点，不修改混合选区的连线')
   context.editing = { kind: 'node', id: 'a' }
-  ok(render() === null, '文字输入时工具栏不遮挡编辑框')
+  ok(render()?.props.role === 'toolbar', '文字输入时保留同一个选区工具栏')
   context.editing = null
   context.selectedIds = ['a', 'b']
   const shapeControl = flatten(render()).find((el) => el.props.label === '形状')
@@ -1319,7 +1322,7 @@ console.log('\n标准色与自定义色板')
   tree.props.ref.current = anchor
   popup.props.ref.current = panel
   tree.props.onToggle({ target: anchor, currentTarget: anchor })
-  ok(panel.shown && panel.style.top === '448px' && panel.style.left === '318px', '色板跟随入口，允许超出窄窗口边界')
+  ok(panel.shown && panel.style.top === '448px' && panel.style.left === '32px', '色板跟随入口并保持在窗口内')
   tree.props.onPointerEnter()
   ok(anchor.open && panel.shown, '悬停工具入口直接打开上浮面板')
   tree.props.onPointerLeave()

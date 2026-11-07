@@ -2,7 +2,7 @@
 
 声音现在有**两条路**，别再混着理解：
 
-- **画布音频节点** = 素材库。放一个音频节点、上传或联网搜一段，它负责「这段音频存在哪、叫什么、许可是什么」。
+- **画布音频节点** = 素材库。放一个音频节点、上传或联网搜一段，它负责「这段音频存在哪、叫什么、如何播放」。
 - **工程时间轴** = 播放轴。`timeline.json` 的 `audio[]` 决定「哪一秒响、多大声、怎么淡、旁白时压到多低」，渲染时由画面侧一起播出去。
 
 换句话说：节点给素材，时间轴给编排。渲染不再走「渲完画面再用 ffmpeg 混音」那条路。
@@ -81,42 +81,90 @@ React 侧只管"每条音轨在每一帧该多响"，它**不做限幅**——�
 这个时间段已经有 1 条音轨，叠加后峰值只会更高
 ```
 
-## 节拍与钉帧
+## 音乐、画面与音效的统一绑定
 
-`motion_audio {action:"analyze"}` 对音频做：
+先用 motion_audio add 将音乐和音效放入工程，再用 list 取得 cueId。
+motion_sync bind 替换 timeline.sync 的绑定表；不再用 motion_audio apply 覆盖已绑定工程。
+拍号从 0 开始，来自音乐源文件的分析网格；at 是音乐源文件的秒值，不是成片秒值。
+音乐的 from、trimStart 和显式 outputOffsetSeconds 共同决定全片帧；最后一步才取整。
 
-- **采样级 onset**：包络峰天然早半个窗（20–40ms），所以细化到第一个越过 35% 局部峰值的采样点。
-- **分频段**：kick 40–160Hz / snare 1.2–3kHz / hihat 6–12kHz，每条拍点带 `kind`。
-- **等距网格拟合**：对候选 BPM 的 0.5×/1×/2× 各做一轮最小二乘（内点按 `|t−t0−kT| ≤ 20ms` 迭代筛选），取残差与覆盖率最好的那个。
-- **不给假数据**：拍点不足、覆盖率 < 45% 或残差过大时 `bpm` 返回 `null` + `note`，而不是报一个看起来像真的数字。氛围铺底这类素材就该是 `null`。
+    {
+      "action":"bind", "nodeId":"n8", "musicCueId":"bgm-1",
+      "anchors":[
+        {"id":"cut-2","type":"cut","shotId":"shot-2","beat":8},
+        {"id":"title-hit","type":"action","shotId":"shot-2","name":"titleLand","beat":10,
+         "visual":{"metric":"change","roi":{"x":0.2,"y":0.2,"w":0.6,"h":0.6}},
+         "sfx":[{"cueId":"impact-1","peakSeconds":0.12}]}
+      ]
+    }
 
-`apply` 会把切镜边界吸到最近的拍子上（容差默认 4 帧）；带 `cueId` 时把那条音轨钉到指定拍点。
+beat 和 at 二选一。低质量网格拒绝拍号绑定，可改用真实瞬态 at。
+所有位置使用同一个解析器：切镜改变 shot 起点/时长，动作生成 shot.anchors，
+音效按源文件 peakSeconds（含 trimStart）反推 cue.from。越界、未知引用、
+重复绑定直接拒绝，不静默截断。音乐/音效暂不支持循环绑定。
+motion_sync list 读解析结果；clear 解除绑定并保留最后排期。
+切镜、旁白排期、修改音轨后重新解析；与绑定冲突的改动需要先解除或调整绑定。
 
-**输出偏移**是已知的硬约束：AAC 编码有 priming 延迟，本管线实测 43ms = `OUTPUT_AUDIO_OFFSET_F = 1.29` 帧（30fps）。钉帧时的换算：
+场景组件接收本镜局部帧 anchors：
 
-```
-from = round(目标帧 − 素材自身峰值滞后 − 1.29)
-```
+    export default function Scene({ anchors }) {
+      const frame = useCurrentFrame()
+      const land = anchors.titleLand
+      const y = interpolate(frame, [land - 8, land], [100, 0], {
+        extrapolateLeft:'clamp', extrapolateRight:'clamp'
+      })
+      // 用 y 绘制标题；每个需要跟音乐走的关键动作都读取对应 anchors。
+    }
 
-实测：目标第 120 帧 → 落位 `from=119`，成片量到 4.010s（目标 4.000s），误差 0.3 帧。旁白避让实测压低 12.1dB（目标 12）。
+动作必须实际使用 anchors；声明名字不会自动改写已有 TSX。
+硬切默认测整画面的相邻帧差；动作显式选择 ROI：
+metric:"change" 测局部变化峰，metric:"brightness" 测亮度峰。
+平滑位移的语义落地时刻不能仅凭变化峰判定；应设计可观测的落点，
+或交给人工逐帧验收。相似镜头、持续运动或声音被掩盖会返回 unverified。
 
-`motion_audio_verify` 从**成片音轨**反向重算拍点，逐拍报残差帧数，`worst > 2` 直接判「对不上拍」——不依赖「我看着差不多」。
+### 成片音画对照
 
-## 音效搜索与署名
+motion_audio_verify 逐锚点做三件事：
 
-两条入口，底层是同一套东西：
+1. 将源音乐瞬态附近的波形与成片混音做局部归一化相关匹配。
+2. 解码成片画面，在计划帧前后 6 帧找选定 ROI 的实际变化/亮度峰。
+3. 对每个已绑定音效独立匹配源峰值，分别计算画面-音乐、音效-音乐的帧误差。
 
-- **对话里**：`motion_sfx {action:"search", nodeId, query:"paper whoosh", maxDuration:2}` → 挑一条 → `motion_sfx {action:"get", nodeId, ids:["fs:730078"]}`。搜索**不按许可过滤**，每条结果带 `licenseLabel`，用哪条由人决定。
-- **画布上**：选中音频节点，展开「搜索 Freesound 音效」（`audio_asset {action:"search"}`）。
+默认容差 2 帧，可配置 0–3 帧。低相关、歧义峰、无画面变化或未声明动作观测
+均标记 unverified；超容差 fail；所有锚点有证据且达标才 pass。
+不再拿成片音频与自己拟合出的网格比较来宣称音画合格。
+报告保存在 .out/qa/sync/report.json，含实测帧、音频时刻、相关度及帧量化误差。
 
-`get` 做的事：
+全片渲染生成 film.mp4.sync.json，记录绑定/场景/素材版本与成片哈希。
+变更后拿旧片验收会拒绝；没有回执的历史成片最多是 unverified。
+预览、局部渲染不会产生完整成片验收回执。
 
-1. 打开详情页复核许可（必须恰好一个 Creative Commons 链接），把许可标签记进清单——**用不用、要不要署名，人自己看标签决定**；
-2. 下载上游 HQ MP3 预览（不是原始无损文件），落到 `<工程>/assets/sfx/fs-<id>.mp3`；
-3. 量 10ms 窗 RMS / 峰值 / 有效起止，算出 `suggestedGainDb`（把这条音效拉到 −16dB RMS 附近），挂到轴上时直接当 `gainDb` 用；
-4. 写 `assets/audio-manifest.json`（含 sha256、许可、作者、原始链接、下载时间、分析结果）与 `assets/FREESOUND-CREDITS.md`——**许可各不相同：CC BY 与 NC 类素材用之前先看一眼，该署名的写进片尾**。
+输出音轨偏移按秒保存，不沿用固定 1.29 帧。默认 0 表示尚未加校准补偿；
+报告在至少 3 个可靠音乐匹配且偏移散布小于 15ms 时给出 measuredOutputOffsetSeconds。
+确认管线后把它传给 motion_sync bind 的 outputOffsetSeconds，再渲染验收。
+改 FPS、编码器或容器后重新量；源音乐的分析 t0 不改写。
+旧 motion_audio apply 仅供未绑定工程使用，保留兼容的旧吸附行为。
 
-网络：只访问 `freesound.org` 与 `cdn.freesound.org`；不需要 API key（读公开搜索页与预览地址）。没有网络时 `search` 会直接报错，不会静默返回空列表。
+### 验证
+
+npm run test:motion-sync 检查绑定、真实 FFmpeg 成片正例、画面延后 4 帧反例与未验证状态。
+node tools/check-motion-sync.mjs --remotion 额外跑真实 Remotion 渲染及成片回测。
+
+## 音效搜索与保存
+
+motion_sfx search/get 与画布 audio_asset 共用同一个 JS 下载器，无 Python 运行时依赖。
+搜索与下载不做许可证筛选或审批，缺少或出现多个许可链接不会阻止下载。
+页面提供的来源与标签仅作为普通元数据保留，不触发确认。
+
+工程音效下载到 assets/sfx/，音频分析与来源合并在一份 audio-manifest.json 中。
+画布音频导入只保留 audio.wav、preview.m4a 和 audio.json 等播放所需文件；
+不再另存 original 音频副本、CREDITS.md 或 analysis.log。
+中转下载不生成清单，导入后整个中转目录清理。
+
+不再自动生成 FREESOUND-CREDITS.md、AUDIO-CREDITS.md、重复 Markdown 验收报告、
+空白旁白脚本；同步验收临时灰度帧与成功日志处理后清理，只保留最终 JSON 报告。
+时间轴、素材索引、渲染回执和工程场景文件仍用于运行与验收。
+已有工程的附加文件不会批量删除。
 
 ## 旁白
 
@@ -165,7 +213,8 @@ const settle = interpolate(frame, [durationInFrames - 10, durationInFrames], [1,
 ## 限制
 
 - 未接入：生成音乐、文本生成音效。TTS 有了（`motion_voice`），但只有 edge-tts 与 Windows SAPI 两个后端，没有云厂商 voice、没有情感/风格参数、不做 ASR 对齐（`align` 是「按已有音频的时长重排」，不是「听写」）。
-- 混音后级只有 `loudnorm` + `alimiter` 这一级：没有总线 EQ、压缩、多段动态；要 −14 LUFS 的交付标准，改 `timeline.audioMix.lufs` 就行，别在成片上再跑一遍。
+- 混音后级只有 `loudnorm` + `alimiter` 这一级：没有总线 EQ、压缩、多段动态。默认目标就是交付值 −14 LUFS / 真峰值 ≤ −1 dBTP；要改只写 `timeline.audioMix.lufs`，别在成片上再跑一遍。
+- 限幅器余量按实测收敛：第一轮 `loudnorm(linear) + alimiter(truePeak − 1dB)`，量回来的真峰值仍高于目标就**只挂限幅器再压一轮**（不再跑 loudnorm，否则会拿旧测量值多加一次增益）。实测 −24.6 LUFS 的素材 → −14.3 LUFS / −2.4 dBTP。
 - 不支持「只重混声音、复用画面」的独立版本（旧版的 `remix` 已随内层 agent 一起删除）；现在改声音就是改 `timeline.audio` 再渲染一遍，画面部分命中 bundle 缓存，只付渲染的钱。
 - 旧的 `audioMode`（auto / manual / off）、`audioPlan` JSON、`no-bgm.mp4` 与 `film-review` 响度报告都不再产出。
 

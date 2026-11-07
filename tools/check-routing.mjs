@@ -99,7 +99,12 @@ const ui = module.exports.__routeInternals
 const canvas = { nodes: [node('a', 0, 0), node('b', 500, 100), node('wall', 230, -20, 100, 150)], edges: [] }
 const geometry = ui.buildGeometry(canvas)
 const preview = ui.routePreviewFor(canvas, geometry, { x: 500, y: 130 }, 'a', geometry.byId.a.geo, { side: 'e' }, ui.HOT_PAD, 'a')
-check(preview && preview.hot.id === 'b', '浏览器预览使用真实引擎并吸附目标')
+check(preview && preview.hot.id === 'b', '浏览器手动连线预览可吸附目标')
+const manualPreview = documentTransaction(canvas, (draft) => draft.edges.push({ ...edge('manual', 'a', 'b', styleWithSide(styleWithSide(styleWithRoutingMode(DEFAULT_EDGE_STYLE, 'manual'), 'source', preview.sides.from), 'target', preview.sides.to)), points: preview.points.slice(1, -1) })).doc
+const beforeManual = ui.routingEngine.solves
+ui.updateDocumentRoutes(canvas, manualPreview)
+assert.deepEqual(ui.edgeRoutePoints(manualPreview, manualPreview.edges[0]), preview.points)
+check(ui.routingEngine.solves === beforeManual && routingModeOf(manualPreview.edges[0]) === 'manual', '新建手动连线保留预览折点，不调用自动避障')
 const created = documentTransaction(canvas, (draft) => draft.edges.push({ ...edge('new', 'a', 'b', styleWithSide(styleWithSide(autoStyle, 'source', preview.sides.from), 'target', preview.sides.to)), __routePreview: preview.points })).doc
 const beforePreviewCommit = ui.routingEngine.solves
 ui.updateDocumentRoutes(canvas, created)

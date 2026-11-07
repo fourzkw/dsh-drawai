@@ -8,13 +8,15 @@
 // 这些是纯模块测试，不需要重启插件；跑 `node tools/check-motion-fixes.mjs`。
 
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { readSpec } from '../src/motion/spec.js'
 import { cardFrames, timelineFromCards } from '../src/motion/cards.js'
 import { addCue, readTrack } from '../src/motion/audio.js'
 import { createProject, readTimeline } from '../src/motion/project.js'
+import { checkFonts } from '../src/motion/pixelqa.js'
+import { unlinkedShotCards } from '../src/motion-core.js'
 
 const root = 'tmp/check-motion-fixes'
 let passed = 0
@@ -95,6 +97,65 @@ console.log('5) 建工程与分镜表')
   assert.equal(again.durationInFrames, 279, '重新读取应保持 279 帧')
   ok('9.3 秒 3 段', '末段结束于 ' + (last.startFrame + last.durationFrames) + ' 帧')
   ok('storyboard.md', created.storyboard.length + ' 行')
+}
+
+console.log('6) 断连的镜头卡')
+{
+  const doc = {
+    nodes: [
+      { id: 'n5', data: { drawaiMotion: '1' } },
+      { id: 'n6', data: { drawaiMotion: '1' } },
+      { id: 'c1', data: { drawaiShotCard: '1', shotCardId: 'a' } },
+      { id: 'c2', data: { drawaiShotCard: '1', shotCardId: 'b' } },
+      { id: 'c3', data: { drawaiShotCard: '1', shotCardId: 'c' } },
+    ],
+    edges: [{ from: 'c1', to: 'n5' }, { from: 'c2', to: 'n6' }],
+  }
+  const unlinked = unlinkedShotCards(doc)
+  assert.deepEqual(unlinked.map((item) => item.nodeId), ['c3'], '连到别的视频节点的卡不算断连')
+  ok('断连检测', unlinked.map((item) => item.nodeId).join(', ') || '（无）')
+}
+
+console.log('7) 分镜表决定段数（不再按卡片/默认值静默开段）')
+{
+  const spec = readSpec({ fps: 30, duration: 10 })
+  const rows = [50, 40, 60, 50, 55, 45].map((frames, index) => ({
+    shot: 'shot-' + (index + 1), durationFrames: frames, intent: '第 ' + (index + 1) + ' 镜', onScreen: '画面', copy: '',
+  }))
+  const withRows = 'tmp/check-motion-storyboard'
+  rmSync(withRows, { recursive: true, force: true })
+  const created = createProject(withRows, { spec, storyboard: rows })
+  // 实测踩过：6 行分镜配上 3 张卡，create 按卡开了 4 段且一个字都不提示，人只能自己数帧才发现。
+  assert.equal(created.timeline.shots.length, 6, '6 行分镜应该开 6 段')
+  assert.deepEqual(created.timeline.shots.map((shot) => shot.durationFrames), [50, 40, 60, 50, 55, 45], '表里的帧区间应被采用')
+  assert.deepEqual(created.warnings, [], '行数与段数一致时不该有 warning')
+  ok('6 行 → 6 段', created.timeline.shots.map((shot) => shot.durationFrames).join('/'))
+
+  const mixedDir = 'tmp/check-motion-storyboard-mixed'
+  rmSync(mixedDir, { recursive: true, force: true })
+  const mixed = createProject(mixedDir, { spec, cards: [{ cardId: 'a', styleKey: 'a' }, { cardId: 'b', styleKey: 'b' }], storyboard: rows })
+  assert.equal(mixed.timeline.shots.length, 2, '卡片在场时仍按卡开段')
+  assert.equal(mixed.warnings.length, 1, '行数与段数对不上必须 warning')
+  assert.ok(mixed.warnings[0].includes('分镜表 6 行'), 'warning 要说清行数与段数')
+  ok('行数对不上会 warning', mixed.warnings[0].slice(0, 28) + '…')
+  rmSync(withRows, { recursive: true, force: true })
+  rmSync(mixedDir, { recursive: true, force: true })
+}
+
+console.log('8) 字体门禁不把模板字面量当字体名')
+{
+  const dir = 'tmp/check-motion-fonts'
+  rmSync(dir, { recursive: true, force: true })
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'scene-0.tsx'), [
+    "const FAMILY = 'Noto Sans SC'",
+    'export const A = () => <div style={{ fontFamily: `${FAMILY}` }} />',
+    "export const B = () => <div style={{ fontFamily: 'Unbounded' }} />",
+  ].join('\n'))
+  const fonts = checkFonts(dir)
+  assert.deepEqual(fonts.missing.map((item) => item.family), ['Unbounded'], '`${FAMILY}` 不该被当成字体名，真缺的仍要报')
+  ok('模板字面量跳过', 'missing=' + fonts.missing.map((item) => item.family).join(', '))
+  rmSync(dir, { recursive: true, force: true })
 }
 
 rmSync(root, { recursive: true, force: true })

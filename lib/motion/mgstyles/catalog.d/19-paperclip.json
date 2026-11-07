@@ -1,0 +1,28 @@
+{
+  "slug": "19-paperclip",
+  "name": "粗描边贴纸科普",
+  "oneLiner": "一块 2400×5900 的手机屏世界，镜头一路下飞，白描边贴纸配精确图表。",
+  "signature": [
+    "世界是一块 2400×5900 的手机屏，#E9EEF2 底 + 48px 网点",
+    "没有切镜：16 个相机关键帧，z 从 1.06 压到 0.2",
+    "所有素材白描边 10px（长边的 2.3%），paint-order: stroke",
+    "章节头 = 20×20 橙方块 + 中文 30px + Inter 大写 .18em",
+    "只有 #25313D 墨 + #FF5A36 一个强调色，没有渐变填充"
+  ],
+  "palette": {
+    "page": "#1D2731",
+    "surface": "#E9EEF2",
+    "field": "#F7F9FB",
+    "text": "#25313D",
+    "muted": "#8C9AA8",
+    "accent": "#FF5A36",
+    "border": "#CDD6DE"
+  },
+  "colors": ["#25313D", "#FF5A36", "#E9EEF2", "#F7F9FB", "#8C9AA8", "#C5CFD8", "#1D2731"],
+  "fonts": {
+    "display": "\"Inter\",\"Noto Sans SC\",sans-serif",
+    "text": "\"Inter\",\"Noto Sans SC\",sans-serif",
+    "mono": "\"JetBrains Mono\",monospace"
+  },
+  "rhythm": { "bpm": 120, "fps": 30, "duration": 10, "aspect": "16:9", "cutFrames": 15 }
+}

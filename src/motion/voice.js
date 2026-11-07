@@ -16,6 +16,7 @@ import { join, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn, spawnSync } from 'node:child_process'
 import { probeAudio } from './assets.js'
+import { parseProjectJson } from './json.js'
 
 export const VOICE_DEFAULTS = {
   voice: 'zh-CN-XiaoxiaoNeural',
@@ -109,7 +110,7 @@ function readMeta(dir, key) {
   const file = join(voiceDirOf(dir), key + '.json')
   if (!existsSync(file)) return null
   try {
-    return JSON.parse(readFileSync(file, 'utf8'))
+    return parseProjectJson(readFileSync(file, 'utf8'))
   } catch {
     return null
   }
@@ -144,7 +145,7 @@ async function edgeSay(dir, key, text, cfg) {
   const code = await run(python[0], [...python.slice(1), HELPER, jobPath], 120000)
   const resultPath = join(tmpDir, key + '.result.json')
   let payload = null
-  try { payload = JSON.parse(readFileSync(resultPath, 'utf8')) } catch { payload = null }
+  try { payload = parseProjectJson(readFileSync(resultPath, 'utf8')) } catch { payload = null }
   rmSync(jobPath, { force: true })
   rmSync(resultPath, { force: true })
   if (code !== 0 || !payload || !payload.ok) {

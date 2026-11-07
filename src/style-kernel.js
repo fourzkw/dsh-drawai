@@ -525,6 +525,19 @@ function styleWithImageDataUri(style, dataUri, aspect) {
   })
 }
 
+/**
+ * 按内容的型别写海报：位图走 `image=`，SVG 走内嵌标记。
+ *
+ * 存在的理由：回填成片时 `applyFilm()` 给的是 **PNG data URI**（Chromium 里 SVG 套 PNG
+ * 会把 canvas 弄脏，见 apply.js 的注释），而调用方以前一律用 `styleWithSvgMarkup()`，
+ * 于是 `data:image/png;base64,…` 被当成 SVG 文本又编码了一层 —— 节点上就是一张空图。
+ * 这里按 `isRasterDataUri` 分派，两边都不会再错。
+ */
+function styleWithMediaMarkup(style, markup, aspect) {
+  if (typeof markup !== 'string' || markup.length === 0) return style
+  return isRasterDataUri(markup) ? styleWithImageDataUri(style, markup, aspect) : styleWithSvgMarkup(style, markup, aspect)
+}
+
 /** 清掉内嵌 SVG / 位图内容（回到矩形）：image / imageAspect / shape 一起删。 */
 function styleWithoutSvgMarkup(style) {
   var map = parseStyle(style)
@@ -1075,7 +1088,7 @@ export {
   nodeShapeFromStyle, styleFromNodeShape, styleWithNodeShape, isVideoNodeData, reportNodeShape,
   isSvgMarkup, normalizeSvgMarkup, isSvgDataUri, isRasterDataUri, svgMarkupFromImageValue, imageValueFromSvgMarkup,
   imageValueFromStyle, svgMarkupFromStyle, styleWithSvgMarkup, styleWithoutSvgMarkup,
-  styleWithImageDataUri, styleWithoutImageDataUri,
+  styleWithImageDataUri, styleWithoutImageDataUri, styleWithMediaMarkup,
   SVG_IMAGE_VALUE_PREFIX, SVG_IMAGE_VALUE_PREFIX_B64,
   colorsFromStyle, colorNameFromStyle, styleWithColorName, styleWithColors,
   textColorNameFromStyle, styleWithTextColorName,

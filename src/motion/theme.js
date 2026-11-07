@@ -11,6 +11,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { parseProjectJson } from './json.js'
 
 const PALETTES = new URL('./shotcraft/upstream/template/src/themes/palettes.json', import.meta.url)
 
@@ -66,15 +67,22 @@ function normalizeTokens(input) {
 }
 
 export const DEFAULT_FONTS = {
-  serif: '"Songti SC", "Source Han Serif SC", "Noto Serif CJK SC", serif',
-  sans: '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif',
-  mono: '"SF Mono", "JetBrains Mono", "Cascadia Mono", monospace',
+  serif: '"Noto Serif SC", "Songti SC", "Source Han Serif SC", serif',
+  sans: '"Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+  mono: '"JetBrains Mono", monospace',
 }
 
 // 场景文件只认这几个名字：PAPER / INK / DUST / STAMP / SURFACE / FIELD / BORDER。
 export function themeSource(theme, fonts = {}) {
   const t = theme.tokens
   const f = { ...DEFAULT_FONTS, ...fonts }
+  const fallback = (value, family, generic) => {
+    const text = String(value || DEFAULT_FONTS[generic === 'serif' ? 'serif' : 'sans'])
+    if (text.includes(family)) return text
+    return text.replace(/,?\s*(sans-serif|serif)\s*$/i, '') + ', "' + family + '", ' + generic
+  }
+  f.serif = fallback(f.serif, 'Noto Serif SC', 'serif')
+  f.sans = fallback(f.sans, 'Noto Sans SC', 'sans-serif')
   const q = (value) => "'" + String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'"
   return [
     '// 主题：' + theme.name + '（由 motion_project 的 theme 参数生成，可以手改）',
@@ -106,7 +114,7 @@ export function readTheme(dir) {
   const file = join(dir, 'theme.json')
   if (!existsSync(file)) return null
   try {
-    return JSON.parse(readFileSync(file, 'utf8'))
+    return parseProjectJson(readFileSync(file, 'utf8'))
   } catch {
     return null
   }

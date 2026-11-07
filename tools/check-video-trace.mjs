@@ -346,7 +346,7 @@ try {
         }
         if (mode === 'detached' && body.action === 'media-trace-frame') unsubscribe()
         const response = (payload, status = 200) => ({ ok: status === 200, status, async json() { return payload } })
-        if (body.action === 'media-source-bytes') return Promise.resolve(response({ ok: true, base64: 'AA==', mime: 'video/mp4' }))
+        if (body.action === 'media-source-url') return Promise.resolve(response({ ok: true, url: '/video/test', mime: 'video/mp4' }))
         if (body.action === 'media-trace-frame' && body.index === 1 && mode === 'failure') return Promise.resolve(response({ ok: false, error: '模拟绘制失败' }, 500))
         const call = request(body.action, body).then(({ status, payload }) => {
           if (body.action === 'media-trace-start') taskClip = payload.clip
@@ -376,7 +376,7 @@ try {
       assert.equal(history.length, 1, 'returning to the original canvas inserts the result exactly once')
     }
     assert.equal(videoTraceRun.current, null)
-    assert.equal(revoked, 1, 'always releases decoder blob URL')
+    assert.equal(revoked, 0, 'streamed source does not allocate a decoder blob URL')
     assert.equal(state.busy, false)
     if (mode === 'success' || mode === 'chunked' || mode === 'detached' || mode === 'queued' || mode === 'queued-pause') {
       assert.equal(history.length, 1, 'complete workflow is one undo operation')

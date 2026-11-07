@@ -1,0 +1,28 @@
+{
+  "slug": "05-cel-boil",
+  "name": "逐帧手绘·线条沸腾",
+  "oneLiner": "一拍二的纸上手绘：每换一张画墨线重抖一次，填色故意错位 5px，唯一饱和色是番茄红。",
+  "signature": [
+    "线条每换一张画就重抖一次（simplex 噪声平移中线，±2.4px）",
+    "一拍二：每张画停 2 帧，开场只循环 4 张",
+    "填色层整体偏移 (-5, +4)px，墨线压在填色上",
+    "可变宽墨线：撇从 1.12 倍收到 0.5 倍，钩在末端收细",
+    "纸是两层：放大 1.045 的纸底 + multiply 的纸齿，位置随画号换"
+  ],
+  "palette": {
+    "page": "#f4e9d0",
+    "surface": "#fff6e2",
+    "field": "#ffc425",
+    "text": "#1c1613",
+    "muted": "#d9573f",
+    "accent": "#e5402b",
+    "border": "#e0cba6"
+  },
+  "colors": ["#f4e9d0", "#fff6e2", "#1c1613", "#e5402b", "#ffc425", "#d9573f"],
+  "fonts": {
+    "display": "\"Caveat\",\"LXGW Marker Gothic\",\"Long Cang\",\"Noto Sans SC\",sans-serif",
+    "text": "\"LXGW Marker Gothic\",\"Long Cang\",\"Noto Sans SC\",sans-serif",
+    "mono": "\"JetBrains Mono\",monospace"
+  },
+  "rhythm": { "bpm": 120, "fps": 24, "duration": 10, "aspect": "16:9", "cutFrames": 2 }
+}

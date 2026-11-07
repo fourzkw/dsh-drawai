@@ -23,7 +23,6 @@ function AudioPanel(props) {
     React.createElement('p',null,data.audioDuration?Number(data.audioDuration).toFixed(2)+' 秒':'上传音效、音乐或旁白，再用箭头连接视频。'),
     preview?React.createElement('audio',{controls:true,src:preview,style:{width:'100%'},'aria-label':'音频试听'}):null,
     React.createElement('button',{className:'drawai-btn',disabled:busy,onClick:props.onUpload},data.audioClip?'更换音频':'上传音频'),
-    React.createElement('button',{className:'drawai-btn',onClick:props.onCreateVideo},'制作视频'),
     React.createElement('label',null,'用途 ',React.createElement('select',{'aria-label':'音频用途',value:data.audioRole||'sfx',onChange:e=>{const defaults=motionCore.audioNodeData(e.target.value);change({audioRole:e.target.value,audioGainDb:defaults.audioGainDb,audioFadeIn:defaults.audioFadeIn,audioFadeOut:defaults.audioFadeOut})}},
       [['sfx','音效'],['bgm','背景音乐'],['voice','旁白']].map(([v,l])=>React.createElement('option',{key:v,value:v},l)))),
     field('增益（dB）','audioGainDb',-60,18),field('开始播放（秒）','audioAt',0,60),
@@ -31,11 +30,11 @@ function AudioPanel(props) {
     field('淡入（秒）','audioFadeIn',0,60),field('淡出（秒）','audioFadeOut',0,60),
     React.createElement('label',null,React.createElement('input',{type:'checkbox',checked:data.audioLoop==='1',onChange:e=>change({audioLoop:e.target.checked?'1':'0'})}),'循环播放'),
     React.createElement('details',null,React.createElement('summary',null,'搜索 Freesound 音效'),
-      React.createElement('p',null,'下载可用于混音的 MP3 预览版；来源及许可随工程保存（许可各不相同，用之前看一眼）。'),
+      React.createElement('p',null,'下载 MP3 预览版并导入音频素材。'),
       React.createElement('input',{'aria-label':'音效搜索词',value:query,onChange:e=>setQuery(e.target.value),placeholder:'例如 soft whoosh'}),
       React.createElement('button',{className:'drawai-btn',disabled:busy||!query.trim(),onClick:()=>run(async()=>{const r=await props.onSearch(query);setResults(r.results||[])})},busy?'处理中…':'搜索'),
-      results.map(row=>React.createElement('div',{key:row.id,style:{margin:'8px 0'}},React.createElement('span',null,(row.name||row.title||row.id)+' · '+(row.license_label||'unknown')),
+      results.map(row=>React.createElement('div',{key:row.id,style:{margin:'8px 0'}},React.createElement('span',null,(row.name||row.title||row.id)+' · '+(row.duration||row.seconds||'')+'s'),
         React.createElement('button',{className:'drawai-btn',disabled:busy,onClick:()=>run(()=>props.onGet(row.id))},'下载到此节点')))),
-    manifest?.provenance?React.createElement('details',null,React.createElement('summary',null,'素材来源与许可'),React.createElement('pre',{style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',fontSize:11}},JSON.stringify(manifest.provenance,null,2))):null,
+    manifest?.provenance?React.createElement('details',null,React.createElement('summary',null,'素材信息'),React.createElement('pre',{style:{whiteSpace:'pre-wrap',overflowWrap:'anywhere',fontSize:11}},JSON.stringify(manifest.provenance,null,2))):null,
     error?React.createElement('p',{role:'alert'},error):null)
 }

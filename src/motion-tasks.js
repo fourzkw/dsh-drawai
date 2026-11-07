@@ -266,6 +266,7 @@ export function createMotionTaskManager(options = {}) {
   return {
     async start(scope, nodeId, input, previews = {}, composition, beforeStart, previousComposition, draft = {}) {
       if (closed) throw new Error('动效服务已关闭')
+      if (!composition && !options.plan && !options.produce && !draft.audioOnly) throw new Error('旧视频任务不再支持自动规划，请使用 motion_project 创建工程并通过 motion_render 渲染')
       load(scope)
       if (draft.requestId) {
         const existing = [...jobs.values()].find((job) => job.scope.sessionId === scope.sessionId && job.scope.drawioAbs === scope.drawioAbs && job.session?.requestId === draft.requestId)

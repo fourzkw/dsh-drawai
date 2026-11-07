@@ -62,8 +62,23 @@
 3. 移植，不是重写。要继承的东西：时间表（帧号）、缓动曲线、透视与相机参数、光与影的层（谁画在谁上面）、材质与 grain、错峰量。
 4. 只允许替换：**内容**（文字 / 图 / 数据）、**配色**（走 theme token）、**品牌元素**。
 5. 如果确实要偏离 demo，在 `storyboard.md` 里写一行「偏离：X 改为 Y，因为 Z」。
+6. **每张卡都必须 `addEdge` 连到视频节点**。连线顺序 = 镜头顺序，卡时长 = 段长，连上的卡还会冻结进 `assets/` 当参考。画布上有断连的卡时 `motion_project create` 会直接报错——不要用"只作参考"来绕过，那等于参考、顺序、段长三样一起丢。
 
 > 判定标准：用户看完成片，能指着镜头说「这就是那张卡」。做不到就是没移植成功。
+
+### 3.2b 用整片风格的硬规定（引擎保真）
+
+风格包里的 `engines` 是上游真用的引擎，不是形容词。移植时必须真跑同一套：
+
+1. `mg_style {action:"read", slug}` 先看 `engines / engineFiles / engineNote`；`{action:"source", files:[…]}` 读该引擎的上游实现正文（shader、renderer、后处理）。
+2. three.js 风格（03 / 10 / 22）：在 `<canvas>` 里用 `three` 或 `@remotion/three` 建 WebGLRenderer + 场景/相机，按 `useCurrentFrame()` 驱动 `renderAt`，后处理用 `three/addons`。
+3. WebGL2 风格（07 / 09 / 12 / 20）：`getContext("webgl2")` + 上游 GLSL 原样编译，逐帧传 uniform；该风格同时要 Canvas2D 层的（09 分色版、20 索引帧）两层都要在。
+4. Canvas2D / DOM 风格按 `engines` 来（DOM 风格如 04 用多层 `backdrop-filter` 景深，不是画布贴图）。
+5. **禁止用更省事的方式替代**：CSS 3D、`transform: perspective` 摆 div、纯 Canvas2D 渐变/模糊冒充实 3D 或 shader、静态图位移——静帧像、一动就露。
+6. `motion_render start` 会扫工程源码（不含 `.out` / `node_modules`）：重引擎 `three / webgl2 / webgl` 缺失直接拒绝渲染。确实要换实现，先在 `STYLE.md` 写一行「偏离：引擎 X 改为 Y，因为 Z」，渲染带 warning 通过，偏离会记进任务返回。
+7. **动效也要看真片**：`mg_style {action:"frames", slug}` 从上游 demo 按 `cues.json` 的时间点抽 8 张参考帧（缺字体/纸纹会用占位兜底并在 `notes` 里写明）。写场景前先 `read_image` 逐张看，再按 `STYLE.md` 的「效果配方」逐项做：转场是 wipe 还是切、落地有没有 impact/地面环、相机有没有漂移/推/甩/抖、motion blur 几采样、颗粒是逐像素还是几百个点、有没有蒸汽/拍翼这类二次运动。规范只验"形"不验"动"，不看帧就会做成"形似而动不像"。
+
+> 判定标准：把成片和上游 demo 并排放，**运动质感要能对上**（透视、光照、流体/印刷颗粒、后处理辉光），不是"颜色差不多"。
 
 ### 3.3 一张卡对应一句"为什么选它"
 
@@ -86,6 +101,27 @@
 - 声音列在 P2 就要填（哪怕只写"纸响 / 落锤"），P6 只做实现，不重新设计。
 - 画布上的镜头卡节点与连线顺序 = 时间轴顺序，改顺序要同时改画布。
 
+### 4.1 分镜表写在画布上（推荐，可复刻）
+
+`storyboard.md` 是编译产物；**真相来源可以在画布上**，这样别人拿到这张 `.drawai` 就能接着做。做法是"现有节点 + 极小标记 + 严格格式"，不新增节点类型、不改画布 schema：
+
+| 画布元素 | 标记 | 格式 |
+| --- | --- | --- |
+| 文本节点 | `【分镜表】`（label 首行） | 六列表格，同 §4 的列；**时长必须写 `172f`**，镜号连号，各幕之和 = 视频节点时长 |
+| 文本节点 | `【风格】` | `page/text/muted/accent/border: #RRGGBB`，`serif/sans/mono: 字体名`，`materials: 瓷白 / 香槟金` |
+| 文本节点 | `【旁白】` | `## shot-N` 一节、一句一行（`motion_voice` 原生认这套） |
+| 图片 / 音频节点 | `【素材】` + 第二行用途 | 被拍主体 / 界面纹理 / BGM / 旁白；音频标明用途 |
+| 图片节点 | `【目标帧】545f` | 第几帧应该长这样；交付时逐张比对 |
+| 边 | 卡 → 视频的连线 label | `第1幕`（把卡钉到某一镜，别再靠顺序猜） |
+
+三条解析规则，破了就解析不了：表头六列不能缺；时长只认 `172f` 这种写法（写 `5.7` 秒直接报错）；镜号必须连号。
+
+用 `motion_spec {action:"scaffold"}` 拿三块模板节点的 `diagram_apply` ops，`{action:"validate"}` 逐条报缺（`error` 必修、`warn` 建议），`motion_project create` 在没有显式 storyboard 时直接读画布上的【分镜表】并按表里的帧数排时间轴。
+
+**一张【分镜表】，不是一镜一个节点。** 每一镜是表里的一行；把八镜写成八个文本节点，画布上就不再是一张表，`motion_project` 也读不到分镜（`motion_spec {action:"validate"}` 会直接报"拆成了 N 条"）。分镜表节点宽 700、放在视频节点左侧一列。
+
+原则一句话：**节点是真相来源，spec 是编译产物**。画布上写得清，换个人（或换一次对话）也能复刻出来。
+
 ---
 
 ## 5. P4 打样：这一关最重要
@@ -105,10 +141,10 @@
 | 共享组件改动 | 改 `components/**` 后必须递增对应 `scene-*.tsx` 顶栏的 `// rev N` | `bundleKey` 只 hash scene 源码，不递增会读到旧 bundle（表现为输出字节完全不变） |
 | 颜色与字体 | 只从 `theme.ts` 取，不手写十六进制 | 换主题要一处生效 |
 | 文件体量 | 单场景 ≤120 行，公共原语抽到 `components/` | 可读、可 diff |
-| 界面素材 | 真实界面走 `motion_assets {action:"page"}` 截 2 倍图；要分层就加 `?only=` 参数逐层截 | 手搭 div 拼界面 = 永远差一口气 |
+| 界面素材 | 真实界面走 `motion_assets {action:"gather", url, brand}`（首页+内页一次收：favicon/og 图/主视觉/内联字标/多页聚合配色字体/2 倍视口截图，另补 Simple Icons、Clearbit、高清 favicon 三条 logo 兜底）；只要一块就 `page` 截、再 `crop` | 手搭 div 拼界面 = 永远差一口气；collect 的实测色比调色调得像 |
+| 品牌字标 | 官方 SVG 直链用 `motion_assets {action:"fetch", url}`，别截图别重画；拿不到官方素材就上"纯文字占位"问用户 | 形近字体冒充一眼假 |
 | 判细节 | 拼图用来看**构图与节奏**；看**细节与曝光**必须 `read_image` 单帧或采样像素 | 缩图会骗人 |
 | 渲染 | `motion_render start` 立即返回，**不要睡眠轮询**；中间干别的，需要时 `status` | 646 帧约 5–6 分钟，progress 严重滞后 |
-| 素材许可 | 只用 CC0 / CC-BY；每次 `motion_sfx get` 后确认 `FREESOUND-CREDITS.md` 已覆盖，CC-BY 需在成片说明里署名 | 商用风险 |
 
 ---
 

@@ -5,6 +5,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { parseProjectJson } from './json.js'
 
 let sequence = 0
 
@@ -20,7 +21,7 @@ export class RenderJobs {
   load(dir) {
     try {
       if (!existsSync(this.file(dir))) return []
-      const raw = JSON.parse(readFileSync(this.file(dir), 'utf8'))
+      const raw = parseProjectJson(readFileSync(this.file(dir), 'utf8'))
       return Array.isArray(raw) ? raw : []
     } catch { return [] }
   }
@@ -97,4 +98,16 @@ export class RenderJobs {
     this.update(job, { status: 'canceled', phase: 'canceled', endedAt: new Date().toISOString() })
     return true
   }
+}
+
+/**
+ * 回填时该取哪一种任务。主视频节点（建过工程的）等的是整片 film；
+ * 另建的「样片」节点等的是 pilot。调用方显式给了 source 就以它为准。
+ *
+ * 以前没有这个区分：apply 只找"最新一版 film"，而样片 range 渲染写的也是 film.mp4，
+ * 于是 4 秒样片会被当成整片写进主节点。
+ */
+export function applyJobKind({ source, targetHasProject }) {
+  if (source === 'pilot' || source === 'film') return source
+  return targetHasProject ? 'film' : 'pilot'
 }

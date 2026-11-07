@@ -9,13 +9,13 @@ import {ffmpegBinary} from '../src/video-export.js'
 mkdirSync('artifacts',{recursive:true})
 const root=mkdtempSync(resolve('artifacts/film-ui-')),videoFile=join(root,'film.mp4')
 execFileSync(ffmpegBinary(),['-hide_banner','-loglevel','error','-y','-f','lavfi','-i','testsrc2=size=320x256:rate=12:duration=2','-f','lavfi','-i','sine=frequency=600:duration=2','-c:v','libx264','-pix_fmt','yuv420p','-c:a','aac','-shortest',videoFile],{windowsHide:true})
-const base64=readFileSync(videoFile).toString('base64')
+const film=readFileSync(videoFile)
 const entry=`import React from 'react';import {createRoot} from 'react-dom/client';
 ${readFileSync('src/motion-panel.js','utf8')}
 const job={id:'test',clip:'clip',qa:{film:{sha256:'hash',duration:2,decode:'passed',motion:{status:'passed',sequences:[]},audio:{hasAudio:true,integratedLufs:-21,truePeakDb:-18},warnings:[],manual:{status:'pending'}}}};
-window.records=[];createRoot(document.getElementById('app')).render(React.createElement(MotionFilmReview,{job,onLoad:async()=>({mime:'video/mp4',base64:${JSON.stringify(base64)}}),onSave:async(id,review)=>{window.records.push({id,review})}}));`
+window.records=[];createRoot(document.getElementById('app')).render(React.createElement(MotionFilmReview,{job,onLoad:async()=>({mime:'video/mp4',url:'/film.mp4'}),onSave:async(id,review)=>{window.records.push({id,review})}}));`
 const bundle=await build({stdin:{contents:entry,resolveDir:process.cwd(),loader:'js'},bundle:true,write:false,platform:'browser',format:'iife'})
-const server=createServer((_req,res)=>{res.setHeader('Content-Type','text/html;charset=utf-8');res.end('<div id="app" style="width:600px"></div><button id="play" onclick="document.querySelector(\'video\').play()">播放</button><script>'+bundle.outputFiles[0].text.replaceAll('</script','<\\/script')+'</script>')})
+const server=createServer((req,res)=>{if(req.url==='/film.mp4'){res.writeHead(200,{'Content-Type':'video/mp4','Content-Length':film.length});res.end(film);return}res.setHeader('Content-Type','text/html;charset=utf-8');res.end('<div id="app" style="width:600px"></div><button id="play" onclick="document.querySelector(\'video\').play()">播放</button><script>'+bundle.outputFiles[0].text.replaceAll('</script','<\\/script')+'</script>')})
 await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser
 try{
   browser=await openBrowser('chrome',{browserExecutable:process.env.DRAWAI_CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',logLevel:'error'})

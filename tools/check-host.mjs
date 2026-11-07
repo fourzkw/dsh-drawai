@@ -150,6 +150,19 @@ const applyTool = tools.get('diagram_apply')
 const readTool = tools.get('diagram_read')
 const exec = { agent: { id: 's1' } }
 
+// A missing focus must never silently read or modify an existing default canvas.
+{
+  const defaultPath = WORKSPACE + '\\demo.drawai'
+  const original = buildMxfile({ nodes: [], edges: [], meta: {} }).text
+  store.set(defaultPath, original)
+  let readError = '', writeError = ''
+  try { await readTool.execute({}, exec) } catch (error) { readError = error.message }
+  try { await applyTool.execute({ ops: [{ op: 'addNode', label: 'unsafe' }] }, exec) } catch (error) { writeError = error.message }
+  ok(/没有聚焦画布/.test(readError), '无路径且无焦点时拒绝读取默认画布')
+  ok(/未指定画布路径|path/i.test(writeError), '无路径且无焦点时拒绝写入默认画布：' + writeError)
+  ok(store.get(defaultPath) === original, '拒绝写入后原有 demo.drawai 完全不变')
+}
+
 /** 调一次 diagram_apply。 */
 async function apply(ops, extra) {
   const args = Object.assign({ path: 'doc.drawio', ops: ops }, extra === undefined ? {} : extra)
@@ -917,6 +930,9 @@ console.log('\n写回路由：list / read / save / create 都只认 .drawio')
   // ── focus：记录"用户在看哪张"，AI 不传 path 时改它 ──
   const focus = await api({ action: 'focus', sessionId: 's1', path: 'flow.drawio' })
   ok(focus.payload.ok === true && focus.payload.focused === 'flow.drawio', 'focus 记下当前画布')
+  let focusWriteError = ''
+  try { await applyTool.execute({ ops: [{ op: 'addNode', label: 'unsafe' }] }, exec) } catch (error) { focusWriteError = error.message }
+  ok(/未指定画布路径|path/i.test(focusWriteError), '有焦点时写入仍需显式指定路径，避免旧焦点误写：' + focusWriteError)
 }
 
 console.log('\n切换画布 → 主动告诉模型"当前是哪一张"（Agent.inject）')
@@ -2245,16 +2261,37 @@ console.log('\n原生文档与自动迁移端到端')
   const diverged = await api({ action: 'read', sessionId: 's1', path: 'native-legacy.drawio', autoMigrate: true })
   ok(!diverged.payload.ok, '旧原稿迁移后发生修改时明确报告冲突')
 }
-console.log('\n自动路由的宿主编辑与保存')
+console.log('\n手动圆角折线与宿主编辑')
 {
   store.clear()
   seed({ version: 2, meta: { pinned: true }, nodes: [
     { id: 'a', x: 0, y: 0, w: 120, h: 60 }, { id: 'b', x: 500, y: 0, w: 120, h: 60 },
     { id: 'wall', x: 220, y: -20, w: 100, h: 120 },
   ], edges: [] })
-  await apply([{ op: 'addEdge', id: 'auto', from: 'a', to: 'b' }])
+  const points = [{ x: 180, y: 30 }, { x: 180, y: -70 }, { x: 440, y: -70 }, { x: 440, y: 30 }]
+  const planned = await apply([{ op: 'addEdge', id: 'manual', from: 'a', to: 'b', exit: 'e', entry: 'w', points }], { layout: 'none' })
+  ok(!planned.summary.includes('尚未明确指定折点'), '已提供折点时不要求重复规划')
   let saved = current(), edge = saved.edges[0]
-  ok(routingModeOf(edge) === 'auto' && Array.isArray(edge.points), 'AI 新建正交线默认自动避障，生成折点已落盘')
+  ok(routingModeOf(edge) === 'manual' && lineKindFromStyle(edge.style) === 'rounded', '工作流连线默认手动圆角折线')
+  ok(JSON.stringify(edge.points) === JSON.stringify(points), 'AI 提供的折点按顺序保存')
+  ok(validRoute(storedRoute(edge, routingBoxes(saved)), edge, routingBoxes(saved)), '手动规划的路径绕开中间节点')
+  await apply([{ op: 'move', id: 'wall', dy: 200 }])
+  ok(JSON.stringify(current().edges[0].points) === JSON.stringify(points), '障碍移动后不自动重算手动折点')
+  const pendingRoute = await apply([{ op: 'addEdge', id: 'default-manual', from: 'a', to: 'b' }])
+  ok(routingModeOf(current().edges.find(item => item.id === 'default-manual')) === 'manual', '未提供折点时也不会自动启用避障')
+  ok(pendingRoute.summary.includes('尚未明确指定折点') && pendingRoute.summary.includes('default-manual'), '工具提示 AI 读回布局并为指定连线规划折点')
+}
+console.log('\n显式启用自动路由的宿主编辑与保存')
+{
+  store.clear()
+  seed({ version: 2, meta: { pinned: true }, nodes: [
+    { id: 'a', x: 0, y: 0, w: 120, h: 60 }, { id: 'b', x: 500, y: 0, w: 120, h: 60 },
+    { id: 'wall', x: 220, y: -20, w: 100, h: 120 },
+  ], edges: [] })
+  await apply([{ op: 'addEdge', id: 'auto', from: 'a', to: 'b', avoid: true }])
+  let saved = current(), edge = saved.edges[0]
+  ok(routingModeOf(edge) === 'auto' && Array.isArray(edge.points), '明确启用自动避障时生成折点并落盘')
+  ok(lineKindFromStyle(edge.style) === 'rounded', '工作流新建连接默认使用圆角折线')
   ok(validRoute(storedRoute(edge, routingBoxes(saved)), edge, routingBoxes(saved)), '工具写入的路线绕开障碍，浏览器可直接读取')
   await apply([{ op: 'move', id: 'wall', dy: 200 }])
   saved = current(); edge = saved.edges[0]
@@ -2264,6 +2301,51 @@ console.log('\n自动路由的宿主编辑与保存')
   await apply([{ op: 'setStyle', id: 'auto', avoid: true, clearPoints: true, exit: 'e', entry: 'w' }])
   saved = current(); edge = saved.edges[0]
   ok(routingModeOf(edge) === 'auto' && validRoute(storedRoute(edge, routingBoxes(saved)), edge, routingBoxes(saved)), '恢复自动避障遵守固定进出连接点')
+  await apply([{ op: 'addEdge', id: 'explicit-straight', from: 'a', to: 'b', line: 'straight' }])
+  ok(lineKindFromStyle(current().edges.find(item => item.id === 'explicit-straight').style) === 'straight', '用户显式指定的直线不被默认样式覆盖')
+}
+console.log('\nAI 精确折点布线')
+{
+  store.clear()
+  seed({ version: 2, meta: { pinned: true }, nodes: [
+    { id: 'a', x: 0, y: 0, w: 120, h: 60 }, { id: 'b', x: 500, y: 0, w: 120, h: 60 },
+  ], edges: [] })
+  const points = [{ x: 180.25, y: 30 }, { x: 180.25, y: 140.75 }, { x: 420, y: 140.75 }, { x: 420, y: 30 }]
+  await apply([{ op: 'addEdge', id: 'precise', from: 'a', to: 'b', exit: 'e', entry: 'w', points }], { layout: 'none' })
+  ok(routingModeOf(current().edges[0]) === 'manual', 'AI 显式折点接管路径，关闭自动避障')
+  ok(JSON.stringify(current().edges[0].points) === JSON.stringify(points), '新建路径逐点保存，不取整或吸附')
+  const replacement = [{ x: 180.5, y: 30 }, { x: 180.5, y: -80 }, { x: 420, y: -80 }, { x: 420, y: 30 }]
+  await apply([{ op: 'setEdge', id: 'precise', points: replacement }], { layout: 'none' })
+  ok(JSON.stringify(current().edges[0].points) === JSON.stringify(replacement), 'setEdge 可只修改折点，不必改接端点')
+  await apply([{ op: 'setEdge', id: 'precise', to: 'a' }], { layout: 'none' })
+  ok(JSON.stringify(current().edges[0].points) === JSON.stringify(replacement), '改接时省略 points 保留原折点')
+  await apply([{ op: 'setLabel', id: 'a', label: '布局后' }], { layout: 'dagre-lr' })
+  ok(JSON.stringify(current().edges[0].points) === JSON.stringify(replacement), '显式布局保留 AI 手动路径')
+  for (const bad of [null, {}, [{ x: 1 }], [{ x: '2', y: 3 }], [{ x: Infinity, y: 3 }], Array(1001).fill({ x: 1, y: 2 })]) {
+    const snapshot = store.get(WORKSPACE + '\\doc.drawio')
+    let rejected = false
+    try { await apply([{ op: 'setEdge', id: 'precise', points: bad }]) } catch { rejected = true }
+    ok(rejected && store.get(WORKSPACE + '\\doc.drawio') === snapshot, '非法折点在写盘前拒绝：' + (Array.isArray(bad) ? bad.length + ' 点' : String(bad)))
+  }
+  let rejected = false
+  try { await apply([{ op: 'addEdge', from: 'a', to: 'b', points, avoid: true }]) } catch { rejected = true }
+  ok(rejected, '显式折点与自动求解同时指定时报冲突')
+  await apply([{ op: 'setEdge', id: 'precise', to: 'b', points: [] }], { layout: 'none' })
+  ok(current().edges[0].points === undefined || current().edges[0].points.length === 0, 'points:[] 清空所有中间折点')
+  ok(routingModeOf(current().edges[0]) === 'manual', '空折点仍明确归属手动模式')
+  await apply([{ op: 'setStyle', id: 'precise', avoid: true, clearPoints: true }], { layout: 'none' })
+  ok(routingModeOf(current().edges[0]) === 'auto', '可显式恢复自动路由')
+}
+console.log('\nAI 修改富文本节点')
+{
+  store.clear()
+  seed({ version: 2, meta: { pinned: true }, nodes: [
+    { id: 'rich', label: 'Hello world', labelHtml: 'Hello <b>world</b>', style: 'text;html=1;whiteSpace=wrap;', x: 0, y: 0, w: 160, h: 60 },
+  ], edges: [] })
+  await apply([{ op: 'setLabel', id: 'rich', label: 'Hello world' }], { layout: 'none' })
+  ok(current().nodes[0].labelHtml === 'Hello <b>world</b>', '相同文字不会丢弃已有富文本格式')
+  await apply([{ op: 'setLabel', id: 'rich', label: '新的文字' }], { layout: 'none' })
+  ok(current().nodes[0].label === '新的文字' && !current().nodes[0].labelHtml, '修改纯文字后不会显示或导出旧富文本')
 }
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1
