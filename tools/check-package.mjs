@@ -152,6 +152,13 @@ for (const tool of registered) {
   const schema = tool.parameters
   const props = schema && schema.properties ? Object.keys(schema.properties) : []
   check(tool.name + ' 有 properties', props.length > 0, props.join(', '))
+  // 参数必须带真实类型：`type: 'json'` 在 DSL 里只是注解，编译后连 `type` 都没有，
+  // 模型就不知道 `frames` 该传数组（issue #14）。这里守住"每个参数不是 type 就是 oneOf"。
+  const untyped = props.filter((name) => {
+    const spec = schema.properties[name]
+    return spec === null || typeof spec !== 'object' || (spec.type === undefined && spec.oneOf === undefined)
+  })
+  check(tool.name + ' 的参数都声明了类型（type 或 oneOf）', untyped.length === 0, untyped.join(', ') || 'ok')
   if (tool.name === 'diagram_apply') {
     const required = Array.isArray(schema.required) ? schema.required : []
     check('diagram_apply 的 ops 是必填', required.includes('ops'), 'required=' + JSON.stringify(required))
@@ -252,6 +259,10 @@ console.log('\n[6] 渲染 worker 传给 Remotion 的浏览器参数名（issue #
   check('五处调用都改用 puppeteerInstance', right.length === 5, right.length + ' 处')
   const fallback = worker.match(/browserExecutable,\s*cancelSignal/g) || []
   check('每次渲染都兜底带 browserExecutable（实例失效也不去联网下载）', fallback.length >= 4, fallback.length + ' 处')
+  // issue #22：Mac 上既没有 Windows 那两条候选，也没有 /usr/bin/*，只能干等 Remotion 下载。
+  check('浏览器候选覆盖 macOS', /\/Applications\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome/.test(worker))
+  check('浏览器候选覆盖 Linux', /\/usr\/bin\/google-chrome/.test(worker))
+  check('没有本机浏览器时先给出提示再下载（不让它看起来像卡死）', /正在下载内置浏览器/.test(worker))
 }
 
 console.log('\n[7] json 参数兼容（宿主可能把 json 参数按字符串送进来）')
@@ -287,6 +298,18 @@ console.log('\n[8] 从 git 克隆能不能构建：routing vendor 必须进版�
   } else {
     console.log('  [SKIP] 这里不是 git 工作区（npm 包安装目录），跳过索引检查')
   }
+}
+
+console.log('\n[9] 打包入口落在工程目录里（issue #21/#22）')
+{
+  // Remotion 的 webpack 只给 .tsx? 挂了 esbuild-loader，.jsx? 那条规则 exclude
+  // /node_modules/ —— 插件装在 profile 的 node_modules 下时，入口 JSX 会被当普通
+  // 文本解析（"Unexpected token (<AbsoluteFill>)"）。所以入口与 @drawai/motion
+  // 都要复制到工程目录再引用。
+  const project = readFileSync('lib/motion-project.js', 'utf8')
+  check('入口从工程目录里的 entry.gen.jsx 引入', /from '\.\/entry\.gen\.jsx'/.test(project))
+  check('@drawai/motion 指向工程目录里的副本', /reference-media\.gen\.jsx/.test(project))
+  check('入口不再用插件自己的绝对路径', !/registerMotionRoot.*from \$\{JSON\.stringify\(runtime\)/.test(project))
 }
 
 console.log('\n' + (failures === 0 ? '全部通过。' : failures + ' 项失败。'))

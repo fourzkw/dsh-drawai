@@ -561,6 +561,14 @@ console.log('\n线型与字号：AI 也能改（直线 / 曲线 / fontSize）')
   ok(e1c.strokeColor === undefined, 'color:"" 会删掉 strokeColor（回到 drawio 缺省颜色）')
   ok(e1c.endArrow === 'classic', 'arrow:end 落成 endArrow=classic（与 drawio 新建连线的写法一致）')
 
+  // 箭头 none 必须显式落成 endArrow=none：drawio 的 defaultEdge 自带 classic，
+  // 删键会让这条边回落到缺省、箭头又长出来（issue #15）。
+  await apply([{ op: 'setStyle', id: 'e1', arrow: 'none' }])
+  const e1d = parseStyle(current().edges[0].style)
+  ok(e1d.endArrow === 'none' && e1d.startArrow === undefined, 'arrow:none 落成 endArrow=none，不是删键（删键会回落到 drawio 缺省的 classic）')
+  const e1Read = (await readTool.execute({ path: 'doc.drawio' }, exec)).edges[0]
+  ok(e1Read.arrow === 'none', '改成无箭头后读回也是 none（写读一致）')
+
   // 节点与连线共用 setStyle：节点该走 style 键那条路。
   await apply([{ op: 'setStyle', id: 'n1', shape: 'diamond', style: 'orange' }])
   const n1 = current().nodes[0]
@@ -680,6 +688,28 @@ console.log('\ndiagram_read 回读')
   ok(e.dash === 'dashed' && e.arrow === 'both' && e.color === '#333', 'read 把边画法一起报出来（AI 改之前看得到现状）')
   ok(parseStyle(e.style).strokeColor === '#333', 'read 同时给出 style 串原文（派生字段只是便于阅读的名字）')
   ok(Array.isArray(read.notes), 'read 也带回 notes（画布表示不了但会原样保留的东西）')
+}
+
+console.log('\ndrawio 缺省：边没有 endArrow 键时按 defaultEdge 算（其实是 classic）')
+{
+  // 导入的图（Lucidchart / Visio / 手工清空过）常常没有 endArrow 键。drawio 渲染时会把
+  // mxStylesheet 的 defaultEdge 合并进来，而它自带 endArrow=classic —— 所以"缺键"读成
+  // "没有箭头"是错的（issue #15）。
+  seed({
+    version: 2,
+    revision: 1,
+    nodes: [
+      { id: 'n1', label: 'A', style: '', x: 0, y: 0, w: 120, h: 60 },
+      { id: 'n2', label: 'B', style: '', x: 300, y: 0, w: 120, h: 60 },
+    ],
+    edges: [{ id: 'e1', from: 'n1', to: 'n2', style: 'edgeStyle=orthogonalEdgeStyle;' }],
+  })
+  const imported = (await readTool.execute({ path: 'doc.drawio' }, exec)).edges[0]
+  ok(imported.arrow === 'end', '没有 endArrow 键的原生边读成 end（drawio 的 defaultEdge 自带 classic）')
+  await apply([{ op: 'setStyle', id: 'e1', arrow: 'none' }])
+  ok(parseStyle(current().edges[0].style).endArrow === 'none', '要它真的没箭头，必须显式写 endArrow=none')
+  const cleared = (await readTool.execute({ path: 'doc.drawio' }, exec)).edges[0]
+  ok(cleared.arrow === 'none', '显式 endArrow=none 之后读回 none（与 drawio 的 =none 语义一致）')
 }
 
 console.log('\n格式逻辑：默认省略 / 开放集合 / 折点与端点分离')

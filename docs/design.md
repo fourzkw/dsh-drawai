@@ -279,7 +279,10 @@ drawio 源码核实过（`mxConstants.js`、`Graph.js`、`mxConnector.js`、`doc
 三条规则，与 drawio 一致：
 
 1. **默认值一律省略。** `Graph.prototype.defaultVertexStyle = {}` —— 普通矩形就是**空样式**
-   （"rect = 没有 shape 键"）。`endArrow` 缺省 = 不画箭头（`mxConnector` 拿 `NONE` 当缺省）。
+   （"rect = 没有 shape 键"）。连线的缺省来自 `mxStylesheet.createDefaultEdgeStyle()`：它自带
+   `endArrow=classic`（还有 `strokeColor=#6482B9`），所以**边上缺 `endArrow` 键 = 画经典箭头**，
+   要"没有箭头"必须显式写 `endArrow=none`（`getCellStyle` 把 `=none` 处理成删键，删的是合并后的
+   样式，于是真的不画）。这一点以前写反了，由 issue #15 修正。
 2. **开放键值集合。** 认不出的键**原样保留、原样写回**，只是不认识就不渲染 —— 于是 drawio 导出的
    文件在这里编辑一轮再拿回去，陌生键不会消失（v1 的"认不出的只能丢"就是这么修掉的）。
 3. **折点与端点是两套模型。** `points` 只放人摆的折点；"从哪一侧进出"是 `exitX/exitY`（源端）与

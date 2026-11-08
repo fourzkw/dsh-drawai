@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {motionAgentFixture} from './motion-agent-test-fixture.mjs'
 import {randomUUID} from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { resolve, join, relative, isAbsolute } from 'node:path'
 import { apply } from '../lib/index.js'
 import { buildCanvas, parseCanvas } from '../src/canvas-format.js'
@@ -123,4 +124,26 @@ try {
   await Promise.allSettled(disposers.map((dispose) => Promise.resolve().then(dispose)))
   const rel = relative(resolve('artifacts'), root)
   if (rel && !rel.startsWith('..') && !isAbsolute(rel)) rmSync(root, { recursive: true, force: true })
+}
+
+// 入口 JSX 必须落在工程目录里：Remotion 的 webpack 给 .jsx 的规则 exclude /node_modules/，
+// 插件装在 profile 的 node_modules 下时入口会被当普通文本解析（issue #21、#22）。
+{
+  const { prepareMotionProject } = await import('../src/motion-project.js')
+  const dir = mkdtempSync(join(tmpdir(), 'drawai-entry-'))
+  try {
+    prepareMotionProject({
+      width: 640, height: 360, fps: 30, durationFrames: 30,
+      shots: [{ id: 'shot-1', recipeId: 'scene', startFrame: 0, durationInFrames: 30,
+        sceneSource: "import React from 'react';\nexport default function Scene() { return <div />; }\n" }],
+    }, dir)
+    const entry = readFileSync(join(dir, 'index.jsx'), 'utf8')
+    assert.match(entry, /from '\.\/entry\.gen\.jsx'/, '入口从工程目录里的副本引入')
+    assert.doesNotMatch(entry, /node_modules/, '入口不引用插件安装目录（那里的 .jsx 不会被编译）')
+    const runtimeEntry = readFileSync(join(dir, 'entry.gen.jsx'), 'utf8')
+    assert.match(runtimeEntry, /由 dsh-drawai 生成/, '运行时入口带"生成"标记')
+    assert.match(runtimeEntry, /registerMotionRoot/, '运行时入口内容就是 entry.jsx')
+    assert.match(readFileSync(join(dir, 'reference-media.gen.jsx'), 'utf8'), /由 dsh-drawai 生成/, '@drawai/motion 也复制到工程目录')
+    console.log('Entrance JSX: generated copies live in the project directory, not node_modules.')
+  } finally { rmSync(dir, { recursive: true, force: true }) }
 }
