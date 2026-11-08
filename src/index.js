@@ -2878,7 +2878,7 @@ async function listCanvases(root, cwd, dir) {
   if (first.entries === null) notes.push('无法列出 ' + startAbs + '：' + first.error)
   else collect(first.entries, '')
   for (let d = 0; d < dirs.length; d += 1) {
-    const subAbs = toAbsolute(dirs[d], cwd)
+    const subAbs = toAbsolute(dirs[d], startAbs)
     const sub = await readDir(subAbs)
     if (sub.entries === null) {
       notes.push('无法列出 ' + subAbs + '：' + sub.error)
@@ -5053,15 +5053,18 @@ function sanitizeNewName(raw) {
           // 同时给出**绝对路径**：客户端按路径去重（同一个文件不该开出两个标签），
           // 而标签上的路径可能来自 tab 的资源地址（绝对），与列表里的相对路径不相等。
           // 让客户端用绝对路径当"身份"，就不会重复开标签。
+          // listed.files 里的相对路径是**相对 dir** 的，必须拼回 dir —— 拼到工作区根会指到
+          // 一个不存在的同名文件（issue #19：子目录里的画布「列得出、打不开」）。
+          const dirAbs = absoluteHint(dirTarget, dir)
           const abs = []
-          for (let i = 0; i < listed.files.length; i += 1) abs.push(toAbsolute(listed.files[i], root))
+          for (let i = 0; i < listed.files.length; i += 1) abs.push(toAbsolute(listed.files[i], dirAbs))
           sendJson(res, 200, {
             ok: true,
             files: listed.files,
             absolute: abs,
             notes: listed.notes,
-            root: absoluteHint(root, root),
-            dir: absoluteHint(dirTarget, dir),
+            root: absoluteHint(rootTarget, root),
+            dir: dirAbs,
           })
         } catch (error) {
           sendJson(res, 500, { ok: false, error: 'list failed: ' + messageOf(error) })
@@ -5077,7 +5080,7 @@ function sanitizeNewName(raw) {
           files: listed.files,
           absolute: abs,
           notes: listed.notes,
-          root: absoluteHint(root, root),
+          root: absoluteHint(await ctx.fs.resolve(root), root),
         })
       } catch (error) {
         sendJson(res, 500, { ok: false, error: 'list failed: ' + messageOf(error) })
