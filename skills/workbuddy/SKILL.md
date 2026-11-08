@@ -1,6 +1,20 @@
 ---
 name: workbuddy
+display_name: 代码视频工作台
+display_name_en: Code Video Studio
 description: 用代码（Remotion + React + three/WebGL）做视频：建工程、写场景、出定调帧、渲样片与整片、做声音、帧检、导出剪映。用于"把一段内容做成能播的片子"，不依赖 DrawAI 插件，也不需要画布。
+description_zh: 把文案做成能播的视频：写 React/TSX 场景，渲样片与整片，配音轨、做帧检、导出剪映包。
+description_en: Turn copy into a playable video by writing React/TSX scenes, rendering pilot and final cuts, with voice, QA and Jianying export.
+version: 0.4.2
+author: DrawAI
+examples_zh:
+  - "把这段产品介绍做成 15 秒竖屏视频，节奏快点"
+  - "给我做一个数据可视化的开场，1920x1080，30fps"
+  - "这条片子加个旁白和背景音乐，导出剪映工程"
+examples_en:
+  - "Turn this product copy into a 15-second vertical video"
+  - "Make a data-visualisation opening at 1920x1080, 30fps"
+  - "Add narration and BGM to this film and export a Jianying project"
 ---
 
 # Workbuddy
@@ -15,17 +29,16 @@ description: 用代码（Remotion + React + three/WebGL）做视频：建工程�
 ## 0. 第一次用：先跑环境检查
 
 ```bash
-node --version            # 需要 ≥ 20
-cd <技能目录>
-npm install               # 只装 @babel/parser / @babel/traverse / npm（几 MB）
-node bin/wb.mjs doctor
+node --version                             # 需要 ≥ 20
+npm --prefix scripts install --omit=dev    # 只装 @babel/parser / @babel/traverse / npm（约 21MB）
+node scripts/bin/wb.mjs doctor             # 四件事：babel / 素材 / 运行时 / FFmpeg
 ```
 
 `doctor` 会报四件事：
 
 | 项 | 缺失时怎么补 |
 | --- | --- |
-| 素材（字体 + 内置纹理/音效，约 150MB） | `node bin/wb.mjs setup --install`（下载到 `~/.dsh/drawai-assets`），或把 `WORKBUDDY_ASSETS_DIR` 指到已有素材根 |
+| 素材（字体 + 内置纹理/音效，约 150MB） | `node scripts/bin/wb.mjs setup --install`（下载到 `~/.dsh/drawai-assets`），或把 `WORKBUDDY_ASSETS_DIR` 指到已有素材根 |
 | 视频运行时（remotion/react/three，约 300MB） | **首次渲染会自动装**，装到 `~/.dsh/drawai-video-runtime/<指纹>`；也可 `setup --install` 提前装 |
 | FFmpeg | 拼图/帧检/导出/混音要用。`winget install --id Gyan.FFmpeg -e`，或 scoop/choco，或设 `WORKBUDDY_FFMPEG_PATH` |
 | 浏览器 | 默认用本机 Chrome/Edge；没有就设 `WORKBUDDY_CHROME_PATH` |
@@ -40,23 +53,23 @@ node bin/wb.mjs doctor
 
 ```bash
 # 1) 建工程：给规格、分镜表（可先 scaffold 一份骨架）
-node bin/wb.mjs create --dir ./my-film --spec 1920x1080@30 --duration 12 --prompt "一句话说清这条片子要什么"
-node bin/wb.mjs spec scaffold --dir ./my-film        # 写出一张六列分镜表骨架
+node scripts/bin/wb.mjs create --dir ./my-film --spec 1920x1080@30 --duration 12 --prompt "一句话说清这条片子要什么"
+node scripts/bin/wb.mjs spec scaffold --dir ./my-film        # 写出一张六列分镜表骨架
 #    改 storyboard.md 后：
-node bin/wb.mjs spec --dir ./my-film                  # 检查时间轴连贯
+node scripts/bin/wb.mjs spec --dir ./my-film                  # 检查时间轴连贯
 
 # 2) 写场景：改 scene-0.tsx …（见 §3）
 
 # 3) 看定调帧（拼图，一眼看构图）
-node bin/wb.mjs preview --dir ./my-film --at 1,3,6
+node scripts/bin/wb.mjs preview --dir ./my-film --at 1,3,6
 
 # 4) 出样片（3 秒左右），看过再往下
-node bin/wb.mjs render --dir ./my-film --range 0,90 --wait
+node scripts/bin/wb.mjs render --dir ./my-film --range 0,90 --wait
 
 # 5) 整片 + 质检 + 交付
-node bin/wb.mjs render --dir ./my-film --wait
-node bin/wb.mjs qa     --dir ./my-film
-node bin/wb.mjs export --dir ./my-film               # 剪映素材包
+node scripts/bin/wb.mjs render --dir ./my-film --wait
+node scripts/bin/wb.mjs qa     --dir ./my-film
+node scripts/bin/wb.mjs export --dir ./my-film               # 剪映素材包
 ```
 
 `create` 会生成：`timeline.json`（时间轴）、`BRIEF.md`（施工说明）、`storyboard.md`、`STYLE.md`（用了整片风格时）、`theme.ts`、`scene-N.tsx`（骨架）、`scene-kit/`（公共原语）、`assets/`（内置素材 + 字体拷贝）。
@@ -241,10 +254,10 @@ wb export --dir D --draft      # 剪映素材包（逐镜切好 + 音轨 + 字�
 
 ## 参考
 
-- [references/commands.md](references/commands.md) — 全部子命令、参数、JSON 输出
-- [references/scene-contract.md](references/scene-contract.md) — 场景 API、`timeline.json`、`theme.ts`、`index.jsx`、`scene-kit`
-- [references/workflow.md](references/workflow.md) — 七道闸门、立项 7 问、打样标准、声音与质检清单、返工原因
-- [references/cards-and-styles.md](references/cards-and-styles.md) — 镜头卡与整片风格的用法与硬规定
-- [references/troubleshooting.md](references/troubleshooting.md) — 环境、运行时、FFmpeg、浏览器、离线、常见报错
+- `@references/commands.md` — 全部子命令、参数、JSON 输出
+- `@references/scene-contract.md` — 场景 API、`timeline.json`、`theme.ts`、`index.jsx`、`scene-kit`
+- `@references/workflow.md` — 七道闸门、立项 7 问、打样标准、声音与质检清单、返工原因
+- `@references/cards-and-styles.md` — 镜头卡与整片风格的用法与硬规定
+- `@references/troubleshooting.md` — 环境、运行时、FFmpeg、浏览器、离线、常见报错
 
-引擎是 DrawAI 插件视频引擎的 vendor 副本（`engine/VENDOR.json` 记录来源 commit），CLI 是插件 16 个 motion 工具的命令行版。
+引擎是 DrawAI 插件视频引擎的 vendor 副本（`scripts/engine/VENDOR.json` 记录来源 commit），CLI 是插件 16 个 motion 工具的命令行版。

@@ -109,7 +109,7 @@ wb render status --job job-20261108-041530-ab12
 
 | 现象 | 处理 |
 | --- | --- |
-| `Cannot find module '@babel/parser'` | 技能根没装依赖：`cd <技能根> && npm install`（或 `wb setup --install`） |
+| `Cannot find module '@babel/parser'` | 技能根没装依赖：`cd <技能根>/scripts && npm install`（或 `wb setup --install`） |
 | `npm` 找不到 | 视频运行时要用 npm 安装依赖；把 node 自带的 npm 放进 PATH |
 | 改了引擎想重新生成 | `node tools/build-skill.mjs`（会覆盖 `engine/`，不动 `lib/`、`bin/`、`SKILL.md`） |
 | 引擎补丁失效报错 | 插件升级改了被补丁的代码；去 `tools/build-skill.mjs` 的 `PATCHES` 里对一下新代码 |

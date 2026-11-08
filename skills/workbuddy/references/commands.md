@@ -1,6 +1,6 @@
 # wb 命令参考
 
-`wb` 是 `node bin/wb.mjs` 的简写。所有命令都接受：
+`wb` 是 `node scripts/bin/wb.mjs` 的简写。所有命令都接受：
 
 | 全局参数 | 作用 |
 | --- | --- |
@@ -15,7 +15,7 @@
 
 ### `wb setup [--install]`
 
-检查 node / @babel / npm / 素材 / 视频运行时 / FFmpeg。`--install` 会：技能根 `npm install`、下载素材、安装视频运行时、尝试安装 FFmpeg。
+检查 node / @babel / npm / 素材 / 视频运行时 / FFmpeg。`--install` 会：`scripts/` 下 `npm install`、下载素材、安装视频运行时、尝试安装 FFmpeg。
 
 ### `wb doctor`
 
