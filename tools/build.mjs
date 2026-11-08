@@ -63,6 +63,21 @@ function digest(text) {
   return createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 12)
 }
 
+/**
+ * 客户端 body 一律按 LF 归一。
+ *
+ * 为什么：本仓库的 `lib/client.js` 是在 LF 工作区里生成的，而 Windows 上
+ * `core.autocrlf=true` 会让检出/编辑出来的源文件变成 CRLF。内联时按 `'\n'` 切分，
+ * CRLF 的每行都会拖一个 `\r`：非空行缩进后是 `    code\r`，提交时被 git 归一化，
+ * 看不出差异；但**空行**会变成 `    \r`，归一化后剩下一行尾随空格，于是
+ * `check-package` 会报"客户端 bundle 的 body 与 src 不一致"，而人肉 diff 只看到
+ * 一堆"空行多了 4 个空格"。归一化放在这里（而不是要求每个人改工作区换行符），
+ * 构建产物就与操作系统无关。
+ */
+function normalizeNewlines(text) {
+  return text.replace(/\r\n/g, '\n')
+}
+
 /** 去掉 factory 的 4 空格基础缩进，得到干净的源形态。 */
 export function dedentBody(body) {
   return body
@@ -97,6 +112,10 @@ export function kernelBody() {
 
 /** 客户端 bundle 的完整 body（内核 + src/client.js 的 body）。构建与校验共用同一个函数。 */
 export function composeClientBody() {
+  return normalizeNewlines(composeClientBodyRaw())
+}
+
+function composeClientBodyRaw() {
   const source = readFileSync('src/client.js', 'utf8').replace(/\s+$/, '')
   const cut = source.indexOf(CLIENT_SOURCE_START)
   const body = cut < 0 ? source : source.slice(cut)
