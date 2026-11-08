@@ -318,5 +318,24 @@ console.log('\n[9] 打包入口落在工程目录里（issue #21/#22）')
   check('入口不再用插件自己的绝对路径', !/registerMotionRoot.*from \$\{JSON\.stringify\(runtime\)/.test(project))
 }
 
+
+console.log('\n[10] 整片风格 demo 的依赖随包 vendored（issue #27）')
+{
+  // 上游 demo 的 importmap 指向 /node_modules/*，装到用户机器上时插件根目录没有这些包；
+  // 没有 vendored 副本就会直接报「依赖没装在本机」，frames 拿不到参考帧。
+  const vendor = 'lib/motion/mgstyles/vendor/modules/'
+  const files = [
+    'd3/dist/d3.min.js',
+    'topojson-client/dist/topojson-client.min.js',
+    'opentype.js/dist/opentype.mjs',
+    'simplex-noise/dist/esm/simplex-noise.js',
+  ]
+  for (const file of files) check('随包带了 ' + file, existsSync(vendor + file) && readFileSync(vendor + file).length > 1000)
+  const frames = readFileSync('lib/motion/style-frames.js', 'utf8')
+  check('缺模块时同时查运行时与 vendored 副本', /VENDOR_MODULES/.test(frames) && /join\(VENDOR_MODULES, relative\)/.test(frames))
+  check('静态服务回落到 vendored 副本', /roots\.bundled/.test(frames))
+  check('不再把 source 说成等价退路', !/多数情况够用/.test(frames) && /有损降级/.test(frames))
+}
+
 console.log('\n' + (failures === 0 ? '全部通过。' : failures + ' 项失败。'))
 process.exit(failures === 0 ? 0 : 1)

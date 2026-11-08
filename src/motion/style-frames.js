@@ -16,6 +16,10 @@ import {fontsDir, mediaLibraryRoot} from './asset-pack.js'
 import {fontFaces} from './fonts.js'
 
 const UPSTREAM = fileURLToPath(new URL('./mgstyles/upstream', import.meta.url))
+// 上游 demo 的 importmap 指向 /node_modules/*：three 由视频运行时提供，d3 / topojson-client /
+// opentype.js / simplex-noise 不在运行时依赖里，随插件一起 vendored（见 mgstyles/vendor/README.md）。
+// 目录叫 modules 而不是 node_modules：npm 打包会无条件跳过任何 node_modules 目录。
+const VENDOR_MODULES = fileURLToPath(new URL('./mgstyles/vendor/modules', import.meta.url))
 const DEMO_FONT_ALIASES = {
   '/demos/03-isometric/assets/fonts/Unbounded-800-static.ttf': 'Unbounded',
   '/demos/07-liquid/assets/Fraunces-Liquid-72-900-Soft.ttf': 'Fraunces',
@@ -23,8 +27,9 @@ const DEMO_FONT_ALIASES = {
   '/demos/10-synthwave/assets/fonts/MrDafoe-Regular.ttf': 'Mr Dafoe',
 }
 // 上游 demo 的 importmap 指向 /node_modules/three/...、/node_modules/opentype.js/...，
-// 但这些包只在插件根目录的 node_modules 里。旧版只服务 upstream 目录，于是模块 404、
+// 这些包不在 upstream 目录里，得单独挂载。旧版只服务 upstream 目录，于是模块 404、
 // window.__ready 永不置真，最后报了句"没有在 120 秒内就绪"——错误信息指向了完全错误的地方。
+// 现在 /node_modules/* 先查视频运行时，再回落到随包 vendored 的那一份（issue #27）。
 
 
 const MIME = {
@@ -99,18 +104,21 @@ function pickTimes(slug, count, explicit, duration) {
   return Array.from({ length: wanted }, (_, i) => Math.round(((max * i) / Math.max(1, wanted - 1)) * 1000) / 1000)
 }
 
-// demo 的 importmap 指向 /node_modules/*，只有真装在本机的包才服务得出来。
-// 缺包时页面会静默卡在模块加载阶段，等到超时也只会说"没就绪"—— 这里提前查，几十毫秒就报清缺什么。
+// demo 的 importmap 指向 /node_modules/*：运行时里有的（three）直接用，没有的回落到随包 vendored 的副本。
+// 两边都没有说明打包缺文件，提前查出来，几十毫秒就报清缺什么，不必等页面静默卡到超时。
 function missingModules(slug, modules) {
   const html = join(UPSTREAM, 'demos', slug, 'index.html')
   let text = ''
   try { text = readFileSync(html, 'utf8') } catch { return [] }
   const refs = [...text.matchAll(/["'](\/node_modules\/[^"']+)["']/g)].map((match) => match[1])
-  return [...new Set(refs)].filter((ref) => !existsSync(join(modules, ref.slice('/node_modules/'.length))))
+  return [...new Set(refs)].filter((ref) => {
+    const relative = ref.slice('/node_modules/'.length)
+    return !existsSync(join(modules, relative)) && !existsSync(join(VENDOR_MODULES, relative))
+  })
 }
 
 function startStaticServer(misses, modules) {
-  const roots = {vendor: resolve(modules), upstream: resolve(UPSTREAM)}
+  const roots = {vendor: resolve(modules), bundled: resolve(VENDOR_MODULES), upstream: resolve(UPSTREAM)}
   return new Promise((done) => {
     const server = createServer((req, res) => {
       try {
@@ -135,11 +143,16 @@ function startStaticServer(misses, modules) {
           }
         }
         const vendor = pathname.startsWith('/node_modules/')
-        // 两条挂载点：/node_modules/* → 插件 node_modules；其余 → upstream。各自限制在自己目录内。
+        // 两条挂载点：/node_modules/* → 视频运行时（缺则随包 vendored 的副本）；其余 → upstream。
+        // 各自限制在自己目录内。
         const root = vendor ? roots.vendor : roots.upstream
         const relative = vendor ? pathname.slice('/node_modules'.length) : pathname
         let file = resolve(join(root, normalize(relative)))
         if (file !== root && !file.startsWith(root + sep)) { res.writeHead(403); return res.end('403') }
+        if (vendor && !existsSync(file)) {
+          const bundled = resolve(join(roots.bundled, normalize(relative)))
+          if (bundled === roots.bundled || bundled.startsWith(roots.bundled + sep)) file = bundled
+        }
         if (existsSync(file) && statSync(file).isDirectory()) file = join(file, 'index.html')
         // Shared upstream textures are packaged separately from the text-only demo tree.
         if (!vendor && !existsSync(file) && pathname.startsWith('/assets/textures/')) {
@@ -187,9 +200,10 @@ export async function captureStyleFrames({slug, times: explicitTimes, count = 8,
   const missing = missingModules(slug, modules)
   if (missing.length) {
     throw new Error('这个 demo 的依赖没装在本机（' + missing.join(', ') + '），页面加载不到模块，截不了帧。'
-      + '三条路：① 改用 action:"source" 读 demos/' + slug + '/ 下的源码与 cues.json 反推动效（多数情况够用）；'
-      + '② 检查独立视频运行环境中的额外依赖（' + modules + '）；'
-      + '③ 换一个不依赖它们的 demo。')
+      + '这不是配置问题：three 由视频运行时提供，d3 / topojson-client / opentype.js / simplex-noise 随插件 vendored；'
+      + '缺这几个说明打包不完整，请把这条错误原样反馈给插件作者。'
+      + '临时退路只有 action:"source" 读 demos/' + slug + '/ 下的源码与 cues.json —— 那是有损降级，'
+      + '只有文字与时间点，看不到转场怎么擦、冲击有没有环、相机抖不抖、颗粒多粗。')
   }
 
   const misses = []
@@ -222,7 +236,7 @@ export async function captureStyleFrames({slug, times: explicitTimes, count = 8,
         + (modules.length ? '；缺 npm 包：' + modules.join(', ') : '')
         + (assets.length ? '；缺上游素材：' + assets.join(', ') + '（这些没有 vendored，不是配置问题）' : '')
         + (modules.length || assets.length ? '' : '；模块可能抛错')
-        + '。改用 action:"source" 读 demos/' + slug + '/ 下的源码与 cues.json 反推动效，通常比等截帧更省事。')
+        + '。只能退到 action:"source" 读源码与 cues.json，但那是有损降级（看得到参数，看不到真实动态）。')
     }
     const meta = await page.evaluate(() => ({
       width: window.DEMO?.width || 1920,

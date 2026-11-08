@@ -81,3 +81,13 @@ skills/workbuddy/*.tgz
 # 技能市场包首次运行解出来的引擎（scripts/engine.tar.gz 的产物）
 skills/workbuddy/scripts/.runtime/
 skills/workbuddy/scripts/node_modules/
+
+# 整片风格 demo 的 vendored 依赖（issue #27）：包内路径里带 dist/，别被上面的构建产物规则吃掉。
+!src/motion/mgstyles/vendor/
+!src/motion/mgstyles/vendor/**
+!src/motion/mgstyles/vendor/modules/**/dist/
+!src/motion/mgstyles/vendor/modules/**/dist/**
+!lib/motion/mgstyles/vendor/
+!lib/motion/mgstyles/vendor/**
+!lib/motion/mgstyles/vendor/modules/**/dist/
+!lib/motion/mgstyles/vendor/modules/**/dist/**
