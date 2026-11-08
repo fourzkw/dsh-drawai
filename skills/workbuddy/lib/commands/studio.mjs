@@ -60,7 +60,8 @@ function measureAssets(root) {
   let files = 0
   let bytes = 0
   const walk = (dir, depth) => {
-    if (depth > 4) return
+    // 素材库是 media-library/assets/textures/<材质>/<文件>（5 层），上限给足；这里只是防死循环的兜底。
+    if (depth > 8) return
     let entries = []
     try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
     for (const entry of entries) {
