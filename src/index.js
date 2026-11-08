@@ -6519,7 +6519,7 @@ function sanitizeNewName(raw) {
   ctx.effect(() => registerHostTool(defineTool({
     name:'audio_asset',
     description:'为画布搜索和导入音频。search 从 Freesound 搜索；get 按 fs:数字 下载并创建音频节点；import 从当前工作区导入 mp3/wav/m4a/aac/ogg/flac/webm，32MB/10分钟以内；targetId 可自动连接视频。configure 修改音频节点的 audioRole(sfx/bgm/voice)、audioGainDb、audioTrimStart/End(秒，End=0至末尾)、audioAt(全片秒)、audioFadeIn/Out(秒)、audioLoop(字符串0/1)。inspect 返回素材来源、哈希和检测结果。音频需要连接到视频；motion_task settings.audioMode=auto让AI安排镜头声音，manual使用节点参数或audioPlan，off静音；remix只重混已有成片。没有真实试听不得宣称听感通过。',
-    parameters:{action:{type:'string',enum:['search','get','import','configure','inspect'],required:true},path:{type:'string'},page:{type:'number'},query:{type:'string'},limit:{type:'number'},id:{type:'string'},file:{type:'string'},nodeId:{type:'string'},targetId:{type:'string'},role:{type:'string',enum:['sfx','bgm','voice']},settings:{type:'json'},x:{type:'number'},y:{type:'number'}},
+    parameters:{action:{type:'string',enum:['search','get','import','configure','inspect'],required:true},path:{type:'string'},page:{type:'number'},query:{type:'string'},limit:{type:'number'},id:{type:'string'},file:{type:'string'},nodeId:{type:'string'},targetId:{type:'string'},role:{type:'string',enum:['sfx','bgm','voice']},settings:{type:'object',additionalProperties:false,properties:{audioRole:{type:'string',enum:['sfx','bgm','voice']},audioGainDb:{type:'number'},audioTrimStart:{type:'number'},audioTrimEnd:{type:'number'},audioAt:{type:'number'},audioFadeIn:{type:'number'},audioFadeOut:{type:'number'},audioLoop:{type:'string',enum:['0','1']}},description:'configure：要改的音频设置，键名就是节点 data 里的名字（audioRole / audioGainDb / audioTrimStart…）'},x:{type:'number'},y:{type:'number'}},
     output:{schema:{type:'object',additionalProperties:false,properties:{summary:{type:'string',required:true},details:{type:'string',required:true}}},render:(_args,value)=>[{type:'text',text:value.summary+'\n'+value.details}]},
     async execute(args,exec){
       const sessionId=sessionIdOf(exec),path=args.path||focusedPathFor(sessionId)
@@ -6746,12 +6746,29 @@ function sanitizeNewName(raw) {
       path: { type: 'string', description: '画布路径，省略时使用当前画布' },
       nodeId: { type: 'string', required: true, description: '视频节点 id' },
       page: { type: 'number' },
-      spec: { type: 'json', description: '视频规格 {width,height,fps,duration}，省略时沿用节点设置' },
+      spec: {
+        type: 'object',
+        additionalProperties: true,
+        properties: { width: { type: 'number' }, height: { type: 'number' }, fps: { type: 'number' }, duration: { type: 'number' } },
+        description: '视频规格 {width,height,fps,duration}（像素与秒），省略时沿用节点设置',
+      },
       prompt: { type: 'string', description: '这条视频要什么，会写进 BRIEF.md' },
       segments: { type: 'number', description: '初始分几段，默认 4' },
-      storyboard: { type: 'json', description: '分镜表：[{intent:"这一镜要做什么", onScreen:"画面上出现什么", copy:"配字"}]，按镜头顺序；也可以给 ["一句话"] 简写。会写成 storyboard.md。' },
+      storyboard: {
+        type: 'array',
+        items: { type: 'json' },
+        description: '分镜表：[{intent:"这一镜要做什么", onScreen:"画面上出现什么", copy:"配字"}]，按镜头顺序；也可以给 ["一句话"] 简写。会写成 storyboard.md。',
+      },
       theme: { type: 'string', description: '配色主题名：vintage-kraft / deep-ocean / obsidian-violet / modern-light / midnight / solar-pop / coral-burst / color-play / paper-ink。给了就在工程里生成 theme.ts，场景用 {{PAPER, INK, DUST, STAMP}} 引用。' },
-      themeTokens: { type: 'json', description: '直接给一套色 {page,text,muted,accent,surface,field,border}（优先于 theme）。' },
+      themeTokens: {
+        type: 'object',
+        additionalProperties: true,
+        properties: {
+          page: { type: 'string' }, text: { type: 'string' }, muted: { type: 'string' }, accent: { type: 'string' },
+          surface: { type: 'string' }, field: { type: 'string' }, border: { type: 'string' },
+        },
+        description: '直接给一套色 {page,text,muted,accent,surface,field,border}（#RRGGBB，优先于 theme；也认 paper/card/ink 这些别名）。',
+      },
       style: { type: 'string', description: '整片风格 slug（mg_style list 里的 slug，如 09-bauhaus）。给了就用这个风格：色板当主题、节奏当规格缺省、施工说明与引擎契约写进 STYLE.md。也可以不传，改为在画布上连一个「整片风格」节点。' },
       allowUnlinkedCards: { type: 'boolean', description: 'create 时允许画布上存在没连线的镜头卡（当作灵感，不进 assets/timeline）。默认不允许：断连的卡会同时漏掉参考与排期，所以直接报错，让你补 addEdge。' },
     },
@@ -6870,10 +6887,21 @@ function sanitizeNewName(raw) {
       path: { type: 'string', description: '画布路径，省略时使用当前画布' },
       nodeId: { type: 'string', description: '视频节点 id（规格块的锚点）' },
       page: { type: 'number' },
-      storyboard: { type: 'json', description: '分镜行 [{intent,onScreen,copy,card,durationFrames}]，或一段 markdown 表；省略时 scaffold 只出表头' },
-      style: { type: 'json', description: '风格：一段文本，或 {palette,fonts,materials}' },
+      storyboard: {
+        oneOf: [{ type: 'array', items: { type: 'json' } }, { type: 'string' }],
+        description: '分镜行 [{intent,onScreen,copy,card,durationFrames}]，或一段 markdown 表；省略时 scaffold 只出表头',
+      },
+      style: {
+        oneOf: [{ type: 'string' }, { type: 'object', additionalProperties: true }],
+        description: '风格：一段文本，或 {palette,fonts,materials}',
+      },
       narration: { type: 'string', description: '旁白脚本（## shot-N 分节，一句一行）' },
-      spec: { type: 'json', description: '视频规格 {width,height,fps,duration}，省略时读节点上的' },
+      spec: {
+        type: 'object',
+        additionalProperties: true,
+        properties: { width: { type: 'number' }, height: { type: 'number' }, fps: { type: 'number' }, duration: { type: 'number' } },
+        description: '视频规格 {width,height,fps,duration}（像素与秒），省略时读节点上的',
+      },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { summary: { type: 'string', required: true }, details: { type: 'string', required: true } } },
       render: (_args, value) => [{ type: 'text', text: value.summary + '\n' + value.details }] },
@@ -6924,9 +6952,17 @@ function sanitizeNewName(raw) {
     description: '渲染工程里的几帧并**直接返回拼图**（同一轮就能看见画面）。第一次调用要打包（约 10–30 秒），之后同一份源码复用缓存只要几秒。frames 是绝对帧号，例如 [0,60,120,180]；省略时取每段的中点（最多 6 帧），定调阶段只写 scene-0 时用它看一张定妆帧。**要看画质（锯齿、色带、字重）就传 crop：只出 1:1 原尺寸局部**，拼图是缩过的，缩过的图看不出这些毛病。',
     parameters: {
       path: { type: 'string' }, page: { type: 'number' }, nodeId: { type: 'string', required: true },
-      frames: { type: 'json', description: '绝对帧号数组，最多 9 帧；省略 = 每段中点' },
+      frames: { type: 'array', items: { type: 'number' }, description: '绝对帧号数组，最多 9 帧；省略 = 每段中点' },
       cols: { type: 'number', description: '拼图列数，默认 3' },
-      crop: { type: 'json', description: '只出局部：{x,y,w,h} 或 {cx,cy,w,h}，像素。传了就按 1:1 原尺寸返回（不缩放），用来判断 AA / 色带 / 字体' },
+      crop: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          x: { type: 'number' }, y: { type: 'number' }, w: { type: 'number' }, h: { type: 'number' },
+          cx: { type: 'number' }, cy: { type: 'number' },
+        },
+        description: '只出局部：{x,y,w,h} 或 {cx,cy,w,h}，像素。传了就按 1:1 原尺寸返回（不缩放），用来判断 AA / 色带 / 字体',
+      },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: {
       summary: { type: 'string', required: true },
@@ -6971,8 +7007,8 @@ function sanitizeNewName(raw) {
       action: { type: 'string', enum: ['start', 'status', 'list', 'cancel', 'apply'], required: true },
       path: { type: 'string' }, page: { type: 'number' }, nodeId: { type: 'string', description: 'start：从哪个视频节点对应的工程渲；apply：回填到哪个节点（省略时：主视频节点回填整片、另建的样片节点回填样片）' }, jobId: { type: 'string' },
       source: { type: 'string', enum: ['film', 'pilot'], description: 'apply 时回填哪一种：film=整片（主视频节点）、pilot=样片（样片节点）' },
-      frames: { type: 'json', description: '只渲染这些帧' },
-      range: { type: 'json', description: '帧区间 [from,to]：渲样片（写 pilot.mp4）' },
+      frames: { type: 'array', items: { type: 'number' }, description: '只渲染这些帧' },
+      range: { type: 'array', items: { type: 'number' }, description: '帧区间 [from,to]：渲样片（写 pilot.mp4）' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { summary: { type: 'string', required: true }, details: { type: 'string', required: true } } },
       render: (_args, value) => [{ type: 'text', text: value.summary + '\n' + value.details }] },
@@ -7151,7 +7187,15 @@ function sanitizeNewName(raw) {
       path: { type: 'string' }, nodeId: { type: 'string' }, page: { type: 'number' },
       name: { type: 'string', description: '导出目录名，默认 jianying' },
       draft: { type: 'boolean', description: '另写一份 draft_content.json（剪映草稿结构，未在剪映里实测过）' },
-      subtitles: { type: 'json', description: '字幕数组 [{startFrame,endFrame,text}]；工程 timeline 里有 subtitles 就不用传' },
+      subtitles: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: true,
+          properties: { startFrame: { type: 'number' }, endFrame: { type: 'number' }, text: { type: 'string' } },
+        },
+        description: '字幕数组 [{startFrame,endFrame,text}]；工程 timeline 里有 subtitles 就不用传',
+      },
       file: { type: 'string', description: '当成片对照的 mp4，默认 .out/film.mp4' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { summary: { type: 'string', required: true }, details: { type: 'string', required: true } } },
@@ -7301,7 +7345,7 @@ function sanitizeNewName(raw) {
       minDuration: { type: 'number', description: 'search：最短秒数，默认 0' },
       maxDuration: { type: 'number', description: 'search：最长秒数' },
       limit: { type: 'number', description: 'search：最多返回几条，默认 8' },
-      ids: { type: 'json', description: 'get：音效 id 数组，例如 ["fs:12345"]' },
+      ids: { type: 'array', items: { type: 'string' }, description: 'get：音效 id 数组，例如 ["fs:12345"]' },
     },
     output: { schema: { type: 'object', additionalProperties: false, properties: { summary: { type: 'string', required: true }, details: { type: 'string', required: true } } },
       render: (_args, value) => [{ type: 'text', text: value.summary + '\n' + value.details }] },
@@ -7470,7 +7514,31 @@ function sanitizeNewName(raw) {
     parameters: {
       action: {type:'string',enum:['bind','list','clear'],required:true},
       nodeId: {type:'string',required:true}, path:{type:'string'},page:{type:'number'},
-      musicCueId:{type:'string'},anchors:{type:'json'},
+      musicCueId:{type:'string'},
+      anchors:{
+        type:'array',
+        items:{
+          type:'object',
+          additionalProperties:true,
+          properties:{
+            id:{type:'string'},
+            type:{type:'string',enum:['cut','action']},
+            shotId:{type:'string'},
+            beat:{type:'number'},
+            at:{type:'number'},
+            name:{type:'string'},
+            visual:{
+              type:'object',
+              additionalProperties:true,
+              properties:{
+                metric:{type:'string',enum:['change','brightness']},
+                roi:{type:'object',additionalProperties:false,properties:{x:{type:'number'},y:{type:'number'},w:{type:'number'},h:{type:'number'}}},
+              },
+            },
+            sfx:{type:'array',items:{type:'object',additionalProperties:true,properties:{cueId:{type:'string'},peakSeconds:{type:'number'}}}},
+          },
+        },
+      },
       outputOffsetSeconds:{type:'number',description:'具体渲染管线实测音轨延迟（秒），默认0；验收报告给出多点测得的偏移参考'},
       toleranceFrames:{type:'number',description:'音画及音效误差容差，默认2帧，最大3帧'},
     },
@@ -7490,7 +7558,7 @@ function sanitizeNewName(raw) {
         const analysis=await analyzeBeats(assetPath(dir,cue.file))
         const tolerance=args.toleranceFrames??2
         if(!Number.isFinite(tolerance)||tolerance<0||tolerance>3)throw new Error('toleranceFrames 必须在0–3内')
-        timeline.sync={version:1,musicCueId:cue.id,analysis,analysisSourceHash:filmHash(assetPath(dir,cue.file)),anchors:args.anchors,outputOffsetSeconds:args.outputOffsetSeconds??0,toleranceFrames:tolerance}
+        timeline.sync={version:1,musicCueId:cue.id,analysis,analysisSourceHash:filmHash(assetPath(dir,cue.file)),anchors:jsonArray(args.anchors),outputOffsetSeconds:args.outputOffsetSeconds??0,toleranceFrames:tolerance}
         timeline=resolveSync(timeline)
       }
       writeTimeline(dir,timeline)

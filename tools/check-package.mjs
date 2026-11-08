@@ -152,6 +152,13 @@ for (const tool of registered) {
   const schema = tool.parameters
   const props = schema && schema.properties ? Object.keys(schema.properties) : []
   check(tool.name + ' 有 properties', props.length > 0, props.join(', '))
+  // 参数必须带真实类型：`type: 'json'` 在 DSL 里只是注解，编译后连 `type` 都没有，
+  // 模型就不知道 `frames` 该传数组（issue #14）。这里守住"每个参数不是 type 就是 oneOf"。
+  const untyped = props.filter((name) => {
+    const spec = schema.properties[name]
+    return spec === null || typeof spec !== 'object' || (spec.type === undefined && spec.oneOf === undefined)
+  })
+  check(tool.name + ' 的参数都声明了类型（type 或 oneOf）', untyped.length === 0, untyped.join(', ') || 'ok')
   if (tool.name === 'diagram_apply') {
     const required = Array.isArray(schema.required) ? schema.required : []
     check('diagram_apply 的 ops 是必填', required.includes('ops'), 'required=' + JSON.stringify(required))
