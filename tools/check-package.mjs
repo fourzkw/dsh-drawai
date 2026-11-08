@@ -263,6 +263,12 @@ console.log('\n[6] 渲染 worker 传给 Remotion 的浏览器参数名（issue #
   check('浏览器候选覆盖 macOS', /\/Applications\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome/.test(worker))
   check('浏览器候选覆盖 Linux', /\/usr\/bin\/google-chrome/.test(worker))
   check('没有本机浏览器时先给出提示再下载（不让它看起来像卡死）', /正在下载内置浏览器/.test(worker))
+  // issue #26：`.dsh` 带 Low 完整性标签时，里面的 ffmpeg 继承 Low IL，写不了 Medium 的系统
+  // %TEMP%；renderMedia 的 pre-encode.mp4 正好写在 os.tmpdir()，正片渲到一半就 Permission denied。
+  // 修法只有一条：fork 时把子进程的 TEMP/TMP 指到工程目录。
+  const render = readFileSync('lib/motion/render.js', 'utf8')
+  check('渲染 worker 的临时目录指到工程里（issue #26）', /TEMP:\s*tempDirectory/.test(render) && /TMP:\s*tempDirectory/.test(render))
+  check('工程里的 .out/tmp 会先建好再 fork', /mkdirSync\(tempDirectory,\s*\{\s*recursive:\s*true\s*\}\)/.test(render))
 }
 
 console.log('\n[7] json 参数兼容（宿主可能把 json 参数按字符串送进来）')
@@ -310,6 +316,25 @@ console.log('\n[9] 打包入口落在工程目录里（issue #21/#22）')
   check('入口从工程目录里的 entry.gen.jsx 引入', /from '\.\/entry\.gen\.jsx'/.test(project))
   check('@drawai/motion 指向工程目录里的副本', /reference-media\.gen\.jsx/.test(project))
   check('入口不再用插件自己的绝对路径', !/registerMotionRoot.*from \$\{JSON\.stringify\(runtime\)/.test(project))
+}
+
+
+console.log('\n[10] 整片风格 demo 的依赖随包 vendored（issue #27）')
+{
+  // 上游 demo 的 importmap 指向 /node_modules/*，装到用户机器上时插件根目录没有这些包；
+  // 没有 vendored 副本就会直接报「依赖没装在本机」，frames 拿不到参考帧。
+  const vendor = 'lib/motion/mgstyles/vendor/modules/'
+  const files = [
+    'd3/dist/d3.min.js',
+    'topojson-client/dist/topojson-client.min.js',
+    'opentype.js/dist/opentype.mjs',
+    'simplex-noise/dist/esm/simplex-noise.js',
+  ]
+  for (const file of files) check('随包带了 ' + file, existsSync(vendor + file) && readFileSync(vendor + file).length > 1000)
+  const frames = readFileSync('lib/motion/style-frames.js', 'utf8')
+  check('缺模块时同时查运行时与 vendored 副本', /VENDOR_MODULES/.test(frames) && /join\(VENDOR_MODULES, relative\)/.test(frames))
+  check('静态服务回落到 vendored 副本', /roots\.bundled/.test(frames))
+  check('不再把 source 说成等价退路', !/多数情况够用/.test(frames) && /有损降级/.test(frames))
 }
 
 console.log('\n' + (failures === 0 ? '全部通过。' : failures + ' 项失败。'))

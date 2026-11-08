@@ -12,3 +12,9 @@ dist/
 artifacts/
 *.log
 *.bak-*
+
+# 整片风格 demo 的 vendored 依赖（issue #27）：路径里带 dist/，别被上面的构建产物规则吃掉。
+!lib/motion/mgstyles/vendor/
+!lib/motion/mgstyles/vendor/**
+!lib/motion/mgstyles/vendor/modules/**/dist/
+!lib/motion/mgstyles/vendor/modules/**/dist/**
