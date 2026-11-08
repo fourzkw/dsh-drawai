@@ -1,0 +1,28 @@
+{
+  "slug": "12-aurora-glass",
+  "name": "弥散渐变·玻璃拟态",
+  "oneLiner": "近黑底上 7 块色斑缓慢漂移，玻璃卡带 1px 内描边与近边折射，一切都慢。",
+  "signature": [
+    "底色 #040312，亮部全靠加色色斑，没有提亮的灰",
+    "7 块无边色斑，24–40s 闭环漂移，强度 0.32–1.15",
+    "玻璃 = 30px backdrop 模糊 + 7% 白 + 1px 白内描边 + 13px 近边折射",
+    "80BPM，最短动作 0.75s，没有 120ms 以下的跳变",
+    "文字只做 opacity + 8px 上浮，从不缩放旋转"
+  ],
+  "palette": {
+    "page": "#040312",
+    "surface": "#171043",
+    "field": "#0B0726",
+    "text": "#FFFFFF",
+    "muted": "#8C8CFF",
+    "accent": "#7050FF",
+    "border": "#FFFFFF"
+  },
+  "colors": ["#040312", "#7050FF", "#2F46F2", "#34CFF0", "#B653F0", "#8C8CFF", "#3320A8"],
+  "fonts": {
+    "display": "\"Sora\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+    "text": "\"Inter\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+    "mono": "\"JetBrains Mono\",monospace"
+  },
+  "rhythm": { "bpm": 80, "fps": 30, "duration": 10, "aspect": "16:9", "cutFrames": 22 }
+}

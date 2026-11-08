@@ -1,0 +1,269 @@
+{
+  "source": "https://github.com/Vincentwei1021/mg-styles-15",
+  "commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c",
+  "license": "MIT",
+  "vendoredAt": "2026-10-05",
+  "note": "只收文本：提示词 + demo 源码。视频/纹理/字体不在仓库里，也没有 vendor 进来。",
+  "styles": [
+    {
+      "slug": "01-flat-vector",
+      "heading": "扁平矢量动画 Flat / Vector 2D Motion Graphics",
+      "shot": "popwise「One Dot」一个点的一镜到底 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.64 / 10",
+      "prompt": "prompts/01-flat-vector.md",
+      "demos": [
+        "demos/01-flat-vector/cues.json",
+        "demos/01-flat-vector/index.html"
+      ]
+    },
+    {
+      "slug": "02-line-art",
+      "heading": "线条动画 Line Art / Line Animation",
+      "shot": "ATELIER LINEA「一笔画 One Line」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.64 / 10",
+      "prompt": "prompts/02-line-art.md",
+      "demos": [
+        "demos/02-line-art/cues.json",
+        "demos/02-line-art/film.js",
+        "demos/02-line-art/index.html",
+        "demos/02-line-art/tools/dump_timing.mjs"
+      ]
+    },
+    {
+      "slug": "03-isometric",
+      "heading": "等轴 2.5D Isometric / 2.5D",
+      "shot": "ISOPOLIS「让城市自己生长」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 8.00 / 10",
+      "prompt": "prompts/03-isometric.md",
+      "demos": [
+        "demos/03-isometric/cues.json",
+        "demos/03-isometric/index.html",
+        "demos/03-isometric/js/anim.js",
+        "demos/03-isometric/js/main.js",
+        "demos/03-isometric/js/night5.js",
+        "demos/03-isometric/js/render.js",
+        "demos/03-isometric/js/title.js",
+        "demos/03-isometric/js/title5.js",
+        "demos/03-isometric/js/ui.js",
+        "demos/03-isometric/js/world.js"
+      ]
+    },
+    {
+      "slug": "05-cel-boil",
+      "heading": "逐帧手绘 / 线条沸腾 Cel Animation / Frame-by-Frame & Line Boil",
+      "shot": "手作 HAND MADE · 1920×1080 · 24 fps · 10 秒 · AI 评审终评 8.07 / 10",
+      "prompt": "prompts/05-cel-boil.md",
+      "demos": [
+        "demos/05-cel-boil/cues.json",
+        "demos/05-cel-boil/index.html",
+        "demos/05-cel-boil/js/engine.js",
+        "demos/05-cel-boil/js/scene.js"
+      ]
+    },
+    {
+      "slug": "06-collage",
+      "heading": "拼贴剪贴 Collage / Cutout Animation",
+      "shot": "NOGGIN 脑洞季刊「脑洞大开 The Mind Is a Collage」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 8.14 / 10",
+      "prompt": "prompts/06-collage.md",
+      "demos": [
+        "demos/06-collage/assets/gen/layout.json",
+        "demos/06-collage/cues.json",
+        "demos/06-collage/index.html"
+      ]
+    },
+    {
+      "slug": "07-liquid",
+      "heading": "液态流动 Liquid Motion",
+      "shot": "drop.「万物始于一滴」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.57 / 10",
+      "prompt": "prompts/07-liquid.md",
+      "demos": [
+        "demos/07-liquid/cues.json",
+        "demos/07-liquid/index.html",
+        "demos/07-liquid/js/engine.js",
+        "demos/07-liquid/js/links.js",
+        "demos/07-liquid/js/lookdev.js",
+        "demos/07-liquid/js/scene.js",
+        "demos/07-liquid/js/shaders.js",
+        "demos/07-liquid/js/textsdf.js",
+        "demos/07-liquid/js/type.js"
+      ]
+    },
+    {
+      "slug": "08-morph",
+      "heading": "形变动画 Morphing / Shape Morph",
+      "shot": "一形万象 One Shape, Every Story · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.64 / 10",
+      "prompt": "prompts/08-morph.md",
+      "demos": [
+        "demos/08-morph/cues.json",
+        "demos/08-morph/glyphs.json",
+        "demos/08-morph/index.html"
+      ]
+    },
+    {
+      "slug": "09-bauhaus",
+      "heading": "几何构成 / 包豪斯 Geometric / Bauhaus Motion",
+      "shot": "KONSTRUKTION · 20 SCHLÄGE「二十拍构成」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.71 / 10",
+      "prompt": "prompts/09-bauhaus.md",
+      "demos": [
+        "demos/09-bauhaus/cues.json",
+        "demos/09-bauhaus/film.js",
+        "demos/09-bauhaus/index.html"
+      ]
+    },
+    {
+      "slug": "10-synthwave",
+      "heading": "复古系（80s Synthwave / Y2K 千禧） Retro: 80s Synthwave / VHS / Y2K",
+      "shot": "NEON DRIVE · Midnight「霓虹夜驰 1986」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 8.21 / 10",
+      "prompt": "prompts/10-synthwave.md",
+      "demos": [
+        "demos/10-synthwave/cues.json",
+        "demos/10-synthwave/index.html"
+      ]
+    },
+    {
+      "slug": "12-aurora-glass",
+      "heading": "弥散渐变 / 玻璃拟态 Gradient Blur (Aurora) & Glassmorphism",
+      "shot": "Aurora — think in light「思考，自有光」 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 8.07 / 10",
+      "prompt": "prompts/12-aurora-glass.md",
+      "demos": [
+        "demos/12-aurora-glass/cues.json",
+        "demos/12-aurora-glass/index.html",
+        "demos/12-aurora-glass/main.js",
+        "demos/12-aurora-glass/shaders.js"
+      ]
+    },
+    {
+      "slug": "18-hanazi",
+      "heading": "综艺花字 Variety Show Kinetic Captions (Hanazi)",
+      "shot": "喵呜日记 EP.07「今日份快乐」 · 1080×1920 · 30 fps · 10 秒 · AI 评审终评 7.64 / 10",
+      "prompt": "prompts/18-hanazi.md",
+      "demos": [
+        "demos/18-hanazi/cues.json",
+        "demos/18-hanazi/index.html"
+      ]
+    },
+    {
+      "slug": "19-paperclip",
+      "heading": "粗描边贴纸人科普 MG（回形针/林超风格） Bold-outline Sticker Explainer MG (PaperClip / Lin Chao style)",
+      "shot": "一部手机里，藏着多少种元素？ 70/118 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.71 / 10",
+      "prompt": "prompts/19-paperclip.md",
+      "demos": [
+        "demos/19-paperclip/assets/countries-110m.json",
+        "demos/19-paperclip/assets/stickers/meta.json",
+        "demos/19-paperclip/cues.json",
+        "demos/19-paperclip/index.html"
+      ]
+    },
+    {
+      "slug": "20-pixel",
+      "heading": "像素风 Pixel Art / 8-bit",
+      "shot": "PIXEL QUEST 像素冒险 · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 8.07 / 10",
+      "prompt": "prompts/20-pixel.md",
+      "demos": [
+        "demos/20-pixel/cues.json",
+        "demos/20-pixel/film.js",
+        "demos/20-pixel/index.html"
+      ]
+    },
+    {
+      "slug": "22-hud",
+      "heading": "赛博朋克 HUD / FUI Cyberpunk HUD / FUI (Fictional UI)",
+      "shot": "隼眼-9 · 目标锁定 KESTREL-9 TARGET ACQUIRED · 1920×1080 · 30 fps · 10 秒 · AI 评审终评 7.93 / 10",
+      "prompt": "prompts/22-hud.md",
+      "demos": [
+        "demos/22-hud/cues.json",
+        "demos/22-hud/index.html",
+        "demos/22-hud/js/holo.js",
+        "demos/22-hud/js/hud.js",
+        "demos/22-hud/js/post.js",
+        "demos/22-hud/js/util.js",
+        "demos/22-hud/js/v5.js"
+      ]
+    }
+  ],
+  "files": {
+    "README.md": "2729498daeeaf5a7bc0a31059a28d20e6bd6ce737df3612a8c7760020adbd8bc",
+    "README.zh-CN.md": "672872ef31e6a1f1ac9f95067e32507a07a3b866e6dd0cf1a8b8a08e492a5843",
+    "rubric.md": "1cb93025d54407317c15005ad58bd47389baa9532f4ed359161247fb0def375a",
+    "template.md": "258709df6bfe71a53a1f9e05d6a130dece77751e667e096ed91d9809aaa24370",
+    "harness/render.mjs": "cdab5828c8dc6ef81a6e295dd4c3b8ec85a7c4aa6fa695266eff02a6b849933f",
+    "prompts/01-flat-vector.md": "0599f4dadbc163066d70e5b98afa190a5580ee00e14bd1ce3473ce8f14c48cf3",
+    "demos/01-flat-vector/cues.json": "7f215e5413f0f22766f7db0a046dbd10222a90b208d591a641ed0ec454d12d3a",
+    "demos/01-flat-vector/index.html": "0f30e342c58bbcf3316d1e7cc3763055e247d1d4fdbcf1f1cef650c0be0bf66e",
+    "prompts/02-line-art.md": "1e61c9fcf80059a20029516f3d0fd016e849d98bb69bdcbf8b63a9e53759d3ce",
+    "demos/02-line-art/cues.json": "66bcec8ddafbded69832ef8947d643336054d90ecf282df3e3de35bad9cc15d9",
+    "demos/02-line-art/film.js": "4227fb400377a124ea3f874b6fb66d03c5918e20702274958ab1de1846e97448",
+    "demos/02-line-art/index.html": "b550add4f153964817af82943c59f31a1df539e186537601ffb8c9badaac5ddb",
+    "demos/02-line-art/tools/dump_timing.mjs": "c62e777cf6aa91507f371c4e9d18942a75f90b9834c449c5f3f88a45818ca904",
+    "prompts/03-isometric.md": "5ace3ffa0d9e4a4a701ae442c102762fcd922229003d675a48f4aa5eb54011e2",
+    "demos/03-isometric/cues.json": "5619858ffdb9ef0e8110d53a90dc24418602b41bd7708c698e9828d9e9dda6e9",
+    "demos/03-isometric/index.html": "7b19eedbf79e452180c5641fa7ea459382a6c5adc644999ee66b80828530b4f6",
+    "demos/03-isometric/js/anim.js": "244b83e8090cf49d3d6d803390fcace7b442dc61363e37b61736b00a4800f5ed",
+    "demos/03-isometric/js/main.js": "ddbffbe057b88a0cda98932ba793ddbe26be6ac37c99fe7fa63e165cc4750d5a",
+    "demos/03-isometric/js/night5.js": "53bdffdf92ae8c883bf81e020d123bbe913eb0c68014762a8c14f451b94efa53",
+    "demos/03-isometric/js/render.js": "646086cbe389bab4b0c168b5bf5a7d0a628aee8568ec3996fbf6addfe60950d0",
+    "demos/03-isometric/js/title.js": "b9fb0e4dbf8b7f054ab263c22f85c55e6a45d865fe0287ec6985b0ddc4d88a52",
+    "demos/03-isometric/js/title5.js": "5725ab88eb188b54701343836cd00b475b4dc640b4ae5573699788e7219a4c79",
+    "demos/03-isometric/js/ui.js": "e915b89d461b840e10c986948e32667bb2dd263f2c5bf120db8654aa3f9d2f9d",
+    "demos/03-isometric/js/world.js": "7542ccf4bae1436da30594ef8ce62ce8f2f4fb13a833dce77cff70f06aac3da6",
+    "prompts/05-cel-boil.md": "ec64b2dea47a557f8506f3e913d2b7a3e4e0efddf9bf0309ffdea40e9116dd68",
+    "demos/05-cel-boil/cues.json": "a2155fa2ce253b492bf566223b56ed06d75a9045d0e377fabfbb199a6811415d",
+    "demos/05-cel-boil/index.html": "3f50e10ce0cd152f67ebf140f75752c1964cb9edefd6d5f336dd8042e9f03845",
+    "demos/05-cel-boil/js/engine.js": "806ccc3d962d94bb8b4f8c1b78ef68297d36206cd47cce02cf51826f7b643b56",
+    "demos/05-cel-boil/js/scene.js": "c26e7f9119d0e74e28cc3159deb496ff161f66a426829871ef76b9b2bc98e250",
+    "prompts/06-collage.md": "556478d4122d1db0535656998f64da8d1805505b14c9eb623f002d3b6aef688d",
+    "demos/06-collage/assets/gen/layout.json": "63eb41f5b30a692e76fe7789b0346a75557280ba2e1c2927651ec755c28748b1",
+    "demos/06-collage/cues.json": "d9fdceb8a1da9610d5d82b190c61d9e87e4d9afa5e92915584717c1b384ff35c",
+    "demos/06-collage/index.html": "1ce00a0c261735d1fb7338a69b82ffe167cf750e723a27e6e21ec7d53c08c6c4",
+    "prompts/07-liquid.md": "7c41e4409bf83fdb8a53ceae1dafd90efc72b2fb1d42654e30f294169ecee379",
+    "demos/07-liquid/cues.json": "db61987daf4e1d4cbea376db8c5c6cf0ce8f0bb589d0330353dadb47a06a3686",
+    "demos/07-liquid/index.html": "81b4aaa0a699f059529b52b0c87ca06ff1872fab09fc1e50f13b8a5a5fd934d6",
+    "demos/07-liquid/js/engine.js": "ba0b5765f838a83ed5b802715c38ffe2726203a81840f72fc93f1a63e7695f1b",
+    "demos/07-liquid/js/links.js": "1215809dbedf931d07bd3adbf85515796b1825d38248664a948ae397a23021ab",
+    "demos/07-liquid/js/lookdev.js": "6217d80bdf31cf40967735101729026a70b51d9c2c5a6edee79c29431c8f8e62",
+    "demos/07-liquid/js/scene.js": "9502f66dc168e18a854108ef5a887ac3afedfc92e22b616d6b8383c0be207614",
+    "demos/07-liquid/js/shaders.js": "1860d08aeaad016c95b9ced19963272ca1cedd85fcc56b53345c4efa158c44ed",
+    "demos/07-liquid/js/textsdf.js": "380c4b90b0e19db237e51dd41385551f8bf17a6206c3c52737bb7835e11924df",
+    "demos/07-liquid/js/type.js": "06be4083a7cd8593cac00cf6bf11e022d0be5649eadf1b68e9070838cab5cb69",
+    "prompts/08-morph.md": "75c9e2bb8ca1edbba5686b431ff85e5ee99be1188e84184d9a105e12c0da63aa",
+    "demos/08-morph/cues.json": "d81d38be1a6712e65a185d12a91642f77bb7e74325e3b678941dc9bddc4f89c0",
+    "demos/08-morph/glyphs.json": "548ad1315f89f747271280655972bc7e783261a799666eeb7c70db87c17d7248",
+    "demos/08-morph/index.html": "4d104505425b3cc991e9b7b49c8bb3b653a1a5da471d0bce5ccca347d77ce62d",
+    "prompts/09-bauhaus.md": "061828b54389f932f7914bdbc6e5afc25c394a401bcdf06111b7f4687d9f89f5",
+    "demos/09-bauhaus/cues.json": "c8a67c33b5f3c0a574759a201bfc602a43a024ebf9ca930d7fdd5b418af006e4",
+    "demos/09-bauhaus/film.js": "1a7bd377ae13f5b04476fe085f55dc8ed9a9ec8d940881bc78aeee0144edf395",
+    "demos/09-bauhaus/index.html": "94855c63ee1a2d38a3811e65f5c9351f525c6a53b68a20edb891027bfb7c0740",
+    "prompts/10-synthwave.md": "a12b216b68afc2fbe51cfe1a410b6eebd71b5cc82f42a2e8c5ca0d85de8747d5",
+    "demos/10-synthwave/cues.json": "49d124ba0b429c69f86f11200de1bf7889a9b0a8076f0e01c120e911921cdeae",
+    "demos/10-synthwave/index.html": "60603876aa00a08901c085c0834b991895971a40a9c73fda4a0ae10b18b37e91",
+    "prompts/12-aurora-glass.md": "c5e68258e5ae0a5e1c5c3a05c4651a9efb5472da6098f17d468442382b3004b3",
+    "demos/12-aurora-glass/cues.json": "3f8d6f7be6bb2f9453ae54fe4253b3cbd4033cb029a6c566169d7b0b8e91e201",
+    "demos/12-aurora-glass/index.html": "0def2223e6949e21fa38093cb6d54752d6606e4edde3ae44b5f52ae05ddd223b",
+    "demos/12-aurora-glass/main.js": "18553afb83a9c4c95f7f4c8a996fc816245a9b9e0d218b8bd9bd912ec785b6d6",
+    "demos/12-aurora-glass/shaders.js": "a912e968e5c90f25f3919adf572d4fd11231a661eb3b2bd3d1d22db6cf954c59",
+    "prompts/18-hanazi.md": "7d6bc0e6e3712778a2ed849fab1a358055d2dfc88cbddc1a27b5694c2f25be69",
+    "demos/18-hanazi/cues.json": "643e92bd1734b7cca012ed5c35fa1d3eea39c817f57f3cc0b82e5e1e74f848ba",
+    "demos/18-hanazi/index.html": "8207f8800f0d5d0189a2ab13c5da1c048578aba47110219ff473a792f3ba1f63",
+    "prompts/19-paperclip.md": "808ccae55d57005eefdc78c06007bc324195063faac80d8c47136ff050b4ea05",
+    "demos/19-paperclip/assets/countries-110m.json": "2516c915867c7baf18ddec727aec46c315541a07cfb3d79a6559b05d5e94eee8",
+    "demos/19-paperclip/assets/stickers/meta.json": "4d97dcb5c9b4c8ac615e7c3aee594c862df839419b1bbfe85ea4dfa3ad42b222",
+    "demos/19-paperclip/cues.json": "acd1fff4792684b3d191b96bb5f9201142b90cf2a5c780e5e0c90a3d1a6fe3c8",
+    "demos/19-paperclip/index.html": "2d50ad0b67c9472557cad5fa60dc27932e6a4fba09c370f267f51e311eeef4b4",
+    "prompts/20-pixel.md": "6eeeb3d60c6a0a1a52417bc6e71c5600113cb62202a623b408460485c96fa9ef",
+    "demos/20-pixel/cues.json": "64942f482552d900ac4f2aeddc0180d4e6dab3a2128d57c5ead4b029567ed707",
+    "demos/20-pixel/film.js": "a11af2464b63b7a3612989425109c219e6a5f59a35d48506e306dc6f24aba4f4",
+    "demos/20-pixel/index.html": "282203861cdd3e9007ede9cfce783a5f5942421d645e160ad505f9c098a8a856",
+    "prompts/22-hud.md": "42e7ba11855ecba90ab9bea4f6963d56f725dbbfd32ff637daebf9428fabb2c9",
+    "demos/22-hud/cues.json": "b5219e1cd06a319e4a004264ddd55a514d17810ab9fa6cb023b81b9fa4030d39",
+    "demos/22-hud/index.html": "eefb5aa96fddf47e84efbd9000e521a6b8e7908a7be20f4f42ed14586f0113b2",
+    "demos/22-hud/js/holo.js": "992031478d3f55cef7bf247146efabeb60c4429f7dd812273820ed87b55c4afb",
+    "demos/22-hud/js/hud.js": "751c05b15e65474b89f55346587c85e9215317e900ecc64a0fce451827ee1c88",
+    "demos/22-hud/js/post.js": "672ce9b4a1da6f59f2d65bb1f8e337851b7893553dc250aad2192388a0711a53",
+    "demos/22-hud/js/util.js": "7ec7a52b27659de843f72f65ad4dbfc07e217f528bba5bbff69b31b4293081db",
+    "demos/22-hud/js/v5.js": "af2cf92f176962361826fc84593241805628afdf13ca9e88e023712dc6626fcb"
+  },
+  "removedStyles": [
+    {
+      "slug": "04-3d-render",
+      "heading": "3D 渲染系（C4D/Blender 质感） 3D Render / CGI Motion Design",
+      "reason": "画面是 Blender 离线渲的 CGI 质感，插件里没有能出同等质感的等价物（拿 DOM 滤镜凑只会更假）。"
+    }
+  ]
+}

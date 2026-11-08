@@ -1,0 +1,24 @@
+{
+  "name": "workbuddy",
+  "version": "0.4.1",
+  "private": true,
+  "type": "module",
+  "description": "用代码做视频：Remotion 引擎 + wb 命令行 + 镜头卡/整片风格配方（DrawAI 引擎的自包含拷贝）",
+  "bin": {
+    "wb": "bin/wb.mjs"
+  },
+  "scripts": {
+    "wb": "node bin/wb.mjs",
+    "setup": "node bin/wb.mjs setup --install",
+    "doctor": "node bin/wb.mjs doctor"
+  },
+  "dependencies": {
+    "@babel/parser": "7.28.5",
+    "@babel/traverse": "7.28.5",
+    "npm": "10.9.4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
