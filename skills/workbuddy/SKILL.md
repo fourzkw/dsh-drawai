@@ -1,5 +1,5 @@
 ---
-name: workbuddy
+name: drawai-video-studio
 display_name: 代码视频工作台
 display_name_en: Code Video Studio
 description: 用代码（Remotion + React + three/WebGL）做视频：建工程、写场景、出定调帧、渲样片与整片、做声音、帧检、导出剪映。用于"把一段内容做成能播的片子"，不依赖 DrawAI 插件，也不需要画布。
@@ -29,16 +29,17 @@ examples_en:
 ## 0. 第一次用：先跑环境检查
 
 ```bash
-node --version                             # 需要 ≥ 20
-npm --prefix scripts install --omit=dev    # 只装 @babel/parser / @babel/traverse / npm（约 21MB）
-node scripts/bin/wb.mjs doctor             # 四件事：babel / 素材 / 运行时 / FFmpeg
+node --version                # 需要 ≥ 20
+node scripts/wb.mjs doctor    # 四件事：babel / 素材 / 运行时 / FFmpeg
 ```
+
+第一次运行 `scripts/wb.mjs` 会自动解包引擎（`scripts/engine.tar.gz`）并装依赖（约 21MB，需要网络），之后直接可用。依赖装不上时手动 `npm --prefix scripts/.runtime install --omit=dev`。
 
 `doctor` 会报四件事：
 
 | 项 | 缺失时怎么补 |
 | --- | --- |
-| 素材（字体 + 内置纹理/音效，约 150MB） | `node scripts/bin/wb.mjs setup --install`（下载到 `~/.dsh/drawai-assets`），或把 `WORKBUDDY_ASSETS_DIR` 指到已有素材根 |
+| 素材（字体 + 内置纹理/音效，约 150MB） | `node scripts/wb.mjs setup --install`（下载到 `~/.dsh/drawai-assets`），或把 `WORKBUDDY_ASSETS_DIR` 指到已有素材根 |
 | 视频运行时（remotion/react/three，约 300MB） | **首次渲染会自动装**，装到 `~/.dsh/drawai-video-runtime/<指纹>`；也可 `setup --install` 提前装 |
 | FFmpeg | 拼图/帧检/导出/混音要用。`winget install --id Gyan.FFmpeg -e`，或 scoop/choco，或设 `WORKBUDDY_FFMPEG_PATH` |
 | 浏览器 | 默认用本机 Chrome/Edge；没有就设 `WORKBUDDY_CHROME_PATH` |
@@ -53,23 +54,23 @@ node scripts/bin/wb.mjs doctor             # 四件事：babel / 素材 / 运行
 
 ```bash
 # 1) 建工程：给规格、分镜表（可先 scaffold 一份骨架）
-node scripts/bin/wb.mjs create --dir ./my-film --spec 1920x1080@30 --duration 12 --prompt "一句话说清这条片子要什么"
-node scripts/bin/wb.mjs spec scaffold --dir ./my-film        # 写出一张六列分镜表骨架
+node scripts/wb.mjs create --dir ./my-film --spec 1920x1080@30 --duration 12 --prompt "一句话说清这条片子要什么"
+node scripts/wb.mjs spec scaffold --dir ./my-film        # 写出一张六列分镜表骨架
 #    改 storyboard.md 后：
-node scripts/bin/wb.mjs spec --dir ./my-film                  # 检查时间轴连贯
+node scripts/wb.mjs spec --dir ./my-film                  # 检查时间轴连贯
 
 # 2) 写场景：改 scene-0.tsx …（见 §3）
 
 # 3) 看定调帧（拼图，一眼看构图）
-node scripts/bin/wb.mjs preview --dir ./my-film --at 1,3,6
+node scripts/wb.mjs preview --dir ./my-film --at 1,3,6
 
 # 4) 出样片（3 秒左右），看过再往下
-node scripts/bin/wb.mjs render --dir ./my-film --range 0,90 --wait
+node scripts/wb.mjs render --dir ./my-film --range 0,90 --wait
 
 # 5) 整片 + 质检 + 交付
-node scripts/bin/wb.mjs render --dir ./my-film --wait
-node scripts/bin/wb.mjs qa     --dir ./my-film
-node scripts/bin/wb.mjs export --dir ./my-film               # 剪映素材包
+node scripts/wb.mjs render --dir ./my-film --wait
+node scripts/wb.mjs qa     --dir ./my-film
+node scripts/wb.mjs export --dir ./my-film               # 剪映素材包
 ```
 
 `create` 会生成：`timeline.json`（时间轴）、`BRIEF.md`（施工说明）、`storyboard.md`、`STYLE.md`（用了整片风格时）、`theme.ts`、`scene-N.tsx`（骨架）、`scene-kit/`（公共原语）、`assets/`（内置素材 + 字体拷贝）。
