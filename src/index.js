@@ -256,6 +256,26 @@ function messageOf(error) {
   return String(error)
 }
 
+// json 参数在工具 schema 里编译成 `{}`（没有类型约束），有的模型/宿主会把它当成字符串送进来，
+// 比如 frames 收到的是 "[0, 120]"。这里统一还原一次：看起来像 JSON 且解析成功就用解析结果，
+// 否则原样返回。不这么做的话，Array.isArray(字符串) 恒为假，参数会被静默忽略、退回默认值。
+function jsonValue(value) {
+  if (typeof value !== 'string') return value
+  const text = value.trim()
+  if (!text || !'[{"]-0123456789ntf'.includes(text[0])) return value
+  try { return JSON.parse(text) } catch { return value }
+}
+
+function jsonObject(value) {
+  const parsed = jsonValue(value)
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+}
+
+function jsonArray(value) {
+  const parsed = jsonValue(value)
+  return Array.isArray(parsed) ? parsed : []
+}
+
 function numberOr(value, fallback) {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
@@ -6651,10 +6671,15 @@ function sanitizeNewName(raw) {
         const node = loaded.doc.nodes.find((item) => item.id === args.nodeId)
         if (!node) throw new Error('找不到视频节点 ' + args.nodeId)
         const dir = projectDirOf(node, scope)
+        // json 参数有可能是字符串（见 jsonValue 注释），先统一还原，后面只读这几个局部量。
+        const specArg = jsonObject(args.spec)
+        const styleArg = jsonValue(args.style)
+        const storyboardArg = jsonValue(args.storyboard)
+        const themeTokensArg = jsonValue(args.themeTokens)
         if (args.action === 'theme') {
           if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
           if (!existsSync(dir)) throw new Error('工程还没建：先 action:"create"')
-          const resolved = resolveTheme(args.themeTokens || args.theme)
+          const resolved = resolveTheme(themeTokensArg || args.theme)
           if (!resolved) throw new Error('请给 theme（主题名）或 themeTokens（一套色）。可选主题：' + listThemes().map((item) => item.name).join('、'))
           const written = writeTheme(dir, resolved)
           return { summary: '已换主题：' + written.name, details: JSON.stringify({ dir, theme: written, themes: listThemes() }) }
@@ -6666,10 +6691,10 @@ function sanitizeNewName(raw) {
         }
         if (!isMotionNode(node)) throw new Error('请选择空视频或绘制视频节点')
         const before = { data: JSON.parse(JSON.stringify(node.data)), style: node.style }
-        const style = args.style ? resolveMgStyle(mgStyleCatalog, args.style) : mgStyleOf(loaded.doc, node.id)
+        const style = styleArg ? resolveMgStyle(mgStyleCatalog, styleArg) : mgStyleOf(loaded.doc, node.id)
         const kit = style ? mgStyleKit({ slug: style.slug }) : null
         // 规格优先级：风格节奏（最弱）< 节点上存的 < 这次显式给的
-        const spec = readSpec({ ...rhythmSpec(style?.rhythm), ...(node.data.motion || {}), ...(args.spec || {}) })
+        const spec = readSpec({ ...rhythmSpec(style?.rhythm), ...(node.data.motion || {}), ...specArg })
         const errors = validateSpec(spec)
         if (errors.length) throw new Error('视频规格不合法：' + errors.join('；'))
         const cards = shotCardsOf(loaded.doc, node.id)
@@ -6685,14 +6710,14 @@ function sanitizeNewName(raw) {
         // 这也是"分镜被拆成八条文本节点"能被发现的地方 —— readCanvasSpec 会把它们列出来。
         const canvasSpec = readCanvasSpec(loaded.doc, { fps: spec.fps })
         const storyboardInput = args.storyboard !== undefined
-          ? args.storyboard
+          ? storyboardArg
           : canvasSpec.storyboard.length > 0 ? canvasSpec.storyboard : undefined
         // 显式给了时长就以时长为总长：卡片之间按相对时长等比拉伸，不再被卡片总和改短。
-        const durationGiven = Number(args.spec?.duration) > 0
+        const durationGiven = Number(specArg.duration) > 0
         // 建工程要往 assets/fonts 里拷字体：先确保素材包在（首次会下载一次）。
         await ensureMotionAssets('建视频工程')
         const created = createProject(dir, { spec, prompt: args.prompt ?? node.data.motion?.prompt, segments: args.segments, cards, storyboard: storyboardInput,
-          theme: args.themeTokens || args.theme, style: kit, fitFrames: durationGiven ? spec.totalFrames : 0 })
+          theme: themeTokensArg || args.theme, style: kit, fitFrames: durationGiven ? spec.totalFrames : 0 })
         registerProject(dir)
         const seconds = created.timeline.durationInFrames / created.timeline.fps
         node.data.motion = { ...(node.data.motion || {}), mode: spec.mode, width: created.timeline.width, height: created.timeline.height, fps: created.timeline.fps, duration: Math.round(seconds * 100) / 100,
@@ -6763,10 +6788,10 @@ function sanitizeNewName(raw) {
       const loaded = await loadDoc(scope.path, scope.sessionId, args.page)
       const node = args.nodeId ? loaded.doc.nodes.find((item) => item.id === args.nodeId) : loaded.doc.nodes.find(isMotionNode)
       if (!node) throw new Error('找不到视频节点' + (args.nodeId ? ' ' + args.nodeId : ''))
-      const spec = readSpec({ ...(node.data?.motion || {}), ...(args.spec || {}) })
+      const spec = readSpec({ ...(node.data?.motion || {}), ...jsonObject(args.spec) })
       if (args.action === 'scaffold') {
         if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
-        const built = scaffoldOps(loaded.doc, { videoNode: node, storyboard: args.storyboard, style: args.style,
+        const built = scaffoldOps(loaded.doc, { videoNode: node, storyboard: jsonValue(args.storyboard), style: jsonValue(args.style),
           narration: args.narration, fps: spec.fps, totalFrames: spec.totalFrames })
         if (built.ops.length === 0) {
           return { summary: '规格块已经齐了（' + built.already.join('、') + '），不必再建',
@@ -6823,12 +6848,13 @@ function sanitizeNewName(raw) {
       const node = loaded.doc.nodes.find((item) => item.id === args.nodeId)
       if (!node) throw new Error('找不到视频节点 ' + args.nodeId)
       const dir = projectDirOf(node, scope)
-      const requested = Array.isArray(args.frames) ? args.frames.map(Number).filter((n) => Number.isFinite(n)).slice(0, 9) : []
+      const requestedFrames = jsonArray(args.frames)
+      const requested = requestedFrames.length ? requestedFrames.map(Number).filter((n) => Number.isFinite(n)).slice(0, 9) : []
       const frames = requested.length ? requested : (() => {
         const timeline = readTimeline(dir)
         return timeline.shots.slice(0, 6).map((shot) => shot.startFrame + Math.floor(shot.durationFrames * 0.6))
       })()
-      const preview = await previewProject(dir, { frames, cols: args.cols, crop: args.crop, attachments: ctx.get?.('attachments') })
+      const preview = await previewProject(dir, { frames, cols: args.cols, crop: jsonValue(args.crop), attachments: ctx.get?.('attachments') })
       const payload = { summary: '已渲染 ' + frames.length + ' 帧并拼图' + (preview.crop ? '（1:1 局部 ' + preview.crop.w + '×' + preview.crop.h + '）' : ''), details: JSON.stringify({ frames: preview.frames, sheet: preview.sheet, crop: preview.crop }) }
       const ref = preview.attachment
       if (ref && typeof ref.attachmentId === 'string') {
@@ -6943,8 +6969,10 @@ function sanitizeNewName(raw) {
         })
       }
       if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
-      const operation = Array.isArray(args.frames) && args.frames.length ? 'still' : 'full'
-      const ranged = Array.isArray(args.range) && args.range.length === 2
+      const renderFrames = jsonArray(args.frames)
+      const renderRange = jsonArray(args.range)
+      const operation = renderFrames.length ? 'still' : 'full'
+      const ranged = renderRange.length === 2
       // 样片的输出必须跟整片分开：以前 range 渲染也写 film.mp4，下一次 apply 就会把 4 秒样片当整片塞进主节点。
       const kind = operation === 'still' ? 'still' : ranged ? 'pilot' : 'film'
       const outputName = kind === 'still' ? 'still.mp4' : kind === 'pilot' ? 'pilot.mp4' : 'film.mp4'
@@ -6966,7 +6994,7 @@ function sanitizeNewName(raw) {
       const qualityGate = kind === 'still' ? null : assertQualityEvidence(dir, styleForGate)
       const gateWarnings = [engineGate?.warning, ...(qualityGate?.warnings || [])].filter(Boolean)
       const job = motionJobs.create({ kind, dir, nodeId: node.id })
-      const handle = renderProject(dir, { operation, frames: args.frames, frameRange: ranged ? args.range : undefined,
+      const handle = renderProject(dir, { operation, frames: renderFrames.length ? renderFrames : undefined, frameRange: ranged ? renderRange : undefined,
         output: outputPath(dir, outputName),
         onProgress: (message) => motionJobs.progress(job, message.phase, message.progress, message.message) })
       motionJobs.attach(job, handle)
@@ -7047,7 +7075,7 @@ function sanitizeNewName(raw) {
       if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
       const timeline = readTimeline(dir)
       const result = await exportPackage({ dir, timeline, name: args.name || 'jianying', draft: Boolean(args.draft),
-        subtitles: args.subtitles, film: args.file ? workspacePath(scope, isAbsolute(args.file) ? args.file : joinPath(dir, args.file)) : undefined })
+        subtitles: jsonValue(args.subtitles), film: args.file ? workspacePath(scope, isAbsolute(args.file) ? args.file : joinPath(dir, args.file)) : undefined })
       return { summary: '已导出 ' + result.shots.length + ' 镜 / ' + result.stems.length + ' 条音轨到 ' + result.folder
         + (result.subtitles ? '（含字幕 ' + result.subtitles + ' 条）' : '')
         + (result.missing.length ? '，缺 ' + result.missing.length + ' 个音频文件' : ''),
@@ -7195,7 +7223,7 @@ function sanitizeNewName(raw) {
           details: JSON.stringify({ ...found, next: '挑一条再 motion_sfx {action:"get", ids:["fs:xxxx"]}；想先听可以按 pageUrl 打开' }) }
       }
       if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
-      const result = await getSfx(dir, args.ids)
+      const result = await getSfx(dir, jsonArray(args.ids))
       const ok = result.results.filter((item) => item.ok)
       const bad = result.results.filter((item) => !item.ok)
       return { summary: '下载 ' + ok.length + ' 条' + (bad.length ? '，失败 ' + bad.length + ' 条' : ''),
