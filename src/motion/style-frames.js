@@ -12,7 +12,7 @@ import {createServer} from 'node:http'
 import {extname,join,normalize,resolve,sep} from 'node:path'
 import {tmpdir} from 'node:os'
 import {fileURLToPath} from 'node:url'
-import {fontsDir, mediaLibraryRoot} from './asset-pack.js'
+import {demoAssetsFile, ensureDemoAssets, fontsDir, mediaLibraryRoot} from './asset-pack.js'
 import {fontFaces} from './fonts.js'
 
 const UPSTREAM = fileURLToPath(new URL('./mgstyles/upstream', import.meta.url))
@@ -25,6 +25,22 @@ const DEMO_FONT_ALIASES = {
   '/demos/07-liquid/assets/Fraunces-Liquid-72-900-Soft.ttf': 'Fraunces',
   '/demos/08-morph/assets/fonts/Outfit-SemiBold.ttf': 'Outfit',
   '/demos/10-synthwave/assets/fonts/MrDafoe-Regular.ttf': 'Mr Dafoe',
+}
+// 上游 demo 自带的数据文件（如 22-hud 的 land-50m.json）不在仓库里：随包的只有代码，
+// 数据单独发布到 Release（约 530KB），第一次请求时下载一次并缓存到 ~/.dsh/drawai-assets/。
+// 只对 .json 兜这一层：贴图/字体缺了照旧走占位，别为了缺一张图去拉包（issue #27 的取舍）。
+const DEMO_DATA_PATTERN = /^\/demos\/[a-z0-9][a-z0-9-]*\/assets\/[^/]+\.json$/i
+
+async function demoDataFile(pathname) {
+  const rel = pathname.slice(1)
+  const have = demoAssetsFile(rel)
+  if (have) return have
+  try {
+    await ensureDemoAssets()
+  } catch {
+    return null
+  }
+  return demoAssetsFile(rel)
 }
 // 上游 demo 的 importmap 指向 /node_modules/three/...、/node_modules/opentype.js/...，
 // 这些包不在 upstream 目录里，得单独挂载。旧版只服务 upstream 目录，于是模块 404、
@@ -120,7 +136,7 @@ function missingModules(slug, modules) {
 function startStaticServer(misses, modules) {
   const roots = {vendor: resolve(modules), bundled: resolve(VENDOR_MODULES), upstream: resolve(UPSTREAM)}
   return new Promise((done) => {
-    const server = createServer((req, res) => {
+    const server = createServer(async (req, res) => {
       try {
         const pathname = decodeURIComponent(new URL(req.url, 'http://x').pathname)
         if (pathname === '/assets/fonts/fonts.css') {
@@ -159,6 +175,11 @@ function startStaticServer(misses, modules) {
           const tdir = texturesDir()
           const texture = tdir ? resolve(tdir, pathname.slice('/assets/textures/'.length)) : ''
           if (tdir && texture.startsWith(resolve(tdir) + sep) && existsSync(texture)) file = texture
+        }
+        // Demo 自带的数据文件（land-50m.json 之类）不在仓库里，走单独的小素材包。
+        if (!vendor && !existsSync(file) && DEMO_DATA_PATTERN.test(pathname)) {
+          const data = await demoDataFile(pathname)
+          if (data) file = data
         }
         if (!existsSync(file)) {
           misses.push(pathname)

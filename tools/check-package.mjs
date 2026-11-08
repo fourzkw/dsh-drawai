@@ -337,5 +337,23 @@ console.log('\n[10] 整片风格 demo 的依赖随包 vendored（issue #27）')
   check('不再把 source 说成等价退路', !/多数情况够用/.test(frames) && /有损降级/.test(frames))
 }
 
+console.log('\n[11] demo 数据文件走单独的小素材包（issue #27 的另一半）')
+{
+  // 22-hud 的 land-50m.json 不在仓库里：进 npm 包让所有人多下 530KB，进仓库又不合适。
+  // 现在按需从 Release 下载，lock 文件记大小与 sha256，缺了就是发版没打包。
+  const lockPath = 'lib/motion/demo-assets-lock.js'
+  check('构建产物里有 demo 数据包的 lock', existsSync(lockPath))
+  if (existsSync(lockPath)) {
+    const lock = readFileSync(lockPath, 'utf8')
+    check('lock 里有文件名、大小与 sha256', /DEMO_ASSETS_LOCK/.test(lock) && /"file": "drawai-demo-assets-/.test(lock) && /"sha256": "[0-9a-f]{64}"/.test(lock))
+  }
+  const pack = readFileSync('lib/motion/asset-pack.js', 'utf8')
+  check('asset-pack 暴露 demo 数据包的按需下载', /export async function ensureDemoAssets/.test(pack) && /export function demoAssetsFile/.test(pack))
+  check('demo 数据包与字体素材包用同一套校验安装', /function installPack/.test(pack) && /lock\.sha256/.test(pack))
+  const frames = readFileSync('lib/motion/style-frames.js', 'utf8')
+  check('静态服务对 demo 的 .json 兜一层数据包', /DEMO_DATA_PATTERN/.test(frames) && /demoDataFile\(pathname\)/.test(frames))
+  check('贴图/字体不触发数据包下载', frames.includes('\\.json$/i') && /DEMO_DATA_PATTERN\.test/.test(frames))
+}
+
 console.log('\n' + (failures === 0 ? '全部通过。' : failures + ' 项失败。'))
 process.exit(failures === 0 ? 0 : 1)

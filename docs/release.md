@@ -40,6 +40,23 @@ node tools/publish-assets.mjs
 
 npm 包体积：`package.json` 的 `files` 用否定项排除 `lib/motion/fonts`、`lib/motion/media-library`，`npm pack` 从 704 文件 / 147.6MB 降到 545 文件 / 3.0MB（注意：单靠 `.npmignore` 无效，`files` 白名单优先）。
 
+## 发布 demo 数据包（只有演示用得上的数据）
+
+上游 demo 里有少量「只有这一个 demo 用得到」的数据文件，例如 22-hud 的世界地图拓扑 `land-50m.json`（约 530KB）。它们不进 npm 包（让每个用户为看一个 demo 多下 530KB 不值得），也不进 git（仓库只留构建脚本），单独打一个小包发 Release。
+
+```powershell
+# 1. 打包（生成 dist/drawai-demo-assets-v1.tar.gz 与 src/motion/demo-assets-lock.js）
+node tools/build-demo-assets-pack.mjs
+
+# 2. 传到 GitHub Release（tag = demo-assets-v1）
+node tools/publish-assets.mjs --demo --dry-run
+node tools/publish-assets.mjs --demo
+```
+
+- 源文件在打包时从 unpkg 下载（`world-atlas@2.0.2`，数据源 Natural Earth 公有领域，包本身 ISC），缓存在 `dist/demo-assets-src/`，之后离线可重复打包；`--refresh` 强制重下。
+- 用户侧缓存 `~/.dsh/drawai-assets/demo-v1/`；环境变量 `DRAWAI_DEMO_ASSETS_DIR` 改位置、`DRAWAI_DEMO_ASSETS_URL` 指镜像。
+- 只有 `/demos/<slug>/assets/*.json` 会触发这个包；**贴图与字体不触发**（缺了照旧走 1px 占位与内置字体）——18-hanazi 的贴图就是「太专一、不收录」的例子。
+
 ## 未发布：FFmpeg 自动获取完善（0.4.1，2026-11-08）
 
 - 首次真正用到 FFmpeg 时自动准备：`DRAWAI_FFMPEG_PATH` → 系统 `PATH` → 开发目录 → 已验证缓存 → 下载；显式路径或 PATH 中的版本不满足要求时列出缺失项并直接报错，不再静默换一个。
