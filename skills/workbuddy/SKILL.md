@@ -1,5 +1,5 @@
 ---
-name: workbuddy
+name: drawai-video-studio
 display_name: 代码视频工作台
 display_name_en: Code Video Studio
 description: 用代码（Remotion + React + three/WebGL）做视频：建工程、写场景、出定调帧、渲样片与整片、做声音、帧检、导出剪映。用于"把一段内容做成能播的片子"，不依赖 DrawAI 插件，也不需要画布。

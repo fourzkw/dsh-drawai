@@ -18,8 +18,13 @@ import { deflateRawSync, gzipSync } from 'node:zlib'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const skillDir = join(root, 'skills', 'workbuddy')
 const scriptsDir = join(skillDir, 'scripts')
+// 市场上传包的顶层目录名必须等于 SKILL.md 里的 name（平台按它生成技能 ID、判重名）。
+const skillText = readFileSync(join(skillDir, 'SKILL.md'), 'utf8')
+const frontmatter = skillText.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+const skillName = (frontmatter?.[1].match(/^name:\s*(\S+)\s*$/m) || [])[1]
+if (!skillName) throw new Error('SKILL.md 的 frontmatter 里没有 name')
 const outIndex = process.argv.indexOf('--out')
-const outFile = outIndex > -1 ? process.argv[outIndex + 1] : join(root, 'dist', 'workbuddy.zip')
+const outFile = outIndex > -1 ? process.argv[outIndex + 1] : join(root, 'dist', skillName + '.zip')
 
 const SKIP = new Set(['node_modules', '.out', '.cache', '__pycache__', '.runtime', '.git'])
 const RUNTIME = ['bin', 'lib', 'engine', 'package.json', 'package-lock.json']
@@ -114,7 +119,7 @@ const central = []
 let offset = 0
 
 for (const [relPath, data] of entries) {
-  const name = Buffer.from('workbuddy/' + relPath, 'utf8')
+  const name = Buffer.from(skillName + '/' + relPath, 'utf8')
   const packed = deflateRawSync(data, { level: 9 })
   const useDeflate = packed.length < data.length
   const body = useDeflate ? packed : data
