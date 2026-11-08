@@ -10,11 +10,11 @@
  *   node tools/build-assets-pack.mjs            # 打包 + 写 asset-pack-lock.js
  *   node tools/build-assets-pack.mjs --no-lock  # 只打包，不改源码
  */
-import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { gzipSync } from 'node:zlib'
+
+import { createTarGz, sha256, walkFiles } from './lib/ustar.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const SRC = join(ROOT, 'src', 'motion')
@@ -23,65 +23,13 @@ const VERSION = 'v1'
 const PACK = `drawai-assets-${VERSION}.tar.gz`
 const SOURCES = ['fonts', 'media-library']
 
-function walk(dir, base = dir, out = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = join(dir, entry.name)
-    if (entry.isDirectory()) walk(full, base, out)
-    else if (entry.isFile()) out.push({ full, rel: relative(base, full).split(/[\\/]/).join('/') })
-  }
-  return out
-}
-
-function sha256(buf) {
-  return createHash('sha256').update(buf).digest('hex')
-}
-
-function octal(value, width) {
-  return value.toString(8).padStart(width - 1, '0') + '\0'
-}
-
-function tarHeader(name, size, mtime) {
-  const header = Buffer.alloc(512, 0)
-  let short = name
-  let prefix = ''
-  if (Buffer.byteLength(name) > 100) {
-    const parts = name.split('/')
-    while (parts.length > 1 && Buffer.byteLength(parts.join('/')) > 100) prefix = parts.shift() + '/' + prefix
-    prefix = prefix.replace(/\/$/, '')
-    short = parts.join('/')
-    if (Buffer.byteLength(prefix) > 155 || Buffer.byteLength(short) > 100) throw new Error('路径太长，装不进 ustar：' + name)
-  }
-  header.write(short, 0, 100, 'utf8')
-  header.write(octal(0o644, 8), 100, 8, 'ascii')
-  header.write(octal(0, 8), 108, 8, 'ascii')
-  header.write(octal(0, 8), 116, 8, 'ascii')
-  header.write(octal(size, 12), 124, 12, 'ascii')
-  header.write(octal(mtime, 12), 136, 12, 'ascii')
-  header.write('        ', 148, 8, 'ascii')
-  header.write('0', 156, 1, 'ascii')
-  header.write('ustar\0', 257, 6, 'ascii')
-  header.write('00', 263, 2, 'ascii')
-  if (prefix) header.write(prefix, 345, 155, 'utf8')
-  let sum = 0
-  for (const byte of header) sum += byte
-  header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148, 8, 'ascii')
-  return header
-}
-
-function appendEntry(chunks, name, buf) {
-  chunks.push(tarHeader(name, buf.length, Math.floor(Date.now() / 1000)))
-  chunks.push(buf)
-  const pad = (512 - (buf.length % 512)) % 512
-  if (pad) chunks.push(Buffer.alloc(pad, 0))
-}
-
 function main() {
   const noLock = process.argv.includes('--no-lock')
   const files = []
   for (const source of SOURCES) {
     const dir = join(SRC, source)
     if (!existsSync(dir)) throw new Error('缺少素材目录：' + dir)
-    for (const item of walk(dir)) {
+    for (const item of walkFiles(dir)) {
       const buf = readFileSync(item.full)
       files.push({ path: source + '/' + item.rel, bytes: buf.length, sha256: sha256(buf), buf })
     }
@@ -96,12 +44,10 @@ function main() {
     files: files.map(({ path, bytes, sha256: hash }) => ({ path, bytes, sha256: hash })),
   }
 
-  const chunks = []
-  appendEntry(chunks, 'manifest.json', Buffer.from(JSON.stringify(manifest, null, 2) + '\n', 'utf8'))
-  for (const file of files) appendEntry(chunks, file.path, file.buf)
-  chunks.push(Buffer.alloc(1024, 0))
-  const tar = Buffer.concat(chunks)
-  const gz = gzipSync(tar, { level: 9 })
+  const { gz, tarBytes } = createTarGz([
+    { path: 'manifest.json', buf: Buffer.from(JSON.stringify(manifest, null, 2) + '\n', 'utf8') },
+    ...files.map((file) => ({ path: file.path, buf: file.buf })),
+  ])
 
   mkdirSync(OUT_DIR, { recursive: true })
   const out = join(OUT_DIR, PACK)
@@ -110,7 +56,7 @@ function main() {
   writeFileSync(out + '.sha256', `${digest}  ${PACK}\n`, 'utf8')
 
   const mb = (n) => (n / 1024 / 1024).toFixed(1) + 'MB'
-  console.log(`${PACK}  ${mb(gz.length)}  (raw ${mb(tar.length)})  ${files.length} files`)
+  console.log(`${PACK}  ${mb(gz.length)}  (raw ${mb(tarBytes)})  ${files.length} files`)
   console.log(`sha256 ${digest}`)
 
   if (!noLock) {
@@ -122,7 +68,7 @@ function main() {
         bytes: gz.length,
         sha256: digest,
         files: files.length,
-        rawBytes: tar.length,
+        rawBytes: tarBytes,
         builtAt: new Date().toISOString(),
       }, null, 2) + '\n'
     writeFileSync(lockPath, lock, 'utf8')

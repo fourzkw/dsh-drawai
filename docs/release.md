@@ -1,6 +1,19 @@
 # 发布与收录流程 / Release & listing
 
-## 0.4.1：独立视频运行环境（尚未发布）
+## 0.4.2 发布内容（2026-11-09）
+
+- 画布工具注册加固：18 个 host 工具逐个兜错，`tools` 服务未就绪时改延迟注册；新增只读端点 `/drawai/api/diagnostics` 用于现场取证（#8）。
+- `diagram_read render:true` 不再永远停在 `pending`：画布没打开回 `not-open`，25 秒没人接回 `timeout`，都带已等待秒数（#12）。
+- `setStyle {arrow:"none"}` 显式写 `endArrow=none`；drawio 的缺省边样式自带 classic 箭头，以前删键反而画出箭头（#15）。
+- 12 个输入参数（`frames`/`spec`/`crop`/`ids`/`anchors` 等）改用真实 JSON Schema 类型，模型知道该传数组还是对象；字符串写法仍兼容（#14）。
+- 子目录里的画布可以正常「打开画布」，`list` 的绝对路径按所选目录拼（#19）。
+- 视频预览/渲染的打包入口复制进工程目录，装在 `node_modules` 下的 `.jsx` 不再被 Remotion 的 loader 跳过；浏览器候选覆盖 macOS/Linux，找不到浏览器时先给进度提示（#21、#22）。
+- 渲染 worker 的临时目录改到工程内，`.dsh` 进程带 Low 完整性标签时 ffmpeg 不再写不了 `%TEMP%`（#26）。
+- 整片风格 demo：`d3`/`topojson-client`/`opentype.js`/`simplex-noise` 四个依赖随包 vendored，`mg_style frames` 不再报缺模块；22-hud 的世界地图数据改由 `demo-assets-v1` 小包按需下载（18-hanazi 的贴图仍用 1px 占位）（#27）。
+- `.gitignore` 的 `vendor/` 锚定到仓库根，routing vendor 纳入版本库，克隆后可直接构建；避障引擎不可用时降级写回而不是整次失败（#13）。
+- 构建：客户端内联按 LF 归一，Windows 检出的换行差异不再误报 bundle 不一致。
+
+## 0.4.1 发布内容（2026-11-08）：独立视频运行环境
 
 - Remotion、React、Three.js 从插件生产依赖移出；插件安装不再触发 esbuild 安装脚本授权。
 - 首次渲染、网页采集或参考帧截取时，用随包提供的 npm 按锁文件初始化独立环境，强制禁用生命周期脚本、保留平台可选二进制，并实际验证 esbuild 转换和 Remotion 加载。
@@ -40,7 +53,24 @@ node tools/publish-assets.mjs
 
 npm 包体积：`package.json` 的 `files` 用否定项排除 `lib/motion/fonts`、`lib/motion/media-library`，`npm pack` 从 704 文件 / 147.6MB 降到 545 文件 / 3.0MB（注意：单靠 `.npmignore` 无效，`files` 白名单优先）。
 
-## 未发布：FFmpeg 自动获取完善（0.4.1，2026-11-08）
+## 发布 demo 数据包（只有演示用得上的数据）
+
+上游 demo 里有少量「只有这一个 demo 用得到」的数据文件，例如 22-hud 的世界地图拓扑 `land-50m.json`（约 530KB）。它们不进 npm 包（让每个用户为看一个 demo 多下 530KB 不值得），也不进 git（仓库只留构建脚本），单独打一个小包发 Release。
+
+```powershell
+# 1. 打包（生成 dist/drawai-demo-assets-v1.tar.gz 与 src/motion/demo-assets-lock.js）
+node tools/build-demo-assets-pack.mjs
+
+# 2. 传到 GitHub Release（tag = demo-assets-v1）
+node tools/publish-assets.mjs --demo --dry-run
+node tools/publish-assets.mjs --demo
+```
+
+- 源文件在打包时从 unpkg 下载（`world-atlas@2.0.2`，数据源 Natural Earth 公有领域，包本身 ISC），缓存在 `dist/demo-assets-src/`，之后离线可重复打包；`--refresh` 强制重下。
+- 用户侧缓存 `~/.dsh/drawai-assets/demo-v1/`；环境变量 `DRAWAI_DEMO_ASSETS_DIR` 改位置、`DRAWAI_DEMO_ASSETS_URL` 指镜像。
+- 只有 `/demos/<slug>/assets/*.json` 会触发这个包；**贴图与字体不触发**（缺了照旧走 1px 占位与内置字体）——18-hanazi 的贴图就是「太专一、不收录」的例子。
+
+## FFmpeg 自动获取完善（0.4.1，2026-11-08）
 
 - 首次真正用到 FFmpeg 时自动准备：`DRAWAI_FFMPEG_PATH` → 系统 `PATH` → 开发目录 → 已验证缓存 → 下载；显式路径或 PATH 中的版本不满足要求时列出缺失项并直接报错，不再静默换一个。
 - 环境变量、PATH、缓存和下载得到的二进制都检查 FFmpeg 5.1+、项目所需的编码器/解码器/滤镜/封装器/解封装器，并实际跑一次含 `-fps_mode` 的短编码；缓存复用时同时核对版本、二进制 SHA-256 与功能。

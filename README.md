@@ -24,10 +24,10 @@ DrawAI 在右侧栏提供画布，也向对话中的模型提供读图、改图�
 
 ```powershell
 # DeepSeek Harness 桌面版
-dsh plugin --profile desktop add dsh-drawai@0.4.1
+dsh plugin --profile desktop add dsh-drawai@0.4.2
 
 # 使用 dsh web 时，安装到 web profile
-dsh plugin --profile web add dsh-drawai@0.4.1
+dsh plugin --profile web add dsh-drawai@0.4.2
 ```
 
 桌面版和 Web 分别管理插件，只需运行需要的命令。安装完成后**完全重启对应的宿主**，然后在右侧栏找到「DrawAI 画布」。
@@ -42,6 +42,7 @@ dsh plugin --profile desktop update dsh-drawai@latest
 也可从 GitHub 安装仓库当前版本：`dsh plugin --profile web add github:fourzkw/dsh-drawai`。GitHub 版本可能包含尚未发布到 npm 的变更。
 
 > 0.4.1 将视频渲染依赖放到独立运行环境，安装插件时无需为 esbuild 授权构建脚本。首次使用某些视频功能时需要联网初始化，详见下文。
+> 0.4.2 修了画布工具注册、渲染预览一直 pending、子目录画布打不开、整片风格 demo 缺依赖等一批问题，详见 [发布说明](docs/release.md)。
 
 ## 第一次使用
 
