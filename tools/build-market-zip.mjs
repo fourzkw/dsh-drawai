@@ -1,26 +1,28 @@
 #!/usr/bin/env node
-// 打技能市场的上传包：<zip>/workbuddy/{SKILL.md, references/, scripts/, LICENSE}
-// 规则来自 https://open.workbuddy.cn/docs/skill#技能市场 —— 只收 .zip、≤3MB、顶层是 {skill-name}/、必须有 SKILL.md。
+// 打 WorkBuddy 技能市场的上传包。
 //
-//   node tools/build-market-zip.mjs            # 产出 dist/workbuddy.zip 并打印体积
+// 市场规则（https://open.workbuddy.cn/docs/skill#技能市场）：
+//   · 只收 .zip，≤ 3MB；
+//   · 顶层是 {skill-name}/，里面必须有 SKILL.md；
+//   · 只支持「根目录/二级目录/文件」两层 —— engine/ 那种深目录树不能直接放，
+//     所以引擎打成 scripts/engine.tar.gz，由 scripts/wb.mjs 首次运行时解包。
+//
+//   node tools/build-market-zip.mjs            # → dist/workbuddy.zip
 //   node tools/build-market-zip.mjs --out X.zip
-//
-// 不打包 node_modules（21MB）：装完技能后按 SKILL.md 的 `npm --prefix scripts install --omit=dev` 装。
 
-import { createWriteStream, readFileSync, readdirSync, statSync } from 'node:fs'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { deflateRawSync } from 'node:zlib'
+import { deflateRawSync, gzipSync } from 'node:zlib'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const skillDir = join(root, 'skills', 'workbuddy')
+const scriptsDir = join(skillDir, 'scripts')
 const outIndex = process.argv.indexOf('--out')
 const outFile = outIndex > -1 ? process.argv[outIndex + 1] : join(root, 'dist', 'workbuddy.zip')
 
-const SKIP = new Set(['node_modules', '.out', '.cache', '__pycache__', '.git'])
-// README.md 是仓库里的开发说明（讲 tools/verify-skill.mjs 这类仓库内路径），不上市场。
-const ROOT_FILES = ['SKILL.md', 'LICENSE']
+const SKIP = new Set(['node_modules', '.out', '.cache', '__pycache__', '.runtime', '.git'])
+const RUNTIME = ['bin', 'lib', 'engine', 'package.json', 'package-lock.json']
 
 function walk(dir, base = dir, out = []) {
   for (const name of readdirSync(dir)) {
@@ -33,12 +35,57 @@ function walk(dir, base = dir, out = []) {
   return out
 }
 
-const files = []
-for (const name of ROOT_FILES) files.push(join(skillDir, name))
-files.push(...walk(join(skillDir, 'references')))
-files.push(...walk(join(skillDir, 'scripts')))
+// —— 最小 tar 写入（ustar + GNU 'L' 长文件名），配 scripts/wb.mjs 的解包器 ——
+function tarHeader(name, size, mtime) {
+  const header = Buffer.alloc(512)
+  header.write(name.slice(0, 100), 0, 100, 'utf8')
+  header.write('0000644\0', 100, 8, 'ascii')
+  header.write('0000000\0', 108, 8, 'ascii')
+  header.write('0000000\0', 116, 8, 'ascii')
+  header.write(size.toString(8).padStart(11, '0') + '\0', 124, 12, 'ascii')
+  header.write(Math.floor(mtime / 1000).toString(8).padStart(11, '0') + '\0', 136, 12, 'ascii')
+  header.write('        ', 148, 8, 'ascii') // 校验和先占位
+  header.write('0', 156, 1, 'ascii')
+  header.write('ustar\0', 257, 6, 'ascii')
+  header.write('00', 263, 2, 'ascii')
+  let sum = 0
+  for (const byte of header) sum += byte
+  header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148, 8, 'ascii')
+  return header
+}
 
-// —— 最小 zip 写入器（deflate + CRC32），不引第三方依赖 ——
+const tarParts = []
+for (const item of RUNTIME) {
+  const full = join(scriptsDir, item)
+  const files = statSync(full).isDirectory() ? walk(full) : [full]
+  for (const file of files) {
+    const name = relative(scriptsDir, file).split('\\').join('/')
+    const data = readFileSync(file)
+    const mtime = statSync(file).mtimeMs
+    if (Buffer.byteLength(name) > 100) {
+      const long = Buffer.from(name + '\0', 'utf8')
+      tarParts.push(tarHeader('././@LongLink', long.length, mtime), long, Buffer.alloc((512 - (long.length % 512)) % 512))
+    }
+    tarParts.push(tarHeader(name, data.length, mtime), data, Buffer.alloc((512 - (data.length % 512)) % 512))
+  }
+}
+tarParts.push(Buffer.alloc(1024)) // 两个空块收尾
+const engineTarGz = gzipSync(Buffer.concat(tarParts), { level: 9 })
+
+// —— 上传包的条目：只允许两层 ——
+const entries = []
+entries.push(['SKILL.md', readFileSync(join(skillDir, 'SKILL.md'))])
+entries.push(['LICENSE', readFileSync(join(skillDir, 'LICENSE'))])
+for (const file of walk(join(skillDir, 'references'))) {
+  entries.push([relative(skillDir, file).split('\\').join('/'), readFileSync(file)])
+}
+entries.push(['scripts/wb.mjs', readFileSync(join(scriptsDir, 'wb.mjs'))])
+entries.push(['scripts/engine.tar.gz', engineTarGz])
+
+const deep = entries.filter(([name]) => name.split('/').length > 2)
+if (deep.length) throw new Error('目录层级超限（只允许两层）：' + deep.map(([name]) => name).join(', '))
+
+// —— 最小 zip 写入器（deflate + CRC32） ——
 const CRC_TABLE = (() => {
   const table = new Int32Array(256)
   for (let n = 0; n < 256; n += 1) {
@@ -56,33 +103,32 @@ function crc32(buf) {
 }
 
 function dosTime(date) {
-  const time = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2)
-  const day = ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate()
-  return { time, day }
+  return {
+    time: (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2),
+    day: ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate(),
+  }
 }
 
 const chunks = []
 const central = []
 let offset = 0
 
-for (const file of files) {
-  const data = readFileSync(file)
-  const name = Buffer.from('workbuddy/' + relative(skillDir, file).split('\\').join('/'), 'utf8')
+for (const [relPath, data] of entries) {
+  const name = Buffer.from('workbuddy/' + relPath, 'utf8')
   const packed = deflateRawSync(data, { level: 9 })
   const useDeflate = packed.length < data.length
   const body = useDeflate ? packed : data
   const method = useDeflate ? 8 : 0
-  const crc = crc32(data)
-  const { time, day } = dosTime(statSync(file).mtime)
+  const { time, day } = dosTime(new Date())
 
   const local = Buffer.alloc(30)
   local.writeUInt32LE(0x04034b50, 0)
   local.writeUInt16LE(20, 4)
-  local.writeUInt16LE(0x0800, 6) // UTF-8 文件名
+  local.writeUInt16LE(0x0800, 6)
   local.writeUInt16LE(method, 8)
   local.writeUInt16LE(time, 10)
   local.writeUInt16LE(day, 12)
-  local.writeUInt32LE(crc, 14)
+  local.writeUInt32LE(crc32(data), 14)
   local.writeUInt32LE(body.length, 18)
   local.writeUInt32LE(data.length, 22)
   local.writeUInt16LE(name.length, 26)
@@ -91,13 +137,13 @@ for (const file of files) {
 
   const dir = Buffer.alloc(46)
   dir.writeUInt32LE(0x02014b50, 0)
-  dir.writeUInt16LE(0x0314, 4) // made by: unix
+  dir.writeUInt16LE(0x0314, 4)
   dir.writeUInt16LE(20, 6)
   dir.writeUInt16LE(0x0800, 8)
   dir.writeUInt16LE(method, 10)
   dir.writeUInt16LE(time, 12)
   dir.writeUInt16LE(day, 14)
-  dir.writeUInt32LE(crc, 16)
+  dir.writeUInt32LE(crc32(data), 16)
   dir.writeUInt32LE(body.length, 20)
   dir.writeUInt32LE(data.length, 24)
   dir.writeUInt16LE(name.length, 28)
@@ -117,17 +163,16 @@ const end = Buffer.alloc(22)
 end.writeUInt32LE(0x06054b50, 0)
 end.writeUInt16LE(0, 4)
 end.writeUInt16LE(0, 6)
-end.writeUInt16LE(files.length, 8)
-end.writeUInt16LE(files.length, 10)
+end.writeUInt16LE(entries.length, 8)
+end.writeUInt16LE(entries.length, 10)
 end.writeUInt32LE(centralSize, 12)
 end.writeUInt32LE(offset, 16)
 end.writeUInt16LE(0, 20)
 
 mkdirSync(dirname(outFile), { recursive: true })
-const sink = createWriteStream(outFile)
-for (const buf of [...chunks, ...central, end]) sink.write(buf)
-await new Promise((resolve) => sink.end(resolve))
+writeFileSync(outFile, Buffer.concat([...chunks, ...central, end]))
 
 const bytes = statSync(outFile).size
 console.log('技能市场包：' + outFile)
-console.log('  ' + files.length + ' 个文件 · ' + (bytes / 1024 / 1024).toFixed(2) + 'MB（上限 3MB）' + (bytes <= 3 * 1024 * 1024 ? '' : ' ✗ 超限'))
+console.log('  ' + entries.length + ' 个条目（' + entries.map(([name]) => name).join('、') + '）')
+console.log('  ' + (bytes / 1024 / 1024).toFixed(2) + 'MB（上限 3MB）' + (bytes <= 3 * 1024 * 1024 ? '' : ' ✗ 超限'))
