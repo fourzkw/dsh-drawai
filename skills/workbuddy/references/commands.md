@@ -1,6 +1,6 @@
 # wb 命令参考
 
-`wb` 是 `node scripts/bin/wb.mjs` 的简写。所有命令都接受：
+`wb` 是 `node scripts/wb.mjs` 的简写。所有命令都接受：
 
 | 全局参数 | 作用 |
 | --- | --- |

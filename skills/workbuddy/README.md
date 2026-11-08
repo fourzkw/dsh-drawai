@@ -16,11 +16,10 @@
 
 ```bash
 cd skills/workbuddy
-npm --prefix scripts install --omit=dev   # @babel/parser + @babel/traverse + npm（约 21MB）
-node scripts/bin/wb.mjs doctor            # 看四件事：babel / 素材 / 视频运行时 / FFmpeg
+node scripts/wb.mjs doctor   # 看四件事：babel / 素材 / 视频运行时 / FFmpeg
 ```
 
-布局按 WorkBuddy 技能市场的要求：根目录只有 `SKILL.md`（含 frontmatter）、`references/` 与 `scripts/`，可执行代码与依赖都在 `scripts/` 里。
+布局按 WorkBuddy 技能市场的要求：上传包只有两层（`SKILL.md`、`references/`、`scripts/`），深目录树放不下，所以引擎被压成 `scripts/engine.tar.gz`，第一次运行 `scripts/wb.mjs` 时解到 `scripts/.runtime/` 并自动装依赖（约 21MB，需要网络）。仓库里开发时旁边就有 `scripts/bin/`，入口直接转发，不解包。
 
 渲染会在 `scripts/node_modules/.cache/webpack/` 里留打包缓存（约 100MB）；随时可删，下一次渲染会重建，不属于包的内容。
 
@@ -44,7 +43,7 @@ wb export  --dir D:\work\demo                 # 剪映素材包
 
 详细说明在 [`SKILL.md`](./SKILL.md)，逐条命令在 [`references/commands.md`](./references/commands.md)。
 
-要发到 WorkBuddy 技能市场时，打上传包（只含 `SKILL.md` + `references/` + `scripts/`，不含 `node_modules`，约 2.6MB）：
+要发到 WorkBuddy 技能市场时，打上传包（`SKILL.md` + `references/` + `scripts/`，两层结构，约 2.1MB）：
 
 ```bash
 node tools/build-market-zip.mjs   # → dist/workbuddy.zip
@@ -58,7 +57,7 @@ node tools/verify-skill.mjs --full
 
 ## 目录
 
-- `scripts/bin/wb.mjs` — 命令入口（`wb help` 看全部）
+- `scripts/wb.mjs` — 命令入口（`wb help` 看全部）
 - `scripts/lib/` — CLI 逻辑：`cli.mjs` 参数与环境、`project.mjs` 规格/分镜表/色板守卫、`ffmpeg.mjs` 找 FFmpeg、`commands/` 各命令实现
 - `scripts/engine/` — vendor 的引擎（由仓库根 `node tools/build-skill.mjs` 生成，勿手改）
 - `references/` — 命令手册、场景契约、工作流闸门、镜头卡与风格、故障排查
