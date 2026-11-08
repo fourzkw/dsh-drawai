@@ -257,10 +257,11 @@ console.log('\n连线的画法：style 键（dashed / dashPattern / endArrow / s
   ok(both.markerEnd !== undefined && both.markerStart !== undefined && both.markerEnd !== both.markerStart, 'endArrow + startArrow → 两端都有箭头，且用的是两个不同 marker')
   const noArrow = styled({ endArrow: 'none' })
   ok(noArrow.markerEnd === undefined && noArrow.markerStart === undefined, 'endArrow=none → 末端没箭头')
-  const bare = styled({ endArrow: null })
-  ok(bare.markerEnd === undefined && bare.markerStart === undefined, '键缺省 = 不画箭头（drawio 的 mxConnector 语义：缺省就是 NONE）')
-  const startOnly = styled({ endArrow: null, startArrow: 'classic' })
-  ok(startOnly.markerEnd === undefined && startOnly.markerStart !== undefined, '只有 startArrow → 只有起点有箭头')
+  // drawio 的 defaultEdge 自带 endArrow=classic：键缺省不是"没箭头"，而是回落到 classic。
+  const drawioDefault = styled({ endArrow: null })
+  ok(drawioDefault.markerEnd !== undefined && drawioDefault.markerStart === undefined, '键缺省 = 回落到 drawio 的 defaultEdge（经典箭头），不是"不画"')
+  const startOnly = styled({ endArrow: 'none', startArrow: 'classic' })
+  ok(startOnly.markerEnd === undefined && startOnly.markerStart !== undefined, 'endArrow=none + startArrow=classic → 只有起点有箭头')
 
   ok(styled({ strokeColor: '#b85450' }).stroke === '#b85450', 'strokeColor 覆盖默认线色')
   ok(styled({}).stroke !== '#b85450', '未指定 strokeColor 时跟随主题')
@@ -1850,10 +1851,10 @@ console.log('\n右键菜单的"当前值"（一类一行只显示它）')
     ok(sum('curved=1', 'line') === '曲线', 'curved=1 → 曲线')
     ok(sum('', 'dash') === '实线' && sum('dashed=1', 'dash') === '虚线' && sum('dashed=1;dashPattern=1 2', 'dash') === '点线', '实线/虚线/点线认得出来')
     ok(sum(DEFAULT_EDGE_STYLE, 'arrow') === '→ 单向', '我们新建的边（缺省样式带 endArrow=classic）→ 单向')
-    ok(sum('', 'arrow') === '— 无箭头', '样式串里没有箭头键 = 不画箭头（drawio 的 mxConnector 语义）')
+    ok(sum('', 'arrow') === '→ 单向', '样式串里没有箭头键 = 回落到 drawio 的 defaultEdge（经典箭头），不是"没箭头"')
     ok(sum('endArrow=none', 'arrow') === '— 无箭头', 'endArrow=none → 无箭头')
     ok(sum('endArrow=classic;startArrow=classic', 'arrow') === '↔ 双向', '两端都有 → 双向')
-    ok(sum('startArrow=classic', 'arrow') === '← 反向', '只有起点有 → 反向')
+    ok(sum('endArrow=none;startArrow=classic', 'arrow') === '← 反向', '起点有、终点显式关掉 → 反向')
     ok(sum('', 'nonsense') === '', '认不出的类返回空串（不猜）')
   }
 
