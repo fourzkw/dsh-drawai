@@ -240,5 +240,30 @@ console.log('\n[5] tools 服务晚于 apply 就绪（issue #8 的现场：apply 
   check('补注册的工具名与声明一致', lateRegistered.every((tool) => EXPECTED_TOOLS.includes(tool.name)), lateRegistered.map((tool) => tool.name).join(','))
 }
 
+console.log('\n[6] 渲染 worker 传给 Remotion 的浏览器参数名（issue #9）')
+{
+  // @remotion/renderer 4.x 只认 puppeteerInstance；写成 browserInstance 会被静默忽略，
+  // 然后它自己去下载 chrome-headless-shell——内网/无外网机器上必然失败。
+  const worker = readFileSync('lib/motion-render-worker.js', 'utf8')
+  const wrong = worker.match(/browserInstance\s*:/g) || []
+  check('不再用 Remotion 不认的 browserInstance 传浏览器', wrong.length === 0, wrong.length + ' 处')
+  const right = worker.match(/puppeteerInstance\s*:/g) || []
+  check('五处调用都改用 puppeteerInstance', right.length === 5, right.length + ' 处')
+  const fallback = worker.match(/browserExecutable,\s*cancelSignal/g) || []
+  check('每次渲染都兜底带 browserExecutable（实例失效也不去联网下载）', fallback.length >= 4, fallback.length + ' 处')
+}
+
+console.log('\n[7] json 参数兼容（宿主可能把 json 参数按字符串送进来）')
+{
+  // json 参数编译成 JSON Schema `{}`（没有类型），有的模型/宿主会送 "[0, 120]" 这样的字符串。
+  // 不做还原的话 Array.isArray(字符串) 恒假，参数会被静默忽略、退回默认值。
+  const host = readFileSync('lib/index.js', 'utf8')
+  check('有统一的还原函数', /function jsonValue\(value\)/.test(host) && /function jsonObject\(value\)/.test(host) && /function jsonArray\(value\)/.test(host))
+  check('预览的 frames 走 jsonArray', /jsonArray\(args\.frames\)/.test(host))
+  check('预览的 crop 走 jsonValue', /jsonValue\(args\.crop\)/.test(host))
+  check('渲染的 frames/range 走 jsonArray', /jsonArray\(args\.frames\)/.test(host) && /jsonArray\(args\.range\)/.test(host))
+  check('视频规格走 jsonObject', /jsonObject\(args\.spec\)/.test(host))
+}
+
 console.log('\n' + (failures === 0 ? '全部通过。' : failures + ' 项失败。'))
 process.exit(failures === 0 ? 0 : 1)
