@@ -21,8 +21,10 @@ _local/
 /.tmp/
 /.tmp-video/
 
-# 本地 drawio webapp junction（见 README 开发一节）
-vendor/
+# 本地 drawio webapp junction（见 docs/design.md「开发回路」）。
+# 必须带前导 /：裸的 vendor/ 会在任意层级匹配，把 src/routing/vendor 一起忽略掉，
+# 于是「从 GitHub 克隆」这条路构建必挂（issue #13）。routing 的 vendor 是要进版本库的。
+/vendor/
 
 # 编辑器 / 系统
 .vscode/

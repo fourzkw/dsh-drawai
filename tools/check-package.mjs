@@ -13,7 +13,8 @@
  * 用法：node tools/check-package.mjs
  */
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { composeClientBody, dedentBody, extractBody } from './build.mjs'
 
 const EXPECTED_INJECT = ['tools', 'fs', 'sessions', 'sandboxPolicy', 'webServer']
@@ -263,6 +264,29 @@ console.log('\n[7] json 参数兼容（宿主可能把 json 参数按字符串�
   check('预览的 crop 走 jsonValue', /jsonValue\(args\.crop\)/.test(host))
   check('渲染的 frames/range 走 jsonArray', /jsonArray\(args\.frames\)/.test(host) && /jsonArray\(args\.range\)/.test(host))
   check('视频规格走 jsonObject', /jsonObject\(args\.spec\)/.test(host))
+}
+
+console.log('\n[8] 从 git 克隆能不能构建：routing vendor 必须进版本库（issue #13）')
+{
+  // `.gitignore` 里的裸 `vendor/` 会在任意层级匹配，把 src/routing/vendor 一起忽略掉；
+  // 于是克隆下来第一步构建就 ENOENT（tools/build.mjs:124 要读这两个文件）。
+  const ignore = readFileSync('.gitignore', 'utf8')
+  check('.gitignore 的 vendor 规则锚定在仓库根', /^\/vendor\/$/m.test(ignore))
+  check('没有会连带忽略 src/routing/vendor 的裸 vendor/ 规则', !/^vendor\/$/m.test(ignore))
+  const vendorFiles = ['libavoid.min.js', 'libavoid-routing.js']
+  for (const file of vendorFiles) {
+    const path = 'src/routing/vendor/' + file
+    check('构建需要的 ' + path + ' 在磁盘上', readFileSync(path, 'utf8').length > 1000)
+  }
+  // 磁盘上有还不够：必须在 git 索引里，否则克隆出来仍然没有（npm 包另说，它走 .npmignore）。
+  if (existsSync('.git')) {
+    const tracked = execFileSync('git', ['ls-files', 'src/routing/vendor', 'lib/routing/vendor'], { encoding: 'utf8' })
+    for (const file of vendorFiles) {
+      check('git 跟踪了 src/routing/vendor/' + file, tracked.includes('src/routing/vendor/' + file))
+    }
+  } else {
+    console.log('  [SKIP] 这里不是 git 工作区（npm 包安装目录），跳过索引检查')
+  }
 }
 
 console.log('\n' + (failures === 0 ? '全部通过。' : failures + ' 项失败。'))

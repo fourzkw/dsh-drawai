@@ -1996,6 +1996,38 @@ console.log('\nAI 侧：「看一眼」画布效果图（图片走附件通道�
   const jpegReq = (await noPng.api({ action: 'read', sessionId: 's1', path: 'look.drawio' })).render
   const wrongType = await noPng.api({ action: 'render-result', sessionId: 's1', path: 'look.drawio', requestId: jpegReq.requestId, ok: true, png: pngBase64 })
   ok(wrongType.ok !== true && String(wrongType.error).indexOf('not accepted') >= 0, '部署不接受 png → 提前拒收：' + String(wrongType.error))
+
+  // ⑧ issue #12：画布没打开时不能永远停在 pending。
+  //   渲染在浏览器里做：用户打开的是别的文件时请求根本没人接，宿主应当立刻说 not-open；
+  //   已经挂上的请求超过 25 秒没有人接，就如实报 timeout（带已等待秒数），别让模型反复重试。
+  const gate = lookInstance()
+  await apply([{ op: 'addNode', label: '另一张', x: 0, y: 0 }], { path: 'other.drawio' })
+  const focusOther = await gate.api({ action: 'focus', sessionId: 's1', path: 'other.drawio' })
+  ok(focusOther.ok === true, '（前提）焦点切到 other.drawio：' + JSON.stringify(focusOther))
+  const closed = await gate.read.execute({ path: 'look.drawio', render: true }, execLook)
+  ok(closed.look !== undefined && closed.look.status === 'not-open', '画布没打开 → look.status=not-open（不是永远 pending）：' + JSON.stringify(closed.look))
+  ok(String(closed.look.error).indexOf('other.drawio') >= 0, 'not-open 说清"现在打开的是哪张"：' + String(closed.look.error))
+  ok((await gate.api({ action: 'read', sessionId: 's1', path: 'look.drawio' })).render === null, 'not-open 时不挂渲染请求（客户端没有活可接）')
+
+  // 打开同一张 → 正常挂请求，pending 里带 waitedMs（"已经等了多久"）
+  await gate.api({ action: 'focus', sessionId: 's1', path: 'look.drawio' })
+  const openAgain = await gate.read.execute({ path: 'look.drawio', render: true }, execLook)
+  ok(openAgain.look.status === 'pending' && openAgain.look.waitedMs === 0, '画布打开着 → pending + waitedMs：' + JSON.stringify(openAgain.look))
+  const gateReq = (await gate.api({ action: 'read', sessionId: 's1', path: 'look.drawio' })).render
+  ok(gateReq !== null && typeof gateReq.requestId === 'string', '（前提）渲染请求挂上去了：' + JSON.stringify(gateReq))
+
+  const realNow = Date.now
+  Date.now = () => realNow() + 26000
+  try {
+    const late = await gate.read.execute({ path: 'look.drawio', render: true }, execLook)
+    ok(late.look.status === 'timeout' && Number(late.look.waitedMs) >= 25000, '挂 25 秒没人接 → timeout + 已等待秒数：' + JSON.stringify(late.look))
+    ok(String(late.look.error).indexOf('打开') >= 0, 'timeout 给出人话原因：' + String(late.look.error))
+  } finally {
+    Date.now = realNow
+  }
+  // 超时只是"不再说 pending"：请求本身留着，迟到的回执照样认（否则真渲完的那一刻图会丢）
+  const latePost = await gate.api({ action: 'render-result', sessionId: 's1', path: 'look.drawio', requestId: gateReq.requestId, ok: true, png: pngBase64, width: 800, height: 600 })
+  ok(latePost.ok === true, '超时之后迟到的回执仍然收下（请求没被删）：' + JSON.stringify(latePost))
 }
 
 console.log('\nclearPoints 不许把"悬空端的落点"一起删掉（独立线会整条消失）')

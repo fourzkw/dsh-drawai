@@ -155,4 +155,19 @@ check(!('__routePreview' in loop.edges[0]), '自环跳过求解也会清除临�
 const covered = { nodes: [node('a', 0, 0), node('b', 500, 0), node('cover', -10, -10, 140, 80)], edges: [edge('covered', 'a', 'b')] }
 check(router.update(null, covered).failed.includes('covered'), '普通覆盖节点不会被误当成可穿越容器')
 
+// issue #13：从 git 克隆的包装不上 src/routing/vendor 时，引擎整个不可用。
+// 这种情况必须在 update() 里降级，而不是把 ENOENT 抛给写回路径（那会让整次改图失败且不落盘）。
+const noEngine = createOrthogonalRouter(() => {
+  throw new Error("ENOENT: no such file or directory, open 'lib/routing/vendor/libavoid.min.js'")
+})
+const degradedScene = { nodes: [node('a', 0, 0), node('b', 500, 0), node('wall', 220, -40, 100, 140)], edges: [edge('e', 'a', 'b')] }
+let degraded
+try {
+  degraded = noEngine.update(null, degradedScene)
+} catch (error) {
+  assert.fail('引擎不可用时 update 抛了异常：' + error.message)
+}
+check(typeof degraded.unavailable === 'string' && degraded.unavailable.includes('libavoid'), '引擎不可用时降级并带出原因（不抛异常）')
+check(degraded.failed.length === 0 && degradedScene.edges[0].points === undefined, '降级时边保持原样，也不会被误标成 blocked')
+
 console.log('Routing checks passed: ' + checks)
