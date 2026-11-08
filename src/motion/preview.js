@@ -27,14 +27,21 @@ export async function contactSheet(images, options = {}) {
   const work = dirnameOf(images[0]) + '\\.sheet-' + createHash('sha1').update(images.join('|')).digest('hex').slice(0, 10)
   mkdirSync(work, { recursive: true })
   try {
-    images.forEach((file, index) => copyFileSync(file, join(work, 'frame-' + (index + 1) + '.png')))
+    const binary = await ensureFfmpeg()
+    // 每帧先各自归一成 rgba 再拼：同一批帧里只要有一张带 alpha（rgba）另一张不带（rgb24），
+    // image2 序列就按第一张的像素格式解码，后面的帧被静默吃掉——拼图里只剩一格，
+    // 看着像"只渲了一帧"，其实是格式不一致。逐帧转一遍最稳（每帧几十毫秒）。
+    for (const [index, file] of images.entries()) {
+      await exec(binary, ['-hide_banner', '-loglevel', 'error', '-y', '-i', file,
+        '-vf', 'format=rgba', '-frames:v', '1', join(work, 'norm-' + (index + 1) + '.png')],
+        { windowsHide: true, timeout: 60000 })
+    }
     const output = join(work, 'sheet.png')
     // width:0 = 不缩放。1:1 看锯齿/色带时必须关掉缩放，否则锯齿先被重采样抹平了。
     const width = options.width === undefined ? 640 : Number(options.width)
     const filter = (width > 0 ? 'scale=' + width + ':-2:flags=lanczos,' : '')
       + 'tile=' + cols + 'x' + rows + ':padding=8:margin=8:color=0x101010'
-    const binary = await ensureFfmpeg()
-    await exec(binary, ['-hide_banner', '-loglevel', 'error', '-y', '-i', join(work, 'frame-%d.png'),
+    await exec(binary, ['-hide_banner', '-loglevel', 'error', '-y', '-i', join(work, 'norm-%d.png'),
       '-frames:v', '1', '-vf', filter, output],
       { windowsHide: true, timeout: 60000 })
     if (!existsSync(output)) throw new Error('拼图失败')

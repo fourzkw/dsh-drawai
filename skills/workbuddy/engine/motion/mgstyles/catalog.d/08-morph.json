@@ -1,0 +1,28 @@
+{
+  "slug": "08-morph",
+  "name": "一形万象·形变",
+  "oneLiner": "始终只有一个实心剪影：轮廓等点数重采样后逐点插值，必经圆形中介变出八个图标。",
+  "signature": [
+    "单形：永远一个实心剪影，无描边、无渐变、无阴影",
+    "变形靠等点数重采样（body 240 / 洞 72）+ 逐点 lerp，不是交叉淡化",
+    "中介形必过圆或胶囊（P.Ca/Cb）",
+    "每次落地压扁回弹：A·sin(2πτ/0.28)·e^(-7.5τ)，从落地前 2 帧起算",
+    "终场落在丝网印质感：纸纹 + 每帧偏移的 512² 颗粒 + 暗角"
+  ],
+  "palette": {
+    "page": "#F4EEE3",
+    "surface": "#E7E1D7",
+    "field": "#DED8CF",
+    "text": "#16151B",
+    "muted": "#908C89",
+    "accent": "#FF4F2B",
+    "border": "#D0CBC3"
+  },
+  "colors": ["#F4EEE3", "#16151B", "#FFB627", "#FF4F2B", "#2438E8", "#D93A1C"],
+  "fonts": {
+    "display": "\"Outfit\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+    "text": "\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+    "mono": "\"IBM Plex Mono\",\"JetBrains Mono\",monospace"
+  },
+  "rhythm": { "bpm": 150, "fps": 30, "duration": 10, "aspect": "16:9", "cutFrames": 25 }
+}

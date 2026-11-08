@@ -1,0 +1,8 @@
+{
+  "source": "dsh-drawai (src/)",
+  "commit": "1d44d14",
+  "builtAt": "2026-11-08T06:29:22.696Z",
+  "files": 510,
+  "bytes": 6229552,
+  "note": "由 tools/build-skill.mjs 生成；工具名已替换为 wb 子命令，引擎逻辑与插件逐字节一致。"
+}

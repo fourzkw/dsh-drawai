@@ -1,0 +1,34 @@
+{
+  "slug": "01-flat-vector",
+  "name": "扁平矢量·一点成城",
+  "oneLiner": "一点落地弹成太阳，长出一座城，再收进窗里变回一个点。",
+  "signature": [
+    "全片零渐变零阴影零描边，只有 #2B2BFF 底上五档纯色块",
+    "每次落地竖向压到 60%、横向撑到 136%，2–6 帧内回弹",
+    "入场一律「预备 4 帧—冲出 4 帧—回弹 8 帧」，过冲 1.56",
+    "9 栋楼以底边为锚错峰 3 帧升起，顶盖再延 2 帧",
+    "推镜 30 倍穿进 64×36 px 的窗，窗内是同一套矢量语言"
+  ],
+  "palette": {
+    "page": "#2B2BFF",
+    "surface": "#3B3BFF",
+    "field": "#4D4DFF",
+    "text": "#FFF6E9",
+    "muted": "#A3A3FF",
+    "accent": "#FF5A4E",
+    "border": "#1F1FCC"
+  },
+  "colors": ["#2B2BFF", "#FF5A4E", "#FFF6E9", "#FFC62B", "#151433", "#2EE6A8", "#A3A3FF"],
+  "fonts": {
+    "display": "\"Fredoka\",\"Resource Han Rounded\",\"Noto Sans SC\",sans-serif",
+    "text": "\"Resource Han Rounded\",\"Noto Sans SC\",sans-serif",
+    "mono": "\"JetBrains Mono\",monospace"
+  },
+  "rhythm": {
+    "bpm": 120,
+    "fps": 30,
+    "duration": 10,
+    "aspect": "16:9",
+    "cutFrames": 15
+  }
+}

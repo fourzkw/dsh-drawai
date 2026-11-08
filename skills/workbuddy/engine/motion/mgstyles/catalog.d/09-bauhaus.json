@@ -1,0 +1,28 @@
+{
+  "slug": "09-bauhaus",
+  "name": "几何构成·包豪斯",
+  "oneLiner": "红黄蓝三原色 + 基础几何 + 严格 120px 网格，按拍切换的构成主义排版。",
+  "signature": [
+    "中央 8x8 网格（模数 120px）",
+    "只有纸/红/黄/蓝/墨五色",
+    "直角几何：正方形、四分之一圆、半圆、三角，无圆角矩形",
+    "每 15 帧一次状态切换，切换之间完全静止",
+    "四色套印偏移 2-4px + 纸纹"
+  ],
+  "palette": {
+    "page": "#F1E9DA",
+    "surface": "#EDE4D3",
+    "field": "#E8DECB",
+    "text": "#111111",
+    "muted": "#8C8172",
+    "accent": "#E03C31",
+    "border": "#D8CBB4"
+  },
+  "colors": ["#F1E9DA", "#E03C31", "#F2B705", "#1E4FA3", "#111111"],
+  "fonts": {
+    "display": "\"Anton\",\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+    "text": "\"HarmonyOS Sans SC\",\"Noto Sans SC\",sans-serif",
+    "mono": "\"IBM Plex Mono\",\"JetBrains Mono\",monospace"
+  },
+  "rhythm": { "bpm": 120, "fps": 30, "duration": 10, "aspect": "16:9", "cutFrames": 15 }
+}

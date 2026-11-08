@@ -5,6 +5,8 @@
 旧版本的「后台制作 Agent」已经整体移除（连同 `.agent/state.json`、receipts、resume / revise / remix、页面采集与 film-review）。相关差异见文末。
 
 > 干活前先读 [`motion-video-playbook.md`](./motion-video-playbook.md)：那里规定了一支片子要过哪几道闸门（内容 / 方向 / 分镜 / 打样 / 量产 / 声音 / 质检）、每道闸门的产出与验收标准。这份文档只讲工具怎么调。
+>
+> 想脱离插件、只靠一台装了 Node 的机器做同样的片子：见 [`skills/workbuddy/SKILL.md`](../skills/workbuddy/SKILL.md)。这是把 `src/motion` 引擎 vendor 成 `wb` 命令的自包含技能包，工程格式与这里完全一致（`timeline.json` + `scene-N.tsx` + `assets/`），只是没有画布——用 `--dir` 指工程目录，分镜表写在工程的 `storyboard.md` 里。
 
 ## 工作流
 
