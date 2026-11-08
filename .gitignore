@@ -69,3 +69,10 @@ lib/motion/fonts/
 dist/
 .tmp-assets-test/
 .tmp-assets-fail/
+
+# Python 字节码（shotcraft 上游脚本跑一次就会生成，不该进包）
+__pycache__/
+*.pyc
+
+# 技能包打包产物
+skills/workbuddy/*.tgz

@@ -37,6 +37,7 @@ export async function card(flags, positional) {
     line('  参数指纹 ' + contract.parametersSha256.slice(0, 16) + ' · 玩法：' + contract.preservation)
     line('')
     line(truncate(contract.recipe, flags.full ? Infinity : 24000))
+    return
   }
 
   throw new Error('card 没有这个动作：' + action + '（list / search / show）')

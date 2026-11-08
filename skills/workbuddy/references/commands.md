@@ -109,12 +109,12 @@
 | `--gain 0` | 旁白增益 dB |
 | `--force` | 忽略缓存重新合成 |
 
-`say` 会真合成（edge-tts，拿不到退 Windows SAPI），按真实时长重排镜头，字幕写进 `timeline.subtitles`。
+`plan` 只给排期预览、**不写时间轴**（这一步音频还没合成，写进去会让下一次 render 找不到文件）；`say` 会真合成（edge-tts，拿不到退 Windows SAPI），按真实时长重排镜头，字幕写进 `timeline.subtitles`；`align` 用已有音频按真实时长对齐。
 
 ### `wb sfx [search|get|list]`
 
 - `search "paper whoosh" [--min 0 --max 3 --limit 8]`：**短词最灵**；返回 id/时长/许可/预览地址。
-- `get --id fs:12345[,fs:678]`：下载到 `assets/sfx/`，并量峰值写进 `assets/audio-manifest.json`。
+- `get --id fs:12345`（或 `wb sfx get fs:12345 fs:678` 一次多个）：下载到 `assets/sfx/`，并量峰值写进 `assets/audio-manifest.json`。
 - `list`：已下载的音效。
 
 ### `wb audio [add|list|remove|analyze|apply]`
@@ -131,7 +131,9 @@
 
 ### `wb sync [bind|list|clear]`
 
-- `bind --music <cueId> [--tolerance 2] [--anchors 文件.json] [--offset 秒]`：分析音乐写 `timeline.sync`（切镜/动作/音效统一对拍点）。容差 0–3 帧。
+- `bind --music <cueId> --anchors <JSON 文件|JSON 文本> [--tolerance 2] [--offset 秒]`：分析音乐写 `timeline.sync`（切镜/动作/音效统一对拍点）。容差 0–3 帧，锚点 1–200 个（必填）。
+  - 锚点格式：`[{"id":"a1","type":"cut","shotId":"shot-1","at":0.5}]`；`shotId` 是 `shot-1` 这种 id（不是序号），按拍号写 `"beat":2`，动作再写 `"name"`、`"visual":{"metric":"change"}`、`"sfx":[{"cueId":"cue-…","peakSeconds":0.02}]`。
+  - 文件带 BOM（记事本 / PowerShell 5 默认）也能读；按 `beat` 绑定要求音乐有稳定网格，量不出来就改用 `at` 的实测秒数。
 - `list` / `clear`。
 
 ### `wb verify [--file 成片]`
@@ -147,7 +149,7 @@
 | 动作 | 参数 | 说明 |
 | --- | --- | --- |
 | `list` | — | 工程内素材 |
-| `library [关键词] [--category paper]` | 内置素材库（116 项） |
+| `library [关键词] [--category paper]` | 内置素材库（111 项：102 音效 + 9 纹理） |
 | `use --id <assetId>` | 导入内置素材 |
 | `page --url https://… [--html 文件] [--width 1440 --height 900 --scale 2 --wait 1200 --name X]` | 截整页 |
 | `gather --url … [--brand …] [--pages 4 --limit 12 --min-width 240 --dry-run]` | 整站收 logo/配色/字体/主视觉/截图 |
@@ -156,6 +158,8 @@
 | `palette --file 图` | 读色板 |
 | `crop --file 图 --x 0 --y 0 --w 800 --h 400 [--name X]` | 裁切 |
 | `capture --file 本机图` | 引进工程（sha256 去重） |
+
+`--file` 三种写法都认：绝对路径、工程内相对路径（`.out/poster.png`）、`assets/` 里的文件名（`builtin/impact.wav`）。
 
 ### `wb card [list|search|show]`
 

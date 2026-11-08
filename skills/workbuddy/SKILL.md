@@ -182,7 +182,7 @@ wb verify --dir D                                  # 成片音画对照验收
 
 ```bash
 wb assets list --dir D                    # 工程里已有的
-wb assets library 纸张                     # 内置素材库（116 个纹理/采样）
+wb assets library 纸张                     # 内置素材库（111 项：102 音效 + 9 纹理）
 wb assets use --dir D --id paper-01       # 拷进工程 assets/
 wb assets gather --dir D --url https://example.com   # 整站收 logo/配色/字体/截图
 wb assets page   --dir D --url ...        # 单页 2 倍截图

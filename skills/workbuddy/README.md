@@ -20,8 +20,10 @@ npm install --omit=dev     # @babel/parser + @babel/traverse + npm（约 21MB）
 node bin/wb.mjs doctor     # 看四件事：babel / 素材 / 视频运行时 / FFmpeg
 ```
 
-- **素材**（字体 / 素材库 / 材质，约 150MB）：`wb setup --download` 下载到 `~/.dsh/drawai-assets/v1`；已有就跳过。
-- **视频运行时**（remotion / react / three，约 100MB）：第一次渲染自动装到 `~/.dsh/drawai-video-runtime/`，也可以 `wb setup --download` 提前装。
+渲染会在 `node_modules/.cache/webpack/` 里留打包缓存（约 100MB）；随时可删，下一次渲染会重建，不属于包的内容。
+
+- **素材**（字体 / 素材库 / 材质，约 150MB）：`wb setup --install` 下载到 `~/.dsh/drawai-assets/v1`；已有就跳过。
+- **视频运行时**（remotion / react / three，约 230MB）：第一次渲染自动装到 `~/.dsh/drawai-video-runtime/`，也可以 `wb setup --install` 提前装。
 - **FFmpeg**（预览拼图 / 帧检 / 导出 / 混音要用）：`winget install --id Gyan.FFmpeg -e`（或 `scoop install ffmpeg`、`choco install ffmpeg`），也可以 `$env:WORKBUDDY_FFMPEG_PATH = "…\ffmpeg.exe"` 指一个现成的。
 - **浏览器**：默认用系统 Chrome（`C:/Program Files/Google/Chrome/Application/chrome.exe`），没有就退回 Edge；也可以用 `$env:WORKBUDDY_CHROME_PATH` 指定。引擎不会去下载 chrome-headless-shell。
 

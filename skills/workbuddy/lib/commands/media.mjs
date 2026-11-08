@@ -9,11 +9,13 @@ import { requireFfmpeg } from '../ffmpeg.mjs'
 
 const mb = (bytes) => (bytes / 1024 / 1024).toFixed(1) + 'MB'
 
-/** `--file` 可以是工作区里的路径，也可以是工程 assets/ 里的文件名。 */
+/** `--file` 可以是本机路径、工程内相对路径（.out/poster.png），也可以是工程 assets/ 里的文件名。 */
 function sourceFile(flags, dir, field = 'file') {
   const raw = flags[field]
-  if (!raw || raw === true) throw new Error('要给 --' + field.replace(/[A-Z]/g, (char) => '-' + char.toLowerCase()) + '（本机文件路径，或工程 assets/ 里的文件名）')
-  const candidates = [isAbsolute(String(raw)) ? String(raw) : resolve(process.cwd(), String(raw)), join(dir, 'assets', String(raw))]
+  if (!raw || raw === true) throw new Error('要给 --' + field.replace(/[A-Z]/g, (char) => '-' + char.toLowerCase()) + '（本机文件路径、工程内相对路径，或工程 assets/ 里的文件名）')
+  const candidates = isAbsolute(String(raw))
+    ? [String(raw)]
+    : [resolve(process.cwd(), String(raw)), resolve(dir, String(raw)), join(dir, 'assets', String(raw))]
   const hit = candidates.find((path) => existsSync(path))
   if (!hit) throw new Error('找不到文件：' + raw)
   return hit
@@ -294,7 +296,14 @@ export async function sync(flags, positional) {
     if (!cue) throw new Error('时间轴里没有这条音轨：' + cueId + '\n先 `wb audio add --file 音乐.mp3 --role bgm`。')
     const tolerance = num(flags.tolerance, 2)
     if (tolerance < 0 || tolerance > 3) throw new Error('容差只能是 0–3 帧')
-    const anchors = flags.anchors ? (String(flags.anchors).trim().startsWith('[') || String(flags.anchors).trim().startsWith('{') ? JSON.parse(String(flags.anchors)) : JSON.parse(readFileSync(resolve(String(flags.anchors)), 'utf8'))) : []
+    const rawAnchors = flags.anchors ? String(flags.anchors).trim() : ''
+    if (!rawAnchors) throw new Error('bind 需要 --anchors（1–200 个锚点；给 JSON 文件，或直接给 JSON 文本）\n格式：`[{"id":"a1","type":"cut","shotId":"shot-1","at":0.5}]`；按拍号就写 "beat"，动作再写 "name" 与 "visual"')
+    const text = rawAnchors.startsWith('[') || rawAnchors.startsWith('{')
+      ? rawAnchors
+      : readFileSync(resolve(String(flags.anchors)), 'utf8')
+    // Windows 记事本 / PowerShell 5 写出的 JSON 带 BOM，直接 JSON.parse 会报 Unexpected token。
+    const anchors = JSON.parse(text.replace(/^\uFEFF/, ''))
+    if (!Array.isArray(anchors) || !anchors.length) throw new Error('anchors 必须是非空数组（1–200 个）')
     const { analyzeBeats } = await import('../../engine/motion/beats.js')
     const { assetPath, resolveSync, filmHash } = await import('../../engine/motion/sync.js')
     const file = assetPath(dir, cue.file)
@@ -322,7 +331,11 @@ export async function verify(flags, positional) {
   const { verifySync } = await import('../../engine/motion/sync.js')
   const timeline = readTimeline(dir)
   if (!timeline.sync) throw new Error('还没绑拍点：先 `wb sync bind --music <cueId>`，再渲整片，再 `wb verify`。')
-  let film = flags.file ? resolve(process.cwd(), String(flags.file)) : null
+  // --file 也认工程内相对路径（.out/film.mp4），和别的命令保持一致。
+  const rawFilm = flags.file ? String(flags.file) : ''
+  let film = rawFilm
+    ? (isAbsolute(rawFilm) ? [rawFilm] : [resolve(process.cwd(), rawFilm), resolve(dir, rawFilm)]).find((path) => existsSync(path)) || null
+    : null
   if (!film) {
     const out = join(dir, '.out', 'film.mp4')
     if (existsSync(out)) film = out
@@ -332,9 +345,20 @@ export async function verify(flags, positional) {
   if (flags.json) return emit('', { ok: report.status !== 'fail', ...report })
   line('音画对照：' + report.status)
   for (const row of report.rows) {
-    const mark = row.status === 'pass' ? '✓' : row.status === 'warn' ? '!' : '✗'
-    line('  ' + mark + ' ' + row.name + (row.measuredFrames !== undefined ? ' · 实测偏差 ' + row.measuredFrames + ' 帧' : '') + (row.message ? ' · ' + row.message : ''))
+    const mark = row.status === 'pass' ? '✓' : row.status === 'fail' ? '✗' : '?'
+    const error = row.audiovisualErrorFrames
+    const measured = error === null || error === undefined ? '未测到' : '实测偏差 ' + Math.round(error) + ' 帧'
+    const sfx = (row.sfx || []).map((item) => item.errorFrames === null || item.errorFrames === undefined
+      ? '未测到'
+      : '偏差 ' + Math.round(item.errorFrames) + ' 帧')
+    line('  ' + mark + ' ' + row.type + '/' + row.id + ' · 计划 ' + row.plannedFrame + 'f · ' + measured
+      + (row.quantizationMs !== undefined ? ' · 吸附 ' + Math.round(row.quantizationMs) + 'ms' : '')
+      + (sfx.length ? ' · 音效 ' + sfx.join(' / ') : ''))
   }
+  if (report.measuredOutputOffsetSeconds !== null && report.measuredOutputOffsetSeconds !== undefined) {
+    line('  实测输出偏移 ' + (report.measuredOutputOffsetSeconds * 1000).toFixed(0) + 'ms（`--offset` 可补偿）')
+  }
+  if (report.status === 'unverified') line('  没测到波形：确认成片里有这条音乐/音效，或用整片（切片渲染的音轨对不上）。')
 }
 
 // ── voice ───────────────────────────────────────────────────────────
@@ -353,7 +377,7 @@ export async function voice(flags, positional) {
     if (flags.json) return emit('', { cues, subtitles: (timeline.subtitles || []).length, edgeAvailable: available, choices: engine.VOICE_CHOICES })
     line('音色：' + (timeline.narration?.voice || engine.VOICE_DEFAULTS.voice) + (available ? '（edge-tts 可用）' : '（edge-tts 不可用，只能退系统语音）'))
     line('旁白 ' + cues.length + ' 条 · 字幕 ' + (timeline.subtitles || []).length + ' 条')
-    return line('可选音色：' + engine.VOICE_CHOICES.slice(0, 12).map((item) => item.value + '（' + item.label + '）').join('、'))
+    return line('可选音色：' + engine.VOICE_CHOICES.slice(0, 12).map((item) => item.name + '（' + item.gender + '，' + item.note + '）').join('、'))
   }
 
   const script = engine.readScript(dir, flags.script)
@@ -386,12 +410,19 @@ export async function voice(flags, positional) {
 
   const checks = engine.checkNarration(planned.timeline, planned.lines, options)
   const seconds = engine.totalSpeechSeconds(planned.lines, fps)
-  writeTimeline(dir, planned.timeline)
-  timeline = planned.timeline
-  if (flags.json) return emit('', { ok: true, action, lines: planned.lines, checks, seconds, summary: engine.describeNarration(planned.lines, timeline.shots, fps) })
+  // plan 只给排期预览，不落盘：这时候 voice/*.mp3 还没合成，写进 timeline 的话
+  // 下一次 render 会在打包阶段去取一个不存在的文件（实测 404，渲到一半才崩）。
+  const persisted = action !== 'plan'
+  if (persisted) {
+    writeTimeline(dir, planned.timeline)
+    timeline = planned.timeline
+  }
+  const summary = engine.describeNarration(planned.lines, planned.timeline.shots, fps)
+  if (flags.json) return emit('', { ok: true, action, persisted, lines: planned.lines, checks, seconds, summary })
   line('旁白 ' + planned.lines.length + ' 句 · ' + seconds + 's · ' + checks.verdict)
   for (const check of checks.checks) if (check.level !== 'pass') line('  [' + check.level + '] ' + check.message)
   line('')
-  line(engine.describeNarration(planned.lines, timeline.shots, fps))
-  if (timeline.subtitles?.length) line('\n字幕 ' + timeline.subtitles.length + ' 条已写进时间轴（`wb export` 会出 subtitles.srt）。')
+  line(summary)
+  if (!persisted) line('\n（预览：没写进时间轴。排期认可后再跑 `wb voice say`，它才会合成音频并写盘。）')
+  if (persisted && timeline.subtitles?.length) line('\n字幕 ' + timeline.subtitles.length + ' 条已写进时间轴（`wb export` 会出 subtitles.srt）。')
 }

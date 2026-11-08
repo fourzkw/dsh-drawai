@@ -181,7 +181,9 @@ export async function verifySync(dir, film, input) {
       const first = Math.max(0, anchor.frame - 6), last = Math.min(timeline.durationInFrames - 1, anchor.frame + 6)
       const path = join(out, 'anchor-' + index + '.gray')
       try {
-        await runFfmpeg(['-loglevel', 'error', '-i', film, '-vf', 'select=between(n\\,' + first + '\\,' + last + '),scale=96:54,format=gray', '-vsync', '0', '-f', 'rawvideo', path], { cwd: dir, log: join(out, 'visual.log') })
+        // -vsync 在 FFmpeg 7 已删除（winget 装的 9.x 直接报 Unrecognized option）；
+        // -fps_mode 从 5.1 起就有，新旧都能跑。
+        await runFfmpeg(['-loglevel', 'error', '-i', film, '-vf', 'select=between(n\\,' + first + '\\,' + last + '),scale=96:54,format=gray', '-fps_mode', 'passthrough', '-f', 'rawvideo', path], { cwd: dir, log: join(out, 'visual.log') })
         visual = visualPeak(readFileSync(path), 96, 54, first, anchor.visual)
         unlinkSync(join(out, 'visual.log'))
       } finally {

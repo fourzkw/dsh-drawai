@@ -5,7 +5,11 @@
 // 引擎是 DrawAI 插件那套的原样拷贝（engine/VENDOR.json 记着来源），
 // 所以这里每一个子命令的行为都和插件里的同名工具一致——只是画布换成了目录。
 
+import { readFileSync } from 'node:fs'
 import { mirrorEnv } from '../lib/cli.mjs'
+
+// 版本以 package.json 为准，别再手写一份（改版本时容易漏）。
+const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version
 
 mirrorEnv()
 
@@ -23,7 +27,7 @@ const { flags, positional } = parseArgs(rest)
 setJson(!!flags.json)
 
 function help() {
-  line(`wb — 用代码做视频（Remotion）· ${'0.4.1'}
+  line(`wb — 用代码做视频（Remotion）· ${VERSION}
 
 用法  wb <命令> [参数]
 
@@ -109,7 +113,7 @@ try {
   if (!command || command === 'help' || command === '--help' || command === '-h') {
     help()
   } else if (command === 'version' || command === '--version' || command === '-v') {
-    line('0.4.1')
+    line(VERSION)
   } else if (command === '__render') {
     // 由 `wb render` 自己拉起来的后台进程；不是给人用的命令。
     const { runRenderJob } = await import('../lib/commands/render-job.mjs')
