@@ -136,7 +136,7 @@ export const TOKENS, THEME_NAME
 ## index.jsx
 
 ```jsx
-import { registerMotionRoot } from "<技能目录>/engine/motion/entry.jsx";
+import { registerMotionRoot } from "<技能目录>/scripts/engine/motion/entry.jsx";
 import Scene0 from './scene-0.tsx';
 registerMotionRoot({ "shot-1": Scene0 });
 ```

@@ -13,7 +13,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const WB = join(ROOT, 'skills', 'workbuddy', 'bin', 'wb.mjs')
+const WB = join(ROOT, 'skills', 'workbuddy', 'scripts', 'bin', 'wb.mjs')
 const DEFAULT_SAMPLE = join(ROOT, '.drawai-motion', 'n1-旧-人生三万天')
 
 const argv = process.argv.slice(2)

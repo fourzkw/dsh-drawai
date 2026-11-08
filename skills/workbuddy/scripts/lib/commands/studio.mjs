@@ -13,6 +13,14 @@ const WB_BIN = fileURLToPath(new URL('../../bin/wb.mjs', import.meta.url))
 // 命令行里的列表统一写逗号：--frames 40,220 / --range 0,90 / --crop 100,200,400,300
 const numbers = (value) => asArray(value).flatMap((item) => String(item).split(',')).map(Number).filter(Number.isFinite)
 const STORYBOARD_HEADER = '| 镜头 | 帧区间 | 镜头卡 | 这一镜要做什么 | 屏幕上出现什么 | 文案 / 声音 |\n| --- | --- | --- | --- | --- | --- |'
+// ffmpeg 的来源在 doctor 里要能一眼看懂：auto = 我们自己找的，不是用户设的环境变量。
+const sourceLabel = (source) => ({
+  auto: '自动发现',
+  env: '环境变量',
+  path: 'PATH',
+  'known-dir': '常见安装位置',
+  'env-invalid': '环境变量（路径不可用）',
+}[source] || source)
 
 const outDir = (dir) => join(dir, '.out')
 const jobsDir = (dir) => join(outDir(dir), 'jobs')
@@ -52,7 +60,8 @@ function measureAssets(root) {
   let files = 0
   let bytes = 0
   const walk = (dir, depth) => {
-    if (depth > 4) return
+    // 素材库是 media-library/assets/textures/<材质>/<文件>（5 层），上限给足；这里只是防死循环的兜底。
+    if (depth > 8) return
     let entries = []
     try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
     for (const entry of entries) {
@@ -141,7 +150,7 @@ export async function setup(flags) {
     ? '✓ ' + after.assets.source + ' · ' + (after.assets.summary.files ?? '?') + ' 文件 · ' + Math.round((after.assets.summary.bytes || 0) / 1024 / 1024) + 'MB\n              ' + (after.assets.root || after.assets.dir)
     : '✗ 未就绪'))
   line('  运行时   ' + (after.runtime.ready ? '✓ ' + after.runtime.dir : '✗ 未安装（首次渲染自动装）\n              ' + after.runtime.dir))
-  line('  ffmpeg   ' + (after.ffmpeg?.missing ? '✗ ' + after.ffmpeg.missing : '✓ ' + after.ffmpeg.version + ' · ' + after.ffmpeg.source + ' · ' + after.ffmpeg.path))
+  line('  ffmpeg   ' + (after.ffmpeg?.missing ? '✗ ' + after.ffmpeg.missing : '✓ ' + after.ffmpeg.version + ' · ' + sourceLabel(after.ffmpeg.source) + ' · ' + after.ffmpeg.path))
   if (steps.length) line('\n还需要：\n' + steps.map((step) => '  · ' + step).join('\n'))
   else line('\n可以开拍了。')
 }
@@ -158,7 +167,7 @@ export async function doctor(flags) {
   line('  运行时    ' + (report.runtime.ready ? '✓ ' + report.runtime.dir : '✗ 未安装（首次渲染自动装）\n              ' + report.runtime.dir))
   line('  ffmpeg    ' + (report.ffmpeg?.missing
     ? '✗ ' + report.ffmpeg.missing + '\n' + HOW_TO_INSTALL.replace(/^/gm, '            ')
-    : '✓ ' + report.ffmpeg.version + ' · ' + report.ffmpeg.source + ' · ' + report.ffmpeg.path))
+    : '✓ ' + report.ffmpeg.version + ' · ' + sourceLabel(report.ffmpeg.source) + ' · ' + report.ffmpeg.path))
   if (!ready) line('\n缺的项可以用 `wb setup --install` 一次补齐（素材/运行时/FFmpeg 都要下载，约 350MB）。')
 }
 

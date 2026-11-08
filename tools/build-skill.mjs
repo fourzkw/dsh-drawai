@@ -15,7 +15,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)))
-const outDir = join(root, 'skills', 'workbuddy')
+const outDir = join(root, 'skills', 'workbuddy', 'scripts')
 const engineDir = join(outDir, 'engine')
 const checkOnly = process.argv.includes('--check')
 

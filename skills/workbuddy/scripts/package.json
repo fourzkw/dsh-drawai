@@ -1,6 +1,6 @@
 {
   "name": "workbuddy",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "type": "module",
   "description": "用代码做视频：Remotion 引擎 + wb 命令行 + 镜头卡/整片风格配方（DrawAI 引擎的自包含拷贝）",

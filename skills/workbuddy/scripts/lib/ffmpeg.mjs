@@ -54,12 +54,15 @@ function wingetCandidates() {
   return found
 }
 
+// 自己写进 DRAWAI_FFMPEG_PATH 的路径：doctor 里要标成「自动发现」，不能让用户以为是自己设的。
+let autoInjected = ''
+
 // 返回 {path, version, source}；没有就是 null。绝不下载。
 export function locateFfmpeg() {
   const explicit = String(process.env.WORKBUDDY_FFMPEG_PATH || process.env.DRAWAI_FFMPEG_PATH || '').trim()
   if (usable(explicit)) {
     const version = versionOf(explicit)
-    if (version) return { path: explicit, version, source: 'env' }
+    if (version) return { path: explicit, version, source: explicit === autoInjected ? 'auto' : 'env' }
     return { path: explicit, version: null, source: 'env-invalid' }
   }
   for (const directory of String(process.env.PATH || '').split(delimiter)) {
@@ -90,7 +93,10 @@ export function locateFfmpeg() {
 // 找到就写进环境：引擎（ensureFfmpeg）会优先用显式路径，子进程也会继承。
 export function applyFfmpegEnv(found = locateFfmpeg()) {
   if (!found || !found.version) return found
-  if (!String(process.env.DRAWAI_FFMPEG_PATH || '').trim()) process.env.DRAWAI_FFMPEG_PATH = found.path
+  if (!String(process.env.DRAWAI_FFMPEG_PATH || '').trim()) {
+    process.env.DRAWAI_FFMPEG_PATH = found.path
+    autoInjected = found.path
+  }
   return found
 }
 
