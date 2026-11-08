@@ -263,6 +263,12 @@ console.log('\n[6] 渲染 worker 传给 Remotion 的浏览器参数名（issue #
   check('浏览器候选覆盖 macOS', /\/Applications\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome/.test(worker))
   check('浏览器候选覆盖 Linux', /\/usr\/bin\/google-chrome/.test(worker))
   check('没有本机浏览器时先给出提示再下载（不让它看起来像卡死）', /正在下载内置浏览器/.test(worker))
+  // issue #26：`.dsh` 带 Low 完整性标签时，里面的 ffmpeg 继承 Low IL，写不了 Medium 的系统
+  // %TEMP%；renderMedia 的 pre-encode.mp4 正好写在 os.tmpdir()，正片渲到一半就 Permission denied。
+  // 修法只有一条：fork 时把子进程的 TEMP/TMP 指到工程目录。
+  const render = readFileSync('lib/motion/render.js', 'utf8')
+  check('渲染 worker 的临时目录指到工程里（issue #26）', /TEMP:\s*tempDirectory/.test(render) && /TMP:\s*tempDirectory/.test(render))
+  check('工程里的 .out/tmp 会先建好再 fork', /mkdirSync\(tempDirectory,\s*\{\s*recursive:\s*true\s*\}\)/.test(render))
 }
 
 console.log('\n[7] json 参数兼容（宿主可能把 json 参数按字符串送进来）')
