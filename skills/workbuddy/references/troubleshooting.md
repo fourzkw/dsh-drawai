@@ -47,9 +47,9 @@ $env:WORKBUDDY_FFMPEG_PATH = "C:\Users\<你>\AppData\Local\Microsoft\WinGet\Pack
 
 `wb` 自己**从不下载 FFmpeg**（下载会挂死，而且用户看不见）；只有 `wb setup --install` 会尝试。
 
-## 首次渲染要装 100MB 运行时
+## 首次渲染要装 230MB 运行时
 
-视频运行时（Remotion 4 + React 19 + three）装在 `~/.dsh/drawai-video-runtime/<key>`，`key` 里含平台/架构/**node 主版本**。第一次 `preview` / `render` 会从 npm 装（约 100MB，几分钟）。
+视频运行时（Remotion 4 + React 19 + three）装在 `~/.dsh/drawai-video-runtime/<key>`，`key` 里含平台/架构/**node 主版本**。第一次 `preview` / `render` 会从 npm 装（约 230MB，几分钟）。
 
 - 换 node 大版本会再装一份；`wb doctor` 里的"期望目录"就是当前 node 对应的那份。
 - 想复用已有的：`$env:WORKBUDDY_VIDEO_RUNTIME_DIR = "C:\Users\<你>\.dsh\drawai-video-runtime\<已有key>"`（跨 node 主版本复用有原生模块不兼容的风险，装不动时再试）。
