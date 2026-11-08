@@ -42,13 +42,27 @@ process.on('message', async (request) => {
       if (request.bundleKey) writeFileSync(cacheFile, request.bundleKey)
     }
     if (cancelled) throw new Error('已取消动效生成')
-    // Use a configured browser, or a local Windows browser before downloading Chromium.
+    // Use a configured browser, or a local browser before downloading Chromium.
     // 参数名必须是 puppeteerInstance：@remotion/renderer 4.x 只认这个名字，
     // 写成 browserInstance 会被静默忽略，然后它自己去下载 chrome-headless-shell（内网/无外网必炸）。
     // 同时把 browserExecutable 一并传下去：万一实例没用上，也还有本机浏览器可退回，不去联网。
-    const candidates = [request.browserExecutable, process.env.DRAWAI_CHROME_PATH,
-      'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe']
+    const candidates = [
+      request.browserExecutable, process.env.DRAWAI_CHROME_PATH,
+      // Windows
+      'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+      // macOS（插件装在 Mac 上时，浏览器不在 PATH 里，也不在 Windows 的默认位置）
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+      '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      // Linux
+      '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/microsoft-edge',
+    ]
     const browserExecutable = candidates.find((path) => path && existsSync(path))
+    if (!browserExecutable) {
+      // 没有本机浏览器时 Remotion 会去下载 chrome-headless-shell：内网/无外网会卡很久。
+      // 先把这件事说出来，别让它看起来像"卡死"（issue #22）。
+      send({ type: 'progress', phase: 'browser', progress: 0, message: '没找到本机 Chrome / Edge，正在下载内置浏览器；首次会慢一些' })
+    }
     browser = await openBrowser('chrome', { browserExecutable, logLevel: 'error' }).catch((error) => {
       const detail = error?.message || String(error)
       throw new Error(browserExecutable
