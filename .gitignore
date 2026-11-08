@@ -76,3 +76,6 @@ __pycache__/
 
 # 技能包打包产物
 skills/workbuddy/*.tgz
+# 技能市场包首次运行解出来的引擎（scripts/engine.tar.gz 的产物）
+skills/workbuddy/scripts/.runtime/
+skills/workbuddy/scripts/node_modules/

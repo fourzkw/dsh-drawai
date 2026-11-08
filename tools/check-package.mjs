@@ -19,6 +19,7 @@ import { composeClientBody, dedentBody, extractBody } from './build.mjs'
 const EXPECTED_INJECT = ['tools', 'fs', 'sessions', 'sandboxPolicy', 'webServer']
 const EXPECTED_TOOLS = ['shotcraft_search', 'mg_style', 'audio_asset', 'diagram_read', 'motion_task', 'motion_project', 'motion_spec', 'motion_preview', 'motion_render', 'motion_qa', 'motion_export', 'motion_assets', 'motion_sfx', 'motion_audio', 'motion_sync', 'motion_audio_verify', 'motion_voice', 'diagram_apply']
 const EXPECTED_ROUTE = '/drawai/api/save'
+const EXPECTED_DIAGNOSTICS = '/drawai/api/diagnostics'
 
 let failures = 0
 
@@ -124,9 +125,26 @@ try {
 }
 
 // 写回路由是人工编辑的唯一落盘通道，注册不上就等于 M1 白做。
-check('注册了写回路由', routes.length === 1, routes.map((route) => route.kind + ' ' + route.path).join(', '))
+check('注册了写回路由', routes.some((route) => route.kind === 'exact' && route.path === EXPECTED_ROUTE), routes.map((route) => route.kind + ' ' + route.path).join(', '))
 check('路由是 ' + EXPECTED_ROUTE, routes.some((route) => route.path === EXPECTED_ROUTE))
 check('路由 handler 是函数', routes.every((route) => typeof route.handler === 'function'))
+
+// 诊断路由是 issue #8 的取证通道：工具全没时，它必须能自己说出"注册上了哪几个"。
+const diagnostics = routes.find((route) => route.path === EXPECTED_DIAGNOSTICS)
+check('注册了诊断路由', diagnostics !== undefined && diagnostics.kind === 'exact')
+if (diagnostics !== undefined) {
+  let body = null
+  diagnostics.handler({ method: 'GET', headers: {}, url: EXPECTED_DIAGNOSTICS }, { writeHead() {}, end(chunk) { body = chunk } })
+  let payload = null
+  try { payload = JSON.parse(body) } catch (error) { payload = null }
+  const detail = payload === null ? String(body).slice(0, 160) : JSON.stringify(payload.registered)
+  check('诊断路由报出全部已注册工具', payload !== null && Array.isArray(payload.registered)
+    && payload.registered.length === EXPECTED_TOOLS.length
+    && EXPECTED_TOOLS.every((name) => payload.registered.includes(name)), detail)
+  check('诊断路由报出 tools 服务可用', payload !== null && payload.toolsService === true, payload === null ? 'no body' : String(payload.toolsService))
+  check('诊断路由报出无失败/无挂起', payload !== null && Array.isArray(payload.failed) && Array.isArray(payload.pending)
+    && payload.failed.length === 0 && payload.pending.length === 0, payload === null ? 'no body' : JSON.stringify({ failed: payload.failed, pending: payload.pending }))
+}
 
 console.log('\n[3] 编译后的参数 schema')
 for (const tool of registered) {
@@ -187,6 +205,39 @@ console.log('\n[4] 内嵌技能：换了电脑、只装了插件时模型怎么�
     check('正文讲了 ' + needle, body.indexOf(needle) >= 0)
   }
   check('注册走的是 Cordis effect（能被卸载）', disposed === 0 && skills.length === 1, 'disposer 还没被调用')
+}
+
+console.log('\n[5] tools 服务晚于 apply 就绪（issue #8 的现场：apply 跑了、工具全没）')
+{
+  // 真实 DSH 里 tools 未必在 apply 那一刻就 ACTIVE；那时 register 会被静默丢掉。
+  // 所以要挂起、等 ctx.inject(['tools']) 的回调再补注册 —— 这条路不测就等于没修。
+  const lateRegistered = []
+  let flushTools = null
+  const lateCtx = Object.assign({}, ctx)
+  delete lateCtx.tools
+  lateCtx.inject = function (deps, callback) {
+    check('等的是 tools 服务', JSON.stringify(deps) === JSON.stringify(['tools']), JSON.stringify(deps))
+    flushTools = callback
+    return () => {}
+  }
+  let threw = null
+  try {
+    mod.apply(lateCtx)
+  } catch (error) {
+    threw = error && error.message ? error.message : String(error)
+  }
+  check('tools 未就绪时 apply 不抛错（抛了会连累后半段）', threw === null, String(threw))
+  check('tools 未就绪时先挂起', lateRegistered.length === 0 && typeof flushTools === 'function', '注册 ' + lateRegistered.length + ' / flush ' + typeof flushTools)
+  // 模拟服务 ACTIVE：把 tools 装回去再跑回调。
+  lateCtx.tools = {
+    register(tool) {
+      lateRegistered.push(tool)
+      return () => {}
+    },
+  }
+  if (typeof flushTools === 'function') flushTools()
+  check('tools 就绪后补注册满全部工具', lateRegistered.length === EXPECTED_TOOLS.length, '实际 ' + lateRegistered.length)
+  check('补注册的工具名与声明一致', lateRegistered.every((tool) => EXPECTED_TOOLS.includes(tool.name)), lateRegistered.map((tool) => tool.name).join(','))
 }
 
 console.log('\n' + (failures === 0 ? '全部通过。' : failures + ' 项失败。'))
