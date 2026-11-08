@@ -80,7 +80,11 @@ function targetOf(p) {
   // 少了这一支，processPath(句柄) 会退化成 "[object Object]" —— 两个不同文件于是算出
   // **同一个** absolute，任何"按文件配对"的逻辑在自测里都会假绿（实测：选区串了文件）。
   if (p !== null && typeof p === 'object' && typeof p.path === 'string') return p
-  return { path: WORKSPACE + '\\' + String(p).replace(/^[\\/]+/, '') }
+  const text = String(p)
+  // 绝对路径原样返回（真实 fs.resolve 就是这么做的）；只有相对路径才挂到工作区根下。
+  // 少了这一支，list + dir 的 absolute 会变成 "D:\\fake-workspace\\D:\\real\\dir\\file"。
+  if (/^[A-Za-z]:[\\/]/.test(text) || text.startsWith('\\\\')) return { path: text }
+  return { path: WORKSPACE + '\\' + text.replace(/^[\\/]+/, '') }
 }
 
 const fs = {
@@ -832,6 +836,25 @@ console.log('\n写回路由：list / read / save / create 都只认 .drawio')
     ok(listed.payload.files.indexOf('one.drawio') >= 0, 'list 列出 .drawio：' + JSON.stringify(listed.payload.files))
     ok(listed.payload.files.indexOf('notes.txt') < 0, '其它文件不会被当成画布')
     ok(Array.isArray(listed.payload.absolute) && listed.payload.absolute.length === listed.payload.files.length, '同时给出绝对路径（客户端拿它当身份）')
+
+    // ── list + dir：用户在文件管理器里挑了一个**子目录**（issue #19）──
+    //
+    // 两处都必须以所选目录为基准，而不是工作区根：
+    //   · absolute 拼在 dir 上 —— 拼到根就指到一个不存在的同名文件，画布"列得出、打不开"
+    //   · 子目录扫描的 startAbs 也是 dir —— 否则会把 dir 的子目录拿到根上去查，产生假 ENOENT
+    const subDir = resolve(listDir, 'sub')
+    mkdirSync(subDir, { recursive: true })
+    mkdirSync(resolve(subDir, '.drawai-cache'), { recursive: true })
+    writeFileSync(resolve(subDir, 'child.drawio'), drawio)
+    const subListed = await api({ action: 'list', sessionId: 's2', dir: subDir })
+    ok(subListed.status === 200 && subListed.payload.ok === true, 'list + dir 正常返回（' + subListed.status + ' ' + String(subListed.payload && subListed.payload.error) + '）')
+    ok(subListed.payload.files.indexOf('child.drawio') >= 0, 'list + dir 列出子目录里的画布：' + JSON.stringify(subListed.payload.files))
+    ok(
+      String(subListed.payload.absolute[subListed.payload.files.indexOf('child.drawio')]) === resolve(subDir, 'child.drawio'),
+      'absolute 拼在所选目录上，不是工作区根：' + JSON.stringify(subListed.payload.absolute),
+    )
+    ok(Array.isArray(subListed.payload.notes) && subListed.payload.notes.length === 0, '子目录扫描不产生假 ENOENT 提示：' + JSON.stringify(subListed.payload.notes))
+    ok(subListed.payload.root === listDir, 'root 是工作区根（不是 undefined）：' + JSON.stringify(subListed.payload.root))
   } finally {
     rmSync(listDir, { recursive: true, force: true })
   }
