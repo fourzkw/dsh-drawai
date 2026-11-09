@@ -1,5 +1,13 @@
 # 发布与收录流程 / Release & listing
 
+## 0.4.3 发布内容（2026-11-09）
+
+- 内嵌技能拆成 `drawai-canvas` 与 `drawai-video` 两条：一份三万字的正文同时背着画布的 op 速查和视频的十步流程，而技能目录只显示 description 那句，用户说「做个宣传片」会先被「读写画布」挡住。拆开后 `motion_*` / `shotcraft_search` / `mg_style` 只进视频正文，`diagram_*` 那套只进画布正文。
+- 视频正文补一段「画布最小集」（path 必填、`as` 别名、from/to 必须是已存在的 id、建了镜头卡必须连），单独加载也不会写错 op；画布正文反过来指向视频技能。
+- 两条技能在同一个 `ctx.effect` 里注册，返回组合 disposer，插件卸载时一起撤掉。
+- `check-package` 从「恰好一个技能」改成「恰好两个、名字对得上、关键字分两组」，并新增「画布技能里没有 motion_*」；`check-media-library-host` 按名字找 `drawai-video`，不再按注册顺序摸 `skills[0]`。
+- `docs/design.md` 的三通道一节同步成两条技能，并写明拆分理由。
+
 ## 0.4.2 发布内容（2026-11-09）
 
 - 画布工具注册加固：18 个 host 工具逐个兜错，`tools` 服务未就绪时改延迟注册；新增只读端点 `/drawai/api/diagnostics` 用于现场取证（#8）。

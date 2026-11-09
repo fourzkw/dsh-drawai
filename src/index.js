@@ -2466,9 +2466,40 @@ export const inject = ['tools', 'fs', 'sessions', 'sandboxPolicy', 'webServer']
  * 它出现在会话的技能目录里，模型需要时按需取全文 —— 于是"怎么在这张画布上操作"这件事
  * 跟着插件走，而不是跟着这份仓库走。
  *
+ * **拆成两份**（drawai-canvas / drawai-video），因为这是两种任务、两套工具族：画布那份讲
+ * diagram_read / diagram_apply 的全部 op 与几何规则，视频那份讲十步制作流程与 motion_* 那组工具。
+ * 合成一份时正文近三万字，而技能目录里只显示 description 那一句 —— 用户说"做个宣传片"会先被
+ * "读写画布"这句挡住；分开后两条简介各自对口，画图的人也不必每次为视频流程付上下文。
+ * 视频那份自带一段"画布最小集"（见下），单独加载也不会写错 op；画布那份末尾指向视频技能。
+ *
  * 写成模板串但**不用反引号**（markdown 里要写示例，反引号会破坏模板串）：代码块用四空格缩进。
+ * 两份各自是独立模板串；`tools/build.mjs` 的反引号配平检查按整份文件数，照样管得住。
  */
-const SKILL_BODY = `# DrawAI 画布：怎么读、怎么改
+
+/** 技能 1/2：视频。位置保持原样（正文接在原来的地方），改动只剩标题与开头那段最小集。 */
+const SKILL_BODY_VIDEO = `# DrawAI 画布做视频：从问到出片
+
+这个技能只讲**怎么把一条片子做出来**。画布怎么读、怎么改（diagram_read / diagram_apply 的完整签名、
+折点与端点、图层与顺序、traceImage 位图矢量化）在技能 drawai-canvas 里 —— 视频流程真正用到的那几个 op
+下面列全了，不够用时再加载那个技能。
+
+## 画布最小集（视频只用到这些 op）
+
+    // 1) 先读回当前那张画布：用户说"这张"就别猜路径，不传 path 读一次
+    diagram_read()                       // → { path, absolute, nodes, edges, ... }，path 拿去给 apply
+    // 2) 一次写完：建节点、连卡、放分镜表；几何已经规划好就 layout:"none"
+    diagram_apply({ path, layout:"none", ops:[
+      {op:"addNode", label:"分镜表", shape:"text", x:40, y:40, w:520, h:360, as:"board"},
+      {op:"addNode", label:"主片", shape:"video", x:600, y:40, w:480, h:270, as:"film"},
+      {op:"addEdge", from:"shot-card", to:"film"}   // shot-card 是画布上已存在的镜头卡 id
+    ]})
+
+- **path 必填**：diagram_apply 永远要显式传 path；diagram_read 不传时返回当前聚焦的那张。
+- **from / to 必须是已存在的节点 id**（写错在写盘前就报错）；as 起的别名只在同一次 ops 数组里有效。
+- **建了镜头卡就必须连**：断连的卡既没进 assets、也不排期，motion_project create 会直接报错。
+- 连线用圆角折线，折点自己规划（points 只放中间转折，不放源/目标连接点），不要启用自动避障。
+- 挪位置用 move，改文字用 setLabel，换样式用 setStyle；改一组就传 ids:[...]。改接边用 setEdge，
+  不要 remove + addEdge 重画 —— 那会丢掉端点约束和折点。
 
 ## 视频节点与工作流编排
 
@@ -2525,11 +2556,18 @@ const SKILL_BODY = `# DrawAI 画布：怎么读、怎么改
 参考图：diagram_apply 连接图片节点后会把画布快照冻结进工程 assets/，场景里通过 props.assets 取用。视频参数（宽高/fps/duration）在 motion_project create 时写入节点；用户指定时长必须显式传 duration（支持 9.3 等小数秒），不能只写在 prompt 里。
 旧任务记录用 motion_task list/status/cancel/apply/focus/remove 管理，不要再指望它 start。多页或多个视频时明确指定 page/nodeId。
 不要把这条流程想成"提交一个任务等结果"：你是在一个普通工程里写代码、看图、渲染，每一步都由本次对话直接完成。
+`
+
+/** 技能 2/2：画布。正文从原来的位置原样接上，只多了标题下的一条"做视频去那边"。 */
+const SKILL_BODY_CANVAS = `# DrawAI 画布：怎么读、怎么改
 
 ## 一句话
 工作区里任何一个 .drawio 文件**就是**一张 DrawAI 画布 —— 它是 drawio 自己的 mxfile 格式。
 用户在 DSH 右栏画布面板里看到的、以及用 drawio 桌面版打开的，是同一份文件；
 没有"导入/导出"这一步，你直接读写这个文件就是读写那张画布。
+
+视频节点、镜头卡、分镜表也都是这张画布上的对象，但**做视频**（选卡、写分镜表、出样片与成片）
+是另一套流程：加载技能 drawai-video。这里只讲怎么读写它们。
 
 ## 两个工具怎么配合
 1. **diagram_read(path?, layer?, ids?)** —— 先读。返回节点（id/label/shape/style/**x·y·w·h 坐标尺寸**）、
@@ -2811,16 +2849,30 @@ HTML 标签按纯文本显示、图层结构原样保留（画布把它们叠在
 `
 
 /**
- * 技能目录里那一段（模型先看到简介，需要时才取全文）。
+ * 技能目录里那两条（模型先看到简介，需要时才取全文）。
  * 名字用 kebab-case —— DSH 的注册表按名字寻址并要求这个形状。
+ *
+ * description 是**唯一的检索入口**：会话的技能目录只渲染 name + description（whenToUse 不出现在
+ * 目录里），所以两边各写各的任务词，互不侵占 —— 这正是拆分的主要收益。
  */
-const SKILL_SUMMARY = {
-  name: 'drawai-canvas',
-  description:
-    '读写 DrawAI 画布（.drawio）：diagram_read 看现状、diagram_apply 结构化改图；做视频先问清风格与品牌素材（motion_assets gather 可整站自动收集素材/配色/字体/logo）、出过样片再开拍；支持图像复刻、视频分段复刻及 SVG 帧序列导出。',
-  whenToUse:
-    '用户让你画流程图/架构图/泳道图、复刻图片或视频、将视频转为 SVG 帧动画，或让你读/改某张 .drawio 画布，或问"这张图里有什么""画布上怎么操作"时。',
-}
+const SKILL_DEFINITIONS = [
+  {
+    name: 'drawai-canvas',
+    description:
+      '读写 DrawAI 画布（.drawio）：diagram_read 看现状、diagram_apply 结构化改图；支持图像复刻、视频分段复刻及 SVG 帧序列导出。',
+    whenToUse:
+      '用户让你画流程图/架构图/泳道图、复刻图片或视频、将视频转为 SVG 帧动画，或让你读/改某张 .drawio 画布，或问"这张图里有什么""画布上怎么操作"时。',
+    content: SKILL_BODY_CANVAS,
+  },
+  {
+    name: 'drawai-video',
+    description:
+      '用 DrawAI 画布做视频：定镜头卡与整片风格、写分镜表、生成工程、出样片与成片；含品牌素材收集、配音与踩点。',
+    whenToUse:
+      '用户让你做视频/宣传片/产品片/MG 动画、给已有视频改镜头或配音、把画布上的流程做成片子，或问"样片怎么出""镜头卡怎么连""配乐怎么踩点"时。',
+    content: SKILL_BODY_VIDEO,
+  },
+]
 
 /**
  * 列出工作区里的画布文档（非递归进子目录，最多扫 MAX_SCAN_DIRS 个）。
@@ -7696,24 +7748,30 @@ function sanitizeNewName(raw) {
   // 再看 DIAGNOSTICS_PATH 的 JSON —— 两者对不上就说明注册完又被回收了。
   reportToolRegistrations()
 
-  // 把"怎么用这张画布"注册成**内嵌技能**（见 SKILL_BODY 的注释）：
+  // 把"怎么用这张画布"注册成**内嵌技能**（见 SKILL_DEFINITIONS 的注释）：
   // 换了电脑、只装了插件（没有源码/README/tools）时，模型依然知道该怎么操作。
   //
   // `skills` 是**可选**依赖：没装 skill 注册表的部署里照样能用（工具描述本身已经够启动），
   // 所以走 ctx.get 而不是写进 inject —— 缺它不该让整个插件停在等待态。
   const skills = typeof ctx.get === 'function' ? ctx.get('skills') : undefined
   if (skills !== undefined && skills !== null && typeof skills.register === 'function') {
-    ctx.effect(() =>
-      skills.register({
-        name: SKILL_SUMMARY.name,
-        description: SKILL_SUMMARY.description,
-        whenToUse: SKILL_SUMMARY.whenToUse,
-        // `source: 'runtime'` 不能省：注册时只校验 name/description/invocation，
-        // 但**取全文**时注册表会再跑一次 validateDefinition，那里要求 source 是字符串
-        // （少了它，目录里看得见、一 load 就抛 "source must be a string"）。
-        source: 'runtime',
-        content: SKILL_BODY,
-      }),
-    )
+    ctx.effect(() => {
+      const disposers = SKILL_DEFINITIONS.map((definition) =>
+        skills.register({
+          name: definition.name,
+          description: definition.description,
+          whenToUse: definition.whenToUse,
+          // `source: 'runtime'` 不能省：注册时只校验 name/description/invocation，
+          // 但**取全文**时注册表会再跑一次 validateDefinition，那里要求 source 是字符串
+          // （少了它，目录里看得见、一 load 就抛 "source must be a string"）。
+          source: 'runtime',
+          content: definition.content,
+        }),
+      )
+      // 两条注册各返回一个 disposer；合成一个交回 Cordis，卸载时一并撤掉。
+      return () => {
+        for (const dispose of disposers) if (typeof dispose === 'function') dispose()
+      }
+    })
   }
 }

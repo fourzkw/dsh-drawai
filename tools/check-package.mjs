@@ -177,7 +177,13 @@ console.log('\n[4] 内嵌技能：换了电脑、只装了插件时模型怎么�
   // 上面那个假 ctx 故意**没有** get()，为的是验证"没有 skill 注册表时照样能用"（没抛错）。
   const skills = []
   let disposed = 0
+  const effectDisposers = []
   const withSkills = Object.assign({}, ctx, {
+    effect(fn) {
+      const dispose = fn()
+      if (typeof dispose === 'function') effectDisposers.push(dispose)
+      return dispose
+    },
     get(name) {
       if (name !== 'skills') return undefined
       return {
@@ -197,22 +203,48 @@ console.log('\n[4] 内嵌技能：换了电脑、只装了插件时模型怎么�
     threw = error && error.message ? error.message : String(error)
   }
   check('装了 skill 注册表时 apply 不抛错', threw === null, String(threw))
-  check('注册了恰好一个技能', skills.length === 1, '实际 ' + skills.length)
-  const skill = skills[0] || {}
-  check('技能名是 kebab-case', typeof skill.name === 'string' && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(skill.name), String(skill.name))
-  check('技能有简介（目录里显示这一段）', typeof skill.description === 'string' && skill.description.length > 20, String(skill.description).slice(0, 40))
-  check('技能有 whenToUse（什么时候该取它）', typeof skill.whenToUse === 'string' && skill.whenToUse.length > 10, String(skill.whenToUse).slice(0, 40))
-  // source 不能省：注册表在**取全文**时会再跑一次 validateDefinition，那里要求 source 是字符串。
-  check('技能带 source: runtime（少了它取全文时会抛 source must be a string）', skill.source === 'runtime', String(skill.source))
-  check('技能带 content（正文就是它）', typeof skill.content === 'string', typeof skill.content)
-  const body = typeof skill.content === 'string' ? skill.content : ''
-  check('正文够长（是一份说明，不是一行）', body.length > 1500, body.length + ' 字符')
+  // 两个技能：画布（diagram_*）与视频（motion_*）。合成一份时正文近三万字，而目录里只有一句简介，
+  // 用户说"做个宣传片"会先被"读写画布"那句挡住 —— 所以这里盯的是"两条都在、且各自对口"。
+  check('注册了恰好两个技能', skills.length === 2, '实际 ' + skills.length)
+  const names = skills.map((skill) => skill.name).sort()
+  check(
+    '两个技能名各是 kebab-case 且不重复',
+    names.length === 2 && new Set(names).size === 2 && names.every((name) => typeof name === 'string' && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(name)),
+    JSON.stringify(names),
+  )
+  check('技能名就是约定的那两个', JSON.stringify(names) === JSON.stringify(['drawai-canvas', 'drawai-video']), JSON.stringify(names))
+  const byName = new Map(skills.map((skill) => [skill.name, skill]))
+  const canvasSkill = byName.get('drawai-canvas') || {}
+  const videoSkill = byName.get('drawai-video') || {}
+  const bodyOf = (skill) => (typeof skill.content === 'string' ? skill.content : '')
+  for (const skill of [canvasSkill, videoSkill]) {
+    const who = '（' + skill.name + '）'
+    check('技能有简介（目录里显示这一段）' + who, typeof skill.description === 'string' && skill.description.length > 20, String(skill.description).slice(0, 40))
+    check('技能有 whenToUse（什么时候该取它）' + who, typeof skill.whenToUse === 'string' && skill.whenToUse.length > 10, String(skill.whenToUse).slice(0, 40))
+    // source 不能省：注册表在**取全文**时会再跑一次 validateDefinition，那里要求 source 是字符串。
+    check('技能带 source: runtime（少了它取全文时会抛 source must be a string）' + who, skill.source === 'runtime', String(skill.source))
+    check('技能带 content（正文就是它）' + who, typeof skill.content === 'string', typeof skill.content)
+    check('正文够长（是一份说明，不是一行）' + who, bodyOf(skill).length > 1500, bodyOf(skill).length + ' 字符')
+  }
   // 关键字是"这份说明有没有随插件一起发出去"的最低保证：换了电脑、只装了 lib/ 时，
   // 模型能依仗的就只有它。新增能力（比如选区、乐观锁）必须在这里留一条，否则删掉了也没人发现。
+  // 两个技能各管一摊：画布讲的 op 一条都不能少，视频讲的流程与工具族一条都不能少。
+  const canvasBody = bodyOf(canvasSkill)
   for (const needle of ['.drawio', 'diagram_read', 'diagram_apply', 'addNode', 'addEdge', 'setStyle', 'remove', 'move', 'highlight', 'fromPoint', 'canRevert', 'layout', 'pinned', 'from === to', 'layers', '无损', '别直接改', 'selection', 'expectRevision', 'created', 'as', 'setEdge', 'setLabelPos', 'order', 'duplicate', 'addLayer', 'setLayer', 'export', 'revertSteps', '纸张', 'filtered', 'fontColor', 'render:true']) {
-    check('正文讲了 ' + needle, body.indexOf(needle) >= 0)
+    check('画布技能讲了 ' + needle, canvasBody.indexOf(needle) >= 0)
   }
-  check('注册走的是 Cordis effect（能被卸载）', disposed === 0 && skills.length === 1, 'disposer 还没被调用')
+  const videoBody = bodyOf(videoSkill)
+  for (const needle of ['motion_project', 'motion_render', 'motion_preview', 'motion_qa', 'motion_audio', 'motion_assets', 'motion_spec', 'shotcraft_search', 'mg_style', '分镜表', '样片', 'STYLE.md', '踩点', 'drawai-canvas', 'diagram_apply']) {
+    check('视频技能讲了 ' + needle, videoBody.indexOf(needle) >= 0)
+  }
+  // 拆分靠的就是这条边界：视频流程跑进画布技能，说明有人把两段又粘回去了。
+  check('画布技能里没有 motion_*（拆分的边界）', canvasBody.indexOf('motion_') < 0, canvasBody.indexOf('motion_') < 0 ? 'ok' : '偏移 ' + canvasBody.indexOf('motion_'))
+  check('视频技能自带画布最小集（单独加载也不会写错 op）', videoBody.indexOf('画布最小集') >= 0 && videoBody.indexOf('from / to 必须是已存在的节点 id') >= 0)
+  check('注册走的是 Cordis effect（能被卸载）', disposed === 0 && skills.length === 2, 'disposer 还没被调用')
+  const skillDispose = effectDisposers[effectDisposers.length - 1]
+  check('技能注册返回了组合 disposer', typeof skillDispose === 'function', typeof skillDispose)
+  if (typeof skillDispose === 'function') skillDispose()
+  check('卸载时两条注册一起撤掉', disposed === 2, '实际 ' + disposed)
 }
 
 console.log('\n[5] tools 服务晚于 apply 就绪（issue #8 的现场：apply 跑了、工具全没）')
