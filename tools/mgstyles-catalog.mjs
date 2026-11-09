@@ -2,7 +2,7 @@
 /**
  * 从 vendor 下来的 upstream（manifest.json + prompts/*.md）生成 catalog.json。
  *
- * catalog.json 是 mg_style 工具的检索索引：14 种整片风格，每种带展示名、一句话、
+ * catalog.json 是 mg_style 工具的检索索引：15 种整片风格，每种带展示名、一句话、
  * 关键词、色板（从提示词的 Creative seed 里抓真实 hex，不手写以免编造）、以及
  * upstream 里的提示词与 demo 路径。
  *
@@ -104,6 +104,12 @@ const META = {
     oneLiner: '科幻界面式的刻线、数据流、扫描圈，虚构 UI 的信息密度。',
     tags: ['HUD', 'FUI', '科幻', '界面', '数据', '赛博', '扫描', 'cyberpunk', 'fictional-ui', 'telemetry'],
   },
+  '23-ink-wash': {
+    name: '水墨写意',
+    en: 'Chinese Ink Wash / Xieyi',
+    oneLiner: '宣纸为底、墨只加不铺：笔毛飞白写出窗竹猫人，墨分五色，留白靠挖，钤印收尾。',
+    tags: ['水墨', '写意', '国风', '宣纸', '毛笔', '墨分五色', '留白', '八大山人', '齐白石', 'ink-wash', 'xieyi', 'chinese-ink'],
+  },
 }
 
 /**
@@ -126,6 +132,7 @@ const ENGINE = {
   '19-paperclip': { engines: ['canvas2d'], note: 'Canvas2D 粗描边小人：手写感靠逐帧画路径，不是字体排版。' },
   '20-pixel': { engines: ['webgl2', 'canvas2d'], note: 'Canvas2D 低分辨率索引帧（320×180 语义槽 → LUT）再进 WebGL2 做 CRT 扫描线/色差 pass；像素颗粒来自真实低分辨率，不是后加滤镜。' },
   '22-hud': { engines: ['three', 'canvas2d'], note: 'three.js 全息线框地球（holo.js）+ Canvas2D HUD 面板与数据流，3D 与 2D 两层叠加。' },
+  '23-ink-wash': { engines: ['canvas2d'], note: '纯 Canvas2D：宣纸纤维、笔毛飞白、墨晕两遍 multiply 全在 2D 画布上画，没有 shader，也没有 DOM 或贴图合成。' },
 }
 
 /** 引擎检测：源码里真的出现才算，别信提示词自述。优先级 = 越"重"越靠前。 */
@@ -326,6 +333,8 @@ for (const style of manifest.styles) {
     engineNote: engineSpec.note,
     engineFiles: [...new Set([...detected.files.values()].flat())].slice(0, 10),
     motion: detectMotion(style, upstream),
+    // 不是从 mg-styles-15 来的（目前只有 23-ink-wash），署名另记，STYLE.md 会照着它写来源。
+    origin: (manifest.origins && manifest.origins[style.slug]) || null,
   })
 }
 
@@ -335,7 +344,7 @@ const catalog = {
   source: manifest.source,
   commit: manifest.commit,
   license: manifest.license,
-  note: '整片风格库：14 种 MG 视觉语言，每种由一份上游提示词 + 一支上游成片源码 + 一份 Remotion 移植 brief 组成。上游的 04-3d-render（Blender 离线渲的 CGI 质感）没有收录，需要那种质感请走外部渲染回灌。',
+  note: '整片风格库：15 种 MG 视觉语言，每种由一份上游提示词 + 一支上游成片源码 + 一份 Remotion 移植 brief 组成。上游的 04-3d-render（Blender 离线渲的 CGI 质感）没有收录，需要那种质感请走外部渲染回灌。',
   promptChars: total('template.md'),
   styles,
 }

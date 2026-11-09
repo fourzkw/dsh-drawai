@@ -1,0 +1,28 @@
+{
+  "slug": "23-ink-wash",
+  "name": "水墨写意",
+  "oneLiner": "宣纸是底、墨只加不铺：一笔一笔写出窗、竹、猫与人，墨分五色，留白是挖出来的，钤印收尾。",
+  "signature": [
+    "纸是整幅唯一的底：#efe6d0 宣纸 + 2600 根纸纤维 + 四角暗角 α.22，没有纯白也没有纯黑背景",
+    "每一笔都是毛笔：4px 等弧长重采样，笔压起收，逐根笔毛按噪声断开出飞白，笔尾比笔头细 30–50%",
+    "墨只用一个色 [16,14,12]，靠 tone 分五色（焦 .9／浓 .8／重 .6／淡 .35／清 .15），全片不出现第二种黑",
+    "晕染是两遍 multiply（外晕 halo·(0.4+grow) + 本体 blur·(1.6−0.6grow)），grow 0→1 是「洇开」不是「淡入」",
+    "留白用 destination-out 从色层里挖掉露出纸色，不是画白色；钤印 1.5→1 倍压下去、multiply 盖上"
+  ],
+  "palette": {
+    "page": "#EFE6D0",
+    "surface": "#F7F1E2",
+    "field": "#6F8AA0",
+    "text": "#14120F",
+    "muted": "#8A7C64",
+    "accent": "#C4281E",
+    "border": "#C9B58C"
+  },
+  "colors": ["#EFE6D0", "#F7F1E2", "#14120F", "#C4281E", "#D8553F", "#C47A3C", "#6F8AA0", "#E2AA34"],
+  "fonts": {
+    "display": "\"Long Cang\",\"Noto Serif SC\",serif",
+    "text": "\"Noto Serif SC\",\"HarmonyOS Sans SC\",serif",
+    "mono": "\"IBM Plex Mono\",monospace"
+  },
+  "rhythm": { "bpm": 60, "fps": 30, "duration": 10, "aspect": "16:9", "cutFrames": 30 }
+}
