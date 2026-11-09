@@ -893,13 +893,25 @@ README、`src/`、`tools/` 都不会过去。于是模型能依仗的是三条�
 | **内嵌技能（skill）** | 插件在 `apply()` 里 `ctx.skills.register(...)` 注册一份**内存里的**使用说明 | ✅ 有（见下） |
 
 第三条是关键：`README` 里那些"什么时候别用 layout""自环怎么写""为什么不能手改文件"的经验，
-原本只活在这份仓库里。现在它们被写成一份**技能正文**（`src/index.js` 的 `SKILL_BODY`，约 3.7k 字），
-注册进 DSH 的 skill 注册表：
+原本只活在这份仓库里。现在它们被写成**两段技能正文**（`src/index.js` 的 `SKILL_BODY_CANVAS` 与
+`SKILL_BODY_VIDEO`），注册进 DSH 的 skill 注册表：
 
-- 会话的技能目录里出现一条简介（名字 `drawai-canvas`，带 `whenToUse`），模型按需取全文；
+| 技能 | 正文 | 讲什么 | 规模 |
+|---|---|---|---|
+| `drawai-canvas` | `SKILL_BODY_CANVAS` | `diagram_read` / `diagram_apply` 的全部 op、几何与折点、图层与顺序、`traceImage`、SVG 帧序列导出 | 约 1.9 万字符 |
+| `drawai-video` | `SKILL_BODY_VIDEO` | 十步视频流程（问风格 → 素材 → 定卡连卡 → 分镜表 → 工程 → 样片 → 写画面 → 配声 → 出片），外加一段"画布最小集" | 约 1.1 万字符 |
+
+- 会话的技能目录里出现**两条**简介，模型按名字取全文；
 - 正文随 `lib/index.js` 一起装到任何机器，**不依赖工作区里有没有这个仓库**；
+- **为什么拆成两条**：合成一份时正文近三万字，而目录里只显示 `description` 那一句
+  （`whenToUse` 不进目录），用户说"做个宣传片"会先被"读写画布"那句挡住；拆开后两条简介各自
+  对口，画图的人也不必每次为视频流程付上下文。边界就是工具族：`motion_*` / `shotcraft_search` /
+  `mg_style` 只出现在视频正文里，`tools/check-package.mjs` 有一条"画布技能里没有 `motion_*`"钉住它；
+- 视频正文自带画布最小集（`path` 必填、`as` 别名、`from`/`to` 必须是已存在的 id、建了卡必须连），
+  单独加载也不会写错 op；
 - `skills` 是**可选**依赖（走 `ctx.get('skills')`，不写进 `inject`）：没装 skill 注册表的部署里
   插件照常工作，只是少了这份说明；
+- 两条注册在同一个 `ctx.effect` 里，返回的组合 disposer 在插件卸载时把两条一起撤掉；
 - 注册必须带 `source: 'runtime'` —— 注册时只校验 name/description/invocation，
   但**取全文**时注册表会再跑一次 `validateDefinition`，那里要求 `source` 是字符串
   （少了它：目录里看得见、一 load 就抛 `source must be a string`）。`tools/check-package.mjs` 盯着这一条。

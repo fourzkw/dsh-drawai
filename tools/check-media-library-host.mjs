@@ -29,9 +29,12 @@ const ctx = { tools: { register(tool) { registered.push(tool); return () => {} }
   effect(fn) { return fn() } }
 try {
   apply(ctx)
-  assert.ok(skills[0].content.includes('action:"library",nodeId'), '内嵌技能应指引 AI 搜索本地素材')
-  assert.ok(skills[0].content.includes('不要猜测插件或上游目录、从其他工程复制同名文件'), '内嵌技能应要求从插件素材库导入')
-  assert.ok(skills[0].content.includes('motion_task 使用单独的画布引用素材快照'), '内嵌技能应解释不同制作流程的素材边界')
+  // 素材库与素材边界的指引写在**视频**技能里，所以按名字找，别再按注册顺序摸 skills[0]。
+  const videoSkill = skills.find((skill) => skill.name === 'drawai-video')
+  assert.ok(videoSkill !== undefined, '插件应注册 drawai-video（素材工作流写在它里面）')
+  assert.ok(videoSkill.content.includes('action:"library",nodeId'), '内嵌技能应指引 AI 搜索本地素材')
+  assert.ok(videoSkill.content.includes('不要猜测插件或上游目录、从其他工程复制同名文件'), '内嵌技能应要求从插件素材库导入')
+  assert.ok(videoSkill.content.includes('motion_task 使用单独的画布引用素材快照'), '内嵌技能应解释不同制作流程的素材边界')
   const tool = registered.find(x => x.name === 'motion_assets'), args = {path:'test.drawai',nodeId:'movie'}
   const list = await tool.execute({...args,action:'library',query:'钢琴'}, {agent:{id:'s'}})
   const opened = await registered.find(x => x.name === 'motion_project').execute({...args,action:'open'}, {agent:{id:'s'}})
