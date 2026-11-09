@@ -2566,14 +2566,38 @@ console.log('\n高级导出范围、尺寸与 SVG 文档')
   const sourceText = readFileSync(source, 'utf8')
   const start = sourceText.indexOf('  function buildExportSvg(opts) {')
   const end = sourceText.indexOf('\n  function prepareExport', start)
-  const build = new Function('docRef', 'mode', 'uid', 'showGrid', 'document', 'exportDocument', 'exportGeometry', 'exportOutputSize', 'svgTreeToDom', 'renderDiagram', 'normalizeCustomColor', sourceText.slice(start, end) + '\nreturn buildExportSvg')(
-    { current: doc }, 'dark', 'test', true, owner, internals.exportDocument, internals.exportGeometry, internals.exportOutputSize, internals.svgTreeToDom, renderDiagram, (color) => color)
+  const buildSvgFor = (target) => new Function('docRef', 'mode', 'uid', 'showGrid', 'document', 'exportDocument', 'exportGeometry', 'exportOutputSize', 'svgTreeToDom', 'renderDiagram', 'normalizeCustomColor', sourceText.slice(start, end) + '\nreturn buildExportSvg')(
+    { current: target }, 'dark', 'test', true, owner, internals.exportDocument, internals.exportGeometry, internals.exportOutputSize, internals.svgTreeToDom, renderDiagram, (color) => color)
+  const build = buildSvgFor(doc)
   const solid = build({ format: 'svg', grid: false, backgroundColor: '#ffcc00', padding: 0, pixelWidth: 900, pixelHeight: 300, lockAspect: false })
   ok(solid.node.firstChild.attributes.fill === '#ffcc00' && solid.node.attributes.width === '900' && solid.node.attributes.preserveAspectRatio === 'none', '独立背景色、指定尺寸和取消比例锁实际写入 SVG')
   ok(solid.node.childNodes.filter((node) => node.nodeName === 'rect').length === 1, '关闭导出网格不受画布网格开关影响')
   const transparent = build({ format: 'svg', transparent: true, grid: true, layerIds: ['2'] })
   ok(transparent.node.childNodes.filter((node) => node.nodeName === 'rect').length === 1 && transparent.node.childNodes.some((node) => String(node.attributes.fill).startsWith('url(')), '透明背景仍可独立保留网格')
   ok(transparent.width > 100 && transparent.node.attributes.xmlns === 'http://www.w3.org/2000/svg', '隐藏图层使用完整内容渲染为独立 SVG 文档')
+
+  // 命中带（.drawai-edge-hit）必须自带 paint —— issue #32：它原来只靠注入页面的 CSS
+  // 上色（fill:none;stroke:transparent;stroke-width:12）。DOM 里没问题，但同一棵树还要
+  // 序列化成独立 SVG 去光栅化（"看一眼"的预览图、导出 PNG/SVG），而 SVG-as-image 不继承
+  // 页面 CSS，fill 退回缺省的黑色：**直线段填充面积为 0 看不出来，一拐弯就围出一大块
+  // 实心黑多边形**。所以这里从"渲染树"和"序列化后的独立 SVG"两头各钉一遍。
+  const bentDoc = { nodes: [{ id: 'a', x: 0, y: 0, w: 100, h: 50 }, { id: 'b', x: 240, y: 200, w: 80, h: 40 }],
+    edges: [{ id: 'e', from: 'a', to: 'b' }], labels: [] }
+  const bentTree = renderDiagram(bentDoc, 'dark', 'hitband', { current: null }, { showGrid: false }, null)
+  const bentHit = walk(bentTree, (n) => n.props.key === 'edge-hit-0', [])[0]
+  ok(bentHit !== undefined && (bentHit.props.d.match(/[LQ]/g) || []).length >= 4, '这条边真的拐了弯（否则下面两条断言测不到黑块那个形态）')
+  ok(bentHit !== undefined && bentHit.props.fill === 'none' && bentHit.props.stroke === 'transparent' && bentHit.props.strokeWidth === 12, '命中带的 paint 内联在渲染树里：' + JSON.stringify(bentHit === undefined ? null : [bentHit.props.fill, bentHit.props.stroke, bentHit.props.strokeWidth]))
+  const bentSvg = buildSvgFor(bentDoc)({ format: 'svg', transparent: true, grid: false, padding: 0 })
+  const hitPaths = []
+  const collectHit = (node) => {
+    if (!node || !node.childNodes) return
+    if (node.nodeName === 'path' && node.attributes.class === 'drawai-edge-hit') hitPaths.push(node)
+    for (const child of node.childNodes) collectHit(child)
+  }
+  collectHit(bentSvg.node)
+  const hitSvg = hitPaths[0] || { attributes: {} }
+  ok(hitPaths.length === 1, '独立 SVG 里带着那条命中带（' + hitPaths.length + ' 条）')
+  ok(hitSvg.attributes.fill === 'none' && hitSvg.attributes.stroke === 'transparent' && hitSvg.attributes['stroke-width'] === '12', '序列化后的命中带以属性形式带上 fill/stroke，不依赖页面 CSS：' + JSON.stringify(hitSvg.attributes))
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
