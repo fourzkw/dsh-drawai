@@ -21,7 +21,7 @@ function MgStyleLibrary(props) {
     React.createElement('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } },
       React.createElement('header', { style: { padding: '20px 24px', borderBottom: '1px solid #8883', display: 'flex', justifyContent: 'space-between', gap: 16 } },
         React.createElement('div', null, React.createElement('strong', { style: { fontSize: 20 } }, props.replaceId ? '换一种整片风格' : '整片风格库'),
-          React.createElement('div', { style: { fontSize: 12, opacity: .65, marginTop: 6 } }, '14 种 MG 视觉语言 · 一种风格管一条片子的色板、字体、节奏与动效语法 · 不是单镜动效')),
+          React.createElement('div', { style: { fontSize: 12, opacity: .65, marginTop: 6 } }, '15 种 MG 视觉语言 · 一种风格管一条片子的色板、字体、节奏与动效语法 · 不是单镜动效')),
         button('关闭', props.onClose)),
       React.createElement('div', { style: { display: 'flex', padding: '16px 24px', gap: 12 } },
         React.createElement('input', { autoFocus: true, 'aria-label': '搜索风格', placeholder: '搜索风格，例如：包豪斯、像素、HUD、拼贴', value: query,

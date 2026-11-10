@@ -18,7 +18,7 @@ let passed = 0
 const ok = (name) => { passed += 1; console.log('  ✓ ' + name) }
 
 // 1. 索引完整性
-assert.equal(catalog.styles.length, 14, '应有 14 种风格')
+assert.equal(catalog.styles.length, 15, '应有 15 种风格')
 for (const style of catalog.styles) {
   assert.ok(style.engine, style.slug + ' 缺 engine')
   assert.ok(Array.isArray(style.engines) && style.engines.length, style.slug + ' 缺 engines')
@@ -26,7 +26,7 @@ for (const style of catalog.styles) {
   assert.ok(style.engineNote && style.engineNote.length > 8, style.slug + ' 缺 engineNote')
   assert.ok(Array.isArray(style.engineFiles) && style.engineFiles.length, style.slug + ' 缺 engineFiles')
 }
-ok('14 种风格都带 engine / engines / engineNote / engineFiles')
+ok('15 种风格都带 engine / engines / engineNote / engineFiles')
 
 // 2. 文本信号
 assert.deepEqual(enginesOfText('import * as THREE from "three"'), ['three'])

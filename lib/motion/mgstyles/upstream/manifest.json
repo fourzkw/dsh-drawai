@@ -3,7 +3,7 @@
   "commit": "49052d80bfaf9fa8412cc9710530e5e95a3b8d8c",
   "license": "MIT",
   "vendoredAt": "2026-10-05",
-  "note": "只收文本：提示词 + demo 源码。视频/纹理/字体不在仓库里，也没有 vendor 进来。",
+  "note": "只收文本：提示词 + demo 源码。视频/纹理/字体不在仓库里，也没有 vendor 进来。23-ink-wash 来自 huashu-art-motion（MIT），见 origins。",
   "styles": [
     {
       "slug": "01-flat-vector",
@@ -176,6 +176,16 @@
         "demos/22-hud/js/util.js",
         "demos/22-hud/js/v5.js"
       ]
+    },
+    {
+      "slug": "23-ink-wash",
+      "heading": "水墨写意 Chinese Ink Wash / Xieyi",
+      "shot": "huashu 17_ink · 1920×1080 · 30 fps · 10 秒 · 单镜写意房间",
+      "prompt": "prompts/23-ink-wash.md",
+      "demos": [
+        "demos/23-ink-wash/film.js",
+        "demos/23-ink-wash/brush.js"
+      ]
     }
   ],
   "files": {
@@ -257,7 +267,10 @@
     "demos/22-hud/js/hud.js": "751c05b15e65474b89f55346587c85e9215317e900ecc64a0fce451827ee1c88",
     "demos/22-hud/js/post.js": "672ce9b4a1da6f59f2d65bb1f8e337851b7893553dc250aad2192388a0711a53",
     "demos/22-hud/js/util.js": "7ec7a52b27659de843f72f65ad4dbfc07e217f528bba5bbff69b31b4293081db",
-    "demos/22-hud/js/v5.js": "af2cf92f176962361826fc84593241805628afdf13ca9e88e023712dc6626fcb"
+    "demos/22-hud/js/v5.js": "af2cf92f176962361826fc84593241805628afdf13ca9e88e023712dc6626fcb",
+    "prompts/23-ink-wash.md": "2f51e3251caca5e66f89c14be8fda0a66b9b3b1b6150e94e87235f963c754246",
+    "demos/23-ink-wash/film.js": "93b1e80a3731b479beac56e0a9dae13d52aa20b7bbc71678527e49dbd22eac4f",
+    "demos/23-ink-wash/brush.js": "e83db04e5fc9fef83237d984d2ceba3c1ec71c0c2a8f8a798ecc939fc8c3b2d4"
   },
   "removedStyles": [
     {
@@ -265,5 +278,17 @@
       "heading": "3D 渲染系（C4D/Blender 质感） 3D Render / CGI Motion Design",
       "reason": "画面是 Blender 离线渲的 CGI 质感，插件里没有能出同等质感的等价物（拿 DOM 滤镜凑只会更假）。"
     }
-  ]
+  ],
+  "origins": {
+    "23-ink-wash": {
+      "source": "https://github.com/alchaincyf/huashu-art-motion",
+      "license": "MIT",
+      "files": {
+        "prompts/23-ink-wash.md": "references/风格配方/17_ink.md",
+        "demos/23-ink-wash/film.js": "scripts/engine/scenes/17_ink.js",
+        "demos/23-ink-wash/brush.js": "scripts/engine/lib/brush.js"
+      },
+      "note": "场景为节选（少女段落未收），brush.js 逐字收录；依赖上游全局 U/KIT/PAINT，只作阅读参考。"
+    }
+  }
 }
