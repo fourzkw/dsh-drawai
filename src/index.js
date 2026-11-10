@@ -7199,7 +7199,7 @@ function sanitizeNewName(raw) {
   // 帧检：把"片子有没有毛病"变成一张带帧号的清单，而不是靠眼睛。
   ctx.effect(() => registerHostTool(defineTool({
     name: 'motion_qa',
-    description: '成片帧检：不靠眼睛，靠像素和响度。inspect 立刻检一遍（默认检工程里的 .out/film.mp4，也可以指定 file）：帧数对不对、有没有黑场、有没有静止太久、有没有单帧闪烁、有没有空白帧、画面有没有顶到边、音轨有没有削波。report 读上次的结果。每条问题都带帧号和镜头号，能直接回去改对应场景。',
+    description: '成片帧检：不靠眼睛，靠像素和响度。inspect 立刻检一遍（默认检工程里的 .out/film.mp4，也可以指定 file）：帧数对不对、有没有黑场、有没有静止太久、有没有整镜没在动（动能量，抓缓慢推镜式的翻页感）、有没有只剩底色没内容（边密度，抓空白帧抓不到的渐变空画面）、有没有单帧闪烁、有没有空白帧、画面有没有顶到边、音轨有没有削波。report 读上次的结果。每条问题都带帧号和镜头号，能直接回去改对应场景。',
     parameters: {
       action: { type: 'string', enum: ['inspect', 'report'], required: true },
       path: { type: 'string' }, nodeId: { type: 'string' }, page: { type: 'number' },
