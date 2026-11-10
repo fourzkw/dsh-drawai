@@ -4418,6 +4418,10 @@ function sanitizeNewName(raw) {
       const outArg = typeof args.out === 'string' && args.out.trim().length > 0 ? args.out.trim() : ''
       const target =
         outArg.length === 0 ? joinPath(dir, base + '.' + format) : isAbsolute(outArg) ? outArg : resolvePath(dir, outArg)
+      // 导出写的是成品图：out 指到画布文件上等于把图覆盖掉（svg 覆盖 .drawio 之后画布就打不开了）。
+      if (/\.(drawio|drawai)$/i.test(target)) {
+        throw new Error('导出不能覆盖画布文件：' + target + '；out 请用 .svg / .png 结尾')
+      }
       const root = await ctx.fs.resolve(workspaceRootOf(sessionId))
       if (!ctx.fs.contains(root, target)) throw new Error('导出路径超出工作区：' + target)
       await mkdir(dirnamePath(target), { recursive: true })
@@ -4438,10 +4442,13 @@ function sanitizeNewName(raw) {
 
       const rel = relativePath(root, target)
       const warnings = built.warnings.slice(0, 20)
+      const warningCount = built.warnings.length
       return {
         summary:
           '已导出 ' + format.toUpperCase() + '：' + rel + '（' + Math.round(width) + '×' + Math.round(height) + '）' +
-          (warnings.length > 0 ? '，' + warnings.length + ' 条降级提示见 details' : ''),
+          (warningCount > 0
+            ? '，' + warningCount + ' 条降级提示见 details' + (warningCount > warnings.length ? '（只列前 ' + warnings.length + ' 条）' : '')
+            : ''),
         details: JSON.stringify({
           path: rel,
           absolute: target,

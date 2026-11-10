@@ -6,7 +6,9 @@
  *   · 正交边被画成斜线（存下来的折点直接连线，与画布上看到的不一致）；
  *   · 隐藏图层里的单元跑到导出件里；
  *   · 标签里的 `<` `&` 把 XML 撑坏；
- *   · 箭头/虚线这些"文档里的 style 键"没有落到 SVG 属性上。
+ *   · 箭头/虚线这些"文档里的 style 键"没有落到 SVG 属性上；
+ *   · 自环（from === to）被静默丢掉、stats 把没画出来的东西也算进去；
+ *   · 超大 scale 先吃满内存再报错（尺寸上限要在栅格化之前算）。
  */
 import assert from 'node:assert/strict'
 import { buildExportSvg, exportBoxes, exportScaleFor, rasterizeSvgToPng } from '../src/svg-export.js'
@@ -178,9 +180,39 @@ assert.equal(png.height, Math.round(plain.height * 2))
 assert.ok(png.png.length > plain.svg.length, 'PNG 比 SVG 还小，八成是空白图')
 
 // ── 12. scale 兜底 ────────────────────────────────────────────────────
-assert.equal(exportScaleFor(null, 3), 3)
-assert.equal(exportScaleFor(null, 0), 0.1, 'scale 不该被算成 0')
-assert.equal(exportScaleFor(null, undefined), 2)
-assert.equal(exportScaleFor(null, 'abc'), 2)
+assert.equal(exportScaleFor(3), 3)
+assert.equal(exportScaleFor(0), 0.1, 'scale 不该被算成 0')
+assert.equal(exportScaleFor(undefined), 2)
+assert.equal(exportScaleFor('abc'), 2)
 
-console.log('check-svg-export: OK (正交化、箭头/虚线、配色与主题、隐藏图层、转义、换行、撑高、PNG、scale 兜底)')
+// ── 13. 自环：两端是同一个节点也要画出来 ──────────────────────────────
+const selfLoopDoc = (style) => doc({ edges: [{ id: 'e1', from: 'a', to: 'a', style: style }] })
+const loopES = buildExportSvg(selfLoopDoc('edgeStyle=orthogonalEdgeStyle;exitX=0.5;exitY=1;entryX=0;entryY=0.5;endArrow=classic;'), {})
+assert.deepEqual(loopES.stats, { nodes: 2, edges: 1 }, '自环没有被算成一条画出来的边')
+assertAxisAligned(edgePath(loopES.svg, 'e1'), '自环（下 → 左）')
+assert.equal(loopES.warnings.length, 0, '自环不该再报"两端都落不到任何节点上"：' + loopES.warnings.join(' / '))
+// 桩点 35：从底边出去是 y=95，从左边回来是 x=-35 —— 桩点得真的画出来，不能只连两个端点。
+const loopPath = edgePath(loopES.svg, 'e1')
+assert.ok((loopPath.match(/-?\d+(?:\.\d+)?/g) || []).includes('95'), '自环的下侧桩点没画出来：' + loopPath)
+const loopEW = buildExportSvg(selfLoopDoc('edgeStyle=orthogonalEdgeStyle;exitX=1;exitY=0.5;entryX=0;entryY=0.5;'), {})
+assertAxisAligned(edgePath(loopEW.svg, 'e1'), '自环（右 → 左）')
+assert.ok(loopEW.viewBox.y < 0, 'e → w 的自环没有从盒子上方绕出去：' + loopEW.viewBox.y)
+
+// ── 14. stats 只数真的画出来的边 ──────────────────────────────────────
+const hiddenEdge = buildExportSvg(doc({
+  layers: [{ id: 'L1', visible: false }],
+  edges: [{ id: 'e1', from: 'a', to: 'b', layer: 'L1', style: EDGE_STYLE }],
+}), {})
+assert.deepEqual(hiddenEdge.stats, { nodes: 2, edges: 0 }, '隐藏图层里的边被算进了 stats')
+assert.equal(hiddenEdge.svg.includes('data-edge-id'), false, '隐藏图层里的边被导出了')
+const dangling = buildExportSvg(doc({ edges: [{ id: 'e1', from: 'a', to: 'missing', style: EDGE_STYLE }] }), {})
+assert.deepEqual(dangling.stats, { nodes: 2, edges: 0 }, '落到不存在节点上的边被算进了 stats')
+assert.ok(dangling.warnings.some((line) => line.includes('两端都落不到任何节点上')), '跳过的边没留 warning')
+
+// ── 15. PNG 尺寸上限：栅格化之前就要拦下来 ────────────────────────────
+const svgOf = (w, h) => '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '"></svg>'
+await assert.rejects(() => rasterizeSvgToPng(svgOf(20000, 200), { scale: 1 }), /PNG 尺寸过大/, '单边超限没被拦住')
+await assert.rejects(() => rasterizeSvgToPng(svgOf(4000, 4000), { scale: 2 }), /PNG 尺寸过大/, '总量超限没被拦住')
+await assert.rejects(() => rasterizeSvgToPng(svgOf(4000, 4000), { scale: 2 }), /请调小 scale/, '报错没有告诉用户怎么办')
+
+console.log('check-svg-export: OK (正交化、箭头/虚线、配色与主题、隐藏图层、转义、换行、撑高、自环、stats、PNG、尺寸上限、scale 兜底)')
