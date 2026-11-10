@@ -1,6 +1,6 @@
 # 画布 AI 工具参考
 
-本文介绍 `diagram_read` 与 `diagram_apply`。画布默认使用 `.drawai`，也可处理兼容的 `.drawio` 文件。
+本文介绍 `diagram_read`、`diagram_apply` 与 `diagram_export`。画布默认使用 `.drawai`，也可处理兼容的 `.drawio` 文件。
 
 ### `diagram_apply` —— 模型怎么改图
 
@@ -12,7 +12,7 @@
 | 修改 | `setLabel` `setLabelPos` `setStyle` `setEdge` `move` |
 | 结构 | `addLayer` `setLayer` `setLayerProps` `order` |
 | 交互 | `highlight`（让画布替你选中，不改文档、不重排） |
-| 输出 | `export`（`svg` 落在画布文件旁边；`png` 走浏览器下载） |
+| 输出 | `export`（`svg` 落在画布文件旁边；`png` 走浏览器下载）—— 要**不依赖浏览器**出图用 `diagram_export` |
 | 图像 | `traceImage`（把工作区里一张位图**逐像素**矢量化成 svg 内容节点） |
 
 - **批量修改**：`setStyle` / `setLabel` / `move` / `remove` 都接受 `ids:[…]`，不必发 N 个 op。
@@ -62,7 +62,36 @@
 读回：节点 / 边 / 标签、每个单元的**样式键**（就是文件里那串 `style`，另外给出派生的形状、线型、箭头、颜色名便于阅读）、图层表与单元所属层、容器父级 `parent`、页面尺寸、边标签的 `labelX/labelY`、**`revision`**（文件内容指纹）、当前选区。SVG 图形节点的内容单独放在 `svg` 字段里（style 串里的 `image=` 则省略成 `«svg N 字符»`，避免一次读取被 data URI 撑爆）。
 
 - 可以只读一层（`layer`）或只看几个单元（`ids`）—— 大图上能省下不少上下文；过滤时会同时报 `totalNodes` / `totalEdges`，免得漏看。
-- `render:true` 会让画布把当前画面渲成 PNG 交给模型"看一眼"；图片走 DSH 的附件服务，**不在工作区落任何文件**。
+- `render:true` 会让画布把当前画面渲成 PNG 交给模型"看一眼"；图片走 DSH 的附件服务，**不在工作区落任何文件**。这条路要有人在右侧栏打开着画布 —— QQ / CLI 里没有人能开，见下面的 `diagram_export`。
+
+### `diagram_export` —— 没有画布也能出成品图
+
+`diagram_apply {op:"export"}` 与 `diagram_read {render:true}` 都要浏览器那一半：只有用户在右侧栏打开着画布，客户端才会接渲染 / 导出请求。纯对话通道（QQ、CLI、定时任务）里没人开得起来，成品图就断了。这个工具把那段路挪到**宿主**：
+
+```
+diagram_export({ path:"docs/登录流程.drawai", format:"png" })
+→ 写到 docs/登录流程.png，返回 width/height/bytes/fidelity/nodes/edges/warnings
+```
+
+| 参数 | 说明 |
+|---|---|
+| `path` / `page` | 画布路径与页码；不传 = 当前会话聚焦的画布 / 用户正看的那一页 |
+| `format` | `svg`（缺省，矢量、零依赖）或 `png`（`@resvg/resvg-js` 栅格化） |
+| `scale` | 只对 PNG 有效（缺省 2，1 = 1:1）；单边 ≤16384px、总量 ≤32MP |
+| `out` | 输出路径（必须在工作区内；相对路径按**画布所在目录**解析），缺省 = 与画布同名、只换扩展名 |
+| `theme` | `light`（缺省，白纸黑线，适合交付）/ `dark`（透明底 + 浅色字线） |
+| `background` | 背景色，`#rrggbb` 或 `transparent`；缺省浅色白底、深色透明 |
+| `padding` | 内容四周留白，缺省 24 |
+
+**它是重画，不是截图**：几何与画布同一套口径（形状、圆角、虚线、箭头、标签换行、文字撑高节点、正交走线的折点、连线标签落点与"字的位置不画线"），但：
+
+- 文字量宽按字符估算（中文 1em、其余 0.55em），长标签的换行位置可能与画布差一行；
+- 视频 / 卡片 / 音频这类**有自己浏览器组件**的节点只画通用形状；
+- 返回里 `fidelity:"approximate"`，所有降级项都在 `warnings` 数组里逐条列出 —— 别拿它判断像素级观感（那件事仍然归 `render:true`）。
+
+PNG 的中文靠系统字体：导出件的 `font-family` 里显式列了常见中文字体（微软雅黑 / 苹方 / 冬青黑 / Noto Sans SC / 文泉驿）。装在**没有中文字体**的机器上（某些精简容器），SVG 仍然正确，PNG 可能出豆腐块 —— 这时改用 `format:"svg"`，或先装一个中文字体。
+
+> 两条路的分工：能开画布 → `render:true` 看真实渲染；开不了 → `diagram_export` 拿成品图。这个工具不改变"画布优先"的既有行为（issue #23）。
 
 ### 让模型少猜的三条通道
 
@@ -83,5 +112,5 @@
 模型：diagram_read → 看到 selection:["n3","n5"] → diagram_apply(setStyle, ids:["n3","n5"], style:"green")
 
 你：这张图导出一份给我
-模型：diagram_apply(export, format:"svg") → 渲染在浏览器侧执行，SVG 落在 .drawio 旁边
+模型：diagram_export(format:"png") → 宿主直接出图，写到画布旁边（不需要你在右侧栏打开画布）
 ```

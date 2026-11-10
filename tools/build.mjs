@@ -45,6 +45,8 @@ const MXFILE_PATH = 'src/mxfile.js'
  */
 const HOST_ONLY_MODULES = ['src/ffmpeg-manager.js', 'src/shotcard-core.js', 'src/mgstyle-core.js', 'src/shotcard-reference.js', 'src/motion-session.js', 'src/motion-library.js', 'src/motion-source.js', 'src/motion-project.js', 'src/motion-core.js', 'src/motion-tasks.js', 'src/motion-render-worker.js', 'src/document-core.js', 'src/document-commands.js', 'src/canvas-format.js', 'src/raster.js', 'src/trace-image.js', 'src/media.js', 'src/video-trace-worker.js', 'src/video-trace-pool.js', 'src/video-export.js', 'src/video-export-worker.js', 'src/performance-log.js', 'src/performance-metrics.js', 'src/video-trace-reuse.js', 'src/task-coordinator.js', 'src/task-patches.js', 'src/drawing-tasks.js', 'src/drawing-runner.js', 'src/drawing-results.js', 'src/comfyui-workflow.mjs', 'src/comfyui-default-workflow.mjs', 'src/imagegen.mjs']
 HOST_ONLY_MODULES.push('src/motion-capture.js', 'src/motion-film-review.js', 'src/motion-agent-protocol.js', 'src/motion-agent-files.js', 'src/motion-vision.js', 'src/audio-media.js', 'src/audio-service.js')
+// 宿主侧导出（diagram_export）：要 node:fs 与 @resvg/resvg-js，绝不能进客户端 bundle。
+HOST_ONLY_MODULES.push('src/svg-export.js')
 
 
 /**
