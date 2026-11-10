@@ -63,7 +63,7 @@ dsh plugin --profile desktop update dsh-drawai@latest
 
 画布支持形状、独立文字、表格、SVG 和位图节点，以及直线、折线、曲线、自环和悬空连线。可用多选、图层、顺序、对齐和页面切换整理内容；双击文字或表格编辑。
 
-模型通过 `diagram_read` 读取结构、样式、选区与文件版本，通过 `diagram_apply` 增删或修改节点和边。对于并发编辑，`expectRevision` 可在文件版本不匹配时阻止写入。
+模型通过 `diagram_read` 读取结构、样式、选区与文件版本，通过 `diagram_apply` 增删或修改节点和边。对于并发编辑，`expectRevision` 可在文件版本不匹配时阻止写入。要成品图时用 `diagram_export` 在宿主侧直接导成 SVG / PNG —— 不需要打开画布，QQ、CLI 这类没有侧栏的通道也能用。
 
 例如可以继续对话：
 
@@ -137,7 +137,7 @@ FFmpeg 按显式路径、系统 PATH、缓存及自动下载的顺序查找，�
 | 文档 | 内容 |
 |---|---|
 | [原生画布与兼容说明](docs/native-canvas.md) | `.drawai`、媒体目录与 `.drawio` 迁移 |
-| [画布 AI 工具参考](docs/diagram-tools.md) | `diagram_read`、`diagram_apply` 和图片矢量化 |
+| [画布 AI 工具参考](docs/diagram-tools.md) | `diagram_read`、`diagram_apply`、`diagram_export` 和图片矢量化 |
 | [视频节点说明](docs/video-nodes.md) | 视频导入、复刻、后台任务和导出 |
 | [动效视频说明](docs/motion-video.md) | 分镜、工程、素材、预览、渲染与回填 |
 | [声音制作说明](docs/motion-audio.md) | 音轨、音效、旁白和节拍 |

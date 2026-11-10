@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process'
 import { composeClientBody, dedentBody, extractBody } from './build.mjs'
 
 const EXPECTED_INJECT = ['tools', 'fs', 'sessions', 'sandboxPolicy', 'webServer']
-const EXPECTED_TOOLS = ['shotcraft_search', 'mg_style', 'audio_asset', 'diagram_read', 'motion_task', 'motion_project', 'motion_spec', 'motion_preview', 'motion_render', 'motion_qa', 'motion_export', 'motion_assets', 'motion_sfx', 'motion_audio', 'motion_sync', 'motion_audio_verify', 'motion_voice', 'diagram_apply']
+const EXPECTED_TOOLS = ['shotcraft_search', 'mg_style', 'audio_asset', 'diagram_read', 'diagram_export', 'motion_task', 'motion_project', 'motion_spec', 'motion_preview', 'motion_render', 'motion_qa', 'motion_export', 'motion_assets', 'motion_sfx', 'motion_audio', 'motion_sync', 'motion_audio_verify', 'motion_voice', 'diagram_apply']
 const EXPECTED_ROUTE = '/drawai/api/save'
 const EXPECTED_DIAGNOSTICS = '/drawai/api/diagnostics'
 

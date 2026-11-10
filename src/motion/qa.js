@@ -10,6 +10,10 @@
 //   5. 空白   近乎纯色的帧（内容是"忘了放东西"）
 //   6. 越界   四边安全区里出现了墨色（文字压边）
 //   7. 响度   综合响度 / 真峰值 / 静音段（ebur128）
+//   8. 动能量 相邻帧差的平均幅度（blend=difference）——抓"缓慢缩放平移"的翻页感，
+//            这一条 freezedetect 抓不到：Ken Burns 幻灯片每帧都在动，却整镜没节奏
+//   9. 空画面 边密度（edgedetect 的 Y 均值）——抓"有渐变底、什么都没放"，
+//            这一条空白帧抓不到：底色渐变会让 ymax-ymin 很大
 //
 // 报告落 .out/qa/framecq/report.json，同时给一份能直接读的 markdown 摘要。
 
@@ -27,6 +31,12 @@ const DEFAULTS = {
   marginRatio: 0.035,     // 四边安全区宽度（占画面宽/高）
   marginDark: 170,        // 安全区里出现比这更暗的像素＝内容压边
   blackPixThreshold: 0.10,
+  // 以下五个是量纲统一的：都在 480 宽缩略图上算，与成片分辨率无关。
+  lowDiff: 0.6,           // 相邻帧平均绝对差低于它＝"这一帧没动"（0–255）
+  slideDiff: 1.2,         // 镜头中位动能量低于它、且低动帧占比过线＝翻页感
+  slideLowRatio: 0.7,
+  edgeMin: 1.5,           // 边密度（edgedetect 的 Y 均值）低于它＝有底没内容
+  edgeFrames: 8,          // 连续多少帧边密度不足才算一段空画面
 }
 
 export function qaDir(dir) {
@@ -57,6 +67,26 @@ function runs(flags) {
 
 const second = (value) => Math.round(value * 100) / 100
 
+function percentile(sorted, p) {
+  if (!sorted.length) return null
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * p)))
+  return sorted[index]
+}
+
+// 中位看"整镜到底动没动"，p90/中位看"有没有节奏峰"：匀速推镜的两头几乎相等。
+function profile(values) {
+  const sorted = [...values].filter((value) => Number.isFinite(value)).sort((a, b) => a - b)
+  return { count: sorted.length, median: percentile(sorted, 0.5), p90: percentile(sorted, 0.9) }
+}
+
+// 最长连续命中：连续两个镜头都像翻页，就不是"某一镜的问题"，是全片的问题。
+function longestRun(flags) {
+  let longest = 0
+  let open = 0
+  for (const flag of flags) { open = flag ? open + 1 : 0; if (open > longest) longest = open }
+  return longest
+}
+
 export async function runFrameQa({ dir, file, timeline, options = {} }) {
   // 工具层会把没传的参数也写成 undefined 传进来，展开时会把默认值顶掉（freezeSeconds 变 undefined，
   // 静止判定就整段失效）—— 所以先剔掉 undefined 再合。
@@ -77,6 +107,29 @@ export async function runFrameQa({ dir, file, timeline, options = {} }) {
   await call(['-i', 'scaled.mp4', '-an', '-vf', 'signalstats,metadata=print:file=stats.txt', '-f', 'null', '-'])
   const stats = parseStats(read('stats.txt'))
   if (!stats.length) throw new Error('ffmpeg 没有输出逐帧统计，成片可能无法解码')
+
+  // 两份额外统计，都在同一条 480 宽缩略片上跑：
+  //   动能量 = 把两条流错开一帧再 blend=difference，得到的逐帧均值就是 |f(t+1)-f(t)|；
+  //   边密度 = edgedetect 把边缘画成白点，Y 均值就是"画面里还有多少结构"。
+  // 任一步失败都不该让整份帧检作废，所以单独兜住，报告里标成"未验证"。
+  let diffs = []
+  let edges = []
+  let motionError = null
+  try {
+    await call(['-i', 'scaled.mp4', '-an', '-filter_complex',
+      '[0:v]split=2[s0][s1];[s0]trim=start_frame=0,setpts=PTS-STARTPTS[a];'
+      + '[s1]trim=start_frame=1,setpts=PTS-STARTPTS[b];'
+      + '[a][b]blend=all_mode=difference,signalstats,metadata=print:file=diff.txt[out]',
+      '-map', '[out]', '-f', 'null', '-'])
+    await call(['-i', 'scaled.mp4', '-an', '-vf',
+      'edgedetect=low=0.08:high=0.2,signalstats,metadata=print:file=edge.txt', '-f', 'null', '-'])
+    diffs = parseStats(read('diff.txt')).map((row) => row.yavg)
+    edges = parseStats(read('edge.txt')).map((row) => row.yavg)
+    if (!diffs.length) motionError = '差帧统计为空'
+  } catch (error) {
+    motionError = (error.message || String(error)).split('\n')[0]
+  }
+
 
   const bands = { left: '0:0', right: 'iw-iw*R:0', top: '0:0', bottom: '0:ih-ih*R' }
   const cropOf = {
@@ -110,6 +163,16 @@ export async function runFrameQa({ dir, file, timeline, options = {} }) {
     const shot = timeline.shots.find((item) => frame >= item.startFrame && frame < item.startFrame + item.durationFrames)
     return shot ? shot.id : '(镜头之间)'
   }
+
+  // 逐镜动能量。差帧流比原片少一帧，所以按帧号切片时尾巴会短一个——不影响中位。
+  const energies = timeline.shots.map((shot) => {
+    const values = diffs.slice(shot.startFrame, shot.startFrame + shot.durationFrames)
+    const { median, p90 } = profile(values)
+    if (median === null) return null
+    const low = values.filter((value) => value < settings.lowDiff).length / values.length
+    return { median: second(median), p90: second(p90), low: second(low) }
+  })
+  const slides = energies.map((energy) => !!energy && energy.median < settings.slideDiff && energy.low > settings.slideLowRatio)
 
   // 单帧突变：比前后两帧都跳、而前后两帧彼此接近 —— 那是闪，不是运动。
   const flashes = []
@@ -180,11 +243,46 @@ export async function runFrameQa({ dir, file, timeline, options = {} }) {
   if (!longFreezes.length) add('pass', 'freeze', '没有超过 ' + settings.freezeSeconds + 's 的静止段')
   else if (!longFreezes.some((item) => item.seconds >= settings.freezeSeconds * 2)) add('pass', 'freeze', '静止段都在设计停留的量级（<' + settings.freezeSeconds * 2 + 's）')
 
+  // 动能量：这一条和 freeze 是两回事。freeze 只看"完全不动"，Ken Burns 式缓慢缩放
+  // 每帧都在动、永远触发不了 freeze，但整镜没有一次加速——那正是翻页感的来源。
+  for (const [index, energy] of energies.entries()) {
+    if (!slides[index]) continue
+    add('warn', 'energy', '第 ' + (index + 1) + ' 镜 ' + timeline.shots[index].id + ' 整镜动能量偏低：中位 '
+      + energy.median + '、低动帧占 ' + Math.round(energy.low * 100) + '% —— 像翻页，不像动画', timeline.shots[index].id)
+  }
+  const slideRun = longestRun(slides)
+  if (slideRun >= 2)
+    add('fail', 'energy-ppt', '连续 ' + slideRun + ' 个镜头几乎没有运动（中位 < ' + settings.slideDiff
+      + '、低动帧 > ' + Math.round(settings.slideLowRatio * 100) + '%）—— 整体观感是幻灯片')
+  else if (energies.some(Boolean) && !slides.some(Boolean)) {
+    const lowest = energies.filter(Boolean).reduce((min, item) => (min === null || item.median < min ? item.median : min), null)
+    add('pass', 'energy', '镜头动能量正常（最低一镜中位 ' + lowest + '）')
+  }
+  if (motionError) add('info', 'energy', '动能量与边密度没测成：' + motionError + '（这两项未验证）')
+
+
   for (const flash of flashes.slice(0, 8)) add('warn', 'flash', '第 ' + flash.frame + ' 帧亮度突变（' + second(flash.t) + 's，Y≈' + second(flash.yavg) + '）', shotAt(flash.t))
   if (!flashes.length) add('pass', 'flash', '没有单帧闪烁')
 
   for (const blank of blanks) add('warn', 'blank', '近乎空白 ' + second(blank.from) + 's–' + second(blank.to) + 's（' + blank.frames + ' 帧）', shotAt(blank.from))
   if (!blanks.length) add('pass', 'blank', '没有连续空白帧')
+
+  // 空画面：blank 判的是"亮度极差小"，只能抓近乎纯色。底色是渐变时极差很大，
+  // 但画面里其实什么都没有——那种要靠边密度才看得见。
+  const thin = edges.map((value) => Number.isFinite(value) && value < settings.edgeMin)
+  const emptyRuns = runs(thin).filter((run) => run.length >= settings.edgeFrames)
+    .map((run) => ({
+      from: second(stats[run.from]?.t ?? 0), to: second(stats[run.to]?.t ?? 0), frames: run.length,
+      edge: second(Math.min(...edges.slice(run.from, run.to + 1))),
+    }))
+  // 同一次失败只报一次：已经在 black / blank 里记过的段落不再重复记。
+  const already = (range) => blacks.some((item) => item.to >= range.from - 0.02 && item.from <= range.to + 0.02)
+    || blanks.some((item) => item.to >= range.from - 0.02 && item.from <= range.to + 0.02)
+  const emptyContent = emptyRuns.filter((range) => !already(range))
+  for (const range of emptyContent)
+    add('warn', 'content', '有底没内容 ' + range.from + 's–' + range.to + 's（' + range.frames + ' 帧，边密度 ' + range.edge + '）—— 只剩底色，没放东西', shotAt(range.from))
+  if (edges.length && !emptyContent.length) add('pass', 'content', '没有只有底色、没内容的段落')
+
 
   let marginCount = 0
   for (const [band, hits] of Object.entries(marginHits)) {
@@ -225,7 +323,7 @@ export async function runFrameQa({ dir, file, timeline, options = {} }) {
     if (audio.silence.length > 2) add('info', 'audio-silence', '有 ' + audio.silence.length + ' 处静音起点（设计上的空拍请忽略）', audio.silence)
   } else add('info', 'audio', '成片没有音轨')
 
-  const byShot = timeline.shots.map((shot) => {
+  const byShot = timeline.shots.map((shot, index) => {
     const from = shot.startFrame / fps, to = (shot.startFrame + shot.durationFrames) / fps
     const inside = (time) => time >= from - 0.02 && time < to - 0.02
     return {
@@ -233,8 +331,10 @@ export async function runFrameQa({ dir, file, timeline, options = {} }) {
       freeze: second(Math.max(0, ...freezes.filter((item) => inside(item.from)).map((item) => item.seconds || 0))),
       black: blacks.filter((item) => inside(item.from)).length,
       blank: blanks.filter((item) => inside(item.from)).length,
+      content: emptyContent.filter((item) => inside(item.from)).length,
       flash: flashes.filter((item) => inside(item.t)).length,
       margin: Object.values(marginHits).flat().filter((item) => inside(item.from)).length,
+      energy: energies[index] || null,
     }
   })
 
@@ -244,6 +344,11 @@ export async function runFrameQa({ dir, file, timeline, options = {} }) {
     generatedAt: new Date().toISOString(), file: source, fps, frames: stats.length, durationSeconds: second(durationSeconds),
     verdict: fails ? 'fail' : warns ? 'warn' : 'pass', summary: { fail: fails, warn: warns, pass: checks.length - fails - warns },
     shots: byShot, checks, audio, pixels,
+    // 量纲写进报告：换个片子看这份 JSON 的人不该猜"2.3 是什么单位"。
+    motion: {
+      unit: '相邻帧平均绝对差（480 宽灰度 0–255）',
+      diffFrames: diffs.length, edgeFrames: edges.length, error: motionError,
+    },
     freezeSegments: freezes.map((item) => ({ from: second(item.from), to: item.to === undefined ? null : second(item.to), seconds: second(item.seconds || 0) })).filter((item) => item.seconds >= settings.freezeSeconds),
     settings,
   }
@@ -253,11 +358,11 @@ export async function runFrameQa({ dir, file, timeline, options = {} }) {
   try {
     const merged = join(dir, '.out', 'qa', 'report.json')
     const base = existsSync(merged) ? parseProjectJson(readFileSync(merged, 'utf8')) : {}
-    base.frameQa = { generatedAt: report.generatedAt, verdict: report.verdict, summary: report.summary, checks, audio, pixels }
+    base.frameQa = { generatedAt: report.generatedAt, verdict: report.verdict, summary: report.summary, checks, audio, pixels, motion: report.motion }
     writeFileSync(merged, JSON.stringify(base, null, 2) + '\n', 'utf8')
   } catch { /* 合并失败不该影响帧检结论 */ }
   for (const name of readdirSync(work)) if (/\.(raw|log)$/.test(name)) rmSync(join(work, name), { force: true })
-  for (const name of ['stats.txt', 'm-left.txt', 'm-right.txt', 'm-top.txt', 'm-bottom.txt', 'scaled.mp4', 'ff.log'])
+  for (const name of ['stats.txt', 'diff.txt', 'edge.txt', 'm-left.txt', 'm-right.txt', 'm-top.txt', 'm-bottom.txt', 'scaled.mp4', 'ff.log'])
     rmSync(join(work, name), { force: true })
   return report
 }
@@ -278,9 +383,14 @@ export function renderMarkdown(report) {
     '',
     '## 逐镜',
     '',
-    '| 镜头 | 时长 | 最长静止 | 黑场 | 空白 | 闪烁 | 越界 |',
-    '| --- | --- | --- | --- | --- | --- | --- |',
-    ...report.shots.map((shot) => '| ' + shot.id + ' | ' + shot.seconds + 's | ' + shot.freeze + 's | ' + shot.black + ' | ' + shot.blank + ' | ' + shot.flash + ' | ' + shot.margin + ' |'),
+    '| 镜头 | 时长 | 最长静止 | 动能量 | 黑场 | 空白 | 空画面 | 闪烁 | 越界 |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
+    ...report.shots.map((shot) => '| ' + shot.id + ' | ' + shot.seconds + 's | ' + shot.freeze + 's | '
+      + (shot.energy ? shot.energy.median : '—') + ' | ' + shot.black + ' | ' + shot.blank + ' | '
+      + (shot.content || 0) + ' | ' + shot.flash + ' | ' + shot.margin + ' |'),
+    '',
+    '动能量 = 相邻帧平均绝对差（480 宽灰度 0–255）：中位偏低且低动帧多，就是翻页感；'
+    + 'p90/中位 偏低，说明整镜匀速、没有加速段。',
     '',
     '## 发现',
     '',

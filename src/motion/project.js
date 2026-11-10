@@ -118,12 +118,16 @@ function motionMarkdown(style) {
 
 function styleMarkdown(style) {
   const palette = Object.entries(style.palette || {}).map(([role, hex]) => '| ' + role + ' | `' + hex + '` |')
+  // 风格不一定都来自 mg-styles-15：23-ink-wash 来自 huashu-art-motion。署名要跟着出处走，别张冠李戴。
+  const origin = style.origin && style.origin.source
+    ? style.origin.source.replace(/^https?:\/\/(github\.com\/)?/, '') + '（' + (style.origin.license || '见仓库') + (style.origin.commit ? '，commit ' + String(style.origin.commit).slice(0, 8) : '') + '）'
+    : 'mg-styles-15（MIT，commit ' + String(style.commit || '').slice(0, 8) + '）'
   return [
     '# 整片风格：' + style.name + '（' + style.slug + '）',
     '',
     style.oneLiner || '',
     '',
-    '来源：mg-styles-15（MIT，commit ' + String(style.commit || '').slice(0, 8) + '）。上游是「HTML 页 + renderAt(t) + 截帧」，',
+    '来源：' + origin + '。上游是「HTML 页 + renderAt(t) + 截帧」，',
     '这里不是逐行搬运（整份 HTML 搬进场景会跟 Remotion 的帧模型打架），但动效、转场、冲击、',
     '相机与质感必须按下面的「效果配方」对齐——对不上就写偏离行，别静默省掉。',
     '',

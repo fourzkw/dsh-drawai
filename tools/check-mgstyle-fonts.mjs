@@ -8,7 +8,7 @@ import { BUNDLED_FONT_FACES } from '../lib/motion/fonts.js'
 
 const catalog = JSON.parse(readFileSync('lib/motion/mgstyles/catalog.json', 'utf8'))
 const available = new Set(BUNDLED_FONT_FACES.map(face => face.family))
-assert.equal(catalog.styles.length, 14)
+assert.equal(catalog.styles.length, 15)
 for (const style of catalog.styles) {
   const fragment = JSON.parse(readFileSync(`src/motion/mgstyles/catalog.d/${style.slug}.json`, 'utf8'))
   assert.deepEqual(style.fonts, fragment.fonts, style.slug + ' 风格索引与源配置不一致')
@@ -42,4 +42,4 @@ for (const [slug, expected] of [
     if (rel && !isAbsolute(rel) && rel !== '..' && !rel.startsWith('..' + sep)) rmSync(dir, { recursive: true, force: true })
   }
 }
-console.log('14 种风格的推荐字体与内置字体一致；手绘和像素工程的主题、说明与字体文件均通过')
+console.log('15 种风格的推荐字体与内置字体一致；手绘和像素工程的主题、说明与字体文件均通过')

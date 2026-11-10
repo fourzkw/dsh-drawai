@@ -35,6 +35,7 @@ import { parseCanvas as parseMxfile, applyCanvas as applyDocToMxfile, buildCanva
 import { emptyDocument, normalizeDocument } from './document-core.js'
 import { createDocumentCommands } from './document-commands.js'
 import { createOrthogonalRouter } from './routing/router.js'
+import { buildExportSvg, rasterizeSvgToPng } from './svg-export.js'
 import { getRoutingRuntime } from './routing/node-runtime.js'
 import { motionInput, motionInputKey, assertMotionEditable, applyMotionResult, isMotionNode, motionNodeData, motionSettings, mergeMotionSettings, isAudioNode, audioNodeData, audioNodeSettings, motionReferenceEdges, motionReferenceRole, unlinkedShotCards } from './motion-core.js'
 import { createAudioService } from './audio-service.js'
@@ -4310,6 +4311,171 @@ function sanitizeNewName(raw) {
 }
 
   /**
+   * `diagram_export`：宿主侧把画布直接导成 SVG / PNG —— **不需要浏览器那一半**。
+   *
+   * 为什么单独开一个工具，而不是给 `diagram_read {render:true}` 加 fallback：
+   * `look` 状态里的 "ready" 含义是"浏览器真渲染过"，它的用途是看压线/重叠/观感；
+   * 把宿主这条简化渲染混进同一个状态，模型会拿它当"看过图了"的依据去下结论。
+   * issue #23 也说得很清楚：不改现有"画布优先"的行为，只补一条没有画布时的交付路径。
+   *
+   * 所以两条路分开：能开画布 → `render:true`；开不了（QQ/CLI）→ 这个工具出成品图。
+   */
+  const exportTool = defineTool({
+    name: 'diagram_export',
+    description:
+      '把画布**在宿主侧**导出成成品图：SVG（矢量、零依赖）或 PNG（`@resvg/resvg-js` 栅格化）——' +
+      '**不需要浏览器、不需要用户打开画布**。QQ / CLI 这类没有右侧栏的通道里，想要"把图发给用户"就用它。' +
+      '与 `diagram_read {render:true}` 的分工：render 由浏览器真渲染、保真度最高（判断压线/重叠/观感靠它）；' +
+      '这个工具是宿主按文档**重画的近似版本**（返回 fidelity="approximate"），用来交付成品图，别拿它判断像素级观感。' +
+      '几何照同一套规则算：形状/圆角/虚线/箭头、标签换行与"文字撑高节点"、正交走线（用文档里存的折点）、' +
+      '连线标签的落点与"字的位置不画线"；但文字量宽是按字符估算的（中文 1em、其余 0.55em），长标签可能差一行；' +
+      '视频/卡片/音频节点只画通用形状（它们的内容在浏览器组件里）。所有降级项都在 warnings 里列出。' +
+      '缺省写到画布旁边（同名，只换扩展名 .svg/.png），可用 out 指定；PNG 的 scale 缺省 2。',
+    parameters: {
+      path: {
+        type: 'string',
+        description: '画布路径（.drawio / .drawai）。不传 = 当前会话聚焦的画布。',
+      },
+      page: {
+        type: 'number',
+        description: '多页画布导哪一页（0 起）。不传 = 用户画布当前页（没上报过则第 1 页）。',
+      },
+      format: {
+        type: 'string',
+        enum: ['svg', 'png'],
+        description:
+          'svg = 矢量（零依赖、可再编辑、放大不糊）；png = 位图（发给用户 / 贴进文档 / 进PPT）。缺省 svg。',
+      },
+      scale: {
+        type: 'number',
+        description: 'PNG 的缩放倍数（缺省 2，1 = 1:1）。SVG 忽略这个参数。',
+      },
+      out: {
+        type: 'string',
+        description:
+          '输出文件路径（必须在工作区内；相对路径按**画布所在目录**解析）。缺省 = 与画布同名、只换扩展名。',
+      },
+      theme: {
+        type: 'string',
+        enum: ['light', 'dark'],
+        description: '配色：light 白纸黑线（缺省，适合交付）；dark 透明底 + 浅色字线。',
+      },
+      background: {
+        type: 'string',
+        description: '背景色：缺省 light 主题白底、dark 主题透明；也可给 #rrggbb 或 "transparent"。',
+      },
+      padding: {
+        type: 'number',
+        description: '内容四周留白（像素，缺省 24）。',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          summary: { type: 'string', required: true },
+          details: { type: 'string', required: true },
+          path: { type: 'string', required: true },
+          absolute: { type: 'string' },
+          format: { type: 'string', required: true },
+          width: { type: 'number', required: true },
+          height: { type: 'number', required: true },
+          bytes: { type: 'number' },
+          fidelity: { type: 'string', required: true },
+          nodes: { type: 'number' },
+          edges: { type: 'number' },
+          warnings: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      render: (args, value) => [{ type: 'text', text: value.summary + '\n' + value.details }],
+    },
+    async execute(args, exec) {
+      const sessionId = sessionIdOf(exec)
+      const path =
+        typeof args.path === 'string' && args.path.trim().length > 0 ? args.path : focusedPathFor(sessionId)
+      if (!path) throw new Error('未指定画布路径且当前会话没有聚焦画布，请传入 path 或先打开目标画布')
+      assertCanvasPath(path)
+      // 导出会往工作区写文件：只读会话里不放行（与其它会写盘的工具同一道闸）。
+      if (policyFor(sessionId)?.mode === 'read-only') throw new Error('当前会话为只读，不能导出文件')
+      const pageArg = Number.isFinite(Number(args.page)) ? Number(args.page) : focusedPageFor(sessionId)
+      const loaded = await loadDoc(path, sessionId, pageArg)
+      if (!loaded.exists) throw new Error('画布不存在：' + loaded.absolute)
+      const format = String(args.format || 'svg').toLowerCase() === 'png' ? 'png' : 'svg'
+
+      const built = buildExportSvg(loaded.doc, {
+        theme: args.theme,
+        background: args.background,
+        padding: args.padding,
+      })
+      if (built.stats.nodes === 0 && built.stats.edges === 0) {
+        throw new Error('画布是空的（0 个节点、0 条连线），没有可导出的内容')
+      }
+
+      // 输出位置：缺省落在画布旁边、同名换扩展名 —— 用户找得到，也不污染工作区根目录。
+      const dir = dirnamePath(loaded.absolute)
+      const base = basenamePath(loaded.absolute).replace(/\.(drawio|drawai)$/i, '')
+      const outArg = typeof args.out === 'string' && args.out.trim().length > 0 ? args.out.trim() : ''
+      const target =
+        outArg.length === 0 ? joinPath(dir, base + '.' + format) : isAbsolute(outArg) ? outArg : resolvePath(dir, outArg)
+      // 导出写的是成品图：out 指到画布文件上等于把图覆盖掉（svg 覆盖 .drawio 之后画布就打不开了）。
+      if (/\.(drawio|drawai)$/i.test(target)) {
+        throw new Error('导出不能覆盖画布文件：' + target + '；out 请用 .svg / .png 结尾')
+      }
+      const root = await ctx.fs.resolve(workspaceRootOf(sessionId))
+      if (!ctx.fs.contains(root, target)) throw new Error('导出路径超出工作区：' + target)
+      await mkdir(dirnamePath(target), { recursive: true })
+
+      let width = built.width
+      let height = built.height
+      let bytes = 0
+      if (format === 'svg') {
+        await writeFile(target, built.svg, 'utf8')
+        bytes = Buffer.byteLength(built.svg, 'utf8')
+      } else {
+        const raster = await rasterizeSvgToPng(built.svg, { scale: args.scale })
+        await writeFile(target, raster.png)
+        width = raster.width
+        height = raster.height
+        bytes = raster.png.length
+      }
+
+      const rel = relativePath(root, target)
+      const warnings = built.warnings.slice(0, 20)
+      const warningCount = built.warnings.length
+      return {
+        summary:
+          '已导出 ' + format.toUpperCase() + '：' + rel + '（' + Math.round(width) + '×' + Math.round(height) + '）' +
+          (warningCount > 0
+            ? '，' + warningCount + ' 条降级提示见 details' + (warningCount > warnings.length ? '（只列前 ' + warnings.length + ' 条）' : '')
+            : ''),
+        details: JSON.stringify({
+          path: rel,
+          absolute: target,
+          format: format,
+          width: Math.round(width),
+          height: Math.round(height),
+          bytes: bytes,
+          fidelity: 'approximate',
+          nodes: built.stats.nodes,
+          edges: built.stats.edges,
+          warnings: warnings,
+        }),
+        path: rel,
+        absolute: target,
+        format: format,
+        width: Math.round(width),
+        height: Math.round(height),
+        bytes: bytes,
+        fidelity: 'approximate',
+        nodes: built.stats.nodes,
+        edges: built.stats.edges,
+        warnings: warnings,
+      }
+    },
+  })
+
+  /**
    * 「画布聚焦」：记录每个会话当前**打开着**的画布路径。
    *
    * 为什么需要：AI 改图只认路径。不传 path 时原来会落到 demo.drawio ——
@@ -6510,7 +6676,7 @@ function sanitizeNewName(raw) {
   })))
   ctx.effect(() => registerHostTool(defineTool({
     name: 'mg_style',
-    description: 'DrawAI 内置的 14 种整片 MG 动效风格（mg-styles 库）：扁平矢量 / 线条动画 / 等轴 2.5D / 逐帧手绘 / 拼贴 / 液态 / 形变 / 包豪斯 / 80s 复古 / 玻璃拟态 / 综艺花字 / 粗描边贴纸科普 / 像素 / 赛博 HUD。上游那支 04-3d-render（C4D/Blender 质感的 CGI 软着陆）没有收录：画面是 Blender 离线渲的，插件里没有同等质感的等价物——用 CSS 滤镜凑出来的 CGI 只会更假，需要那种质感就外部渲好当素材回灌（motion_assets capture / 参考段）。这是「整片风格」（一种片子的整体视觉语言），与 shotcraft_search 的「单镜动效卡」互补、可同时用。action:"list" 列出全部；"search" 按关键词检索；"read" 读某个风格的施工包（可检验判据 + 色板 + 字体 + 节奏 + 效果配方 + 上游提示词 + Remotion 移植 brief）；"source" 读上游成片源码正文；**"frames" 从上游 demo 按 cue 时间点抽参考帧**——动态、转场、冲击、颗粒这些只有看帧才知道，写场景前先取。选中后 diagram_apply 加 shape:"mgstyle" 节点并连到视频节点，motion_project 会把风格写进工程主题与 STYLE.md。',
+    description: 'DrawAI 内置的 15 种整片 MG 动效风格（mg-styles 库）：扁平矢量 / 线条动画 / 等轴 2.5D / 逐帧手绘 / 拼贴 / 液态 / 形变 / 包豪斯 / 80s 复古 / 玻璃拟态 / 综艺花字 / 粗描边贴纸科普 / 像素 / 赛博 HUD / 水墨写意。上游那支 04-3d-render（C4D/Blender 质感的 CGI 软着陆）没有收录：画面是 Blender 离线渲的，插件里没有同等质感的等价物——用 CSS 滤镜凑出来的 CGI 只会更假，需要那种质感就外部渲好当素材回灌（motion_assets capture / 参考段）。这是「整片风格」（一种片子的整体视觉语言），与 shotcraft_search 的「单镜动效卡」互补、可同时用。action:"list" 列出全部；"search" 按关键词检索；"read" 读某个风格的施工包（可检验判据 + 色板 + 字体 + 节奏 + 效果配方 + 上游提示词 + Remotion 移植 brief）；"source" 读上游成片源码正文；**"frames" 从上游 demo 按 cue 时间点抽参考帧**——动态、转场、冲击、颗粒这些只有看帧才知道，写场景前先取。选中后 diagram_apply 加 shape:"mgstyle" 节点并连到视频节点，motion_project 会把风格写进工程主题与 STYLE.md。',
     parameters: { action: { type: 'string', enum: ['list', 'search', 'read', 'source', 'frames'], required: true },
       slug: { type: 'string', description: '风格 slug，如 09-bauhaus' },
       query: { type: 'string', description: 'search：关键词（中英文风格名、用途、视觉特征）' },
@@ -6621,6 +6787,8 @@ function sanitizeNewName(raw) {
     }
   })))
   ctx.effect(() => registerHostTool(readTool))
+  // 宿主侧导出：没有画布侧栏的通道（QQ/CLI）里，成品图只能这么拿。与 render:true 两条路。
+  ctx.effect(() => registerHostTool(exportTool))
   ctx.effect(() => registerHostTool(defineTool({
     name: 'motion_task',
     description: '画布视频节点的任务记录：list 列出任务、status 查某个任务、cancel 取消、focus 在面板定位、remove 移除记录。开始制作请走 motion_project → 改 scene-*.tsx → motion_preview → motion_render；成片回填节点用 motion_render apply。',
@@ -7199,7 +7367,7 @@ function sanitizeNewName(raw) {
   // 帧检：把"片子有没有毛病"变成一张带帧号的清单，而不是靠眼睛。
   ctx.effect(() => registerHostTool(defineTool({
     name: 'motion_qa',
-    description: '成片帧检：不靠眼睛，靠像素和响度。inspect 立刻检一遍（默认检工程里的 .out/film.mp4，也可以指定 file）：帧数对不对、有没有黑场、有没有静止太久、有没有单帧闪烁、有没有空白帧、画面有没有顶到边、音轨有没有削波。report 读上次的结果。每条问题都带帧号和镜头号，能直接回去改对应场景。',
+    description: '成片帧检：不靠眼睛，靠像素和响度。inspect 立刻检一遍（默认检工程里的 .out/film.mp4，也可以指定 file）：帧数对不对、有没有黑场、有没有静止太久、有没有整镜没在动（动能量，抓缓慢推镜式的翻页感）、有没有只剩底色没内容（边密度，抓空白帧抓不到的渐变空画面）、有没有单帧闪烁、有没有空白帧、画面有没有顶到边、音轨有没有削波。report 读上次的结果。每条问题都带帧号和镜头号，能直接回去改对应场景。',
     parameters: {
       action: { type: 'string', enum: ['inspect', 'report'], required: true },
       path: { type: 'string' }, nodeId: { type: 'string' }, page: { type: 'number' },
