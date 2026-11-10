@@ -1,5 +1,15 @@
 # 发布与收录流程 / Release & listing
 
+## 0.4.4 发布内容（2026-11-10）
+
+- 新增 `diagram_export`：在宿主侧把 `.drawai` / `.drawio` 直接导成 SVG 或 PNG，不需要打开画布侧栏。QQ、CLI 这类没有画布的通道里，成品图终于拿得到；`diagram_read {render:true}` 与 `diagram_apply {op:"export"}` 保持原样——能开画布时仍走浏览器那一半，保真度更高（#23）。
+- `diagram_export` 把保真度写在返回值里：`fidelity:"approximate"`，视频/卡片/音频节点只画通用形状，文字量宽按字符宽度估算（CJK 1em、其余 0.55em），降级项逐条进 `warnings`。
+- 导出走宿主自己的渲染器：正交连线跑仓库里的避障路由器，标签处按线段挖空，`out` 可指定输出路径（限工作区内），PNG 由 `@resvg/resvg-js` 栅格化并带 CJK 字体回退。
+- 修 `diagram_export` 的自环绘制、边计数与尺寸预检：自环以前整条静默消失，统计把隐藏图层与悬空边也算进去，超大 scale 先渲染再报错（#23）。
+- 修：拐弯的连线在预览里糊成黑块。`<path>` 的内联 paint 没有跟着渲染树走，SVG-as-image 里缺省 fill 是黑的（#32）。
+- `motion_qa` 帧检补上「整镜动能量」与「有底没内容」两条：freezedetect 只看完全不动、空白帧只看亮度极差，两者都会漏掉缓慢推镜与渐变底。
+- 整片风格新增「水墨写意」，从 14 种增至 15 种。
+
 ## 0.4.3 发布内容（2026-11-09）
 
 - 内嵌技能拆成 `drawai-canvas` 与 `drawai-video` 两条：一份三万字的正文同时背着画布的 op 速查和视频的十步流程，而技能目录只显示 description 那句，用户说「做个宣传片」会先被「读写画布」挡住。拆开后 `motion_*` / `shotcraft_search` / `mg_style` 只进视频正文，`diagram_*` 那套只进画布正文。
