@@ -95,7 +95,7 @@ export function enforceMotionCards(composition, input) {
   return composition
 }
 
-// ── mg-styles：14 种整片风格（不是单镜卡；上游 15 支里的 04-3d-render 已移除） ──
+// ── mg-styles：15 种整片风格（不是单镜卡；上游 15 支里的 04-3d-render 已移除，另接入 huashu 17_ink） ──
 // 上游是「HTML 页 + renderAt(t) + puppeteer 截帧」，这里是「提示词 + 移植 brief + 成片源码」，
 // 供 agent 在 Remotion 里照着写场景。源码只作阅读参考，不进 webpack（和镜头卡不同）。
 

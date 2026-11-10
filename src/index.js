@@ -6676,7 +6676,7 @@ function sanitizeNewName(raw) {
   })))
   ctx.effect(() => registerHostTool(defineTool({
     name: 'mg_style',
-    description: 'DrawAI 内置的 14 种整片 MG 动效风格（mg-styles 库）：扁平矢量 / 线条动画 / 等轴 2.5D / 逐帧手绘 / 拼贴 / 液态 / 形变 / 包豪斯 / 80s 复古 / 玻璃拟态 / 综艺花字 / 粗描边贴纸科普 / 像素 / 赛博 HUD。上游那支 04-3d-render（C4D/Blender 质感的 CGI 软着陆）没有收录：画面是 Blender 离线渲的，插件里没有同等质感的等价物——用 CSS 滤镜凑出来的 CGI 只会更假，需要那种质感就外部渲好当素材回灌（motion_assets capture / 参考段）。这是「整片风格」（一种片子的整体视觉语言），与 shotcraft_search 的「单镜动效卡」互补、可同时用。action:"list" 列出全部；"search" 按关键词检索；"read" 读某个风格的施工包（可检验判据 + 色板 + 字体 + 节奏 + 效果配方 + 上游提示词 + Remotion 移植 brief）；"source" 读上游成片源码正文；**"frames" 从上游 demo 按 cue 时间点抽参考帧**——动态、转场、冲击、颗粒这些只有看帧才知道，写场景前先取。选中后 diagram_apply 加 shape:"mgstyle" 节点并连到视频节点，motion_project 会把风格写进工程主题与 STYLE.md。',
+    description: 'DrawAI 内置的 15 种整片 MG 动效风格（mg-styles 库）：扁平矢量 / 线条动画 / 等轴 2.5D / 逐帧手绘 / 拼贴 / 液态 / 形变 / 包豪斯 / 80s 复古 / 玻璃拟态 / 综艺花字 / 粗描边贴纸科普 / 像素 / 赛博 HUD / 水墨写意。上游那支 04-3d-render（C4D/Blender 质感的 CGI 软着陆）没有收录：画面是 Blender 离线渲的，插件里没有同等质感的等价物——用 CSS 滤镜凑出来的 CGI 只会更假，需要那种质感就外部渲好当素材回灌（motion_assets capture / 参考段）。这是「整片风格」（一种片子的整体视觉语言），与 shotcraft_search 的「单镜动效卡」互补、可同时用。action:"list" 列出全部；"search" 按关键词检索；"read" 读某个风格的施工包（可检验判据 + 色板 + 字体 + 节奏 + 效果配方 + 上游提示词 + Remotion 移植 brief）；"source" 读上游成片源码正文；**"frames" 从上游 demo 按 cue 时间点抽参考帧**——动态、转场、冲击、颗粒这些只有看帧才知道，写场景前先取。选中后 diagram_apply 加 shape:"mgstyle" 节点并连到视频节点，motion_project 会把风格写进工程主题与 STYLE.md。',
     parameters: { action: { type: 'string', enum: ['list', 'search', 'read', 'source', 'frames'], required: true },
       slug: { type: 'string', description: '风格 slug，如 09-bauhaus' },
       query: { type: 'string', description: 'search：关键词（中英文风格名、用途、视觉特征）' },
@@ -7367,7 +7367,7 @@ function sanitizeNewName(raw) {
   // 帧检：把"片子有没有毛病"变成一张带帧号的清单，而不是靠眼睛。
   ctx.effect(() => registerHostTool(defineTool({
     name: 'motion_qa',
-    description: '成片帧检：不靠眼睛，靠像素和响度。inspect 立刻检一遍（默认检工程里的 .out/film.mp4，也可以指定 file）：帧数对不对、有没有黑场、有没有静止太久、有没有单帧闪烁、有没有空白帧、画面有没有顶到边、音轨有没有削波。report 读上次的结果。每条问题都带帧号和镜头号，能直接回去改对应场景。',
+    description: '成片帧检：不靠眼睛，靠像素和响度。inspect 立刻检一遍（默认检工程里的 .out/film.mp4，也可以指定 file）：帧数对不对、有没有黑场、有没有静止太久、有没有整镜没在动（动能量，抓缓慢推镜式的翻页感）、有没有只剩底色没内容（边密度，抓空白帧抓不到的渐变空画面）、有没有单帧闪烁、有没有空白帧、画面有没有顶到边、音轨有没有削波。report 读上次的结果。每条问题都带帧号和镜头号，能直接回去改对应场景。',
     parameters: {
       action: { type: 'string', enum: ['inspect', 'report'], required: true },
       path: { type: 'string' }, nodeId: { type: 'string' }, page: { type: 'number' },

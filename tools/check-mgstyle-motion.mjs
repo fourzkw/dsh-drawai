@@ -19,7 +19,7 @@ let passed = 0
 const ok = (name) => { passed += 1; console.log('  ✓ ' + name) }
 
 // 1. 每种风格都有动效画像
-assert.equal(catalog.styles.length, 14)
+assert.equal(catalog.styles.length, 15)
 for (const style of catalog.styles) {
   assert.ok(style.motion && typeof style.motion === 'object', style.slug + ' 缺 motion')
   assert.ok(['wipe', 'cut'].includes(style.motion.transitions), style.slug + ' 的 transitions 不合法')
@@ -28,7 +28,7 @@ for (const style of catalog.styles) {
     assert.ok(style.motion.motionBlur.shutter > 0, style.slug + ' motionBlur.shutter 不合法')
   }
 }
-ok('14 种风格都带 motion（transitions / impact / camera / motionBlur / grain / secondary）')
+ok('15 种风格都带 motion（transitions / impact / camera / motionBlur / grain / secondary）')
 
 // 2. 形变这支的具体值（catches 正则跑偏）
 const morph = resolveMgStyle(catalog, '08-morph').motion
