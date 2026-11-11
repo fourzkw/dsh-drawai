@@ -13,7 +13,7 @@
  *
  * 用法：node tools/check-host.mjs
  */
-import { mkdirSync, existsSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { createRequire } from 'node:module'
@@ -67,6 +67,8 @@ const WORKSPACE = 'D:\\fake-workspace'
 const SESSION = { header: { cwd: WORKSPACE } }
 /** 第二个会话：工作区指向一个**真实**目录（list 用 node:readdir，内存桩骗不过它）。 */
 const SESSION2 = { header: { cwd: '' } }
+/** 第三个会话：工作区指向仓库内的真实临时目录 —— diagram_export 真的往盘上写文件。 */
+const SESSION3 = { header: { cwd: '' } }
 
 /**
  * 真实 DSH 的 ctx.fs 里，resolve() 返回的是一个**目标句柄**（绝对路径是它的一部分），
@@ -104,8 +106,17 @@ const fs = {
   async writeText(target, text) {
     store.set(target.path, text)
   },
-  contains() {
-    return true
+  // 真实 fs-local 的 contains() 内部走 processPath：字符串没有 targetKey，processPath 回
+  // 的是字面量 "undefined"，于是一定判越界。旧版桩一律 return true，把 issue #40 那种
+  // 「把路径串当成目标句柄传进 contains」的写法整个盖住了 —— 这里按真实语义建模。
+  contains(rootTarget, target) {
+    const norm = (value) => {
+      const text = value !== null && typeof value === 'object' ? String(value.path) : 'undefined'
+      return text.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+    }
+    const root = norm(rootTarget)
+    const path = norm(target)
+    return root.length > 0 && (path === root || path.startsWith(root + '/'))
   },
 }
 
@@ -130,6 +141,7 @@ const ctx = {
     get(id) {
       if (id === 's1') return SESSION
       if (id === 's2') return SESSION2
+      if (id === 's3') return SESSION3
       return undefined
     },
   },
@@ -2411,6 +2423,43 @@ console.log('\nAI 富文本整体字色和字号')
   let rejected = false
   try { await apply([{ op: 'setStyle', id: 'shorthand', fontSize: 24 }], { layout: 'none' }) } catch (error) { rejected = /font 简写/.test(error.message) }
   ok(rejected && store.get(WORKSPACE + '\\doc.drawio') === before, '无法安全保留简写字体时不写入')
+}
+console.log('\ndiagram_export 的工作区闸门（issue #40）')
+{
+  // 导出是唯一一处「真的用 node:fs 写盘」的工具，所以工作区给一个仓库内的临时目录。
+  const exportTool = tools.get('diagram_export')
+  const outDir = resolve(root, '.tmp', 'check-export')
+  rmSync(outDir, { recursive: true, force: true })
+  mkdirSync(outDir, { recursive: true })
+  SESSION3.header.cwd = outDir
+  const exec3 = { agent: { id: 's3' } }
+  const canvasPath = resolve(outDir, 'doc.drawio')
+  store.set(canvasPath, buildMxfile({ version: 2, nodes: [
+    { id: 'a', x: 0, y: 0, w: 120, h: 60, label: '开始' },
+    { id: 'b', x: 300, y: 0, w: 120, h: 60, label: '结束' },
+  ], edges: [{ id: 'e1', from: 'a', to: 'b' }] }).text)
+  const exported = resolve(outDir, 'doc.svg')
+  let error = ''
+  let result
+  try {
+    result = await exportTool.execute({ path: canvasPath, format: 'svg' }, exec3)
+  } catch (caught) {
+    error = caught.message
+  }
+  ok(error === '', '默认导出不再被误判越界：' + error)
+  ok(existsSync(exported) && readFileSync(exported, 'utf8').startsWith('<?xml'), '导出件真的落在画布旁边')
+  ok(result !== undefined && result.path === 'doc.svg', '结果里的 path 是工作区相对路径：' + (result === undefined ? '(无结果)' : result.path))
+  // 闸门修好不等于把围栏拆了：工作区外的 out 仍然必须被拒绝，而且不能留下文件。
+  const outside = resolve(outDir, '..', 'outside.svg')
+  let blocked = ''
+  try {
+    await exportTool.execute({ path: canvasPath, format: 'svg', out: outside }, exec3)
+  } catch (caught) {
+    blocked = caught.message
+  }
+  ok(/导出路径超出工作区/.test(blocked), '工作区外的 out 仍然被拒绝：' + blocked)
+  ok(!existsSync(outside), '被拒绝的导出没有留下文件')
+  rmSync(outDir, { recursive: true, force: true })
 }
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1
