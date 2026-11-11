@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import * as motionCore from '../src/motion-core.js'
+import { composeClientBody } from './build.mjs'
 
 const state = []; let cursor = 0
 const React = {
@@ -61,4 +62,30 @@ byLabel(tree,'信息').props.onClick();cursor=0;tree=VideoNodeToolbar(toolbarPro
 assert.equal(byLabel(tree,'信息').props['aria-expanded'],true)
 assert.ok(all(tree).some(item=>item.props.role==='status'))
 assert.ok(all(tree).some(item=>item.children.includes('空视频节点')))
+// ── issue #39：视频参数浮层必须锚在整条 footer 上、左右贴边 ──────────────────
+// 以前浮层挂在 chip 那一格（footer 的 auto 列，约 150px 宽）上，右锚 + 固定 200px 宽
+// 且没有 box-sizing，实际 226px 必然向左越出 composer 边框，被侧栏裁掉一半（标签全丢）。
+const css = composeClientBody()
+function effectiveDecls(selector) {
+  const decls = new Map()
+  const rule = /([^{}]+)\{([^{}]*)\}/g
+  for (let hit = rule.exec(css); hit !== null; hit = rule.exec(css)) {
+    if (!hit[1].split(',').some((item) => item.trim() === selector)) continue
+    for (const part of hit[2].split(';')) {
+      const index = part.indexOf(':')
+      if (index > 0) decls.set(part.slice(0, index).trim(), part.slice(index + 1).trim())
+    }
+  }
+  return decls
+}
+const menu = effectiveDecls('.drawai-video-settings-menu')
+assert.equal(menu.get('left'), '0', '浮层左沿要贴住容器，不能再挂在窄格子上向右锚')
+assert.equal(menu.get('right'), '0', '浮层右沿要贴住容器')
+assert.equal(menu.get('width'), 'auto', '浮层宽度不能再写死成 200px')
+assert.equal(menu.get('box-sizing'), 'border-box', '12px padding 不能把浮层再撑宽 26px')
+assert.match(menu.get('bottom') || '', /100%/, '浮层仍然贴着触发 chip 向上开')
+assert.match(menu.get('max-height') || '', /min\(/, '矮侧栏里浮层高度要有上限')
+assert.notEqual(effectiveDecls('.drawai-video-settings').get('position'), 'relative', '定位上下文要交给 footer，不能是 chip 那一格')
+assert.equal(effectiveDecls('.drawai-video-composer-footer').get('position'), 'relative', 'footer 必须是浮层的定位上下文')
+assert.equal(effectiveDecls('.drawai-video-settings-menu>label').get('flex-wrap'), 'wrap', '窄宽度下标签与控件要能换行')
 console.log('Motion UI: description, settings, references, task ownership, cancellation and scene editing passed.')
