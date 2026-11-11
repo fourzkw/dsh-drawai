@@ -617,6 +617,12 @@ console.log('\n地址解析：要认得出绝对路径（否则 tab 永久停在
     ['D:/ws/sub/a.drawio', 'D:/ws/sub/a.drawio'],
     ['dsh-resource://file/session/abc/', undefined],
     ['', undefined],
+    // #41：中文路径在地址里是 URL 编码的，要解回原文，否则读的是不存在的文件
+    ['%E6%B5%8B%E8%AF%95/%E7%94%BB%E5%B8%83.drawio', '测试/画布.drawio'],
+    ['dsh-resource://file/session/abc/%E6%B5%8B%E8%AF%95/%E7%94%BB%E5%B8%83.drawio', '测试/画布.drawio'],
+    ['file:///D:/ws/%E6%B5%8B%E8%AF%95.drawio', 'D:/ws/测试.drawio'],
+    ['测试/画布.drawio', '测试/画布.drawio'],
+    ['ws/100%.drawio', 'ws/100%.drawio'],
   ]
   for (const [addr, want] of cases) {
     const got = internals.pathFromAddress(addr)
