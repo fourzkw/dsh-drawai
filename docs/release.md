@@ -1,5 +1,11 @@
 # 发布与收录流程 / Release & listing
 
+## 0.4.5 发布内容（2026-11-11）
+
+- 修 `diagram_export` 永远报「导出路径超出工作区」：工作区闸门把 `ctx.fs.resolve()` 拿到的**目标句柄**和 `ctx.fs.contains()` 需要的路径混成了一个值。`target` 是 `node:path` 拼出来的字符串，`contains()` 内部 `processPath()` 对字符串取 `targetKey` 得到 `undefined`，`relative()` 于是永远判成越界——与真实路径无关，SVG/PNG、默认输出目录、纯英文目录都一样失败。改为两边都先 `resolve()` 成句柄再 `contains()`；`relative()` 要的字符串单独从根句柄 `processPath()` 取（#40）。
+- 修视频参数浮层（`.drawai-video-settings-menu`）显示不完整：浮层原本锚在 composer 底部那个只剩 chip 宽度的网格格子里，`right:0` + 固定 `width:200px` 且没有 `box-sizing`，实际 226px 必然向左伸出侧栏被裁；又因为向上展开，直接压住提示词与面板标题。改为锚在整条 `.drawai-video-composer-footer` 上（`position:relative`），浮层 `left:0;right:0;width:auto;box-sizing:border-box`，横向不再越过 composer 内容宽，`max-height:min(260px, 50vh)` 兜住纵向，窄宽度下 label 允许换行（#39）。
+- 回归：`check-host` 新增 `diagram_export` 工作区闸门用例（假 fs 按真实 `processPath` 语义判越界，旧构建下 3 条按预期失败）；`check-motion-ui` 新增浮层几何的 CSS 静态断言（锚点、左右贴边、`border-box`、不再固定 200px）。
+
 ## 0.4.4 发布内容（2026-11-10）
 
 - 新增 `diagram_export`：在宿主侧把 `.drawai` / `.drawio` 直接导成 SVG 或 PNG，不需要打开画布侧栏。QQ、CLI 这类没有画布的通道里，成品图终于拿得到；`diagram_read {render:true}` 与 `diagram_apply {op:"export"}` 保持原样——能开画布时仍走浏览器那一半，保真度更高（#23）。
