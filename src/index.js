@@ -4422,8 +4422,13 @@ function sanitizeNewName(raw) {
       if (/\.(drawio|drawai)$/i.test(target)) {
         throw new Error('导出不能覆盖画布文件：' + target + '；out 请用 .svg / .png 结尾')
       }
-      const root = await ctx.fs.resolve(workspaceRootOf(sessionId))
-      if (!ctx.fs.contains(root, target)) throw new Error('导出路径超出工作区：' + target)
+      // contains()/processPath() 吃的是**目标句柄**，不是路径串：传裸字符串时 processPath
+      // 会退化成字面量 "undefined"，relative() 于是永远判成越界 —— 任何路径都导不出去（issue #40）。
+      // 所以闸门用句柄，下面 relativePath() 要的字符串单独从 rootTarget 取。
+      const rootTarget = await ctx.fs.resolve(workspaceRootOf(sessionId))
+      const root = ctx.fs.processPath(rootTarget)
+      const outTarget = await ctx.fs.resolve(target)
+      if (!ctx.fs.contains(rootTarget, outTarget)) throw new Error('导出路径超出工作区：' + target)
       await mkdir(dirnamePath(target), { recursive: true })
 
       let width = built.width
