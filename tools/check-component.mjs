@@ -331,6 +331,8 @@ console.log('\n工具条：按类型合并为下拉菜单')
       redo: () => {},
       setViewOverride: () => {},
       setMode: () => {},
+      // 画布外观切换：现在走一个把 state 与 prefs 一起写的具名处理函数。
+      toggleCanvasMode: () => {},
       setNonce: () => {},
       setSelectedIds: () => {},
       setExportRequest: () => {},

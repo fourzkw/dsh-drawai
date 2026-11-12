@@ -60,6 +60,9 @@ new Function('module', 'exports', 'require', 'window', 'document', clientBody)(m
 const internals = module.exports.__routeInternals
 const renderDiagram = internals.renderDiagram
 if (typeof renderDiagram !== 'function') throw new Error('renderDiagram 没有导出，无法做渲染自测')
+// 选中色不在这里再抄一份字面量：直接用 client.js 里那一个常量（换强调色时测试不用跟着改）。
+const ACCENT = internals.ACCENT
+if (typeof ACCENT !== 'string' || ACCENT.length === 0) throw new Error('ACCENT 没有导出，无法断言选中色')
 
 const migrationXml = buildMxfile({ version: 2, nodes: [
   { id: 'migration-text', label: '迁移文字', x: 10, y: 20, w: 100, h: 40, style: 'text;fontColor=#334455;' },
@@ -273,7 +276,7 @@ console.log('\n连线的画法：style 键（dashed / dashPattern / endArrow / s
   const d3 = { nodes: doc.nodes, edges: [{ id: 'e1', from: 'a', to: 'b', style: stylePatch(DEFAULT_EDGE_STYLE, { strokeColor: '#b85450' }) }] }
   const tree3 = renderDiagram(d3, 'light', 'u1', { current: null }, { selectedIds: ['e1'] }, null)
   const sel = edgePaths(tree3)
-  ok(sel[sel.length - 1].props.stroke === '#1a73e8', '选中时用选中色，而不是边的自定义色')
+  ok(sel[sel.length - 1].props.stroke === ACCENT, '选中时用选中色，而不是边的自定义色')
   ok(sel[sel.length - 1].props.strokeDasharray === undefined, '选中不改线型')
 
   // 起点箭头的 marker 必须在 defs 里真的存在，否则 SVG 会静默不画（最难查的一种"没反应"）。
