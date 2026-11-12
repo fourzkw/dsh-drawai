@@ -24,10 +24,10 @@ DrawAI 在右侧栏提供画布，也向对话中的模型提供读图、改图�
 
 ```powershell
 # DeepSeek Harness 桌面版
-dsh plugin --profile desktop add dsh-drawai@0.4.5
+dsh plugin --profile desktop add dsh-drawai@0.4.6
 
 # 使用 dsh web 时，安装到 web profile
-dsh plugin --profile web add dsh-drawai@0.4.5
+dsh plugin --profile web add dsh-drawai@0.4.6
 ```
 
 桌面版和 Web 分别管理插件，只需运行需要的命令。安装完成后**完全重启对应的宿主**，然后在右侧栏找到「DrawAI 画布」。
@@ -46,6 +46,7 @@ dsh plugin --profile desktop update dsh-drawai@latest
 > 0.4.3 把内嵌技能拆成「画布」与「视频」两条，做视频不必先被读写画布那句挡住，详见 [发布说明](docs/release.md)。
 > 0.4.4 新增 `diagram_export`，没有画布侧栏的通道也能在宿主侧导成 SVG / PNG；同时修了拐弯连线在预览里糊成黑块，整片风格增至 15 种，详见 [发布说明](docs/release.md)。
 > 0.4.5 修 `diagram_export` 在任何路径都报「导出路径超出工作区」（#40），以及视频参数浮层越出侧栏被裁、盖住提示词区（#39），详见 [发布说明](docs/release.md)。
+> 0.4.6 修中文/含 URL 编码路径的画布打开后显示空白（#41），以及 `motion_audio_verify` 在 FFmpeg 9 下报 `Unrecognized option 'vsync'`（#43），详见 [发布说明](docs/release.md)。
 
 ## 第一次使用
 
