@@ -331,6 +331,8 @@ console.log('\n工具条：按类型合并为下拉菜单')
       redo: () => {},
       setViewOverride: () => {},
       setMode: () => {},
+      // 画布外观切换：现在走一个把 state 与 prefs 一起写的具名处理函数。
+      toggleCanvasMode: () => {},
       setNonce: () => {},
       setSelectedIds: () => {},
       setExportRequest: () => {},
@@ -728,7 +730,7 @@ console.log('\n右键菜单：几类只显示当前值，并排成一行')
   ok(/function railHoverTipLabel\(/.test(src), '最后一级用 railHoverTipLabel 出名称')
   ok(/drawai-rail-tip/.test(src), '最后一级名称气泡有 .drawai-rail-tip 样式')
   ok(/scheduleCloseRailFamilyPanel/.test(src), '离开后延迟关闭气泡')
-  ok(/background:#ffffff/.test(src) && /border-radius:14px/.test(src), '元素选择气泡是白色圆角浮层')
+  ok(/background:var\(--dsw-alias-bg-overlay,#ffffff\)/.test(src) && /border-radius:var\(--drawai-radius-lg\)/.test(src), '元素选择气泡是白色圆角浮层（走宿主底色 + 大圆角 token）')
   ok(/railOpenFamily/.test(src), '气泡开关由悬停状态 railOpenFamily 控制（不靠选中/放置自动铺开）')
   ok(/hoverHandlers\(entry\.family\)/.test(src), '各族入口都挂悬停（末级出名称、多变体出同族）')
   ok(/family: 'edge'/.test(src) && /EDGE_LINE_LIBRARY/.test(src), '线条收成一族（EDGE_LINE_LIBRARY）')

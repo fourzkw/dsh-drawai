@@ -442,6 +442,15 @@ const LHEIGHT = 14
 //
 // 注意这里**只有"缺省"一套色**：v1.1 起颜色是文档的一部分（style 键 fillColor/strokeColor），
 // 主题只在文档没写颜色时补缺省 —— 这与 drawio 一致（换主题不改文档里的颜色，只改画布与网格）。
+// 画布强调色：选中框 / 手柄 / 端口 / 引导线 / 连线高亮都走这里。
+// 沿用 drawio 的 Google 蓝 —— 这是使用者选定的画布选中色。
+// UI 侧的强调色（按钮/焦点环/选中态）也收在 CSS 的 `--drawai-accent` 里，两处同值；
+// 改色要同时改这里和那条 token（CSS 在下方 const CSS 数组的 :root 里）。
+const ACCENT = '#1a73e8'
+// 超链接文字色：drawio 链接的默认蓝，属于**文档内容**（会进导出），不随主题/强调色变。
+// 与 ACCENT 同值纯属巧合：一个是画布控件色，一个是节点文字的链接色，各改各的。
+const LINK_BLUE = '#1a73e8'
+
 const LIGHT = {
   page: '#ffffff',
   text: '#000000',
@@ -477,23 +486,23 @@ const DARK = {
 let client = null
 
 const CSS = [
-  '.drawai-audio-panel{font-size:12px;line-height:1.5}.drawai-audio-panel button,.drawai-audio-panel input,.drawai-audio-panel select{font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l2,#dedfe4);border-radius:6px;background:var(--dsw-alias-bg-layer-1,#fff);padding:5px 7px;box-sizing:border-box}.drawai-audio-panel button{margin:4px 4px 4px 0;cursor:pointer}.drawai-audio-panel button:hover{background:#7c6df217}.drawai-audio-panel button:disabled{opacity:.5;cursor:wait}.drawai-audio-panel label{min-height:30px}.drawai-audio-panel details{border-top:1px solid #8883;margin-top:12px;padding-top:10px}.drawai-audio-panel summary{cursor:pointer;margin-bottom:8px}.drawai-audio-panel p{opacity:.75}.drawai-audio-panel input[type=checkbox]{vertical-align:middle}',
-  '.drawai-trace-pin{border:0;border-radius:6px;background:transparent;color:inherit;padding:5px 8px;cursor:pointer;font:inherit;font-size:11px}.drawai-trace-pin:hover,.drawai-trace-pin:focus-visible{background:var(--dsw-alias-bg-hover,#eef0f5)}.drawai-trace-card-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:600;margin-bottom:10px}.drawai-trace-card-actions{display:flex;gap:2px}.drawai-video-task-card{position:absolute;right:12px;bottom:36px;width:300px;max-width:calc(100% - 24px);box-sizing:border-box;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:0 6px 24px #20273820;z-index:950}.drawai-video-task-card progress{width:100%;height:5px;display:block}.drawai-video-task-detail{font-size:12px;line-height:1.5;margin-top:10px;overflow-wrap:anywhere}.drawai-video-task-detail small{display:block;opacity:.65;margin-top:4px}.drawai-video-task-detail .drawai-btn{margin-top:8px}',
+  '.drawai-audio-panel{font-size:var(--drawai-text-sm);line-height:1.5}.drawai-audio-panel button{box-sizing:border-box;font:inherit;margin:4px 4px 4px 0;cursor:pointer}.drawai-audio-panel button:hover{border-color:var(--drawai-accent);background:var(--drawai-hover)}.drawai-audio-panel button:disabled{opacity:var(--drawai-disabled-opacity);cursor:wait}.drawai-audio-panel label{min-height:30px}.drawai-audio-panel details{border-top:1px solid #8883;margin-top:12px;padding-top:10px}.drawai-audio-panel summary{cursor:pointer;margin-bottom:8px}.drawai-audio-panel p{opacity:.75}.drawai-audio-panel input[type=checkbox]{vertical-align:middle}',
+  '.drawai-trace-pin{border:0;border-radius:var(--drawai-radius-md);background:transparent;color:inherit;padding:6px 8px;cursor:pointer;font:inherit;font-size:var(--drawai-text-xs)}.drawai-trace-pin:hover,.drawai-trace-pin:focus-visible{background:var(--dsw-alias-bg-hover,#eef0f5)}.drawai-trace-card-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:var(--drawai-text-sm);font-weight:600;margin-bottom:10px}.drawai-trace-card-actions{display:flex;gap:2px}.drawai-video-task-card{position:absolute;right:12px;bottom:36px;width:300px;max-width:calc(100% - 24px);box-sizing:border-box;padding:12px 12px;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:var(--drawai-radius-lg);background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:var(--drawai-elevation-2);z-index:950}.drawai-video-task-card progress{width:100%;height:5px;display:block}.drawai-video-task-detail{font-size:var(--drawai-text-sm);line-height:1.5;margin-top:10px;overflow-wrap:anywhere}.drawai-video-task-detail small{display:block;opacity:.65;margin-top:4px}.drawai-video-task-detail .drawai-btn{margin-top:8px}',
   // 用绝对定位铺满宿主给的那一格，**不用 height:100%**。
   //
   // 这里连续出过两次"画布没高度"（先是一条，后来整块消失）：根因都是
   // `height:100%` 要求父级有**确定高度**，而宿主给的容器不保证这一点。
   // inset:0 只要求父级是定位元素，而 .drawai-pane 已经是（我们自己的 CSS），
   // 所以这条链子只依赖我们自己，不再依赖宿主怎么排。
-  '.drawai-root{display:flex;flex-direction:column;position:absolute;top:0;left:0;right:0;bottom:0;min-height:0;font-size:12px;color:var(--dsw-alias-label-primary,#e6e6e6);outline:none}',
+  '.drawai-root{display:flex;flex-direction:column;position:absolute;top:0;left:0;right:0;bottom:0;min-height:0;font-size:var(--drawai-text-sm);color:var(--dsw-alias-label-primary,#e6e6e6);outline:none}',
   '.drawai-head{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--dsw-alias-border-l1,#333)}',
   // 多画布标签条。放在工具条**下面**一行：工具条是"对这张画布做什么"，
   // 标签条是"现在看哪张画布"，两者职责不同，混在一行会挤成一团（右栏本来就窄）。
   '.drawai-tabs{display:flex;gap:4px;padding:4px 6px 0;overflow-x:auto;border-bottom:1px solid var(--dsw-alias-border-l1,#333);flex:0 0 auto}',
-  '.drawai-tab{display:flex;align-items:center;gap:2px;flex:0 0 auto;border:1px solid var(--dsw-alias-border-l2,#444);border-bottom:none;border-radius:6px 6px 0 0;background:transparent;padding:1px 4px 1px 8px}',
-  '.drawai-tab.on{background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.08));border-color:var(--dsw-alias-brand-primary,#4c8dff)}',
-  '.drawai-tab-name{border:none;background:transparent;color:inherit;font-size:12px;cursor:pointer;padding:2px 2px;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}',
-  '.drawai-tab-x{border:none;background:transparent;color:var(--dsw-alias-label-secondary,#9aa0a6);cursor:pointer;font-size:13px;line-height:1;padding:0 3px;border-radius:3px}',
+  '.drawai-tab{display:flex;align-items:center;gap:2px;flex:0 0 auto;border:1px solid var(--dsw-alias-border-l2,#444);border-bottom:none;border-radius:var(--drawai-radius-md) var(--drawai-radius-md) 0 0;background:transparent;padding:2px 4px 2px 8px}',
+  '.drawai-tab.on{background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.08));border-color:var(--drawai-accent)}',
+  '.drawai-tab-name{border:none;background:transparent;color:inherit;font-size:var(--drawai-text-sm);cursor:pointer;padding:2px 2px;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis}',
+  '.drawai-tab-x{border:none;background:transparent;color:var(--dsw-alias-label-secondary,#9aa0a6);cursor:pointer;font-size:var(--drawai-text-md);line-height:1;padding:0 4px;border-radius:var(--drawai-radius-sm)}',
   '.drawai-tab-x:hover{background:rgba(255,120,120,.25);color:inherit}',
   // 标签区外壳 = 整个组件根，**用绝对定位铺满宿主给的位置**。
   //
@@ -505,48 +514,48 @@ const CSS = [
   '.drawai-panes{position:relative;flex:1;min-height:0}',
   // 空舞台：一张画布都没打开时的提示（工作栏在它上面，仍然可用）。
   '.drawai-empty{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:16px;text-align:center}',
-  '.drawai-empty-title{font-size:13px;color:var(--dsw-alias-label-primary,#e6e6e6)}',
-  '.drawai-empty-hint{font-size:12px;color:var(--dsw-alias-label-secondary,#9aa0a6)}',
+  '.drawai-empty-title{font-size:var(--drawai-text-md);color:var(--dsw-alias-label-primary,#e6e6e6)}',
+  '.drawai-empty-hint{font-size:var(--drawai-text-sm);color:var(--dsw-alias-label-secondary,#9aa0a6)}',
   '.drawai-pane{position:absolute;top:0;left:0;right:0;bottom:0;flex-direction:column;min-height:0}',
   // 画布 + 右侧常驻元素条：横排，条不挤工具栏宽度（飞书侧栏在左，我们放右边）。
   '.drawai-body{display:flex;flex:1;min-height:0;min-width:0;position:relative}',
   '.drawai-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,Consolas,monospace;color:var(--dsw-alias-label-secondary,#9aa0a6)}',
-  '.drawai-btn{border:1px solid var(--dsw-alias-border-l2,#444);background:var(--dsw-alias-bg-layer-2,rgba(255,255,255,.06));color:inherit;border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer;white-space:nowrap}',
-  '.drawai-btn:hover{border-color:var(--dsw-alias-brand-primary,#4c8dff)}',
+  '.drawai-btn{padding:2px 8px;cursor:pointer;white-space:nowrap}',
+  '.drawai-btn:hover{border-color:var(--drawai-accent);background:var(--drawai-hover)}',
   // 视口由我们自己管（viewBox），所以不再让容器滚动 —— 否则滚轮会同时滚动和缩放。
   // user-select:none —— 拖动平移时不能把图里的文字一起选中（观感很差）。
   // touch-action:none —— 我们自己处理 pointer 事件，别让浏览器再做触摸滚动/缩放。
   '.drawai-canvas{flex:1;min-height:0;min-width:0;overflow:hidden;position:relative;user-select:none;-webkit-user-select:none;touch-action:none}',
-  '.drawai-note{padding:4px 8px;color:var(--dsw-alias-label-secondary,#9aa0a6);border-top:1px solid var(--dsw-alias-border-l1,#333);user-select:text;-webkit-user-select:text;cursor:text}.drawai-err{user-select:text;-webkit-user-select:text;cursor:text}.drawai-status-note{display:flex;align-items:flex-start;gap:8px}.drawai-status-text{flex:1;min-width:0;max-height:120px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}.drawai-status-copy{flex:none;border:1px solid var(--dsw-alias-border-l1,#888);border-radius:4px;background:transparent;color:inherit;padding:2px 6px;cursor:pointer;user-select:none}',
+  '.drawai-note{padding:4px 8px;color:var(--dsw-alias-label-secondary,#9aa0a6);border-top:1px solid var(--dsw-alias-border-l1,#333);user-select:text;-webkit-user-select:text;cursor:text}.drawai-err{user-select:text;-webkit-user-select:text;cursor:text}.drawai-status-note{display:flex;align-items:flex-start;gap:8px}.drawai-status-text{flex:1;min-width:0;max-height:120px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere}.drawai-status-copy{flex:none;border:1px solid var(--dsw-alias-border-l1,#888);border-radius:var(--drawai-radius-sm);background:transparent;color:inherit;padding:2px 6px;cursor:pointer;user-select:none}',
   // 右侧元素条（飞书侧栏观感）：浅底 + 线稿图标 + 宽松间距；同族变体进侧面板。
   '.drawai-rail{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px;border-left:1px solid var(--dsw-alias-border-l1,rgba(0,0,0,.08));background:var(--dsw-alias-bg-base,#ffffff);overflow-y:auto;overflow-x:hidden}',
   '.drawai-rail-cap{width:20px;height:1px;margin:0 0 4px;background:var(--dsw-alias-border-l1,rgba(0,0,0,.12));flex:0 0 auto}',
-  '.drawai-rail-chip{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border:none;border-radius:8px;background:transparent;padding:0;cursor:pointer;color:var(--dsw-alias-label-primary,#333333);flex:0 0 auto}',
+  '.drawai-rail-chip{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border:none;border-radius:var(--drawai-radius-md);background:transparent;padding:0;cursor:pointer;color:var(--dsw-alias-label-primary,#333333);flex:0 0 auto}',
   '.drawai-rail-chip:hover{background:rgba(0,0,0,.06)}',
-  '.drawai-rail-chip.on{background:rgba(0,0,0,.08);color:var(--dsw-alias-brand-primary,#3370ff)}',
+  '.drawai-rail-chip.on{background:var(--drawai-accent-soft);color:var(--drawai-accent)}',
   '.drawai-rail-chip.dim{opacity:.35}',
   '.drawai-rail-chip svg{display:block}',
   '.drawai-rail-sep{width:20px;height:1px;margin:4px 0;background:var(--dsw-alias-border-l1,rgba(0,0,0,.12));flex:0 0 auto}',
   // 同族变体：悬停族入口时在左侧弹出白色气泡（不铺满侧栏高度）。
   '.drawai-rail-wrap{position:relative;flex:0 0 48px;display:flex;flex-direction:row-reverse;align-items:stretch;min-height:0}',
   '.drawai-rail-wrap>.drawai-rail{flex:0 0 48px}',
-  '.drawai-rail-panel{position:absolute;right:54px;z-index:12;display:grid;grid-template-columns:repeat(3,44px);gap:6px;padding:10px;border:1px solid rgba(0,0,0,.08);border-radius:14px;background:#ffffff;box-shadow:0 8px 28px rgba(0,0,0,.12),0 0 0 1px rgba(0,0,0,.02);max-height:min(320px,70%);overflow-y:auto}',
-  '.drawai-rail-panel-title{grid-column:1/-1;font-size:11px;color:#8f959e;padding:0 2px 2px;user-select:none;white-space:nowrap}',
-  '.drawai-rail-panel .drawai-rail-chip{width:44px;height:34px;color:#333}',
+  '.drawai-rail-panel{position:absolute;right:54px;z-index:12;display:grid;grid-template-columns:repeat(3,44px);gap:6px;padding:10px;border:1px solid rgba(0,0,0,.08);border-radius:var(--drawai-radius-lg);background:var(--dsw-alias-bg-overlay,#ffffff);box-shadow:var(--drawai-elevation-2);max-height:min(320px,70%);overflow-y:auto}',
+  '.drawai-rail-panel-title{grid-column:1/-1;font-size:var(--drawai-text-xs);color:#8f959e;padding:0 2px 2px;user-select:none;white-space:nowrap}',
+  '.drawai-rail-panel .drawai-rail-chip{width:44px;height:34px;color:var(--dsw-alias-label-primary,#282c35)}',
   '.drawai-rail-panel .drawai-rail-chip:hover{background:rgba(0,0,0,.06)}',
-  '.drawai-rail-panel .drawai-rail-chip.on{background:rgba(51,112,255,.1);color:#3370ff}',
+  '.drawai-rail-panel .drawai-rail-chip.on{background:var(--drawai-accent-soft);color:var(--drawai-accent)}',
   // 最后一级（文字/分区/SVG/图片/独立线…）：悬停只浮名称气泡，不铺同族形状格。
-  '.drawai-rail-tip{position:absolute;right:54px;z-index:12;padding:6px 10px;border:1px solid rgba(0,0,0,.08);border-radius:8px;background:#ffffff;box-shadow:0 4px 16px rgba(0,0,0,.12),0 0 0 1px rgba(0,0,0,.02);font-size:12px;line-height:1.3;color:#333;white-space:nowrap;pointer-events:none;user-select:none}',
+  '.drawai-rail-tip{position:absolute;right:54px;z-index:12;padding:6px 10px;border:1px solid rgba(0,0,0,.08);border-radius:var(--drawai-radius-md);background:var(--dsw-alias-bg-overlay,#ffffff);box-shadow:var(--drawai-elevation-1);font-size:var(--drawai-text-sm);line-height:1.3;color:var(--dsw-alias-label-primary,#282c35);white-space:nowrap;pointer-events:none;user-select:none}',
   '.drawai-canvas.placing{cursor:crosshair}',
   '.drawai-err{padding:8px;color:var(--dsw-alias-state-error-primary,#ff6b6b);white-space:pre-wrap}',
   // 交互态
   '.drawai-node{cursor:move}',
   '.drawai-node-hit{cursor:pointer}',
   '.drawai-edge-hit{cursor:pointer;stroke:transparent;stroke-width:12;fill:none}',
-  '.drawai-sel{stroke:#1a73e8 !important;stroke-width:2 !important}',
+  '.drawai-sel{stroke:var(--drawai-accent,#1a73e8) !important;stroke-width:2 !important}',
   '.drawai-handle{cursor:crosshair}',
   // 「编辑数据」面板里的多行输入：等宽字体、跟着菜单宽度走。
-  '.drawai-data{width:100%;box-sizing:border-box;font:12px/1.5 ui-monospace,Consolas,monospace;color:inherit;background:transparent;border:1px solid currentColor;border-radius:4px;padding:4px;resize:vertical}',
+  '.drawai-data{width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:var(--drawai-text-sm);line-height:1.5;color:inherit;background:transparent;border:1px solid currentColor;border-radius:var(--drawai-radius-sm);padding:4px;resize:vertical}',
   '.drawai-link{cursor:crosshair}',
   // 连线拖拽的实时预览（路由后的正交预览线 + 落点提示）。
   // 这两条路径都是纯视觉件，绝不能挡住命中测试 —— .drawai-edge-hit 的 12px 透明带子、
@@ -564,31 +573,31 @@ const CSS = [
   // 文生图（imagegen）面板：默认只露「提示词 / 比例 / 生成」三样，宽高·步数·种子·负向提示词
   // 折进「更多参数」。参数一屏铺开会把「写提示词→点生成」这条主路径淹掉，所以默认收起。
   '.drawai-imagegen-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0 0 8px}',
-  '.drawai-imagegen-head .drawai-popover-title{margin:0;font-size:13px}',
+  '.drawai-imagegen-head .drawai-popover-title{margin:0;font-size:var(--drawai-text-md)}',
   // 服务徽标：只说"在哪家服务上出图"，点一下去设置里换 —— 那句解释服务的长文案不再占版面。
-  '.drawai-imagegen-provider{flex:0 1 auto;min-width:0;border:0;border-radius:999px;background:var(--dsw-alias-bg-layer-2,#f1f3f6);color:var(--dsw-alias-label-secondary,#737a86);font:inherit;font-size:11px;line-height:1.2;padding:3px 9px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}',
+  '.drawai-imagegen-provider{flex:0 1 auto;min-width:0;border:0;border-radius:var(--drawai-radius-pill);background:var(--dsw-alias-bg-layer-2,#f1f3f6);color:var(--dsw-alias-label-secondary,#737a86);font:inherit;font-size:var(--drawai-text-xs);line-height:1.2;padding:4px 10px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}',
   '.drawai-imagegen-provider:hover{background:var(--dsw-alias-bg-layer-3,#e6e9ef);color:var(--dsw-alias-label-primary,#282c35)}',
-  '.drawai-imagegen-prompt{box-sizing:border-box;width:100%;min-width:0;min-height:68px;max-height:180px;resize:vertical;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:8px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;padding:7px 8px;font:12px/1.55 inherit;outline:none;display:block}',
-  '.drawai-imagegen-prompt:focus{border-color:#386bff;box-shadow:0 0 0 3px #386bff1f}',
+  '.drawai-imagegen-prompt{box-sizing:border-box;width:100%;min-width:0;min-height:68px;max-height:180px;resize:vertical;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:var(--drawai-radius-md);background:var(--dsw-alias-bg-overlay,#fff);color:inherit;padding:8px 8px;font-family:inherit;font-size:var(--drawai-text-sm);line-height:1.55;outline:none;display:block}',
+  '.drawai-imagegen-prompt:focus{border-color:var(--drawai-accent);box-shadow:var(--drawai-focus-ring)}',
   // 比例 chips 借 .drawai-option-strip（分段控件）的壳，只把它偏大的字与高收小一档。
   '.drawai-option-strip.drawai-imagegen-strip{margin:8px 0 0}',
-  '.drawai-imagegen-strip>.drawai-choice-button{min-height:30px;font-size:12px;padding:0 4px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
-  '.drawai-imagegen-more{display:inline-flex;align-items:center;gap:4px;margin-top:6px;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#737a86);font:inherit;font-size:11px;padding:3px 2px;cursor:pointer}',
+  '.drawai-imagegen-strip>.drawai-choice-button{min-height:30px;font-size:var(--drawai-text-sm);padding:0 4px;border-radius:var(--drawai-radius-md);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+  '.drawai-imagegen-more{display:inline-flex;align-items:center;gap:4px;margin-top:6px;border:0;background:transparent;color:var(--dsw-alias-label-secondary,#737a86);font:inherit;font-size:var(--drawai-text-xs);padding:4px 2px;cursor:pointer}',
   '.drawai-imagegen-more:hover{color:var(--dsw-alias-label-primary,#282c35)}',
-  '.drawai-imagegen-more>i{width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg) translateY(-1px);transition:transform .15s ease}',
+  '.drawai-imagegen-more>i{width:5px;height:5px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg) translateY(-1px);transition:transform var(--drawai-duration-base) var(--drawai-ease)}',
   '.drawai-imagegen-more.on>i{transform:rotate(-135deg) translateY(-1px)}',
-  '.drawai-imagegen-more-body{display:flex;flex-direction:column;gap:8px;margin-top:4px;padding:10px;border:1px solid var(--dsw-alias-border-l1,#eceef2);border-radius:10px;background:var(--dsw-alias-bg-layer-1,#fafbfc)}',
+  '.drawai-imagegen-more-body{display:flex;flex-direction:column;gap:8px;margin-top:4px;padding:10px;border:1px solid var(--dsw-alias-border-l1,#eceef2);border-radius:var(--drawai-radius-lg);background:var(--dsw-alias-bg-layer-1,#fafbfc)}',
   '.drawai-imagegen-pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-items:end}',
-  '.drawai-imagegen-field{display:flex;flex-direction:column;gap:4px;font-size:11px}',
+  '.drawai-imagegen-field{display:flex;flex-direction:column;gap:4px;font-size:var(--drawai-text-xs)}',
   '.drawai-imagegen-field>span{color:var(--dsw-alias-label-secondary,#737a86)}',
-  '.drawai-imagegen-field input,.drawai-imagegen-field select,.drawai-imagegen-field textarea{box-sizing:border-box;width:100%;min-width:0;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:6px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;padding:5px 6px;font:12px/1.4 inherit}',
-  '.drawai-imagegen-field textarea{min-height:52px;resize:vertical;font:11px/1.5 ui-monospace,Consolas,monospace}',
+  '.drawai-imagegen-field input,.drawai-imagegen-field select{box-sizing:border-box;width:100%;min-width:0}',
+  '.drawai-imagegen-field textarea{box-sizing:border-box;width:100%;min-width:0;border:1px solid var(--drawai-border);border-radius:var(--drawai-radius-md);background:var(--drawai-surface);color:var(--drawai-text);padding:6px 6px;font-family:ui-monospace,Consolas,monospace;font-size:var(--drawai-text-xs);line-height:1.5;min-height:52px;resize:vertical}',
   '.drawai-imagegen-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}',
   '.drawai-imagegen-row>*{flex:1;min-width:0}',
   '.drawai-imagegen-row>span{flex:0 0 auto;min-width:0;opacity:.7}',
   '.drawai-imagegen-foot{display:flex;gap:8px;align-items:center;margin-top:12px}',
-  '.drawai-imagegen-foot>.drawai-primary-btn{flex:1;padding:7px 12px}',
-  '.drawai-imagegen-status{font-size:11px;line-height:1.5;margin-top:8px;color:var(--dsw-alias-label-secondary,#737a86);white-space:pre-wrap;overflow-wrap:anywhere}',
+  '.drawai-imagegen-foot>.drawai-primary-btn{flex:1;padding:8px 12px}',
+  '.drawai-imagegen-status{font-size:var(--drawai-text-xs);line-height:1.5;margin-top:8px;color:var(--dsw-alias-label-secondary,#737a86);white-space:pre-wrap;overflow-wrap:anywhere}',
   '.drawai-imagegen-status.err{color:var(--dsw-alias-state-error-primary,#c9353f)}',
   '.drawai-imagegen-busy{display:inline-block;width:11px;height:11px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:drawai-spin .8s linear infinite;vertical-align:-1px;margin-right:6px}',
   '@keyframes drawai-spin{to{transform:rotate(360deg)}}',
@@ -603,54 +612,52 @@ const CSS = [
   // 输完后一致"要求它能按节点的文字区宽度换行、并按节点自己的字号字色画。
   // 用 `outline` 而不是 `border`：边框会占掉 2px 内容宽度，断行位置就跟最终效果差一个字符。
   // 背景透明、颜色与字号由 inline style 按**这个节点**给（见 renderDiagram 的 labelTextBox）。
-  '.drawai-edit{position:absolute;z-index:5;box-sizing:border-box;outline:2px solid #1a73e8;outline-offset:-2px;border:none;border-radius:4px;background:transparent;color:#000;font-family:Helvetica, Arial, sans-serif;font-size:12px;line-height:14px;text-align:center;padding:0;margin:0;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text}',
+  '.drawai-edit{position:absolute;z-index:5;box-sizing:border-box;outline:2px solid var(--drawai-accent,#1a73e8);outline-offset:-2px;border:none;border-radius:var(--drawai-radius-sm);background:transparent;color:#000;font-family:Helvetica, Arial, sans-serif;font-size:var(--drawai-text-sm);line-height:14px;text-align:center;padding:0;margin:0;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text}',
   '.drawai-canvas-edit{outline:none;border:0;border-radius:0;background:transparent;box-shadow:none}',
-  '.drawai-table-editor{position:absolute;z-index:30;inset:12px;display:flex;flex-direction:column;min-width:0;min-height:0;padding:12px;gap:8px;border:1px solid var(--dsw-alias-border-l2,#d5dbe4);border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:0 8px 28px #20273830}.drawai-table-editor-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.drawai-table-editor-bar strong{margin-right:auto}.drawai-table-editor-bar button{padding:5px 8px;border:1px solid var(--dsw-alias-border-l2,#d5dbe4);border-radius:6px;background:transparent;color:inherit;cursor:pointer}.drawai-table-editor-bar button:disabled{opacity:.45}.drawai-table-note{margin:0;font-size:11px;opacity:.7}.drawai-table-scroll{flex:1;min-height:0;overflow:auto}.drawai-table-scroll table{border-collapse:collapse;min-width:100%;table-layout:fixed}.drawai-table-scroll td,.drawai-table-scroll th{border:1px solid #cbd2dd;min-width:120px;padding:4px}.drawai-table-scroll th{background:#eef2f8}.drawai-table-scroll textarea{box-sizing:border-box;width:100%;min-width:112px;min-height:60px;padding:4px;border:0;background:transparent;color:inherit;font:12px/1.4 sans-serif;resize:vertical;user-select:text}.drawai-table-scroll th textarea{color:#263143;font-weight:bold}',
+  '.drawai-table-editor{position:absolute;z-index:30;inset:12px;display:flex;flex-direction:column;min-width:0;min-height:0;padding:12px;gap:8px;border:1px solid var(--dsw-alias-border-l2,#d5dbe4);border-radius:var(--drawai-radius-lg);background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:var(--drawai-elevation-3)}.drawai-table-editor-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.drawai-table-editor-bar strong{margin-right:auto}.drawai-table-editor-bar button{padding:6px 8px;border:1px solid var(--drawai-border);border-radius:var(--drawai-radius-md);background:transparent;color:inherit;cursor:pointer}.drawai-table-editor-bar button:disabled{opacity:var(--drawai-disabled-opacity)}.drawai-table-note{margin:0;font-size:var(--drawai-text-xs);opacity:.7}.drawai-table-scroll{flex:1;min-height:0;overflow:auto}.drawai-table-scroll table{border-collapse:collapse;min-width:100%;table-layout:fixed}.drawai-table-scroll td,.drawai-table-scroll th{border:1px solid #cbd2dd;min-width:120px;padding:4px}.drawai-table-scroll th{background:var(--dsw-alias-bg-layer-2,#eef2f8)}.drawai-table-scroll textarea{box-sizing:border-box;width:100%;min-width:112px;min-height:60px;padding:4px;border:0;background:transparent;color:inherit;font-family:sans-serif;font-size:var(--drawai-text-sm);line-height:1.4;resize:vertical;user-select:text}.drawai-table-scroll th textarea{color:#263143;font-weight:bold}',
   '.drawai-rich-edit{overflow:auto;min-height:24px}',
   '.drawai-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}',
-  '.drawai-trace-surface{position:relative;width:100%;height:100%;overflow:hidden}.drawai-trace-surface>svg{display:block;pointer-events:none}.drawai-trace-progress{position:absolute;left:8px;right:8px;bottom:8px;pointer-events:none;line-height:0}.drawai-trace-progress progress{display:block;width:100%;height:5px;accent-color:#386bff}',
-  '.drawai-motion-toolbar{overflow:visible!important;padding:16px!important}.drawai-video-methods{display:flex;gap:6px;margin-bottom:14px;border-bottom:1px solid #8883;padding-bottom:12px}.drawai-video-method{font:inherit;font-size:12px;padding:6px 8px;border:0;border-radius:6px;color:inherit;background:transparent}.drawai-video-method.active{background:#7c6df21a;color:var(--dsw-alias-brand-primary,#6956de);font-weight:600}.drawai-video-method:disabled{opacity:.45}.drawai-motion-task-heading{display:flex;align-items:center;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:1px solid #8883;font-size:12px;font-weight:600}.drawai-motion-panel select{max-width:100%;min-width:0}.drawai-motion-panel input,.drawai-motion-panel select{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,#fff);border:1px solid var(--dsw-alias-border-l2,#dde1e8);border-radius:5px;padding:4px}',
-  '.drawai-video-surface{position:relative;width:100%;height:100%;background:transparent;overflow:hidden}.drawai-video-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);min-width:44px;min-height:44px;border:1px solid #ffffff80;border-radius:24px;background:#101827bf;color:#fff;font-size:18px;cursor:pointer;z-index:1}.drawai-video-play:disabled{cursor:wait}.drawai-video-chrome{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;align-items:center;gap:8px;padding:10px 10px 8px;box-sizing:border-box;background:linear-gradient(transparent,#000000bf);color:#fff;font:11px/1.2 sans-serif}.drawai-video-chrome-toggle{flex:0 0 auto;min-width:28px;min-height:28px;border:0;border-radius:4px;background:transparent;color:#fff;cursor:pointer;font-size:12px;padding:2px 4px;line-height:1}.drawai-video-chrome-toggle:hover,.drawai-video-chrome-toggle:focus-visible{background:#ffffff24}.drawai-video-chrome-progress{flex:1 1 auto;min-width:0;height:4px;margin:0;accent-color:#fff;cursor:pointer}.drawai-video-chrome-time{flex:0 0 auto;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.9}.drawai-video-message{position:absolute;bottom:0;left:0;right:0;padding:6px;background:#000c;color:#fff;font:12px/1.4 sans-serif;pointer-events:none}.drawai-video-toolbar{overflow:visible!important;max-height:none}.drawai-video-controls{display:flex;flex-wrap:wrap;align-items:center;gap:6px;width:100%;box-sizing:border-box;font:12px/1.4 sans-serif}.drawai-video-controls button,.drawai-video-controls select,.drawai-video-more summary{min-height:30px;border:1px solid var(--dsw-alias-border-l2,#dde1e8);border-radius:6px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;padding:4px 7px;cursor:pointer}.drawai-video-controls button:disabled{opacity:.4;cursor:default}.drawai-video-controls input[type=range]{flex:1 1 120px;min-width:70px;max-width:100%;accent-color:#386bff}.drawai-video-controls label{display:flex;align-items:center;white-space:nowrap}.drawai-video-time{font-variant-numeric:tabular-nums;white-space:nowrap}.drawai-video-more{position:relative}.drawai-video-more summary{list-style:none}.drawai-video-more>div{position:absolute;right:0;top:100%;display:flex;flex-direction:column;min-width:140px;gap:4px;padding:6px;border-radius:8px;background:var(--dsw-alias-bg-overlay,#fff);box-shadow:0 6px 24px #0003;z-index:10}.drawai-video-preview{position:absolute;inset:0;z-index:1100;display:flex;flex-direction:column;gap:12px;padding:16px;box-sizing:border-box;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35)}.drawai-video-preview-media{flex:1;min-height:0;overflow:hidden}.drawai-video-close{align-self:flex-end;cursor:pointer;background:transparent;color:inherit;border:0;padding:6px}',
-  '.drawai-motion-toolbar{padding:0!important;background:transparent!important;border:0!important;box-shadow:none!important;overflow:visible!important}.drawai-video-composer{--vc-bg:#fff;--vc-fg:#353332;--vc-muted:#918d88;--vc-line:#e5e2df;--vc-chip:#f3f1ee;width:100%;box-sizing:border-box;padding:18px;border:1px solid var(--vc-line);border-radius:20px;background:var(--vc-bg);color:var(--vc-fg);box-shadow:0 10px 28px #00000010;font-size:13px}.drawai-video-composer[data-tone=dark]{--vc-bg:#211f1d;--vc-fg:#e6e3df;--vc-muted:#a39d97;--vc-line:#44403c;--vc-chip:#34312e}.drawai-video-reference-heading{font-weight:600;font-size:12px;margin-bottom:10px}.drawai-video-references{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap}.drawai-video-reference{width:58px;height:62px;position:relative;display:flex;align-items:center;justify-content:center;border:1px solid var(--vc-line);border-radius:13px;background:var(--vc-chip);overflow:hidden}.drawai-video-reference>img{width:100%;height:100%;object-fit:cover}.drawai-video-reference>span{position:absolute;bottom:0;left:0;right:0;padding:3px 4px;font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--vc-chip)}.drawai-video-reference>small{display:none}.drawai-video-ref-picker{position:relative}.drawai-video-ref-picker>summary{width:58px;height:62px;display:flex;align-items:center;justify-content:center;list-style:none;cursor:pointer;border:1px solid var(--vc-line);border-radius:13px}.drawai-video-ref-picker>summary::-webkit-details-marker,.drawai-video-settings>summary::-webkit-details-marker{display:none}.drawai-video-ref-menu,.drawai-video-settings-menu{position:absolute;z-index:5;top:calc(100% + 8px);left:0;width:220px;max-height:260px;overflow:auto;background:var(--vc-bg);color:var(--vc-fg);border:1px solid var(--vc-line);border-radius:12px;padding:12px;box-shadow:0 8px 24px #0003}.drawai-video-ref-menu strong{display:block;margin-bottom:8px}.drawai-video-ref-menu p{font-size:12px;line-height:1.6}.drawai-video-reference-note{font-size:10px;color:var(--vc-muted);line-height:1.5;margin-top:8px}.drawai-video-prompt{display:block;box-sizing:border-box;resize:vertical;width:100%;min-height:150px;padding:18px 2px 12px;border:0;outline:0;background:transparent;color:var(--vc-fg);font:inherit;line-height:1.7}.drawai-video-prompt::placeholder{color:var(--vc-muted)}.drawai-video-composer-footer{display:grid;grid-template-columns:minmax(100px,1fr) auto 40px;gap:8px;align-items:center;margin-top:10px}.drawai-video-composer .drawai-video-method-select{width:100%;min-width:0;height:36px;border-radius:20px;padding:5px 10px;background:var(--vc-chip);border:1px solid var(--vc-line);color:var(--vc-fg);font:inherit;font-size:12px;cursor:pointer}.drawai-video-settings{min-width:0}.drawai-video-settings>summary{display:flex;gap:5px;align-items:center;white-space:nowrap;list-style:none;cursor:pointer;font-size:11px;border-radius:20px;background:var(--vc-chip);padding:9px 8px}.drawai-video-settings>summary svg{width:15px;height:15px;flex-shrink:0}.drawai-video-settings-menu{left:0;right:0;top:auto;bottom:calc(100% + 8px);width:auto;box-sizing:border-box}.drawai-video-settings-menu>label{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 10px;padding:6px 0;font-size:12px}.drawai-video-settings-menu input,.drawai-video-settings-menu select{max-width:110px;background:var(--vc-chip)!important;border-color:var(--vc-line)!important;color:var(--vc-fg)!important}.drawai-video-submit{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--vc-line);background:#e7e0ff;color:#6650c9;font-size:0;cursor:pointer}.drawai-video-submit:disabled{background:var(--vc-chip);color:var(--vc-muted);opacity:.55;cursor:default}.drawai-video-submit:focus-visible,.drawai-video-ref-picker>summary:focus-visible,.drawai-video-settings>summary:focus-visible{outline:2px solid #7c6df2;outline-offset:3px}.drawai-video-project{border-top:1px solid var(--vc-line);margin-top:14px;padding-top:12px;font-size:12px}.drawai-video-composer .drawai-motion-task-heading{border-color:var(--vc-line);font-size:11px}.drawai-video-composer .drawai-export-info{color:var(--vc-muted);font-size:11px}.drawai-video-action-toolbar{overflow:visible!important;padding:4px!important;border-radius:18px!important;background:#fff!important;color:#292a2d!important}.drawai-video-actions{display:flex;gap:2px;align-items:center;position:relative;width:100%;justify-content:center}.drawai-video-action{border:0;background:transparent;color:inherit;display:flex;align-items:center;justify-content:center;gap:7px;padding:10px 12px;border-radius:12px;white-space:nowrap;font:inherit;font-size:13px;cursor:pointer}.drawai-video-action:hover{background:#f2f1f5}.drawai-video-info{position:absolute;left:0;top:calc(100% + 12px);padding:14px;min-width:200px;background:#fff;color:#292a2d;border:1px solid #e1dfe5;border-radius:12px;box-shadow:0 8px 24px #0002;line-height:1.8;font-size:12px}',
-  '.drawai-selection-toolbar{position:absolute;z-index:6;box-sizing:border-box;display:flex;flex-wrap:nowrap;align-items:stretch;gap:2px;padding:5px 6px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:0 8px 28px #20273814,0 2px 6px #20273808}',
-  '.drawai-video-composer{--vc-bg:var(--dsw-alias-bg-overlay,#fff);--vc-fg:var(--dsw-alias-label-primary,#282c35);--vc-muted:var(--dsw-alias-label-secondary,#737a86);--vc-line:var(--dsw-alias-border-l2,#e1e3e8);--vc-chip:var(--dsw-alias-bg-layer-2,#f0f1f3);padding:14px;border-radius:12px;box-shadow:0 8px 28px #20273814,0 2px 6px #20273808}.drawai-video-composer[data-tone=dark]{--vc-bg:var(--dsw-alias-bg-overlay,#25262a);--vc-fg:var(--dsw-alias-label-primary,#eceef2);--vc-muted:var(--dsw-alias-label-secondary,#a4a8b0);--vc-line:var(--dsw-alias-border-l2,#45474d);--vc-chip:var(--dsw-alias-bg-layer-2,#34363c)}.drawai-video-composer-footer{position:relative;grid-template-columns:auto minmax(0,1fr)}.drawai-video-settings-menu{max-height:min(260px,50vh)}.drawai-video-action-toolbar{padding:5px 6px!important;border-radius:12px!important;background:var(--dsw-alias-bg-overlay,#fff)!important;color:var(--dsw-alias-label-primary,#282c35)!important}.drawai-video-info{background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);border-color:var(--dsw-alias-border-l2,#e1e3e8)}',
-  '.drawai-video-actions{display:flex;align-items:stretch;gap:2px;width:100%;min-width:0}.drawai-toolbar-button{flex:1 0 38px;min-width:38px;border:0;background:transparent;color:inherit;font:inherit}.drawai-toolbar-button:disabled{opacity:.45;cursor:default}.drawai-toolbar-button:disabled:hover{background:transparent}.drawai-video-export-options{display:flex;flex-direction:column;gap:8px}.drawai-video-export-options .drawai-choice-button{min-height:34px;text-align:left;padding:7px 10px}',
-  '.drawai-style-control{display:flex;align-items:center;gap:5px;font-size:11px;white-space:nowrap;padding-left:8px;border-left:1px solid var(--dsw-alias-border-l2,#e1e3e8)}',
-  '.drawai-style-control select,.drawai-style-control input{box-sizing:border-box;height:30px;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:7px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;max-width:100px;padding:2px 5px}',
+  '.drawai-trace-surface{position:relative;width:100%;height:100%;overflow:hidden}.drawai-trace-surface>svg{display:block;pointer-events:none}.drawai-trace-progress{position:absolute;left:8px;right:8px;bottom:8px;pointer-events:none;line-height:0}.drawai-trace-progress progress{display:block;width:100%;height:5px;accent-color:var(--drawai-accent,#1a73e8)}',
+  '.drawai-motion-toolbar{overflow:visible!important;padding:16px!important}.drawai-video-methods{display:flex;gap:6px;margin-bottom:12px;border-bottom:1px solid #8883;padding-bottom:12px}.drawai-video-method{font:inherit;font-size:var(--drawai-text-sm);padding:6px 8px;border:0;border-radius:var(--drawai-radius-md);color:inherit;background:transparent}.drawai-video-method.active{background:var(--drawai-accent-soft);color:var(--drawai-accent);font-weight:600}.drawai-video-method:disabled{opacity:var(--drawai-disabled-opacity)}.drawai-motion-task-heading{display:flex;align-items:center;justify-content:space-between;margin-top:12px;padding-top:12px;border-top:1px solid #8883;font-size:var(--drawai-text-sm);font-weight:600}.drawai-motion-panel select{max-width:100%;min-width:0}.drawai-motion-panel input,.drawai-motion-panel select{font:inherit}',
+  '.drawai-video-surface{position:relative;width:100%;height:100%;background:transparent;overflow:hidden}.drawai-video-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);min-width:44px;min-height:44px;border:1px solid #ffffff80;border-radius:var(--drawai-radius-pill);background:#101827bf;color:#fff;font-size:var(--drawai-text-lg);cursor:pointer;z-index:1}.drawai-video-play:disabled{cursor:wait}.drawai-video-chrome{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;align-items:center;gap:8px;padding:10px 10px 8px;box-sizing:border-box;background:linear-gradient(transparent,#000000bf);color:#fff;font-family:sans-serif;font-size:var(--drawai-text-xs);line-height:1.2}.drawai-video-chrome-toggle{flex:0 0 auto;min-width:28px;min-height:28px;border:0;border-radius:var(--drawai-radius-sm);background:transparent;color:#fff;cursor:pointer;font-size:var(--drawai-text-sm);padding:2px 4px;line-height:1}.drawai-video-chrome-toggle:hover,.drawai-video-chrome-toggle:focus-visible{background:#ffffff24}.drawai-video-chrome-progress{flex:1 1 auto;min-width:0;height:4px;margin:0;accent-color:#fff;cursor:pointer}.drawai-video-chrome-time{flex:0 0 auto;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.9}.drawai-video-message{position:absolute;bottom:0;left:0;right:0;padding:6px;background:#000c;color:#fff;font-family:sans-serif;font-size:var(--drawai-text-sm);line-height:1.4;pointer-events:none}.drawai-video-toolbar{overflow:visible!important;max-height:none}.drawai-video-controls{display:flex;flex-wrap:wrap;align-items:center;gap:6px;width:100%;box-sizing:border-box;font-family:sans-serif;font-size:var(--drawai-text-sm);line-height:1.4}.drawai-video-controls button,.drawai-video-controls select,.drawai-video-more summary{min-height:30px;padding:4px 8px;cursor:pointer}.drawai-video-controls button:disabled{opacity:var(--drawai-disabled-opacity);cursor:default}.drawai-video-controls input[type=range]{flex:1 1 120px;min-width:70px;max-width:100%;accent-color:var(--drawai-accent,#1a73e8)}.drawai-video-controls label{display:flex;align-items:center;white-space:nowrap}.drawai-video-time{font-variant-numeric:tabular-nums;white-space:nowrap}.drawai-video-more{position:relative}.drawai-video-more summary{list-style:none}.drawai-video-more>div{position:absolute;right:0;top:100%;display:flex;flex-direction:column;min-width:140px;gap:4px;padding:6px;border-radius:var(--drawai-radius-md);background:var(--dsw-alias-bg-overlay,#fff);box-shadow:var(--drawai-elevation-2);z-index:10}.drawai-video-preview{position:absolute;inset:0;z-index:1100;display:flex;flex-direction:column;gap:12px;padding:16px;box-sizing:border-box;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35)}.drawai-video-preview-media{flex:1;min-height:0;overflow:hidden}.drawai-video-close{align-self:flex-end;cursor:pointer;background:transparent;color:inherit;border:0;padding:6px}',
+  '.drawai-motion-toolbar{padding:0!important;background:transparent!important;border:0!important;box-shadow:none!important;overflow:visible!important}.drawai-video-composer{width:100%;box-sizing:border-box;padding:16px;border:1px solid var(--vc-line);border-radius:var(--drawai-radius-lg);background:var(--vc-bg);color:var(--vc-fg);box-shadow:var(--drawai-elevation-1);font-size:var(--drawai-text-md)}.drawai-video-reference-heading{font-weight:600;font-size:var(--drawai-text-sm);margin-bottom:10px}.drawai-video-references{display:flex;gap:8px;align-items:stretch;flex-wrap:wrap}.drawai-video-reference{width:58px;height:62px;position:relative;display:flex;align-items:center;justify-content:center;border:1px solid var(--vc-line);border-radius:var(--drawai-radius-lg);background:var(--vc-chip);overflow:hidden}.drawai-video-reference>img{width:100%;height:100%;object-fit:cover}.drawai-video-reference>span{position:absolute;bottom:0;left:0;right:0;padding:4px 4px;font-size:var(--drawai-text-xs);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:var(--vc-chip)}.drawai-video-reference>small{display:none}.drawai-video-ref-picker{position:relative}.drawai-video-ref-picker>summary{width:58px;height:62px;display:flex;align-items:center;justify-content:center;list-style:none;cursor:pointer;border:1px solid var(--vc-line);border-radius:var(--drawai-radius-lg)}.drawai-video-ref-picker>summary::-webkit-details-marker,.drawai-video-settings>summary::-webkit-details-marker{display:none}.drawai-video-ref-menu,.drawai-video-settings-menu{position:absolute;z-index:5;top:calc(100% + 8px);left:0;width:220px;max-height:260px;overflow:auto;background:var(--vc-bg);color:var(--vc-fg);border:1px solid var(--vc-line);border-radius:var(--drawai-radius-lg);padding:12px;box-shadow:var(--drawai-elevation-2)}.drawai-video-ref-menu strong{display:block;margin-bottom:8px}.drawai-video-ref-menu p{font-size:var(--drawai-text-sm);line-height:1.6}.drawai-video-reference-note{font-size:var(--drawai-text-xs);color:var(--vc-muted);line-height:1.5;margin-top:8px}.drawai-video-prompt{display:block;box-sizing:border-box;resize:vertical;width:100%;min-height:150px;padding:16px 2px 12px;border:0;outline:0;background:transparent;color:var(--vc-fg);font:inherit;line-height:1.7}.drawai-video-prompt::placeholder{color:var(--vc-muted)}.drawai-video-composer-footer{display:grid;grid-template-columns:minmax(100px,1fr) auto 40px;gap:8px;align-items:center;margin-top:10px}.drawai-video-composer .drawai-video-method-select{width:100%;min-width:0;height:36px;border-radius:var(--drawai-radius-pill);padding:6px 10px;background:var(--vc-chip);border:1px solid var(--vc-line);color:var(--vc-fg);font:inherit;font-size:var(--drawai-text-sm);cursor:pointer}.drawai-video-settings{min-width:0}.drawai-video-settings>summary{display:flex;gap:6px;align-items:center;white-space:nowrap;list-style:none;cursor:pointer;font-size:var(--drawai-text-xs);border-radius:var(--drawai-radius-pill);background:var(--vc-chip);padding:10px 8px}.drawai-video-settings>summary svg{width:15px;height:15px;flex-shrink:0}.drawai-video-settings-menu{left:0;right:0;top:auto;bottom:calc(100% + 8px);width:auto;box-sizing:border-box}.drawai-video-settings-menu>label{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 10px;padding:6px 0;font-size:var(--drawai-text-sm)}.drawai-video-settings-menu input,.drawai-video-settings-menu select{max-width:110px}.drawai-video-submit{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--vc-line);background:#e7e0ff;color:#6650c9;font-size:0;cursor:pointer}.drawai-video-submit:disabled{background:var(--vc-chip);color:var(--vc-muted);opacity:var(--drawai-disabled-opacity);cursor:default}.drawai-video-submit:focus-visible,.drawai-video-ref-picker>summary:focus-visible,.drawai-video-settings>summary:focus-visible{outline:2px solid var(--drawai-accent);outline-offset:3px}.drawai-video-project{border-top:1px solid var(--vc-line);margin-top:12px;padding-top:12px;font-size:var(--drawai-text-sm)}.drawai-video-composer .drawai-motion-task-heading{border-color:var(--vc-line);font-size:var(--drawai-text-xs)}.drawai-video-composer .drawai-export-info{color:var(--vc-muted);font-size:var(--drawai-text-xs)}.drawai-video-action-toolbar{overflow:visible!important}.drawai-video-actions{display:flex;gap:2px;align-items:center;position:relative;width:100%;justify-content:center}.drawai-video-action{border:0;background:transparent;color:inherit;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 12px;border-radius:var(--drawai-radius-lg);white-space:nowrap;font:inherit;font-size:var(--drawai-text-md);cursor:pointer}.drawai-video-action:hover{background:var(--dsw-alias-bg-hover,#f2f1f5)}.drawai-video-info{position:absolute;left:0;top:calc(100% + 12px);padding:12px;min-width:200px;border:1px solid #e1dfe5;border-radius:var(--drawai-radius-lg);box-shadow:var(--drawai-elevation-2);line-height:1.8;font-size:var(--drawai-text-sm)}',
+  '.drawai-selection-toolbar{position:absolute;z-index:6;box-sizing:border-box;display:flex;flex-wrap:nowrap;align-items:stretch;gap:2px;padding:6px 6px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:var(--drawai-radius-lg);background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:var(--drawai-elevation-2)}',
+  '.drawai-video-composer{--vc-bg:var(--dsw-alias-bg-overlay,#fff);--vc-fg:var(--dsw-alias-label-primary,#282c35);--vc-muted:var(--dsw-alias-label-secondary,#737a86);--vc-line:var(--dsw-alias-border-l2,#e1e3e8);--vc-chip:var(--dsw-alias-bg-layer-2,#f0f1f3);padding:12px;border-radius:var(--drawai-radius-lg);box-shadow:var(--drawai-elevation-2)}.drawai-video-composer[data-tone=dark]{--vc-bg:var(--dsw-alias-bg-overlay,#25262a);--vc-fg:var(--dsw-alias-label-primary,#eceef2);--vc-muted:var(--dsw-alias-label-secondary,#a4a8b0);--vc-line:var(--dsw-alias-border-l2,#45474d);--vc-chip:var(--dsw-alias-bg-layer-2,#34363c)}.drawai-video-composer-footer{position:relative;grid-template-columns:auto minmax(0,1fr)}.drawai-video-settings-menu{max-height:min(260px,50vh)}.drawai-video-action-toolbar{padding:6px 6px !important;border-radius:var(--drawai-radius-lg)!important;background:var(--dsw-alias-bg-overlay,#fff)!important;color:var(--dsw-alias-label-primary,#282c35)!important}.drawai-video-info{background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);border-color:var(--dsw-alias-border-l2,#e1e3e8)}',
+  '.drawai-video-actions{display:flex;align-items:stretch;gap:2px;width:100%;min-width:0}.drawai-toolbar-button{flex:1 0 38px;min-width:38px;border:0;background:transparent;color:inherit;font:inherit}.drawai-toolbar-button:disabled{opacity:var(--drawai-disabled-opacity);cursor:default}.drawai-toolbar-button:disabled:hover{background:transparent}.drawai-video-export-options{display:flex;flex-direction:column;gap:8px}.drawai-video-export-options .drawai-choice-button{min-height:34px;text-align:left;padding:8px 10px}',
+  '.drawai-style-control{display:flex;align-items:center;gap:6px;font-size:var(--drawai-text-xs);white-space:nowrap;padding-left:8px;border-left:1px solid var(--dsw-alias-border-l2,#e1e3e8)}',
+  '.drawai-style-control select,.drawai-style-control input{box-sizing:border-box;max-width:100px}',
   '.drawai-style-control input[type=color]{width:28px;padding:2px;cursor:pointer}.drawai-style-control input[type=number]{width:52px;padding:2px 4px}',
-  '.drawai-color-palette{flex:1 0 38px;min-width:38px}.drawai-color-palette summary,.drawai-toolbar-button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;list-style:none;padding:5px 3px;border-radius:7px;min-height:44px}.drawai-color-palette summary::-webkit-details-marker{display:none}.drawai-color-palette summary:hover,.drawai-color-palette[open] summary,.drawai-toolbar-button:hover,.drawai-toolbar-button:focus-visible{background:var(--dsw-alias-bg-layer-2,#f0f1f3)}.drawai-color-palette.disabled summary{opacity:.45;cursor:default}.drawai-color-palette.disabled summary:hover{background:transparent}',
-  '.drawai-color-preview{display:inline-block;flex:0 0 22px;width:22px;height:22px;border:1px solid #d9dde3;border-radius:50%;background:repeating-conic-gradient(#ddd 0% 25%,#fff 0% 50%) 50%/8px 8px}.drawai-color-caret{font-size:13px;color:#7b818c}.drawai-color-palette:not([open]) .drawai-color-caret{transform:rotate(180deg)}',
-  '.drawai-palette-panel{position:fixed;inset:auto;margin:0;width:320px;box-sizing:border-box;padding:18px;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:12px;background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:0 14px 44px #20273824,0 3px 10px #2027380a;overflow:auto;z-index:1000}.drawai-palette-panel::backdrop{background:transparent}.drawai-palette-hint{font-size:11px;opacity:.7;margin:6px 0}',
-  '.drawai-palette-grid{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:10px 7px}.drawai-palette-swatch{width:100%;aspect-ratio:1;min-height:20px;border:none;border-radius:50%;cursor:pointer;padding:0;box-shadow:inset 0 0 0 1px #80808014;transition:box-shadow .12s,transform .12s}.drawai-palette-swatch:hover{transform:scale(1.08)}.drawai-palette-swatch[aria-pressed=true]{outline:2px solid #386bff;outline-offset:3px}',
+  '.drawai-color-palette{flex:1 0 38px;min-width:38px}.drawai-color-palette summary,.drawai-toolbar-button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;cursor:pointer;list-style:none;padding:6px 4px;border-radius:var(--drawai-radius-md);min-height:44px}.drawai-color-palette summary::-webkit-details-marker{display:none}.drawai-color-palette summary:hover,.drawai-color-palette[open] summary,.drawai-toolbar-button:hover,.drawai-toolbar-button:focus-visible{background:var(--drawai-hover)}.drawai-color-palette.disabled summary{opacity:.45;cursor:default}.drawai-color-palette.disabled summary:hover{background:transparent}',
+  '.drawai-color-preview{display:inline-block;flex:0 0 22px;width:22px;height:22px;border:1px solid #d9dde3;border-radius:50%;background:repeating-conic-gradient(#ddd 0% 25%,#fff 0% 50%) 50%/8px 8px}.drawai-color-caret{font-size:var(--drawai-text-md);color:#7b818c}.drawai-color-palette:not([open]) .drawai-color-caret{transform:rotate(180deg)}',
+  '.drawai-palette-panel{position:fixed;inset:auto;margin:0;width:320px;box-sizing:border-box;padding:16px;border:1px solid var(--dsw-alias-border-l2,#e1e3e8);border-radius:var(--drawai-radius-lg);background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:var(--drawai-elevation-3);overflow:auto;z-index:1000}.drawai-palette-panel::backdrop{background:transparent}.drawai-palette-hint{font-size:var(--drawai-text-xs);opacity:.7;margin:6px 0}',
+  '.drawai-palette-grid{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:10px 8px}.drawai-palette-swatch{width:100%;aspect-ratio:1;min-height:20px;border:none;border-radius:50%;cursor:pointer;padding:0;box-shadow:inset 0 0 0 1px rgba(128,128,128,.08);transition:box-shadow var(--drawai-duration-fast) var(--drawai-ease),transform var(--drawai-duration-fast) var(--drawai-ease)}.drawai-palette-swatch:hover{transform:scale(1.08)}.drawai-palette-swatch[aria-pressed=true]{outline:2px solid var(--drawai-accent);outline-offset:3px}',
   '.drawai-palette-swatch[title^="无颜色"],.drawai-color-preview.none{background:linear-gradient(135deg,transparent 47%,#c8cdd5 48%,#c8cdd5 52%,transparent 53%)!important;border:1px solid #c8cdd5}',
-  '.drawai-palette-custom{margin-top:12px}.drawai-palette-plus{width:100%;aspect-ratio:1;border:none;border-radius:50%;background:var(--dsw-alias-bg-layer-2,#edeef0);color:var(--dsw-alias-label-secondary,#707782);font-size:24px;line-height:1;cursor:pointer}.drawai-palette-plus:hover{background:#e1e7ff;color:#386bff}',
-  '.drawai-palette-add{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#eee)}.drawai-palette-add input{box-sizing:border-box;height:30px;border:1px solid #d9dde3;border-radius:6px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit}.drawai-palette-add input[type=color]{width:32px;padding:2px}.drawai-palette-add input[type=text]{width:90px;padding:4px;font:12px ui-monospace,monospace}.drawai-palette-add button{font-size:11px}',
-  '.drawai-palette-opacity{margin-top:24px}.drawai-palette-opacity-label{display:flex;justify-content:space-between;align-items:center;font-size:13px;margin-bottom:10px}.drawai-palette-opacity-label span{color:var(--dsw-alias-label-secondary,#767d89)}.drawai-palette-opacity input{display:block;width:100%;height:18px;margin:0;accent-color:#2355ed;cursor:pointer}',
-  '.drawai-tool-icon{position:relative;height:25px;min-width:28px;display:flex;align-items:center;justify-content:center;padding-right:7px}.drawai-tool-icon>svg{width:28px;height:25px}.drawai-color-label{font-size:10px;line-height:13px;white-space:nowrap;color:var(--dsw-alias-label-secondary,#737a86)}.drawai-tool-icon .drawai-color-caret{position:absolute;right:-2px;top:6px;font-size:10px}.drawai-color-preview.stroke{background:transparent;border-width:5px;box-sizing:border-box}.drawai-font-icon{font:24px/24px Georgia,serif;border-bottom:3px solid}.drawai-value-icon{font:18px/25px Arial,sans-serif}',
-  '.drawai-popover-title{font-size:13px;margin:0 0 12px}.drawai-shape-options{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px}.drawai-choice-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.drawai-choice-button{display:flex;align-items:center;justify-content:center;min-height:38px;padding:4px;border:0;border-radius:7px;background:transparent;color:inherit;cursor:pointer;font-size:16px}.drawai-choice-button:hover{background:var(--dsw-alias-bg-layer-2,#f1f3f6)}.drawai-choice-button.on{background:#e8efff;color:#386bff}.drawai-shape-options .drawai-choice-button{aspect-ratio:1}.drawai-shape-options svg{width:34px;height:28px}',
-  '.drawai-stroke-options{padding-bottom:14px;margin-bottom:16px;border-bottom:1px solid var(--dsw-alias-border-l2,#e1e3e8)}.drawai-option-strip{display:flex;gap:4px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,#f4f5f7);padding:3px;margin:7px 0}.drawai-option-strip>.drawai-choice-button{flex:1}.drawai-width-dot{display:block;background:currentColor;border-radius:50%}.drawai-font-custom{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#eee);font-size:11px}.drawai-font-custom input{box-sizing:border-box;width:100%;height:30px;padding:4px 6px;border:1px solid #d9dde3;border-radius:6px;background:transparent;color:inherit}',
+  '.drawai-palette-custom{margin-top:12px}.drawai-palette-plus{width:100%;aspect-ratio:1;border:none;border-radius:50%;background:var(--dsw-alias-bg-layer-2,#edeef0);color:var(--dsw-alias-label-secondary,#707782);font-size:var(--drawai-text-xl);line-height:1;cursor:pointer}.drawai-palette-plus:hover{background:var(--drawai-accent-soft);color:var(--drawai-accent)}',
+  '.drawai-palette-opacity{margin-top:24px}.drawai-palette-opacity-label{display:flex;justify-content:space-between;align-items:center;font-size:var(--drawai-text-md);margin-bottom:10px}.drawai-palette-opacity-label span{color:var(--dsw-alias-label-secondary,#767d89)}.drawai-palette-opacity input{display:block;width:100%;height:18px;margin:0;accent-color:var(--drawai-accent,#1a73e8);cursor:pointer}',
+  '.drawai-tool-icon{position:relative;height:25px;min-width:28px;display:flex;align-items:center;justify-content:center;padding-right:8px}.drawai-tool-icon>svg{width:28px;height:25px}.drawai-color-label{font-size:var(--drawai-text-xs);line-height:13px;white-space:nowrap;color:var(--dsw-alias-label-secondary,#737a86)}.drawai-tool-icon .drawai-color-caret{position:absolute;right:-2px;top:6px;font-size:var(--drawai-text-xs)}.drawai-color-preview.stroke{background:transparent;border-width:5px;box-sizing:border-box}.drawai-font-icon{font-family:Georgia,serif;font-size:var(--drawai-text-xl);line-height:24px;border-bottom:3px solid}.drawai-value-icon{font-family:Arial,sans-serif;font-size:var(--drawai-text-lg);line-height:25px}',
+  '.drawai-popover-title{font-size:var(--drawai-text-md);margin:0 0 12px}.drawai-shape-options{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px}.drawai-choice-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.drawai-choice-button{display:flex;align-items:center;justify-content:center;min-height:38px;padding:4px;border:0;border-radius:var(--drawai-radius-md);background:transparent;color:inherit;cursor:pointer;font-size:var(--drawai-text-lg)}.drawai-choice-button:hover{background:var(--dsw-alias-bg-layer-2,#f1f3f6)}.drawai-choice-button.on{background:var(--drawai-accent-soft);color:var(--drawai-accent)}.drawai-shape-options .drawai-choice-button{aspect-ratio:1}.drawai-shape-options svg{width:34px;height:28px}',
+  '.drawai-stroke-options{padding-bottom:12px;margin-bottom:16px;border-bottom:1px solid var(--dsw-alias-border-l2,#e1e3e8)}.drawai-option-strip{display:flex;gap:4px;border-radius:var(--drawai-radius-md);background:var(--dsw-alias-bg-layer-2,#f4f5f7);padding:4px;margin:8px 0}.drawai-option-strip>.drawai-choice-button{flex:1}.drawai-width-dot{display:block;background:currentColor;border-radius:50%}.drawai-font-custom{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2,#eee);font-size:var(--drawai-text-xs)}.drawai-font-custom input{width:100%}',
   // 右键菜单 / 元素库
-  '.drawai-menu{position:absolute;z-index:20;min-width:196px;padding:8px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,#555);background:var(--dsw-alias-bg-overlay,#1e1e1e);box-shadow:0 10px 28px rgba(0,0,0,.4);color:var(--dsw-alias-label-primary,#e6e6e6)}',
-  '.drawai-menu-title{font-size:11px;color:var(--dsw-alias-label-secondary,#9aa0a6);margin:0 0 6px}',
-  '.drawai-menu-separator{height:1px;margin:6px 0;background:var(--dsw-alias-border-l2,#e1e3e8)}.drawai-menu-label{display:inline-block}.drawai-menu-shortcut{float:right;margin-left:16px;font-size:10px;opacity:.55}.drawai-page-picker{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;padding:8px 2px;border-top:1px solid var(--dsw-alias-border-l2,#e1e3e8)}.drawai-page-picker select{padding:4px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:5px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit}',
-  '.drawai-special-panel{box-sizing:border-box;padding:0;min-width:0;overflow:hidden;border-radius:12px}.drawai-layers-panel{display:flex;flex-direction:column;max-height:inherit}.drawai-panel-heading{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;font-size:13px;font-weight:600;border-bottom:1px solid var(--dsw-alias-border-l2,#e1e3e8)}.drawai-panel-heading span{font-size:11px;font-weight:400;opacity:.65}',
-  '.drawai-layer-list{overflow:auto;min-height:0;max-height:340px;padding:6px}.drawai-layer-row{display:flex;align-items:center;gap:5px;padding:7px 5px;border-radius:8px;min-width:0}.drawai-layer-row.active{background:rgba(56,107,255,.12)}.drawai-layer-row.hidden .drawai-layer-namebox{opacity:.55}.drawai-layer-thumb{flex:0 0 52px;width:52px;height:38px;padding:2px;overflow:hidden;border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:5px;background:#fff;cursor:pointer}.drawai-layer-thumb svg{display:block;width:100%;height:100%;pointer-events:none}.drawai-layer-empty{font-size:9px;color:#999}',
-  '.drawai-layer-namebox{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}.drawai-layer-name{display:block;max-width:100%;border:0;background:none;padding:0;text-align:left;font-size:12px;color:inherit;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.drawai-layer-meta{font-size:10px;opacity:.6}.drawai-layer-icon{display:flex;align-items:center;justify-content:center;flex:0 0 23px;width:23px;height:26px;border:0;border-radius:5px;background:none;color:inherit;cursor:pointer;padding:2px}.drawai-layer-icon:hover{background:rgba(128,128,128,.15)}',
-  '.drawai-layer-name-input,.drawai-panel-input{box-sizing:border-box;min-width:0;width:100%;border:1px solid #386bff;border-radius:5px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;padding:4px;font-size:12px}.drawai-panel-input{width:calc(100% - 24px);margin:8px 12px;border-color:var(--dsw-alias-border-l2,#d9dde3)}.drawai-layer-more{display:flex;flex-direction:column;gap:6px;padding:6px 10px 10px}.drawai-layer-more span{font-size:10px;opacity:.65}.drawai-layer-footer{flex:0 0 auto;display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-top:1px solid var(--dsw-alias-border-l2,#e1e3e8)}.drawai-layer-move{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:11px}.drawai-layer-move select{min-width:0;max-width:55%;border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:5px;padding:4px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit}',
+  '.drawai-menu{position:absolute;z-index:20;min-width:196px;padding:8px;border-radius:var(--drawai-radius-md);border:1px solid var(--dsw-alias-border-l2,#555);background:var(--dsw-alias-bg-overlay,#1e1e1e);box-shadow:var(--drawai-elevation-2);color:var(--dsw-alias-label-primary,#e6e6e6)}',
+  '.drawai-menu-title{font-size:var(--drawai-text-xs);color:var(--dsw-alias-label-secondary,#9aa0a6);margin:0 0 6px}',
+  '.drawai-special-panel{box-sizing:border-box;padding:0;min-width:0;overflow:hidden;border-radius:var(--drawai-radius-lg)}.drawai-layers-panel{display:flex;flex-direction:column;max-height:inherit}.drawai-panel-heading{display:flex;align-items:center;justify-content:space-between;padding:12px 12px;font-size:var(--drawai-text-md);font-weight:600;border-bottom:1px solid var(--dsw-alias-border-l2,#e1e3e8)}.drawai-panel-heading span{font-size:var(--drawai-text-xs);font-weight:400;opacity:.65}',
+  '.drawai-layer-list{overflow:auto;min-height:0;max-height:340px;padding:6px}.drawai-layer-row{display:flex;align-items:center;gap:6px;padding:8px 6px;border-radius:var(--drawai-radius-md);min-width:0}.drawai-layer-row.active{background:rgba(56,107,255,.12)}.drawai-layer-row.hidden .drawai-layer-namebox{opacity:.55}.drawai-layer-thumb{flex:0 0 52px;width:52px;height:38px;padding:2px;overflow:hidden;border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:var(--drawai-radius-md);background:#fff;cursor:pointer}.drawai-layer-thumb svg{display:block;width:100%;height:100%;pointer-events:none}.drawai-layer-empty{font-size:var(--drawai-text-xs);color:#999}',
+  '.drawai-layer-namebox{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}.drawai-layer-name{display:block;max-width:100%;border:0;background:none;padding:0;text-align:left;font-size:var(--drawai-text-sm);color:inherit;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.drawai-layer-meta{font-size:var(--drawai-text-xs);opacity:.6}.drawai-layer-icon{display:flex;align-items:center;justify-content:center;flex:0 0 23px;width:23px;height:26px;border:0;border-radius:var(--drawai-radius-md);background:none;color:inherit;cursor:pointer;padding:2px}.drawai-layer-icon:hover{background:rgba(128,128,128,.15)}',
+  '.drawai-layer-name-input,.drawai-panel-input{box-sizing:border-box;min-width:0;width:100%}.drawai-panel-input{width:calc(100% - 24px);margin:8px 12px}.drawai-layer-more{display:flex;flex-direction:column;gap:6px;padding:6px 10px 10px}.drawai-layer-more span{font-size:var(--drawai-text-xs);opacity:.65}.drawai-layer-footer{flex:0 0 auto;display:flex;flex-direction:column;gap:8px;padding:10px 12px;border-top:1px solid var(--dsw-alias-border-l2,#e1e3e8)}.drawai-layer-move{display:flex;align-items:center;justify-content:space-between;gap:6px;font-size:var(--drawai-text-xs)}.drawai-layer-move select{min-width:0;max-width:55%}',
   '.drawai-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}',
-  '.drawai-export-fields{display:flex;flex-direction:column;gap:12px;padding:14px}.drawai-export-field{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px}.drawai-export-field>span{flex:0 0 44px}.drawai-export-field select,.drawai-export-field input{box-sizing:border-box;min-width:0;width:100%;border:1px solid var(--dsw-alias-border-l2,#d9dde3);border-radius:6px;background:var(--dsw-alias-bg-overlay,#fff);color:inherit;padding:6px;font-size:12px}.drawai-export-filename{display:flex;align-items:center;gap:4px;min-width:0}.drawai-export-filename span{font-size:11px;opacity:.65}.drawai-export-info{font-size:11px;opacity:.65;line-height:1.6}.drawai-primary-btn{background:#386bff;color:white;border-color:#386bff;padding:7px 12px}.drawai-primary-btn:disabled{opacity:.5;cursor:default}',
-  '.drawai-export-advanced{border-top:1px solid var(--dsw-alias-border-l2,#e1e3e8);padding-top:10px}.drawai-export-advanced>summary{font-size:12px;cursor:pointer;margin-bottom:10px}.drawai-export-advanced>.drawai-export-field{margin:10px 0}.drawai-export-check{display:flex;align-items:center;gap:6px;font-size:11px;margin:8px 0}.drawai-export-dimensions{display:flex;flex-wrap:wrap;gap:8px}.drawai-export-dimension{display:flex;flex:1;min-width:75px;flex-direction:column;gap:5px;font-size:10px}.drawai-export-dimension input{box-sizing:border-box;width:100%;min-width:0;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:5px;padding:6px;background:transparent;color:inherit}.drawai-export-dimensions>.drawai-export-check{flex-basis:100%}.drawai-export-layer-options{display:flex;flex-direction:column;gap:6px;max-height:140px;overflow:auto;padding:8px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:6px}.drawai-export-layer-options label{display:flex;align-items:center;gap:5px;font-size:11px}',
-  '.drawai-chip{display:flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:6px;background:transparent;padding:1px;cursor:pointer}',
-  '.drawai-chip:hover{border-color:var(--dsw-alias-brand-primary,#4c8dff);background:rgba(76,141,255,.14)}',
+  '.drawai-export-fields{display:flex;flex-direction:column;gap:12px;padding:12px}.drawai-export-field{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:var(--drawai-text-sm)}.drawai-export-field>span{flex:0 0 44px}.drawai-export-field select,.drawai-export-field input{box-sizing:border-box;min-width:0;width:100%}.drawai-export-filename{display:flex;align-items:center;gap:4px;min-width:0}.drawai-export-filename span{font-size:var(--drawai-text-xs);opacity:.65}.drawai-export-info{font-size:var(--drawai-text-xs);opacity:.65;line-height:1.6}.drawai-primary-btn{background:var(--drawai-accent);color:#fff;border-color:var(--drawai-accent);border-radius:var(--drawai-radius-md);padding:8px 12px}.drawai-primary-btn:disabled{opacity:var(--drawai-disabled-opacity);cursor:default}',
+  '.drawai-export-advanced{border-top:1px solid var(--dsw-alias-border-l2,#e1e3e8);padding-top:10px}.drawai-export-advanced>summary{font-size:var(--drawai-text-sm);cursor:pointer;margin-bottom:10px}.drawai-export-advanced>.drawai-export-field{margin:10px 0}.drawai-export-check{display:flex;align-items:center;gap:6px;font-size:var(--drawai-text-xs);margin:8px 0}.drawai-export-dimensions{display:flex;flex-wrap:wrap;gap:8px}.drawai-export-dimension{display:flex;flex:1;min-width:75px;flex-direction:column;gap:6px;font-size:var(--drawai-text-xs)}.drawai-export-dimension input{width:100%;min-width:0}.drawai-export-dimensions>.drawai-export-check{flex-basis:100%}.drawai-export-layer-options{display:flex;flex-direction:column;gap:6px;max-height:140px;overflow:auto;padding:8px;border:1px solid var(--dsw-alias-border-l2,#ddd);border-radius:var(--drawai-radius-md)}.drawai-export-layer-options label{display:flex;align-items:center;gap:6px;font-size:var(--drawai-text-xs)}',
+  '.drawai-chip{display:flex;align-items:center;justify-content:center;border:1px solid transparent;border-radius:var(--drawai-radius-md);background:transparent;padding:2px;cursor:pointer}',
+  '.drawai-chip:hover{border-color:var(--drawai-accent);background:var(--drawai-accent-soft)}',
   '.drawai-swatches{display:flex;gap:6px;margin-top:8px}',
   // 形状**平铺**那一块：与下面那些「类：当前值」的行用同一条分隔线，
   // 但里面的缩略图按原尺寸自动填充（5 列 1fr 会把 44px 的缩略图挤扁）。
   '.drawai-pick{margin-top:8px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1,#3a3a3a)}',
   '.drawai-pick>.drawai-grid{grid-template-columns:repeat(auto-fill,minmax(42px,1fr))}',
-  '.drawai-swatch{width:18px;height:18px;border-radius:4px;border:1px solid rgba(0,0,0,.3);cursor:pointer;padding:0}',
-  '.drawai-swatch.on{outline:2px solid var(--dsw-alias-brand-primary,#4c8dff);outline-offset:1px}',
+  '.drawai-swatch{width:18px;height:18px;border-radius:var(--drawai-radius-sm);border:1px solid rgba(0,0,0,.3);cursor:pointer;padding:0}',
+  '.drawai-swatch.on{outline:2px solid var(--drawai-accent);outline-offset:1px}',
   // 当前生效的选项（线型/箭头方向）—— 和色板用同一套"被选中"语言。
-  '.drawai-btn.on{outline:2px solid var(--dsw-alias-brand-primary,#4c8dff);outline-offset:1px}',
+  '.drawai-btn.on{outline:2px solid var(--drawai-accent);outline-offset:1px}',
   '.drawai-menu-row{display:flex;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1,#3a3a3a)}',
   // 「一类一个下拉」：几类**并排成一行**，每个只显示当前值（形状：矩形 ▾ / 配色：蓝 ▾ …），
   // 点开的那一类把选项铺在下面整行里。菜单因此更矮，一眼能看全每一类的当前值。
@@ -665,7 +672,7 @@ const CSS = [
   '.drawai-menu-select-body>.drawai-swatches{margin-top:0;flex-wrap:wrap}',
   // 字号那一行的"手动调节"：− [输入] ＋
   '.drawai-fontrow{display:flex;flex-wrap:wrap;gap:6px;align-items:center}',
-  '.drawai-fontsize{width:56px;padding:2px 4px;border-radius:4px;border:1px solid var(--dsw-alias-border-l2,#555);background:transparent;color:inherit;font-size:12px;text-align:center}',
+  '.drawai-fontsize{width:56px;padding:2px 4px;border-radius:var(--drawai-radius-sm);border:1px solid var(--dsw-alias-border-l2,#555);background:transparent;color:inherit;font-size:var(--drawai-text-sm);text-align:center}',
   // 新建/打开面板：固定在工具条下方左侧，盖在画布上（和右键菜单同一层）。
   // 下拉面板：left/top 由**触发它的按钮**算出来（inline style），这里只给宽度与兜底位置。
   // 兜底 left:8px;top:38px 用于"量不到按钮位置"的情形（首帧 ref 还没挂）。
@@ -673,11 +680,31 @@ const CSS = [
   '.drawai-docmenu.drawai-special-panel{min-width:0;max-width:calc(100% - 8px)}',
   // 下拉菜单项：整行可点，右侧/下方带一句说明。按钮默认是 inline 且 nowrap，
   // 这里要改成块级 + 允许换行，否则说明文字会把面板撑爆。
-  '.drawai-menu-item{display:block;width:100%;text-align:left;margin-bottom:3px;white-space:normal}',
-  '.drawai-menu-hint{display:block;font-size:11px;opacity:.65;margin-top:1px}',
+  '.drawai-menu-item{display:block;width:100%;text-align:left;margin-bottom:4px;white-space:normal}',
+  '.drawai-menu-hint{display:block;font-size:var(--drawai-text-xs);opacity:.65;margin-top:2px}',
   // 这一格复用 .drawai-edit 的输入框外观，但它是**静态**的（不盖在节点上），
   // 所以要清掉绝对定位与居中，改成整行宽。
   '.drawai-docmenu .doc-menu-input{position:static;width:100%;box-sizing:border-box;text-align:left;margin-bottom:2px}',
+  // ── 设计 token：颜色 / 圆角 / 控件尺寸只在这里定义一次，其余规则一律引用 --drawai-*。
+  // 宿主主题（--dsw-*）能接管语义色；没有宿主变量时用兜底值，所以插件单独跑也自洽。
+  ':root{--drawai-accent:#1a73e8;--drawai-accent-soft:rgba(26,115,232,.14);--drawai-focus-ring:0 0 0 3px rgba(26,115,232,.22);--drawai-surface:var(--dsw-alias-bg-overlay,#ffffff);--drawai-surface-sunken:var(--dsw-alias-bg-layer-1,#ffffff);--drawai-hover:var(--dsw-alias-bg-hover,#f2f1f5);--drawai-border:var(--dsw-alias-border-l2,#e1e3e8);--drawai-text:var(--dsw-alias-label-primary,#282c35);--drawai-text-muted:var(--dsw-alias-label-secondary,#737a86);--drawai-radius-sm:4px;--drawai-radius-md:6px;--drawai-radius-lg:12px;--drawai-radius-pill:999px;--drawai-field-height:30px;--drawai-field-padding:4px 8px;--drawai-font-size:var(--drawai-text-sm);--drawai-text-xs:11px;--drawai-text-sm:12px;--drawai-text-md:13px;--drawai-text-lg:16px;--drawai-text-xl:24px;--drawai-elevation-1:0 2px 6px rgba(32,39,56,.06),0 8px 24px rgba(32,39,56,.08);--drawai-elevation-2:0 2px 6px rgba(32,39,56,.06),0 8px 28px rgba(32,39,56,.16);--drawai-elevation-3:0 4px 12px rgba(32,39,56,.10),0 14px 44px rgba(32,39,56,.22);--drawai-duration-fast:120ms;--drawai-duration-base:160ms;--drawai-ease:cubic-bezier(.2,.8,.2,1);--drawai-disabled-opacity:.45}',
+  // 单行输入框 / 下拉：13 套配方收成一套（原来边框灰有 6 种、圆角 5/6/7、内边距 4~7px）。
+  '.drawai-audio-panel input,.drawai-audio-panel select,.drawai-imagegen-field input,.drawai-imagegen-field select,.drawai-motion-panel input,.drawai-motion-panel select,.drawai-style-control input,.drawai-style-control select,.drawai-palette-add input,.drawai-font-custom input,.drawai-page-picker select,.drawai-layer-move select,.drawai-export-field input,.drawai-export-field select,.drawai-export-dimension input,.drawai-video-settings-menu input,.drawai-video-settings-menu select{box-sizing:border-box;height:var(--drawai-field-height);padding:var(--drawai-field-padding);border:1px solid var(--drawai-border);border-radius:var(--drawai-radius-md);background:var(--drawai-surface);color:var(--drawai-text);font:inherit;font-size:var(--drawai-font-size);line-height:1.4}',
+  '.drawai-audio-panel input:focus-visible,.drawai-audio-panel select:focus-visible,.drawai-imagegen-field input:focus-visible,.drawai-imagegen-field select:focus-visible,.drawai-motion-panel input:focus-visible,.drawai-motion-panel select:focus-visible,.drawai-style-control input:focus-visible,.drawai-style-control select:focus-visible,.drawai-palette-add input:focus-visible,.drawai-font-custom input:focus-visible,.drawai-page-picker select:focus-visible,.drawai-layer-move select:focus-visible,.drawai-export-field input:focus-visible,.drawai-export-field select:focus-visible,.drawai-export-dimension input:focus-visible,.drawai-video-settings-menu input:focus-visible,.drawai-video-settings-menu select:focus-visible{outline:none;border-color:var(--drawai-accent);box-shadow:var(--drawai-focus-ring)}',
+  // 勾选框/单选框不是"输入框"：上面那套高 30px、带描边底板只属于单行文本框与下拉。
+  '.drawai-audio-panel input[type=checkbox],.drawai-audio-panel input[type=radio],.drawai-motion-panel input[type=checkbox],.drawai-video-settings-menu input[type=checkbox]{height:auto;padding:0;border:0;background:transparent}',
+  // 内嵌在面板行里的小输入框（重命名 / 面板搜索）：同一套外观，但不吃 30px 行高。
+  '.drawai-layer-name-input,.drawai-panel-input{box-sizing:border-box;padding:4px 8px;border:1px solid var(--drawai-border);border-radius:var(--drawai-radius-sm);background:var(--drawai-surface);color:var(--drawai-text);font:inherit;font-size:var(--drawai-font-size)}',
+  // 重命名框是「正在编辑」的强提示：仍用强调色描边（写在 primitive 之后才压得住它）。
+  '.drawai-layer-name-input{border-color:var(--drawai-accent)}',
+  // 按钮：统一描边/圆角/底色/字号；各家族自己的高与内边距留着（工具条比面板按钮矮得多）。
+  '.drawai-btn,.drawai-audio-panel button,.drawai-video-controls button,.drawai-video-controls select,.drawai-video-more summary{box-sizing:border-box;border:1px solid var(--drawai-border);border-radius:var(--drawai-radius-md);background:var(--drawai-surface-sunken);color:var(--drawai-text);font:inherit;font-size:var(--drawai-font-size)}',
+  // ── P2：交互反馈。按下态统一给一点「压下去」的手感（transform 不影响布局），
+  // 禁用态只有一个透明度，系统开了「减少动态效果」就把动画和过渡压到最短。
+  '.drawai-btn:active,.drawai-choice-button:active,.drawai-audio-panel button:active,.drawai-video-controls button:active,.drawai-video-more summary:active,.drawai-rail-chip:active,.drawai-toolbar-button:active,.drawai-primary-btn:active{transform:translateY(1px)}',
+  '.drawai-btn:active,.drawai-choice-button:active,.drawai-audio-panel button:active,.drawai-video-controls button:active,.drawai-rail-chip:active{background:var(--drawai-hover)}',
+  '.drawai-btn:disabled,.drawai-choice-button:disabled,.drawai-primary-btn:disabled,.drawai-video-controls button:disabled,.drawai-video-method:disabled,.drawai-audio-panel button:disabled,.drawai-toolbar-button:disabled,.drawai-table-editor-bar button:disabled{opacity:var(--drawai-disabled-opacity)}',
+  '@media (prefers-reduced-motion:reduce){.drawai-root,.drawai-root *,.drawai-root *::before,.drawai-root *::after{animation-duration:1ms!important;animation-iteration-count:1!important;transition-duration:1ms!important}}',
 ].join('\n')
 
 function numberOr(value, fallback) {
@@ -984,7 +1011,7 @@ function labelHtmlElements(html, options) {
       if (tag === 'I' || tag === 'EM') style.fontStyle = 'italic'
       if (tag === 'U') style.textDecoration = 'underline'
       if (tag === 'S' || tag === 'STRIKE' || tag === 'DEL') style.textDecoration = 'line-through'
-      if (tag === 'A' && child.hasAttribute('href')) { style.textDecoration = 'underline'; if (!style.color) style.color = '#1a73e8' }
+      if (tag === 'A' && child.hasAttribute('href')) { style.textDecoration = 'underline'; if (!style.color) style.color = LINK_BLUE }
       if (tag === 'SUP' || tag === 'SUB') { style.baselineShift = tag === 'SUP' ? 'super' : 'sub'; style.fontSize = (style.fontSize || baseSize) * .75 }
       if (child.style) {
         for (const name of ['color', 'backgroundColor', 'fontWeight', 'fontStyle', 'textDecoration', 'fontFamily']) if (child.style[name]) style[name] = child.style[name]
@@ -3783,6 +3810,8 @@ const DRAWAI_PREFS_KEY = 'dsh-drawai.prefs'
 const DEFAULT_DRAWAI_PREFS = {
   showGrid: true,
   showTaskList: false,
+  // 画布外观（light / dark）：以前只活在组件 state 里，切了、重开就回浅色。
+  mode: 'light',
   defaultShape: 'rounded',
   defaultColor: 'blue',
   // 文生图：服务方与默认参数。`imagegenWorkflow` 留空 = 用宿主内置的 Qwen-Image 2.1 默认工作流。
@@ -6399,7 +6428,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     // drawio 的圆角半径：mxPolyline.paintLine 取 arcSize（缺省 mxConstants.LINE_ARCSIZE = 20）
     // 再 **除以 2**（那个 x2 是 addPoints 的内部约定，我们不打算复刻）→ 缺省 10px。
     const cornerRadius = styleGet(edgeStyle, 'rounded', '0') === '1' ? Math.max(0, styleNumber(edgeStyle, 'arcSize', 20) / 2) : 0
-    const lineStroke = selected ? '#1a73e8' : strokeColor !== null ? strokeColor : skin.line
+    const lineStroke = selected ? ACCENT : strokeColor !== null ? strokeColor : skin.line
     // 线上的文字：先算出**文字框**（渲染与"给线挖空"要用同一个框），
     // 再把落在框里的那几段线挖掉 —— 于是字的位置不画线，而不是盖一层白底。
     const labelFontSize = styleNumber(edgeStyle, 'fontSize', 10)
@@ -6547,7 +6576,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             className: 'drawai-preview',
             d: d,
             fill: 'none',
-            stroke: '#1a73e8',
+            stroke: ACCENT,
             strokeWidth: 2,
             strokeDasharray: '6 4',
           }),
@@ -6562,7 +6591,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
               y1: end.y,
               x2: preview.x,
               y2: preview.y,
-              stroke: '#1a73e8',
+              stroke: ACCENT,
               strokeWidth: 2,
               strokeDasharray: '6 6',
               markerEnd: 'url(#' + arrowId + ')',
@@ -6579,7 +6608,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             y1: anchor.y,
             x2: preview.x,
             y2: preview.y,
-            stroke: '#1a73e8',
+            stroke: ACCENT,
             strokeWidth: 2,
             strokeDasharray: '6 4',
           }),
@@ -6747,7 +6776,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             width: 8,
             height: 8,
             fill: '#ffffff',
-            stroke: '#1a73e8',
+            stroke: ACCENT,
             strokeWidth: 1.5,
             onPointerDown: (event) => ui.onResizePointerDown(node.id, dir, event),
           }),
@@ -6866,7 +6895,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             className: 'drawai-preview',
             d: d,
             fill: 'none',
-            stroke: '#1a73e8',
+            stroke: ACCENT,
             strokeWidth: 2,
             strokeDasharray: '6 4',
           }),
@@ -6884,7 +6913,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
               y1: end.y,
               x2: to.x,
               y2: to.y,
-              stroke: '#1a73e8',
+              stroke: ACCENT,
               strokeWidth: 2,
               strokeDasharray: '6 6',
               markerEnd: 'url(#' + arrowId + ')',
@@ -6899,7 +6928,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             cx: anchor.x,
             cy: anchor.y,
             r: 3.5,
-            fill: '#1a73e8',
+            fill: ACCENT,
             stroke: '#ffffff',
             strokeWidth: 1.5,
           }),
@@ -6925,7 +6954,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
           height: geo.h + 12,
           rx: 8,
           fill: 'none',
-          stroke: '#1a73e8',
+          stroke: ACCENT,
           strokeWidth: 2.5,
         }),
       )
@@ -6948,8 +6977,8 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             cx: a.x,
             cy: a.y,
             r: on ? 6 : 4,
-            fill: on ? '#1a73e8' : '#ffffff',
-            stroke: on ? '#ffffff' : '#1a73e8',
+            fill: on ? ACCENT : '#ffffff',
+            stroke: on ? '#ffffff' : ACCENT,
             strokeWidth: 2,
           }),
         )
@@ -7010,7 +7039,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             className: 'drawai-preview',
             d: d,
             fill: 'none',
-            stroke: '#1a73e8',
+            stroke: ACCENT,
             strokeWidth: 2,
             strokeDasharray: '6 4',
             pointerEvents: 'none',
@@ -7025,7 +7054,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             y1: fromPt.y,
             x2: toPt.x,
             y2: toPt.y,
-            stroke: '#1a73e8',
+            stroke: ACCENT,
             strokeWidth: 2,
             strokeDasharray: '6 4',
             pointerEvents: 'none',
@@ -7044,8 +7073,8 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
           y: by,
           width: bw,
           height: bh,
-          fill: 'rgba(26,115,232,0.12)',
-          stroke: '#1a73e8',
+          fill: 'rgba(56,107,255,0.12)',
+          stroke: ACCENT,
           strokeWidth: 1,
           strokeDasharray: '4 3',
           pointerEvents: 'none',
@@ -7065,7 +7094,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     children.push(
       React.createElement(
         'line',
-        Object.assign({ key: 'guide-' + i, stroke: '#1a73e8', strokeWidth: 1, strokeDasharray: '4 3', pointerEvents: 'none' }, geom),
+        Object.assign({ key: 'guide-' + i, stroke: ACCENT, strokeWidth: 1, strokeDasharray: '4 3', pointerEvents: 'none' }, geom),
       ),
     )
   }
@@ -7634,9 +7663,15 @@ function CanvasView(props) {
   const uid = uidState[0]
   const active = props.active !== false
   const svgRef = React.useRef(null)
-  const modeState = React.useState('light')
+  const modeState = React.useState(() => (loadDrawaiPrefs().mode === 'dark' ? 'dark' : 'light'))
   const mode = modeState[0]
   const setMode = modeState[1]
+  /** 切画布外观：state 管本帧渲染，prefs 管下次打开还记得。 */
+  function toggleCanvasMode() {
+    const next = mode === 'light' ? 'dark' : 'light'
+    setMode(next)
+    patchPrefs({ mode: next })
+  }
   const docState = React.useState(null)
   const doc = docState[0]
   const setDoc = docState[1]
@@ -13177,7 +13212,7 @@ function CanvasView(props) {
         title: '后台任务' + (activeTaskCount ? ' · ' + activeTaskCount + ' 项进行中' : ''),
         onClick: () => patchPrefs({ showTaskList: !showTaskList }),
       }, railIcon('tasks'), activeTaskCount ? React.createElement('span', { 'aria-hidden': true,
-        style: { position: 'absolute', top: 0, right: 0, borderRadius: 8, padding: '1px 4px', fontSize: 10, background: 'var(--dsw-alias-brand-primary,#3370ff)', color: '#fff', lineHeight: '14px' },
+        style: { position: 'absolute', top: 0, right: 0, borderRadius: 8, padding: '1px 4px', fontSize: 10, background: 'var(--drawai-accent)', color: '#fff', lineHeight: '14px' },
       }, activeTaskCount > 99 ? '99+' : activeTaskCount) : null))
 
     const rail = React.createElement(
@@ -14092,6 +14127,7 @@ function CanvasView(props) {
               className: 'drawai-btn',
               onClick: () => {
                 patchPrefs(Object.assign({}, DEFAULT_DRAWAI_PREFS))
+                setMode('light')
               },
             },
             '恢复默认',
@@ -14507,7 +14543,7 @@ function CanvasView(props) {
         items: [
           item('适应内容', () => setViewOverride(null), { group: 'zoom', disabled: empty }),
           item('100%', () => { const current = viewRef.current; if (current && size.w > 0) setViewOverride(zoomViewAt(current, { x: current.x + current.w / 2, y: current.y + current.h / 2 }, size.w / current.w)) }, { group: 'zoom', disabled: empty }),
-          item(modeTag, () => setMode(mode === 'light' ? 'dark' : 'light'), { group: 'appearance', keepOpen: true }),
+          item(modeTag, toggleCanvasMode, { group: 'appearance', keepOpen: true }),
           item(showGrid ? '隐藏网格' : '显示网格', () => setShowGrid(!showGrid), { group: 'appearance', keepOpen: true }),
           item('偏好…', openPrefsPanel, { group: 'settings' }),
         ],
@@ -15217,4 +15253,8 @@ exports.__routeInternals = {
   SIDES: SIDES,
   HOT_PAD: HOT_PAD,
   GRID: GRID,
+  // 强调色：画布选中环/手柄/引导线与 UI 主色同源。导出给自测断言用，
+  // 免得测试里再抄一份色值 —— 换色时只改上面那一个常量。
+  ACCENT: ACCENT,
+  LINK_BLUE: LINK_BLUE,
 }
