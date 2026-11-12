@@ -1188,7 +1188,7 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
     selectedIds: ['a', 'b', 'e'], routeMemoryRef: { current: new Map() },
     React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
     filterEditableIds: (doc, ids) => ids,
-    nodeBoxOf: (n) => n, isTableNode: () => false,
+    nodeBoxOf: (n) => n, nodeFrameBox: (n, geo) => geo, isTableNode: () => false,
     edgeRoutePoints: () => [{ x: 100, y: 30 }, { x: 150, y: 30 }],
     boxOfBoxes: () => ({ x: 0, y: 0, w: 250, h: 60 }),
     clampNumber: (v, min, max) => Math.min(max, Math.max(min, v)),
