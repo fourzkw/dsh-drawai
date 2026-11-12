@@ -44,6 +44,14 @@ npm test                      # 全量；或至少跑相关子集
 npm run test:motion-sync
 ```
 
+发版（打 tag、发布 npm）前额外跑：
+
+```powershell
+npm run release:check   # build + 构建产物同步 + check-package + npm test
+```
+
+tag 必须打在「构建产物已提交」的提交上。0.4.5 就是因为只改了 `src/motion/sync.js`、没重建 `lib/motion/sync.js`，让带旧参数的产物进了 npm 包（#43）。CI 同样会在构建后要求 `src`/`lib` 没有差异。
+
 ## 关于「修复完成」
 
 一个 issue 只有在**合并进 `develop` 且验证通过**之后才算完成。此时才删分支。分支存在于本地、远端还没合并时，不要说「已修复」——尤其当问题只在报告人的机器上复现时，先给出取证手段（例如 `/drawai/api/diagnostics`），再谈修复。
