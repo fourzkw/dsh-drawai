@@ -1,5 +1,11 @@
 # 发布与收录流程 / Release & listing
 
+## 0.4.6 发布内容（2026-11-12）
+
+- 修中文或含 URL 编码路径的画布打开后显示成空白：右栏标签的地址（`pathFromAddress()`）把 `dsh-resource://…/测试画布.drawio` 里的 `%E6%B5%8B…` 原样交给宿主读文件，宿主按字面量找不到，回 `exists:false` + 空文档，界面当成可编辑空画布——保存还会在磁盘上按编码串新建一个空文件。现在先 `decodeURIComponent` 再走原有的 `dsh-resource://`、`file://` 与盘符处理；不是合法编码（例如文件名里本来就有 `100%`）就保留原串（#41，PR #42）。
+- 修 `motion_audio_verify` 在 FFmpeg 9 下报 `Unrecognized option 'vsync'` 并中断：验收的视觉帧抽样还在用 FFmpeg 7 起弃用、9 已移除的 `-vsync 0`，换成 `-fps_mode passthrough`。受影响的是 macOS Apple Silicon（首次使用自动下载的正是 9.0.2）和系统 `PATH` 上装了 ffmpeg 9+ 的用户；Windows/Linux 默认下载的 8.1.x 仍接受旧参数，但同样已迁移。崩溃时 `report.json` 不生成、`visual.log` 残留，验收步骤卡住。0.4.5 的 npm 包里 `lib/motion/sync.js` 是旧版（发布提交没重建），所以 0.4.5 实际带着这个 bug（#43，PR #44）。
+- 工程侧（不进 npm 包）：`check-package` 的构建同步检查从白名单扩到整个 `lib/motion/*`（678 个文件逐个比对）；新增 `tools/check-release.mjs`（`npm run release:check`），打 tag 前强制「工作树干净 → 跑 build → 构建产物不再产生新改动」；仓库新增 CI（`.github/workflows/verify.yml`），push / PR 到 `develop`、`master` 与推 `v*` tag 时跑构建同步检查与渲染回归。这两个盲区叠加正是 0.4.5 漏发 lib 重建的原因。
+
 ## 0.4.5 发布内容（2026-11-11）
 
 - 修 `diagram_export` 永远报「导出路径超出工作区」：工作区闸门把 `ctx.fs.resolve()` 拿到的**目标句柄**和 `ctx.fs.contains()` 需要的路径混成了一个值。`target` 是 `node:path` 拼出来的字符串，`contains()` 内部 `processPath()` 对字符串取 `targetKey` 得到 `undefined`，`relative()` 于是永远判成越界——与真实路径无关，SVG/PNG、默认输出目录、纯英文目录都一样失败。改为两边都先 `resolve()` 成句柄再 `contains()`；`relative()` 要的字符串单独从根句柄 `processPath()` 取（#40）。
