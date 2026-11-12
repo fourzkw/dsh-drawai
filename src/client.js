@@ -614,7 +614,8 @@ const CSS = [
   // 背景透明、颜色与字号由 inline style 按**这个节点**给（见 renderDiagram 的 labelTextBox）。
   '.drawai-edit{position:absolute;z-index:5;box-sizing:border-box;outline:2px solid var(--drawai-accent,#1a73e8);outline-offset:-2px;border:none;border-radius:var(--drawai-radius-sm);background:transparent;color:#000;font-family:Helvetica, Arial, sans-serif;font-size:var(--drawai-text-sm);line-height:14px;text-align:center;padding:0;margin:0;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text}',
   '.drawai-canvas-edit{outline:none;border:0;border-radius:0;background:transparent;box-shadow:none}',
-  '.drawai-table-editor{position:absolute;z-index:30;inset:12px;display:flex;flex-direction:column;min-width:0;min-height:0;padding:12px;gap:8px;border:1px solid var(--dsw-alias-border-l2,#d5dbe4);border-radius:var(--drawai-radius-lg);background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:var(--drawai-elevation-3)}.drawai-table-editor-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.drawai-table-editor-bar strong{margin-right:auto}.drawai-table-editor-bar button{padding:6px 8px;border:1px solid var(--drawai-border);border-radius:var(--drawai-radius-md);background:transparent;color:inherit;cursor:pointer}.drawai-table-editor-bar button:disabled{opacity:var(--drawai-disabled-opacity)}.drawai-table-note{margin:0;font-size:var(--drawai-text-xs);opacity:.7}.drawai-table-scroll{flex:1;min-height:0;overflow:auto}.drawai-table-scroll table{border-collapse:collapse;min-width:100%;table-layout:fixed}.drawai-table-scroll td,.drawai-table-scroll th{border:1px solid #cbd2dd;min-width:120px;padding:4px}.drawai-table-scroll th{background:var(--dsw-alias-bg-layer-2,#eef2f8)}.drawai-table-scroll textarea{box-sizing:border-box;width:100%;min-width:112px;min-height:60px;padding:4px;border:0;background:transparent;color:inherit;font-family:sans-serif;font-size:var(--drawai-text-sm);line-height:1.4;resize:vertical;user-select:text}.drawai-table-scroll th textarea{color:#263143;font-weight:bold}',
+  '.drawai-cell-editor{position:absolute;z-index:6;box-sizing:border-box;margin:0;padding:4px 4px;border:2px solid var(--drawai-accent,#1a73e8);border-radius:var(--drawai-radius-sm);background:#ffffff;color:#263143;font-family:sans-serif;font-weight:normal;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-all;outline:none;box-shadow:var(--drawai-focus-ring)}',
+'.drawai-cell-editor.drawai-cell-editor-head{background:#eef2f8;font-weight:bold}',
   '.drawai-rich-edit{overflow:auto;min-height:24px}',
   '.drawai-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}',
   '.drawai-trace-surface{position:relative;width:100%;height:100%;overflow:hidden}.drawai-trace-surface>svg{display:block;pointer-events:none}.drawai-trace-progress{position:absolute;left:8px;right:8px;bottom:8px;pointer-events:none;line-height:0}.drawai-trace-progress progress{display:block;width:100%;height:5px;accent-color:var(--drawai-accent,#1a73e8)}',
@@ -703,7 +704,7 @@ const CSS = [
   // 禁用态只有一个透明度，系统开了「减少动态效果」就把动画和过渡压到最短。
   '.drawai-btn:active,.drawai-choice-button:active,.drawai-audio-panel button:active,.drawai-video-controls button:active,.drawai-video-more summary:active,.drawai-rail-chip:active,.drawai-toolbar-button:active,.drawai-primary-btn:active{transform:translateY(1px)}',
   '.drawai-btn:active,.drawai-choice-button:active,.drawai-audio-panel button:active,.drawai-video-controls button:active,.drawai-rail-chip:active{background:var(--drawai-hover)}',
-  '.drawai-btn:disabled,.drawai-choice-button:disabled,.drawai-primary-btn:disabled,.drawai-video-controls button:disabled,.drawai-video-method:disabled,.drawai-audio-panel button:disabled,.drawai-toolbar-button:disabled,.drawai-table-editor-bar button:disabled{opacity:var(--drawai-disabled-opacity)}',
+  '.drawai-btn:disabled,.drawai-choice-button:disabled,.drawai-primary-btn:disabled,.drawai-video-controls button:disabled,.drawai-video-method:disabled,.drawai-audio-panel button:disabled,.drawai-toolbar-button:disabled{opacity:var(--drawai-disabled-opacity)}',
   '@media (prefers-reduced-motion:reduce){.drawai-root,.drawai-root *,.drawai-root *::before,.drawai-root *::after{animation-duration:1ms!important;animation-iteration-count:1!important;transition-duration:1ms!important}}',
 ].join('\n')
 
@@ -7690,8 +7691,12 @@ function CanvasView(props) {
   const editingState = React.useState(null)
   const editing = editingState[0]
   const setEditing = editingState[1]
-  const [tableEditor, setTableEditor] = React.useState(null)
+  // 表格是就地编辑：state 只记"正在改哪一格"，不再挂一整张表的弹窗模型。
+  const [cellEdit, setCellEdit] = React.useState(null)
   const richEditorRef = React.useRef(null)
+  // Esc / 换格会先关掉编辑框，随后才轮到 blur —— 这个标记让 blur 知道"不是用户点走了"。
+  const cellSkipBlurRef = React.useRef(false)
+  const cellEditorRef = React.useRef(null)
   const richDirtyRef = React.useRef(false)
   const richFormatRef = React.useRef(false)
   const richSelectionRef = React.useRef(null)
@@ -9619,40 +9624,117 @@ function CanvasView(props) {
    * 于是编辑框里的断行与字号跟提交后画出来的标签一模一样（需求"输入时的效果与
    * 输入完成后统一"）。定位仍然换算到**画布容器**的坐标系（画布是定位上下文）。
    */
-  function openTableEditor(id) {
+  /**
+   * 一格在**画布容器**里的像素框。表格用的是画布坐标，乘 ctm 的 scale 再减容器原点，
+   * 于是编辑框正好盖在画出来的格子上（缩放后也一样：字号同样乘 scale）。
+   */
+  function tableCellBox(node, model, row, col) {
+    const svg = svgRef.current
+    const canvas = canvasRef.current
+    if (svg === null || canvas === null) return null
+    const ctm = svg.getScreenCTM()
+    if (ctm === null) return null
+    const rects = tableCellRects(node, model)
+    if (row < 0 || row >= rects.length || col < 0 || col >= rects[row].length) return null
+    const rect = canvas.getBoundingClientRect()
+    const cell = rects[row][col]
+    const layout = tableNodeLayout(node, model)
+    const scale = numberOr(ctm.a, 1)
+    return {
+      left: cell.x * scale + numberOr(ctm.e, 0) - rect.left,
+      top: cell.y * scale + numberOr(ctm.f, 0) - rect.top,
+      width: Math.max(24, cell.w * scale),
+      height: Math.max(18, cell.h * scale),
+      fontSize: Math.max(6, layout.fs * scale),
+      lineHeight: Math.max(8, layout.lineHeight * scale),
+    }
+  }
+
+  /** 打开某一格的编辑框（就地改，不弹页）。`givenModel` 用于换格时沿用刚提交的模型。 */
+  function openTableCell(id, row, col, givenModel) {
     const node = nodeById(id)
-    const model = parseCanvasTable(node)
-    if (!node || !model || !filterEditableIds(docRef.current, [id]).includes(id)) return
+    if (node === null) return
+    const model = givenModel || parseCanvasTable(node)
+    if (!model || !model.rows.length) return
+    if (!filterEditableIds(docRef.current, [id]).includes(id)) return
+    const rows = model.rows
+    const r = Math.max(0, Math.min(rows.length - 1, Math.floor(row) || 0))
+    const c = Math.max(0, Math.min(rows[r].length - 1, Math.floor(col) || 0))
+    const box = tableCellBox(node, model, r, c)
+    if (box === null) return
     setEditing(null)
     setSelectedIds([id])
     setMenu(null)
-    setTableEditor({ id, model, original: node.label, path: target, page: pageIndex, hasFormatting: typeof node.labelHtml === 'string' })
+    cellSkipBlurRef.current = false
+    setCellEdit(Object.assign({ id: id, row: r, col: c, text: rows[r][c], model: model,
+      original: node.label, path: target, page: pageIndex, hasFormatting: typeof node.labelHtml === 'string' }, box))
   }
 
-  function saveTableEditor(model) {
-    if (!tableEditor) return
-    const node = nodeById(tableEditor.id)
-    if (target !== tableEditor.path || pageIndex !== tableEditor.page || !node || node.label !== tableEditor.original) {
-      setSaveNote('表格已被其他修改更新，请重新打开后编辑')
-      return
-    }
-    if (JSON.stringify(model) !== JSON.stringify(tableEditor.model)) {
-      applyLocal((next) => {
-        const changed = next.nodes.find(item => item.id === tableEditor.id)
+  /**
+   * 提交当前格。`next` 可以是 `(model) => ({row, col})`：Enter/Tab 提交后直接跳到下一格
+   * （飞书表格的手感），返回 null 表示"到头了就关掉"。
+   */
+  function commitTableCell(next) {
+    const edit = cellEdit
+    if (edit === null) return
+    const node = nodeById(edit.id)
+    const text = edit.text
+    const model = Object.assign({}, edit.model, {
+      rows: edit.model.rows.map((row, r) => r === edit.row ? row.map((v, c) => c === edit.col ? text : v) : row),
+    })
+    const dirty = text !== edit.model.rows[edit.row][edit.col]
+    if (node !== null && dirty && target === edit.path && pageIndex === edit.page) {
+      applyLocal((doc) => {
+        const changed = doc.nodes.find(item => item.id === edit.id)
         if (!changed) return
         changed.label = serializeCanvasTable(model)
-        changed.data = { ...changed.data, drawaiTableEscaped: '1' }
+        changed.data = Object.assign({}, changed.data, { drawaiTableEscaped: '1' })
         if (typeof changed.labelHtml === 'string') changed.labelHtml = null
         changed.h = Math.max(Number(changed.h) || 0, tableNodeLayout(changed, model).height)
       })
     }
-    setTableEditor(null)
+    const move = typeof next === 'function' ? next(model) : null
+    if (move !== null) openTableCell(edit.id, move.row, move.col, model)
+    else setCellEdit(null)
+  }
+
+  function cancelTableCell() {
+    // Esc / 换格引起的 blur 不应该提交：先立标记，blur 回调看到它就直接放弃。
+    cellSkipBlurRef.current = true
+    setCellEdit(null)
+  }
+
+  /** 行列增删：菜单里点一下就走这里，和改单元格一样走 applyLocal（可撤销）。 */
+  function applyTableOp(id, op, row, col) {
+    setMenu(null)
+    const node = nodeById(id)
+    const model = parseCanvasTable(node)
+    if (node === null || model === null || !model.rows.length) return
+    const rows = model.rows.map((cells) => cells.slice())
+    const width = rows[0].length
+    const emptyRow = () => rows[0].map(() => '')
+    if (op === 'row-above') rows.splice(row, 0, emptyRow())
+    else if (op === 'row-below') rows.splice(row + 1, 0, emptyRow())
+    else if (op === 'row-delete') { if (rows.length <= 2) return; rows.splice(row, 1) }
+    else if (op === 'col-left') rows.forEach((cells) => cells.splice(col, 0, ''))
+    else if (op === 'col-right') rows.forEach((cells) => cells.splice(col + 1, 0, ''))
+    else if (op === 'col-delete') { if (width <= 2) return; rows.forEach((cells) => cells.splice(col, 1)) }
+    else return
+    const modelNext = Object.assign({}, model, { rows: rows })
+    applyLocal((doc) => {
+      const changed = doc.nodes.find(item => item.id === id)
+      if (!changed) return
+      changed.label = serializeCanvasTable(modelNext)
+      changed.data = Object.assign({}, changed.data, { drawaiTableEscaped: '1' })
+      if (typeof changed.labelHtml === 'string') changed.labelHtml = null
+      changed.h = Math.max(Number(changed.h) || 0, tableNodeLayout(changed, modelNext).height)
+    })
   }
 
   function openNodeEditor(id) {
     const node = nodeById(id)
     if (node === null) return
-    if (isTableNode(node)) { openTableEditor(id); return }
+    if (isTableNode(node)) { openTableCell(id, 0, 0); return }
     if (motionCore.isShotCardNode(node)) { setShotLibrary({ replaceId: node.id, initialSelection: { cardId: node.data.shotCardId, styleKey: node.data.shotStyleKey } }); return }
     if (motionCore.isMgStyleNode(node)) { setMgLibrary({ replaceId: node.id, initialSelection: { slug: node.data.mgStyleSlug } }); return }
     const svg = svgRef.current
@@ -9685,6 +9767,13 @@ function CanvasView(props) {
       return
     }
     if (node !== null && !nodeShowsLabel(node)) return
+    // 表格：双击落在哪一格就开哪一格（双击表头也能改列名），不用先选中再找按钮。
+    if (node !== null && isTableNode(node)) {
+      const model = parseCanvasTable(node)
+      const hit = model === null ? null : tableCellAt(node, model, toUserSpace(event))
+      openTableCell(id, hit === null ? 0 : hit.row, hit === null ? 0 : hit.col)
+      return
+    }
     openNodeEditor(id)
   }
 
@@ -10397,6 +10486,15 @@ function CanvasView(props) {
   }
 
   function onNodeContextMenu(id, event) {
+    // 表格的右键菜单是「这一格」的：行列增删都按落点算，菜单项直接作用在那个格子上。
+    const tableNode = nodeById(id)
+    const tableModel = tableNode === null ? null : (isTableNode(tableNode) ? parseCanvasTable(tableNode) : null)
+    if (tableModel !== null && !(selectedIds.length > 1 && selectedIds.indexOf(id) >= 0)) {
+      const hit = tableCellAt(tableNode, tableModel, toUserSpace(event))
+      setSelectedIds([id])
+      openMenu('tableCell', id, event, false, { row: hit === null ? 0 : hit.row, col: hit === null ? 0 : hit.col })
+      return
+    }
     // 右键的节点**已经在选区里**且选区不止一个 → 用户想收拾的是这一整批（对齐/分布），
     // 而不是要把选区缩成这一个。选单个时保持原行为（形状/配色/改标签/删除）。
     if (selectedIds.length > 1 && selectedIds.indexOf(id) >= 0) {
@@ -12841,7 +12939,7 @@ function CanvasView(props) {
   }
 
   function renderSelectionToolbar() {
-    if (!active || doc === null || view === null || tableEditor !== null || menu !== null || placeEdgeKind !== null || placeTool !== null) return null
+    if (!active || doc === null || view === null || cellEdit !== null || menu !== null || placeEdgeKind !== null || placeTool !== null) return null
     const ids = filterEditableIds(doc, selectedIds)
     const nodes = doc.nodes.filter((n) => ids.indexOf(n.id) >= 0)
     const edges = doc.edges.filter((e) => ids.indexOf(e.id) >= 0)
@@ -12863,7 +12961,7 @@ function CanvasView(props) {
       const node = nodes[0]
       return React.createElement(NodeToolCard, { canvasRef, className: 'drawai-selection-toolbar', role: 'toolbar', 'aria-label': '表格操作', fallbackTop: bottom + 12,
         style: { width: '96px', left: center - 48 + 'px', top: top - 72 + 'px' } },
-        React.createElement('button', { type: 'button', className: 'drawai-toolbar-button', onClick: () => openTableEditor(node.id), 'aria-label': '编辑表格' },
+        React.createElement('button', { type: 'button', className: 'drawai-toolbar-button', onClick: () => openTableCell(node.id, 0, 0), 'aria-label': '编辑表格' },
           railIcon('table'), React.createElement('span', { className: 'drawai-color-label' }, '编辑表格')))
     }
     if(nodes.length===1&&edges.length===0&&motionCore.isAudioNode(nodes[0])){
@@ -13515,6 +13613,57 @@ function CanvasView(props) {
           React.createElement('button', { className: 'drawai-btn', onClick: () => alignSelection('distributeY'), disabled: !canDistribute, title: canDistribute ? '垂直等距' : '需要选中至少 3 个节点' }, '垂直等距'),
         ),
       )
+    } else if (menu.kind === 'tableCell') {
+      // 表格：行列操作都挂在这一格上（参考飞书表格），不再另开一页编辑。
+      const tableNode = nodeById(menu.id)
+      const tableModel = tableNode === null ? null : parseCanvasTable(tableNode)
+      const cellRow = typeof menu.row === 'number' ? menu.row : 0
+      const cellCol = typeof menu.col === 'number' ? menu.col : 0
+      const rowCount = tableModel === null ? 0 : tableModel.rows.length
+      const colCount = tableModel === null || !tableModel.rows.length ? 0 : tableModel.rows[0].length
+      const fixedCols = tableModel !== null && tableModel.storyboard === true
+      rows.push(menuTitle('表格：第 ' + (cellRow + 1) + ' 行 · 第 ' + (cellCol + 1) + ' 列'))
+      rows.push(
+        React.createElement(
+          'div',
+          { className: 'drawai-menu-row' },
+          React.createElement('button', { className: 'drawai-btn', onClick: () => { setMenu(null); openTableCell(menu.id, cellRow, cellCol) } }, '编辑此格'),
+        ),
+      )
+      rows.push(
+        React.createElement(
+          'div',
+          { className: 'drawai-menu-row' },
+          React.createElement('button', { className: 'drawai-btn', onClick: () => applyTableOp(menu.id, 'row-above', cellRow, cellCol) }, '上方插入行'),
+          React.createElement('button', { className: 'drawai-btn', onClick: () => applyTableOp(menu.id, 'row-below', cellRow, cellCol) }, '下方插入行'),
+        ),
+      )
+      rows.push(
+        React.createElement(
+          'div',
+          { className: 'drawai-menu-row' },
+          React.createElement('button', { className: 'drawai-btn', onClick: () => applyTableOp(menu.id, 'row-delete', cellRow, cellCol), disabled: rowCount <= 2, title: rowCount <= 2 ? '至少要留 2 行' : '删除第 ' + (cellRow + 1) + ' 行' }, '删除本行'),
+        ),
+      )
+      if (!fixedCols) {
+        rows.push(
+          React.createElement(
+            'div',
+            { className: 'drawai-menu-row' },
+            React.createElement('button', { className: 'drawai-btn', onClick: () => applyTableOp(menu.id, 'col-left', cellRow, cellCol) }, '左侧插入列'),
+            React.createElement('button', { className: 'drawai-btn', onClick: () => applyTableOp(menu.id, 'col-right', cellRow, cellCol) }, '右侧插入列'),
+          ),
+        )
+        rows.push(
+          React.createElement(
+            'div',
+            { className: 'drawai-menu-row' },
+            React.createElement('button', { className: 'drawai-btn', onClick: () => applyTableOp(menu.id, 'col-delete', cellRow, cellCol), disabled: colCount <= 2, title: colCount <= 2 ? '至少要留 2 列' : '删除第 ' + (cellCol + 1) + ' 列' }, '删除本列'),
+          ),
+        )
+      } else {
+        rows.push(React.createElement('div', { className: 'drawai-note' }, '分镜表的列是固定的（结构由视频工作流决定），不能增删列。'))
+      }
     } else if (menu.kind === 'node') {
       const node = nodeById(menu.id)
       const label = node !== null && typeof node.label === 'string' ? node.label : menu.id
@@ -14350,7 +14499,7 @@ function CanvasView(props) {
     const target = event === null || event === undefined ? null : event.target
     if (isSelectableTextTarget(target)) return
     const closest = target !== null && target !== undefined && typeof target.closest === 'function' ? target.closest.bind(target) : null
-    if (closest !== null && closest('.drawai-table-editor') !== null) return
+    if (closest !== null && closest('.drawai-cell-editor') !== null) return
     // Formatting controls must not steal focus or clear the selected text in
     // the contenteditable before the command is applied (capture runs first).
     if (closest !== null && (closest('.drawai-selection-toolbar') !== null || closest('.drawai-palette-panel') !== null)) {
@@ -14608,8 +14757,43 @@ function CanvasView(props) {
       for (const cell of cells) if (cell.id === editing.id) cell.label = editing.text
     }
     const canvasChildren = [renderDiagram(previewDoc, mode, uid, svgRef, ui, view)]
-    if (tableEditor !== null) canvasChildren.push(React.createElement(TableNodeEditor, { key: 'table-editor-' + tableEditor.id, model: tableEditor.model,
-      hasFormatting: tableEditor.hasFormatting, onSave: saveTableEditor, onCancel: () => setTableEditor(null) }))
+    if (cellEdit !== null) canvasChildren.push(React.createElement('textarea', {
+      key: 'cell-editor-' + cellEdit.id + '-' + cellEdit.row + '-' + cellEdit.col,
+      className: 'drawai-cell-editor' + (cellEdit.row === 0 ? ' drawai-cell-editor-head' : ''),
+      ref: cellEditorRef,
+      value: cellEdit.text,
+      style: { left: cellEdit.left + 'px', top: cellEdit.top + 'px', width: cellEdit.width + 'px', height: cellEdit.height + 'px',
+        fontSize: cellEdit.fontSize + 'px', lineHeight: cellEdit.lineHeight + 'px' },
+      'aria-label': '第' + (cellEdit.row + 1) + '行第' + (cellEdit.col + 1) + '列',
+      spellCheck: false,
+      autoFocus: true,
+      onFocus: (event) => event.target.select(),
+      onChange: (event) => setCellEdit(current => current === null ? null : Object.assign({}, current, { text: event.target.value })),
+      onBlur: () => {
+        if (cellSkipBlurRef.current) { cellSkipBlurRef.current = false; return }
+        commitTableCell(null)
+      },
+      onKeyDown: (event) => {
+        // Enter 提交并下移、Tab 提交并右移 —— 和飞书表格一致；Shift+Enter 才是单元格内换行。
+        const model = cellEdit.model
+        if (event.key === 'Escape') { event.preventDefault(); cancelTableCell(); return }
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault()
+          commitTableCell(() => ({ row: cellEdit.row + 1, col: cellEdit.col }))
+          return
+        }
+        if (event.key === 'Tab') {
+          event.preventDefault()
+          const step = event.shiftKey ? -1 : 1
+          commitTableCell(() => {
+            const width = model.rows[cellEdit.row].length
+            const next = cellEdit.col + step
+            if (next >= 0 && next < width) return { row: cellEdit.row, col: next }
+            return null
+          })
+        }
+      },
+    }))
     const selectionToolbar = renderSelectionToolbar()
     if (selectionToolbar !== null) canvasChildren.push(selectionToolbar)
     const menuNode = renderMenu()

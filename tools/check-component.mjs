@@ -1184,7 +1184,7 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
   const importedKernel = Object.fromEntries(importedNames.map((name) => [name, styleKernel[name]]))
   const context = Object.assign({}, importedKernel, {
     doc, view: { x: 0, y: 0, w: 500, h: 500 }, size: { w: 260, h: 400 },
-    editing: null, tableEditor: null, menu: null, placeEdgeKind: null, placeTool: null,
+    editing: null, cellEdit: null, menu: null, placeEdgeKind: null, placeTool: null,
     selectedIds: ['a', 'b', 'e'], routeMemoryRef: { current: new Map() },
     React: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }) },
     filterEditableIds: (doc, ids) => ids,
