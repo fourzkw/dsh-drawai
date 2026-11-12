@@ -46,7 +46,9 @@ function serializeCanvasTable(model) {
 
 function tableNodeLayout(node, model) {
   const width = Math.max(1, Number(node.w) || 1)
-  const fs = Math.max(10, Math.min(20, styleNumber(node.style || '', 'fontSize', FSIZE)))
+  // 字号上下限放宽到 6–48：拖角等比缩放时字号要跟着节点一起放大缩小，
+  // 卡在 20 的话放大到 1.7 倍以后表格高度就不再跟手了（行高、换行都按 fs 算）。
+  const fs = Math.max(6, Math.min(48, styleNumber(node.style || '', 'fontSize', FSIZE)))
   const weights = model.storyboard && model.rows[0].length === 6 ? [0.10, 0.10, 0.18, 0.20, 0.27, 0.15] : model.rows[0].map(() => 1 / model.rows[0].length)
   const widths = weights.map(weight => width * weight)
   const lineHeight = labelLineHeight(fs)
