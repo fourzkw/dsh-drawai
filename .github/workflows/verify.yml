@@ -1,0 +1,34 @@
+name: verify
+
+# 0.4.5 的漏发就发生在没有 CI 的这段路上：src 改了、lib 没重建，发布提交也没跑 build，
+# 带旧参数的产物直接进了 tag 与 npm 包（#43）。这里在 PR、推 develop、打 tag 时都真跑一遍构建，
+# 并要求构建产物已经在提交里——tag 前必须 build 这条规则由 CI 兜底。
+on:
+  push:
+    branches: [develop, master]
+    tags: ['v*']
+  pull_request:
+    branches: [develop, master]
+
+jobs:
+  build-sync:
+    name: 构建与 lib 同步
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+
+      # check-package 需要 @deepseek-ai/dsh-tools（peer 依赖），CI 里没有，所以跳过；
+      # 构建 + 同步检查这一步不依赖它。
+      - name: tag 前必须 build（构建产物必须已提交）
+        run: node tools/check-release.mjs --skip-tests --skip-package
+
+      - name: 客户端渲染用例
+        run: node tools/check-render.mjs

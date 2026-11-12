@@ -13,7 +13,7 @@
  * 用法：node tools/check-package.mjs
  */
 
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { composeClientBody, dedentBody, extractBody } from './build.mjs'
 
@@ -28,6 +28,18 @@ function check(label, ok, detail) {
   const mark = ok ? 'PASS' : 'FAIL'
   if (!ok) failures += 1
   console.log(`  [${mark}] ${label}${detail === undefined ? '' : ' — ' + detail}`)
+}
+
+/** 递归列出目录下的相对路径（正斜杠），用来比对 build 时 cpSync 过去的整棵目录。 */
+function listFiles(root, prefix = '') {
+  const dir = prefix === '' ? root : root + '/' + prefix
+  const files = []
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const rel = prefix === '' ? entry.name : prefix + '/' + entry.name
+    if (entry.isDirectory()) files.push(...listFiles(root, rel))
+    else files.push(rel)
+  }
+  return files
 }
 
 console.log('dsh-drawai 安装前烟测\n')
@@ -60,6 +72,16 @@ try {
     const built = readFileSync(new URL('../lib/routing/' + name, import.meta.url))
     check('路由引擎及许可已打包：' + name, source.equals(built))
   }
+  // lib/motion 整棵目录是 build 时 cpSync 拷过去的：改了 src/motion 却没重新 build，
+  // 运行时用的还是旧代码。0.4.5 就是这么漏掉 sync.js 的 -fps_mode 修复的——
+  // 当时检查只覆盖白名单文件，lib/motion/** 一个都没查。逐文件比对，漏一个都藏不住。
+  const motionFiles = listFiles('src/motion')
+  const staleMotion = motionFiles.filter((file) => {
+    const source = readFileSync('src/motion/' + file)
+    const built = 'lib/motion/' + file
+    return !existsSync(built) || !source.equals(readFileSync(built))
+  })
+  check('lib/motion 的 ' + motionFiles.length + ' 个文件都同步自 src/motion', staleMotion.length === 0, staleMotion.slice(0, 5).join('、') || 'ok')
 } catch (error) {
   check('可读取 lib/ 与 src/', false, error && error.message ? error.message : String(error))
 }
