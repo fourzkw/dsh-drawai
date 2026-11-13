@@ -2722,30 +2722,32 @@ console.log('\n缩放手柄：4 个角 + 整条边热区，尺寸按屏幕像素
   ok(cellText !== undefined && cellText.props.fontSize === 30, '表格字号上限放宽到 48：fontSize=30 不再被卡在 20（' + (cellText === undefined ? 'missing' : cellText.props.fontSize) + '）')
 }
 
-console.log('\n拖角等比：表格/文字拖角等比但字号不变；Shift 在边和角上都生效')
+console.log('\n拖角等比：表格只改框、文字字号跟着变；Shift 在边和角上都生效')
 {
   const tableBase = { dir: 'se', x: 0, y: 0, w: 400, h: 200, aspect: 2, scales: true, fontSize: 12, nodeX: 0, nodeY: 0, nodeW: 400, nodeH: 200 }
   const grown = internals.resizeOutcome(tableBase, 80, 0, false)
   ok(grown.w === 480 && Math.abs(grown.w / grown.h - 2) < 0.2, '表格拖角：宽 400→480，高按原比例跟上（' + grown.w + '×' + grown.h + '）')
-  ok(!('fontSize' in grown), '表格拖角不再乘字号（resizeOutcome 不返回 fontSize）')
+  ok(grown.fontSize === null, '表格拖角不改字号（resizeOutcome 返回 null）')
   ok(Math.abs(grown.k - 1.2) < 1e-6, '等比系数 k = 新宽/原宽 = ' + grown.k)
   const shrunk = internals.resizeOutcome(tableBase, -200, 0, false)
   ok(shrunk.w === 200 && Math.abs(shrunk.w / shrunk.h - 2) < 0.2, '缩小一半：宽 200、高 100（' + shrunk.w + '×' + shrunk.h + '）')
-  ok(!('fontSize' in shrunk), '缩小一半也不动字号')
+  ok(shrunk.fontSize === null, '缩小一半也不动字号')
   // 文字：节点框 200×100，内容框只有 48×14 且不在节点框左上角 —— 等比时**内容框的对角**必须钉住，
   // 同时节点框（= 换行宽度）按同一个 k 放大，否则放大后文字会重新折行。
-  const textBase = { dir: 'se', x: 76, y: 43, w: 48, h: 14, aspect: 48 / 14, scales: true, fontSize: 12, nodeX: 0, nodeY: 0, nodeW: 200, nodeH: 100 }
+  const textBase = { dir: 'se', x: 76, y: 43, w: 48, h: 14, aspect: 48 / 14, scales: true, fontScales: true, fontSize: 12, nodeX: 0, nodeY: 0, nodeW: 200, nodeH: 100 }
   const textGrown = internals.resizeOutcome(textBase, 48, 0, false)
   const textFrameX = textGrown.x + (textGrown.w - 48 * textGrown.k) / 2
   const textFrameY = textGrown.y + (textGrown.h - 14 * textGrown.k) / 2
   ok(Math.abs(textFrameX - 76) <= 2 && Math.abs(textFrameY - 43) <= 2, '文字拖角：内容框的左上角钉住不动（' + textFrameX.toFixed(1) + ',' + textFrameY.toFixed(1) + '）')
   ok(Math.abs(textGrown.w - 200 * textGrown.k) <= 10 && Math.abs(textGrown.h - 100 * textGrown.k) <= 10, '文字拖角：节点框（换行宽度）按同一个 k 放大（' + textGrown.w + '×' + textGrown.h + '）')
-  ok(!('fontSize' in textGrown), '文字拖角不再乘字号（字号交给工具条）')
+  ok(textGrown.fontSize !== null && Math.abs(Number(textGrown.fontSize) - 12 * textGrown.k) < 0.2, '文字拖角：字号按同一个 k 放大（12→' + textGrown.fontSize + '）')
+  const textSide = internals.resizeOutcome({ dir: 'e', x: 76, y: 43, w: 48, h: 14, aspect: 48 / 14, scales: true, fontScales: true, fontSize: 12, nodeX: 0, nodeY: 0, nodeW: 200, nodeH: 100 }, 24, 0, false)
+  ok(textSide.w > 48 && textSide.fontSize !== null && Number(textSide.fontSize) > 12, '文字拖边也按内容框等比并改字号（' + textSide.w + '×' + textSide.h + '，fontSize=' + textSide.fontSize + '）')
   const shapeBase = { dir: 'se', x: 0, y: 0, w: 400, h: 200, aspect: 2, scales: false, fontSize: 12, nodeX: 0, nodeY: 0, nodeW: 400, nodeH: 200 }
   const free = internals.resizeOutcome(shapeBase, 80, 0, false)
-  ok(free.w === 480 && free.h === 200 && !('fontSize' in free), '形状默认只改被拖的那条边（h 不动、字号不动）')
+  ok(free.w === 480 && free.h === 200 && free.fontSize === null, '形状默认只改被拖的那条边（h 不动、字号不动）')
   const shifted = internals.resizeOutcome(shapeBase, 80, 0, true)
-  ok(shifted.w === 480 && Math.abs(shifted.w / shifted.h - 2) < 0.2 && !('fontSize' in shifted), '形状 Shift 拖角等比，但不缩字号')
+  ok(shifted.w === 480 && Math.abs(shifted.w / shifted.h - 2) < 0.2 && shifted.fontSize === null, '形状 Shift 拖角等比，但不缩字号')
   const side = internals.resizeOutcome({ dir: 'e', x: 0, y: 0, w: 400, h: 200, aspect: 2, scales: false, fontSize: 12 }, 80, 0, true)
   ok(side.w === 480 && Math.abs(side.w / side.h - 2) < 0.2, '拖边按住 Shift 也等比（width 480、height ' + side.h + '）')
   const sideFree = internals.resizeOutcome({ dir: 'e', x: 0, y: 0, w: 400, h: 200, aspect: 2, scales: false, fontSize: 12 }, 80, 0, false)
@@ -2786,6 +2788,46 @@ console.log('\n拖角等比：表格/文字拖角等比但字号不变；Shift �
   ok(Math.abs(drag.w - 500) < 1 && Math.abs(afterFrame.w - 500) < 1, '端到端：拖宽 100 后节点与表格都变成 500 宽（' + drag.w + ' / ' + afterFrame.w + '）')
   ok(afterFont === beforeFont && beforeFont === 12, '端到端：字号保持 12，不被拖角改掉（' + beforeFont + '→' + afterFont + '）')
   ok(afterFrame.h === beforeFrame.h, '端到端：表格高度不跟着 resize 变（' + beforeFrame.h + '→' + afterFrame.h + '）')
+
+  // 文字节点端到端：拖角必须真的把 fontScales 写回 style，否则会出现"外框变大、字没变、
+  // 选中框原地不动"的假缩放（用户反馈的正是这个现象）。
+  const textDoc = {
+    nodes: [{ id: 'tx', x: 0, y: 0, w: 200, h: 100, label: '文字', style: 'text;html=1;whiteSpace=wrap;fontSize=12;' }],
+    edges: [],
+  }
+  const textView = { x: -100, y: -100, w: 800, h: 600 }
+  const textBeforeTree = renderDiagram(textDoc, 'light', 'text-e2e-before', { current: null }, { selectedIds: ['tx'], singleSelectedNodeId: 'tx', viewportSize: { w: 800, h: 600 }, onResizePointerDown: () => {} }, textView)
+  const textBeforeHandles = byClass(textBeforeTree, 'drawai-handle').filter((n) => n.type === 'rect')
+  const textBeforeFrame = {
+    x: textBeforeHandles[0].props.x + 4,
+    y: textBeforeHandles[0].props.y + 4,
+    w: textBeforeHandles[2].props.x - textBeforeHandles[0].props.x,
+    h: textBeforeHandles[2].props.y - textBeforeHandles[0].props.y,
+  }
+  const textBeforeFont = Number(byKey(textBeforeTree, 'label-0')[0].props.fontSize)
+  const textGeo = internals.nodeBoxOf(textDoc.nodes[0])
+  const textDrag = internals.resizeOutcome(
+    { dir: 'se', x: textBeforeFrame.x, y: textBeforeFrame.y, w: textBeforeFrame.w, h: textBeforeFrame.h, aspect: textBeforeFrame.w / textBeforeFrame.h, scales: true, fontScales: true, fontSize: textBeforeFont, nodeX: textGeo.x, nodeY: textGeo.y, nodeW: textGeo.w, nodeH: textGeo.h },
+    30,
+    0,
+    false,
+  )
+  const textAfterDoc = JSON.parse(JSON.stringify(textDoc))
+  textAfterDoc.nodes[0].x = textDrag.x
+  textAfterDoc.nodes[0].y = textDrag.y
+  textAfterDoc.nodes[0].w = textDrag.w
+  textAfterDoc.nodes[0].h = textDrag.h
+  textAfterDoc.nodes[0].style = 'text;html=1;whiteSpace=wrap;fontSize=' + textDrag.fontSize + ';'
+  const textAfterTree = renderDiagram(textAfterDoc, 'light', 'text-e2e-after', { current: null }, { selectedIds: ['tx'], singleSelectedNodeId: 'tx', viewportSize: { w: 800, h: 600 }, onResizePointerDown: () => {} }, textView)
+  const textAfterHandles = byClass(textAfterTree, 'drawai-handle').filter((n) => n.type === 'rect')
+  const textAfterFrame = {
+    w: textAfterHandles[2].props.x - textAfterHandles[0].props.x,
+    h: textAfterHandles[2].props.y - textAfterHandles[0].props.y,
+  }
+  const textAfterFont = Number(byKey(textAfterTree, 'label-0')[0].props.fontSize)
+  ok(textDrag.fontSize !== null && Number(textDrag.fontSize) > textBeforeFont, '文字端到端：拖角返回更大的字号（' + textBeforeFont + '→' + textDrag.fontSize + '）')
+  ok(textAfterFont > textBeforeFont, '文字端到端：字号真的写回 style 并重新渲染（' + textBeforeFont + '→' + textAfterFont + '）')
+  ok(textAfterFrame.w > textBeforeFrame.w && textAfterFrame.h > textBeforeFrame.h, '文字端到端：选中框跟着字号一起变大（' + textBeforeFrame.w + '×' + textBeforeFrame.h + '→' + textAfterFrame.w + '×' + textAfterFrame.h + '）')
 }
 
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
