@@ -589,7 +589,7 @@ const index = catalog.styles.map((style) => `
   <a class="index-item" href="#${esc(style.slug)}" data-slug="${esc(style.slug)}">
     <span class="index-num">${esc(style.slug.slice(0, 2))}</span>
     <span class="index-name">${esc(style.name)}</span>
-  </a>`).join('') + '<span class="index-filler" aria-hidden="true"></span>';
+  </a>`).join('');
 
 const firstFilm = [...media.values()].find((item) => item.film !== false && item.poster && fs.existsSync(path.join(SHOWCASE, item.poster)));
 const ogImage = firstFilm ? new URL(firstFilm.poster, SITE_URL).toString() : SITE_URL;
