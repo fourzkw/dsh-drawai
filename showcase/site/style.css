@@ -709,6 +709,7 @@ button { font: inherit; }
   width: 100%;
   margin: 12px 0;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 11.5px;
 }
 .md th, .md td {
@@ -716,6 +717,7 @@ button { font: inherit; }
   border: 1px solid var(--line);
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 .md th { color: var(--ink); font-weight: 600; }
 .md blockquote {
@@ -728,6 +730,7 @@ button { font: inherit; }
 .md hr { border: 0; border-top: 1px solid var(--line); margin: 18px 0; }
 
 .brief-section { border-top: 1px solid var(--line); }
+.brief { min-width: 0; overflow-x: clip; }
 .brief-section summary {
   display: flex;
   align-items: center;

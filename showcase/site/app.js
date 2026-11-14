@@ -71,6 +71,9 @@
     if (!TABS.has(tab)) tab = 'prompt';
     const buttons = $$('.tab', section);
     const panes = $$('.pane', section);
+    if (!buttons.some((button) => button.dataset.tab === tab)) {
+      tab = buttons[0]?.dataset.tab || tab;
+    }
 
     buttons.forEach((button) => {
       const active = button.dataset.tab === tab;

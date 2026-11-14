@@ -6,7 +6,7 @@
 
 DrawAI 在右侧栏提供画布，也向对话中的模型提供读图、改图和视频工程工具。你可以自己拖动、连线、改字，也可以让模型继续编辑同一份文件。
 
-15 种整片风格的完整提示词、移植说明与调用方式（赛博 HUD、像素风样片已上线）：[在线风格展示](https://fourzkw.github.io/dsh-drawai/styles/)。
+15 种整片风格索引、移植说明与调用方式（赛博 HUD、像素风附本地提示词与样片）：[在线风格展示](https://fourzkw.github.io/dsh-drawai/styles/)。
 
 ![DrawAI 画布与对话界面](docs/picture/整体界面图.png)
 
