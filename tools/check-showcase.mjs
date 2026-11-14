@@ -75,6 +75,7 @@ if (!fs.existsSync(INDEX)) {
   if (/待补|留空|film slot|pending/i.test(html)) fail('页面里仍有占位/待补文案');
   if (/briefs\/|在 GitHub 打开|风格库 ID/.test(html)) fail('页面里仍有内部路径或标识');
   if (/catalog [0-9a-f]{7,}|生成于/.test(html)) fail('页面里仍有构建元数据');
+  if (html.includes('data-play')) fail('页面里仍有自定义播放按钮');
 
   const promptWraps = (html.match(/class="prompt-wrap"/g) || []).length;
   if (promptWraps !== styles.length) fail(`提示词展示块数量应为 ${styles.length}，实际 ${promptWraps}`);

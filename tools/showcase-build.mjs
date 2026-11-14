@@ -271,9 +271,6 @@ function renderPlayer(style, film, number) {
       <video controls playsinline preload="none" width="${width}" height="${height}"${hasPoster ? ` poster="${esc(posterRel)}"` : ''} aria-label="${esc(style.name)} 样片">
         <source src="${esc(videoRel)}" type="video/mp4">
       </video>
-      <button class="play" type="button" data-play aria-label="播放 ${esc(style.name)} 样片">
-        <span class="play-icon" aria-hidden="true">▶</span>
-      </button>
       <figcaption>
         <span class="badge">DrawAI 样片</span>
         <span>${film?.title ? `${esc(film.title)} · ` : ''}${width}×${height} · ${durationLabel || '—'}</span>

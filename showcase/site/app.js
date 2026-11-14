@@ -211,18 +211,6 @@
         if (other !== video) other.pause();
       });
     }, true);
-
-    $$('.player').forEach((player) => {
-      const video = $('video', player);
-      const button = $('[data-play]', player);
-      if (!video || !button) return;
-
-      button.addEventListener('click', () => {
-        video.play().catch(() => {});
-      });
-      video.addEventListener('play', () => { button.hidden = true; });
-      video.addEventListener('ended', () => { button.hidden = false; });
-    });
   }
 
   /* ---------- copy ---------- */
