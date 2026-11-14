@@ -97,38 +97,29 @@ if (fs.existsSync(MANIFEST)) {
   } catch (error) {
     fail(`media/manifest.json 解析失败：${error.message}`);
   }
-} else if (!allowMissingMedia) {
-  fail('缺少 showcase/media/manifest.json（先跑 npm run showcase:media，或加 --allow-missing-media）');
 }
 
 if (manifest) {
   const films = Array.isArray(manifest.films) ? manifest.films : Array.isArray(manifest.items) ? manifest.items : [];
-  const bySlug = new Map(films.map((film) => [film.slug, film]));
   let filmCount = 0;
 
-  for (const style of styles) {
-    const film = bySlug.get(style.slug);
-    if (!film) {
-      fail(`${style.slug}: media manifest 缺条目`);
+  for (const film of films) {
+    if (!film?.slug || film.film === false) continue;
+    if (/mg-styles-15/i.test(film.source || '')) {
+      fail(`${film.slug}: 不应引用 mg-styles-15 的参考片`);
       continue;
     }
-    if (film.film === false) continue;
     filmCount += 1;
     for (const key of ['video', 'poster']) {
-      if (!film[key]) {
-        fail(`${style.slug}: manifest 缺 ${key}`);
-      } else if (!exists(film[key])) {
-        fail(`${style.slug}: 媒体文件不存在 ${film[key]}`);
-      }
+      if (!film[key]) fail(`${film.slug}: manifest 缺 ${key}`);
+      else if (!exists(film[key])) fail(`${film.slug}: 媒体文件不存在 ${film[key]}`);
     }
-    if (film.sha256 && !/^[0-9a-f]{64}$/.test(film.sha256)) fail(`${style.slug}: sha256 格式不对`);
+    if (film.sha256 && !/^[0-9a-f]{64}$/.test(film.sha256)) fail(`${film.slug}: sha256 格式不对`);
   }
 
-  if (filmCount !== 14) fail(`参考片数量应为 14，实际 ${filmCount}`);
-  if (manifest.commit !== catalog.commit) fail(`media commit 与 catalog commit 不一致：${manifest.commit} / ${catalog.commit}`);
-  notes.push(`媒体 manifest：${filmCount} 条参考片 · commit ${String(manifest.commit).slice(0, 8)}`);
-} else if (allowMissingMedia) {
-  notes.push('未检查媒体（--allow-missing-media）');
+  notes.push(`样片 manifest：${filmCount} 条已配置`);
+} else {
+  notes.push('样片：全部留空');
 }
 
 if (problems.length) {

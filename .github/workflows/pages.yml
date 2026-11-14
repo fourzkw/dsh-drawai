@@ -35,24 +35,6 @@ jobs:
 
       - run: npm ci
 
-      - name: 确保 ffmpeg 可用
-        run: |
-          if ! command -v ffmpeg >/dev/null 2>&1; then
-            sudo apt-get update
-            sudo apt-get install -y ffmpeg
-          fi
-          ffmpeg -version | head -n 1
-
-      - name: 缓存上游参考片
-        uses: actions/cache@v4
-        with:
-          path: .cache/showcase
-          key: showcase-media-${{ hashFiles('src/motion/mgstyles/catalog.json') }}
-          restore-keys: showcase-media-
-
-      - name: 转码参考片
-        run: node tools/showcase-media.mjs
-
       - name: 构建展示页
         run: node tools/showcase-build.mjs
 

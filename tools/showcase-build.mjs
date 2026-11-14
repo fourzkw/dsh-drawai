@@ -7,7 +7,7 @@
  *   showcase/index.html
  *   showcase/demos/<slug>/**    （文本源码，供“上游源码”页读取）
  *
- * 媒体（mp4/jpg）由 tools/showcase-media.mjs 单独生成，build 只读取 manifest。
+ * 样片位默认留空；如果 showcase/media/manifest.json 配置了 DrawAI 自产样片，build 会读取并渲染。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -268,30 +268,33 @@ function renderPlayer(style, film) {
   const height = film?.h || (portrait ? 1280 : 720);
   const ratio = `${width} / ${height}`;
 
-  const videoRel = film?.video || `media/${style.slug}.mp4`;
-  const posterRel = film?.poster || `media/${style.slug}.jpg`;
-  const hasVideo = film?.film !== false && fs.existsSync(path.join(SHOWCASE, videoRel));
-  const hasPoster = hasVideo && fs.existsSync(path.join(SHOWCASE, posterRel));
+  const videoRel = film?.video || null;
+  const posterRel = film?.poster || null;
+  const upstream = /mg-styles-15/i.test(film?.source || '');
+  const hasVideo = Boolean(
+    film &&
+    film.film !== false &&
+    !upstream &&
+    videoRel &&
+    fs.existsSync(path.join(SHOWCASE, videoRel)),
+  );
+  const hasPoster = hasVideo && posterRel && fs.existsSync(path.join(SHOWCASE, posterRel));
 
   if (!hasVideo) {
-    const isInk = style.slug === '23-ink-wash';
-    const message = isInk
-      ? '上游没有这支风格的参考片。下面仍可看完整配方、提示词和源码。'
-      : '参考片尚未生成。运行 <code>npm run showcase:media</code> 后重新构建。';
     return {
       html: `<figure class="player" data-film="false" style="--ratio:${ratio}">
         <div class="poster-missing">
           <span class="ghost" aria-hidden="true">${esc(number)}</span>
           <div class="poster-missing-inner">
             <strong>${esc(style.name)}</strong>
-            <p>${message}</p>
-            <p class="small">${isInk ? 'spec card · no upstream film' : 'media pending'}</p>
+            <p>样片位先留空，后续替换为 DrawAI 生成的样片。</p>
+            <p class="small">film slot · pending</p>
           </div>
           <div class="poster-palette" aria-hidden="true">
             ${(style.colors || []).filter(isHex).slice(0, 8).map((color) => `<span style="--sw:${esc(color)}"></span>`).join('')}
           </div>
         </div>
-        <figcaption><span>${isInk ? '规格卡 · 参考片待补' : '参考片待生成'}</span><span>${esc(rhythm.aspect || '16:9')}</span></figcaption>
+        <figcaption><span>样片位 · 待补</span><span>${esc(rhythm.aspect || '16:9')}</span></figcaption>
       </figure>`,
       hasVideo: false,
       portrait,
@@ -300,14 +303,14 @@ function renderPlayer(style, film) {
 
   return {
     html: `<figure class="player" data-film="true" style="--ratio:${ratio}">
-      <video controls playsinline preload="none" width="${width}" height="${height}"${hasPoster ? ` poster="${esc(posterRel)}"` : ''} aria-label="${esc(style.name)} 参考片">
+      <video controls playsinline preload="none" width="${width}" height="${height}"${hasPoster ? ` poster="${esc(posterRel)}"` : ''} aria-label="${esc(style.name)} 样片">
         <source src="${esc(videoRel)}" type="video/mp4">
       </video>
-      <button class="play" type="button" data-play aria-label="播放 ${esc(style.name)} 参考片">
-        <span class="play-icon" aria-hidden="true">▶</span><span>播放参考片</span>
+      <button class="play" type="button" data-play aria-label="播放 ${esc(style.name)} 样片">
+        <span class="play-icon" aria-hidden="true">▶</span><span>播放样片</span>
       </button>
       <figcaption>
-        <span class="badge">上游参考片 · MIT</span>
+        <span class="badge">DrawAI 样片</span>
         <span>${width}×${height} · ${esc(String(rhythm.duration || 10))}s</span>
       </figcaption>
     </figure>`,
@@ -624,13 +627,15 @@ if (fs.existsSync(MEDIA_MANIFEST)) {
   try {
     const manifest = JSON.parse(fs.readFileSync(MEDIA_MANIFEST, 'utf8'));
     for (const item of manifest.films || manifest.items || []) {
-      if (item?.slug) media.set(item.slug, item);
+      if (!item?.slug) continue;
+      if (/mg-styles-15/i.test(item.source || '')) continue;
+      media.set(item.slug, item);
     }
   } catch (error) {
     console.warn(`[showcase] 读取媒体 manifest 失败，按无媒体处理：${error.message}`);
   }
 } else {
-  console.warn('[showcase] 没有 showcase/media/manifest.json，先按无媒体构建；跑 npm run showcase:media 后可补参考片。');
+  console.warn('[showcase] 没有 showcase/media/manifest.json，所有样片位留空。');
 }
 
 fs.rmSync(DEMOS_OUT, { recursive: true, force: true });
@@ -656,14 +661,14 @@ const index = catalog.styles.map((style) => `
   </a>`).join('');
 
 const firstFilm = [...media.values()].find((item) => item.film !== false && item.poster && fs.existsSync(path.join(SHOWCASE, item.poster)));
-const ogImage = firstFilm ? new URL(firstFilm.poster, SITE_URL).toString() : SITE_URL;
+const ogImage = firstFilm ? new URL(firstFilm.poster, SITE_URL).toString() : '';
+const ogImageMeta = ogImage ? `<meta property="og:image" content="${esc(ogImage)}">` : '';
 
 const values = {
   SITE_URL,
-  OG_IMAGE: ogImage,
+  OG_IMAGE_META: ogImageMeta,
   INDEX: index,
   SECTIONS: sections.join('\n'),
-  FILM_COUNT: String(mediaState.filmCount),
   SOURCE_COMMIT_SHORT: String(catalog.commit || '').slice(0, 8),
   GENERATED_AT: new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC',
 };
@@ -677,4 +682,4 @@ html = html.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => {
 fs.writeFileSync(OUTPUT, html, 'utf8');
 
 console.log(`[showcase] 写 ${path.relative(ROOT, OUTPUT)}`);
-console.log(`[showcase] ${catalog.styles.length} 个风格 · ${mediaState.filmCount} 条参考片 · ${fs.statSync(OUTPUT).size.toLocaleString()} bytes`);
+console.log(`[showcase] ${catalog.styles.length} 个风格 · ${mediaState.filmCount} 条样片 · ${fs.statSync(OUTPUT).size.toLocaleString()} bytes`);
