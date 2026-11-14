@@ -358,30 +358,6 @@ button { font: inherit; }
 }
 .player figcaption .badge { color: var(--accent); }
 
-.play {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  border-radius: var(--r-pill);
-  background: rgba(10, 10, 12, 0.62);
-  color: #fff;
-  font: 10px var(--mono);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  cursor: pointer;
-  backdrop-filter: blur(6px);
-}
-.play:hover { border-color: var(--accent); color: var(--accent); }
-.play-icon { font-size: 13px; margin-left: 1px; }
-
 .poster-missing {
   position: relative;
   display: grid;
