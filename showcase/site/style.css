@@ -372,8 +372,10 @@ button { font: inherit; }
   transform: translate(-50%, -50%);
   display: inline-flex;
   align-items: center;
-  gap: 9px;
-  padding: 11px 18px;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.5);
   border-radius: var(--r-pill);
   background: rgba(10, 10, 12, 0.62);
@@ -385,7 +387,7 @@ button { font: inherit; }
   backdrop-filter: blur(6px);
 }
 .play:hover { border-color: var(--accent); color: var(--accent); }
-.play-icon { font-size: 11px; }
+.play-icon { font-size: 13px; margin-left: 1px; }
 
 .poster-missing {
   position: relative;

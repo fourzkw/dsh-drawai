@@ -278,7 +278,7 @@ function renderPlayer(style, film) {
         <source src="${esc(videoRel)}" type="video/mp4">
       </video>
       <button class="play" type="button" data-play aria-label="播放 ${esc(style.name)} 样片">
-        <span class="play-icon" aria-hidden="true">▶</span><span>播放样片</span>
+        <span class="play-icon" aria-hidden="true">▶</span>
       </button>
       <figcaption>
         <span class="badge">DrawAI 样片</span>
