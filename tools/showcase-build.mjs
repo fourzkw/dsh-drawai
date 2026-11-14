@@ -215,6 +215,9 @@ function renderPlayer(style, film) {
             <p>${message}</p>
             <p class="small">${isInk ? 'spec card · no upstream film' : 'media pending'}</p>
           </div>
+          <div class="poster-palette" aria-hidden="true">
+            ${(style.colors || []).filter(isHex).slice(0, 8).map((color) => `<span style="--sw:${esc(color)}"></span>`).join('')}
+          </div>
         </div>
         <figcaption><span>${isInk ? '规格卡 · 参考片待补' : '参考片待生成'}</span><span>${esc(rhythm.aspect || '16:9')}</span></figcaption>
       </figure>`,
@@ -497,18 +500,19 @@ function renderSection(style, demo, film, mediaState) {
       <div class="style-title">
         <h2>${esc(style.name)}</h2>
         <p class="style-en">${esc(style.en)}</p>
+        <p class="style-lede">${esc(style.oneLiner)}</p>
+        <div class="tags">${(style.tags || []).slice(0, 10).map((tag) => `<span class="tag">${esc(tag)}</span>`).join('')}</div>
       </div>
       <a class="style-anchor" href="#${esc(style.slug)}" aria-label="链接到 ${esc(style.name)}">#</a>
     </header>
 
     <div class="style-body">
-      ${player.html}
+      <div class="stage">
+        ${player.html}
+        <div class="tabs" role="tablist" aria-label="${esc(style.name)} 内容">${tabButtons}</div>
+        <div class="panes">${panes}</div>
+      </div>
       <aside class="spec">
-        <div class="spec-lede">
-          <p>${esc(style.oneLiner)}</p>
-          <div class="tags">${(style.tags || []).slice(0, 10).map((tag) => `<span class="tag">${esc(tag)}</span>`).join('')}</div>
-        </div>
-
         ${renderFacts(style, engines)}
 
         <div class="spec-block">
@@ -537,9 +541,6 @@ function renderSection(style, demo, film, mediaState) {
         ${style.shot ? `<p class="shot">上游成片：${esc(style.shot)}</p>` : ''}
       </aside>
     </div>
-
-    <div class="tabs" role="tablist" aria-label="${esc(style.name)} 内容">${tabButtons}</div>
-    <div class="panes">${panes}</div>
   </section>`;
 }
 
@@ -588,7 +589,7 @@ const index = catalog.styles.map((style) => `
   <a class="index-item" href="#${esc(style.slug)}" data-slug="${esc(style.slug)}">
     <span class="index-num">${esc(style.slug.slice(0, 2))}</span>
     <span class="index-name">${esc(style.name)}</span>
-  </a>`).join('');
+  </a>`).join('') + '<span class="index-filler" aria-hidden="true"></span>';
 
 const firstFilm = [...media.values()].find((item) => item.film !== false && item.poster && fs.existsSync(path.join(SHOWCASE, item.poster)));
 const ogImage = firstFilm ? new URL(firstFilm.poster, SITE_URL).toString() : SITE_URL;
