@@ -60,6 +60,12 @@ if (!fs.existsSync(INDEX)) {
   const tabs = (html.match(/class="tab/g) || []).length;
   if (tabs < styles.length * 3) fail(`tab 数量不足：${tabs}，至少 ${styles.length * 3}`);
 
+  const indexNumbers = [...html.matchAll(/class="index-num">(\d{2})</g)].map((match) => match[1]);
+  const expectedNumbers = styles.map((_, index) => String(index + 1).padStart(2, '0'));
+  if (indexNumbers.join(',') !== expectedNumbers.join(',')) {
+    fail(`索引编号不是连续的 01–${String(styles.length).padStart(2, '0')}：${indexNumbers.join(',')}`);
+  }
+
   if (html.includes('data-pane="src"')) fail('页面里仍有源码 pane');
   if (html.includes('上游源码')) fail('页面里仍有“上游源码”');
   if (html.includes('上游成片')) fail('页面里仍有“上游成片”');

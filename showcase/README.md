@@ -2,6 +2,8 @@
 
 独立静态站，展示 DrawAI 的 15 种整片风格：样片、完整提示词、移植说明和调用方式。它不嵌入插件，只从 `src/motion/mgstyles/` 读取数据，构建后发布到 GitHub Pages。
 
+页面编号按展示顺序编为 01–15；URL 深链仍使用风格库原始 slug（如 `#05-cel-boil`），所以页面编号和提示词文件名里的编号可能不同。
+
 **已放入两支 DrawAI 自产样片**：`22-hud`（10 秒）和 `20-pixel`（12.1 秒）；其余样片位留空。样片按作品实际长度播放，不强制 10 秒。
 
 - 线上地址：<https://fourzkw.github.io/dsh-drawai/styles/>
