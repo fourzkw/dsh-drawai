@@ -20,7 +20,6 @@ const TEMPLATE = path.join(SHOWCASE, 'template.html');
 const OUTPUT = path.join(SHOWCASE, 'index.html');
 const MEDIA_MANIFEST = path.join(SHOWCASE, 'media', 'manifest.json');
 
-const DRAWAI_REPO = 'https://github.com/fourzkw/dsh-drawai';
 const SITE_URL = (process.env.SHOWCASE_URL || 'https://fourzkw.github.io/dsh-drawai/styles/').replace(/\/?$/, '/');
 
 const PALETTE_ROLES = ['page', 'surface', 'field', 'text', 'muted', 'accent', 'border'];
@@ -257,16 +256,10 @@ function renderPlayer(style, film, number) {
       html: `<figure class="player" data-film="false" style="--ratio:${ratio}">
         <div class="poster-missing">
           <span class="ghost" aria-hidden="true">${esc(number)}</span>
-          <div class="poster-missing-inner">
-            <strong>${esc(style.name)}</strong>
-            <p>样片位先留空，后续替换为 DrawAI 生成的样片。</p>
-            <p class="small">film slot · pending</p>
-          </div>
           <div class="poster-palette" aria-hidden="true">
             ${(style.colors || []).filter(isHex).slice(0, 8).map((color) => `<span style="--sw:${esc(color)}"></span>`).join('')}
           </div>
         </div>
-        <figcaption><span>样片位 · 待补</span><span>${esc(rhythm.aspect || '16:9')}</span></figcaption>
       </figure>`,
       hasVideo: false,
       portrait,
@@ -339,7 +332,9 @@ function renderFacts(style, engines, film) {
     ['基准片长', formatSeconds(rhythm.duration) || '—'],
   ];
 
-  if (film?.duration) facts.push(['样片时长', formatSeconds(film.duration) || '—']);
+  if (film?.duration && Number(film.duration) !== Number(rhythm.duration)) {
+    facts.push(['样片时长', formatSeconds(film.duration) || '—']);
+  }
 
   facts.push(
     ['BPM', rhythm.bpm ?? '—'],
@@ -348,8 +343,7 @@ function renderFacts(style, engines, film) {
   );
 
   return `<dl class="facts">${facts.map(([label, value]) => `
-    <div class="fact"><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>
-    ${film?.duration ? '<p class="note facts-note">基准片长是风格库的默认节奏；样片按作品实际长度展示，不强制 10 秒。</p>' : ''}`;
+    <div class="fact"><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>`;
 }
 
 function renderFonts(style) {
@@ -475,10 +469,6 @@ function renderSection(style, film, mediaState, number) {
     </section>
 
     <section class="pane" id="pane-brief-${style.slug}" role="tabpanel" aria-labelledby="tab-brief-${style.slug}" data-pane="brief" hidden>
-      <div class="pane-head">
-        <p>DrawAI 移植说明 · ${esc(style.brief)}</p>
-        <a href="${DRAWAI_REPO}/blob/develop/src/motion/mgstyles/${encodeURI(style.brief)}" target="_blank" rel="noreferrer">在 GitHub 打开 ↗</a>
-      </div>
       <div class="brief">${briefHtml}</div>
     </section>
 
@@ -488,7 +478,7 @@ function renderSection(style, film, mediaState, number) {
 
   return `<section class="style${portrait ? ' is-portrait' : ''}" id="${esc(style.slug)}" data-slug="${esc(style.slug)}" data-search="${esc(searchText)}" data-film="${player.hasVideo}" style="--accent:${esc(accent)}">
     <header class="style-head">
-      <span class="style-num" title="风格库 ID：${esc(style.slug)}">${esc(number)}</span>
+      <span class="style-num">${esc(number)}</span>
       <div class="style-title">
         <h2>${esc(style.name)}</h2>
         <p class="style-en">${esc(style.en)}</p>
@@ -515,7 +505,6 @@ function renderSection(style, film, mediaState, number) {
         <div class="spec-block">
           <h3>字体</h3>
           ${renderFonts(style)}
-          <p class="note">展示页不加载这些字体；成片请按移植说明里的内置字体或替代栈处理。</p>
         </div>
 
         <div class="spec-block">
@@ -565,7 +554,7 @@ const mediaState = { filmCount: 0 };
 const sections = catalog.styles.map((style, index) => renderSection(style, media.get(style.slug), mediaState, displayNumber(index)));
 
 const index = catalog.styles.map((style, index) => `
-  <a class="index-item" href="#${esc(style.slug)}" data-slug="${esc(style.slug)}" title="风格库 ID：${esc(style.slug)}">
+  <a class="index-item" href="#${esc(style.slug)}" data-slug="${esc(style.slug)}">
     <span class="index-num">${esc(displayNumber(index))}</span>
     <span class="index-name">${esc(style.name)}</span>
   </a>`).join('');
@@ -580,8 +569,6 @@ const values = {
   FILM_COUNT: String(mediaState.filmCount),
   INDEX: index,
   SECTIONS: sections.join('\n'),
-  SOURCE_COMMIT_SHORT: String(catalog.commit || '').slice(0, 8),
-  GENERATED_AT: new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC',
 };
 
 let html = fs.readFileSync(TEMPLATE, 'utf8');
