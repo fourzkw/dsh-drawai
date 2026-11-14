@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
- * 把 src/motion/mgstyles 的 catalog / brief / prompt / demo 源码
+ * 把 src/motion/mgstyles 的 catalog / brief / prompt
  * 生成为 showcase/index.html（构建期静态 HTML，不依赖浏览器端数据渲染）。
  *
  * 生成物：
  *   showcase/index.html
- *   showcase/demos/<slug>/**    （文本源码，供“上游源码”页读取）
  *
  * 样片位默认留空；如果 showcase/media/manifest.json 配置了 DrawAI 自产样片，build 会读取并渲染。
  */
@@ -19,10 +18,8 @@ const MG = path.join(ROOT, 'src', 'motion', 'mgstyles');
 const SHOWCASE = path.join(ROOT, 'showcase');
 const TEMPLATE = path.join(SHOWCASE, 'template.html');
 const OUTPUT = path.join(SHOWCASE, 'index.html');
-const DEMOS_OUT = path.join(SHOWCASE, 'demos');
 const MEDIA_MANIFEST = path.join(SHOWCASE, 'media', 'manifest.json');
 
-const UPSTREAM_REPO = 'https://github.com/Vincentwei1021/mg-styles-15';
 const DRAWAI_REPO = 'https://github.com/fourzkw/dsh-drawai';
 const SITE_URL = (process.env.SHOWCASE_URL || 'https://fourzkw.github.io/dsh-drawai/styles/').replace(/\/?$/, '/');
 
@@ -38,22 +35,11 @@ const ROLE_LABELS = {
   extra: '补充',
 };
 
-const TEXT_EXT = new Set([
-  '.js', '.mjs', '.cjs', '.json', '.html', '.htm', '.css', '.md', '.txt',
-  '.svg', '.glsl', '.frag', '.vert', '.py', '.csv', '.xml', '.yml', '.yaml',
-]);
-
 const esc = (value) => String(value ?? '')
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;');
-
-const sizeLabel = (bytes) => {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-};
 
 const isHex = (value) => /^#[0-9a-f]{3,8}$/i.test(String(value));
 
@@ -72,75 +58,35 @@ function briefFile(style) {
   return path.join(MG, style.brief);
 }
 
-function promptSourceUrl(style) {
-  if (style.origin?.source && style.origin.files?.[style.prompt]) {
-    return `${style.origin.source}/blob/main/${encodeURI(style.origin.files[style.prompt])}`;
-  }
-  return `${UPSTREAM_REPO}/blob/${catalog.commit}/${style.prompt.split('/').map(encodeURIComponent).join('/')}`;
-}
+function cleanBrief(markdown) {
+  const lines = markdown
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .filter((line) => {
+      const text = line.trim();
+      if (!text) return true;
+      if (/^>\s?/.test(text)) return false;
+      if (/^上游\s*[:：]/.test(text)) return false;
+      if (/^提示词原文用/.test(text)) return false;
+      if (/^`?(?:\.\.\/)?(?:src\/motion\/mgstyles\/upstream\/)?demos\//.test(text)) return false;
+      return true;
+    });
 
-function demoSourceUrl(style, rel) {
-  if (style.origin?.source && style.origin.files) {
-    const mapped = style.origin.files[`demos/${style.slug}/${rel}`];
-    if (mapped) return `${style.origin.source}/blob/main/${encodeURI(mapped)}`;
-  }
-  return `${UPSTREAM_REPO}/blob/${catalog.commit}/demos/${style.slug}/${rel.split('/').map(encodeURIComponent).join('/')}`;
-}
-
-function collectDemoFiles(slug) {
-  const root = path.join(MG, 'upstream', 'demos', slug);
-  if (!fs.existsSync(root)) return { files: [], skipped: [] };
-
-  const files = [];
-  const skipped = [];
-
-  const walk = (directory) => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const absolute = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        walk(absolute);
-        continue;
-      }
-
-      const relative = path.relative(root, absolute).split(path.sep).join('/');
-      const extension = path.extname(absolute).toLowerCase();
-      const bytes = fs.statSync(absolute).size;
-
-      if (!TEXT_EXT.has(extension)) {
-        skipped.push({ relative, reason: '非文本文件' });
-        continue;
-      }
-      if (bytes > 400 * 1024) {
-        skipped.push({ relative, reason: `超过 400KB（${sizeLabel(bytes)}）` });
-        continue;
-      }
-
-      const buffer = fs.readFileSync(absolute);
-      if (buffer.subarray(0, 4096).includes(0)) {
-        skipped.push({ relative, reason: '疑似二进制' });
-        continue;
-      }
-
-      files.push({ relative, absolute, bytes, text: buffer.toString('utf8') });
-    }
-  };
-
-  walk(root);
-  files.sort((a, b) => a.relative.localeCompare(b.relative));
-  return { files, skipped };
-}
-
-function copyDemoFiles(slug, files) {
-  const targetRoot = path.join(DEMOS_OUT, slug);
-  for (const file of files) {
-    const target = path.join(targetRoot, file.relative);
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.writeFileSync(target, file.text, 'utf8');
-  }
+  return lines
+    .join('\n')
+    .replace(/src\/motion\/mgstyles\/upstream\/demos\/[^\s`)]+/g, '参考实现')
+    .replace(/`demos\/[^`]*`/g, '`参考实现`')
+    .replace(/demos\/[a-z0-9-]+\//g, '参考实现/')
+    .replace(/mg-styles-15/gi, '参考项目')
+    .replace(/huashu-art-motion/gi, '参考项目')
+    .replace(/upstream\/LICENSE/g, '许可')
+    .replace(/上游/g, '参考实现')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function renderBrief(markdown) {
-  const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
+  const lines = cleanBrief(markdown).split('\n');
   const intro = [];
   const sections = [];
   let current = null;
@@ -196,6 +142,21 @@ function renderMarkdown(markdown) {
   }
 }
 
+function cleanPromptGuide(value) {
+  return value
+    .split('\n')
+    .filter((line) => {
+      const text = line.trim();
+      if (!text) return true;
+      if (/^\*\*(?:原片|源码)\*\*/.test(text)) return false;
+      if (/rubric\.md|(?:^|[\s(])(?:\.\.\/)?demos\//.test(text)) return false;
+      return true;
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function splitPrompt(markdown) {
   const text = markdown.replace(/\r\n?/g, '\n').trim();
   const fence = /```[a-zA-Z0-9_-]*\n([\s\S]*?)```/.exec(text);
@@ -212,29 +173,26 @@ function splitPrompt(markdown) {
     guide = guide.slice(howIndex).replace(/^##\s*怎么用\s*\n?/u, '').trim();
   }
 
-  guide = guide.replace(/\]\((\.\.\/[^)\s]+)\)/g, (_, href) => {
-    const target = href.replace(/^\.\.\//, '');
-    return `](${UPSTREAM_REPO}/blob/${catalog.commit}/${target})`;
-  });
-
   const body = fence[1].trim();
-  return { hasPrompt: true, body, guide, chars: body.length };
+  return { hasPrompt: true, body, guide: cleanPromptGuide(guide), chars: body.length };
 }
 
 function renderPrompt(style, markdown) {
   const { hasPrompt, body, guide, chars } = splitPrompt(markdown);
   const bodyId = `prompt-${style.slug}`;
-  const source = esc(promptSourceUrl(style));
   const copyLabel = hasPrompt ? '复制提示词' : '复制配方';
+  const recipe = hasPrompt
+    ? ''
+    : markdown.replace(/\r\n?/g, '\n').replace(/^>\s?.*(?:\n|$)/gm, '').trim();
+  const displayChars = hasPrompt ? chars : recipe.length;
 
   const toolbar = `
     <div class="prompt-bar">
       <div class="prompt-meta">
-        <span class="prompt-kicker">${hasPrompt ? '上游写法' : '参考配方'}</span>
-        <span>${chars} 字符</span>
+        <span class="prompt-kicker">${hasPrompt ? '风格提示词' : '风格配方'}</span>
+        <span>${displayChars} 字符</span>
       </div>
       <div class="prompt-actions">
-        <a href="${source}" target="_blank" rel="noreferrer">原文 ↗</a>
         <button class="copy" type="button" data-copy="${bodyId}">${copyLabel}</button>
       </div>
     </div>`;
@@ -243,10 +201,10 @@ function renderPrompt(style, markdown) {
     return `<div class="prompt-wrap">
       ${toolbar}
       <details class="prompt-fold">
-        <summary>参考配方<span>展开 / 收起 · ${chars} 字符</span></summary>
-        <div class="prompt-fold-body md prompt-recipe">${renderMarkdown(markdown)}</div>
+        <summary>参考配方<span>展开 / 收起 · ${displayChars} 字符</span></summary>
+        <div class="prompt-fold-body md prompt-recipe">${renderMarkdown(recipe)}</div>
       </details>
-      <pre hidden id="${bodyId}">${esc(body)}</pre>
+      <pre hidden id="${bodyId}">${esc(recipe)}</pre>
     </div>`;
   }
 
@@ -431,53 +389,6 @@ function renderSignature(style) {
   return `<ul class="sig">${signature.map((item) => `<li>${esc(item)}</li>`).join('')}</ul>`;
 }
 
-function renderOrigin(style) {
-  if (!style.origin) return '';
-  const source = style.origin.source ? `<a href="${esc(style.origin.source)}" target="_blank" rel="noreferrer">${esc(style.origin.source.replace(/^https?:\/\//, ''))}</a>` : '';
-  const note = style.origin.note ? `<br>${esc(style.origin.note)}` : '';
-  const license = style.origin.license ? ` · ${esc(style.origin.license)}` : '';
-  return `<p class="origin">配方来源：${source}${license}${note}</p>`;
-}
-
-function renderSource(style, demo) {
-  const files = demo.files;
-  if (!files.length) {
-    return '<p class="note">这个风格没有 vendored 文本源码。</p>';
-  }
-
-  const first = files.find((file) => file.relative === 'index.html')
-    || files.find((file) => file.relative === 'film.js')
-    || files[0];
-
-  const list = files.map((file) => {
-    const url = demoSourceUrl(style, file.relative);
-    return `<button class="file" type="button" data-path="${esc(file.relative)}" data-url="${esc(url)}">
-      <span>${esc(file.relative)}</span><span class="fsize">${sizeLabel(file.bytes)}</span>
-    </button>`;
-  }).join('');
-
-  const inkNote = style.slug === '23-ink-wash'
-    ? '<p class="note">23 的 film.js 是上游节选，依赖全局 U/KIT/PAINT，不能独立运行；brush.js 为逐字收录。</p>'
-    : '';
-
-  return `${inkNote}<div class="source" data-base="demos/${esc(style.slug)}" data-first="${esc(first.relative)}">
-    <div class="file-list">
-      <div class="file-list-head">${files.length} 个文本文件 · 点击查看</div>
-      ${list}
-    </div>
-    <div class="code-view">
-      <div class="code-head">
-        <span class="code-path">选择左侧文件</span>
-        <span class="code-actions">
-          <a class="code-link" target="_blank" rel="noreferrer" hidden>GitHub ↗</a>
-          <button class="copy" type="button" data-copy="code-${esc(style.slug)}">复制</button>
-        </span>
-      </div>
-      <pre class="code" id="code-${esc(style.slug)}"></pre>
-    </div>
-  </div>`;
-}
-
 function renderUsage(style) {
   const slug = style.slug;
   const commands = [
@@ -507,7 +418,7 @@ function renderUsage(style) {
   </div>`;
 }
 
-function renderSection(style, demo, film, mediaState) {
+function renderSection(style, film, mediaState) {
   const number = style.slug.slice(0, 2);
   const accent = isHex(style.palette?.accent) ? style.palette.accent : '#e8c547';
   const rhythm = style.rhythm || {};
@@ -533,7 +444,6 @@ function renderSection(style, demo, film, mediaState) {
   const tabs = [
     ['prompt', '提示词'],
     ['brief', '移植说明'],
-    ['src', '上游源码'],
     ['use', '在 DrawAI 中使用'],
   ];
 
@@ -556,10 +466,6 @@ function renderSection(style, demo, film, mediaState) {
         <a href="${DRAWAI_REPO}/blob/develop/src/motion/mgstyles/${encodeURI(style.brief)}" target="_blank" rel="noreferrer">在 GitHub 打开 ↗</a>
       </div>
       <div class="brief">${briefHtml}</div>
-    </section>
-
-    <section class="pane" id="pane-src-${style.slug}" role="tabpanel" aria-labelledby="tab-src-${style.slug}" data-pane="src" hidden>
-      ${renderSource(style, demo)}
     </section>
 
     <section class="pane" id="pane-use-${style.slug}" role="tabpanel" aria-labelledby="tab-use-${style.slug}" data-pane="use" hidden>
@@ -609,8 +515,6 @@ function renderSection(style, demo, film, mediaState) {
         </div>
 
         ${style.engineNote ? `<div class="spec-block"><h3>引擎说明</h3><p class="note">${esc(style.engineNote)}</p></div>` : ''}
-        ${renderOrigin(style)}
-        ${style.shot ? `<p class="shot">上游成片：${esc(style.shot)}</p>` : ''}
       </aside>
     </div>
   </section>`;
@@ -643,21 +547,8 @@ if (fs.existsSync(MEDIA_MANIFEST)) {
   console.warn('[showcase] 没有 showcase/media/manifest.json，所有样片位留空。');
 }
 
-fs.rmSync(DEMOS_OUT, { recursive: true, force: true });
-fs.mkdirSync(DEMOS_OUT, { recursive: true });
-
-const demoMap = new Map();
-for (const style of catalog.styles) {
-  const demo = collectDemoFiles(style.slug);
-  demoMap.set(style.slug, demo);
-  copyDemoFiles(style.slug, demo.files);
-  if (demo.skipped.length) {
-    console.log(`[showcase] ${style.slug}: 跳过 ${demo.skipped.length} 个文件（${demo.skipped.map((item) => item.relative).join(', ')}）`);
-  }
-}
-
 const mediaState = { filmCount: 0 };
-const sections = catalog.styles.map((style) => renderSection(style, demoMap.get(style.slug), media.get(style.slug), mediaState));
+const sections = catalog.styles.map((style) => renderSection(style, media.get(style.slug), mediaState));
 
 const index = catalog.styles.map((style) => `
   <a class="index-item" href="#${esc(style.slug)}" data-slug="${esc(style.slug)}">

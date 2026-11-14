@@ -737,17 +737,6 @@ button { font: inherit; }
   overflow-wrap: anywhere;
 }
 
-.cline { display: block; min-width: max-content; }
-.ln {
-  display: inline-block;
-  width: 3.2em;
-  padding-right: 1em;
-  color: #4f4b44;
-  text-align: right;
-  user-select: none;
-}
-.lc { white-space: pre; }
-
 .md {
   max-width: 80ch;
   padding: 0 0 18px;
@@ -826,82 +815,6 @@ button { font: inherit; }
   font: 14px var(--mono);
 }
 .brief-section[open] summary::after { content: "−"; }
-
-/* ---------- source ---------- */
-.source {
-  display: grid;
-  grid-template-columns: minmax(240px, 0.38fr) minmax(0, 1fr);
-  gap: 16px;
-  align-items: start;
-}
-
-.file-list {
-  max-height: 560px;
-  overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--bg-2);
-}
-.file-list-head {
-  padding: 9px 10px;
-  border-bottom: 1px solid var(--line);
-  color: var(--muted);
-  font: 9px var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.file {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-  background: none;
-  color: var(--ink-2);
-  font: 10.5px var(--mono);
-  text-align: left;
-  cursor: pointer;
-}
-.file:hover, .file.is-active {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--ink);
-}
-.file .fsize { color: var(--muted); white-space: nowrap; }
-
-.code-view {
-  min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: #07080a;
-}
-.code-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--line);
-  color: var(--muted);
-  font: 9px var(--mono);
-}
-.code-head .code-path {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.code-head a { color: var(--accent); text-decoration: none; }
-.code-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  flex: none;
-}
-.code-actions [hidden] { display: none; }
-.code-view .code { max-height: 520px; border: 0; }
 
 /* ---------- usage ---------- */
 .usage {
@@ -998,8 +911,6 @@ button { font: inherit; }
     grid-template-columns: 1fr;
   }
   .style.is-portrait .player { max-width: 430px; }
-  .source { grid-template-columns: 1fr; }
-  .file-list { max-height: 280px; }
   .footer-grid { grid-template-columns: 1fr; gap: 22px; }
 }
 

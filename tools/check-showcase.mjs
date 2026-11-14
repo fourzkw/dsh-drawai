@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 展示站构建产物检查：15 个风格、提示词/移植说明/源码、深链、媒体 manifest。
+ * 展示站构建产物检查：15 个风格、提示词/移植说明、深链、媒体 manifest。
  *
  *   node tools/check-showcase.mjs
  *   node tools/check-showcase.mjs --allow-missing-media
@@ -51,12 +51,6 @@ if (!fs.existsSync(INDEX)) {
 
     const brief = fs.readFileSync(path.join(MG, style.brief), 'utf8');
     if (!/^##\s+/m.test(brief)) fail(`${slug}: 移植说明没有二级标题`);
-
-    const demoRoot = path.join(MG, 'upstream', 'demos', slug);
-    if (!fs.existsSync(demoRoot)) fail(`${slug}: 缺少 vendored demo 目录`);
-
-    const demoOut = path.join(SHOWCASE, 'demos', slug);
-    if (!fs.existsSync(demoOut)) fail(`${slug}: 构建产物里没有 demos/${slug}`);
   }
 
   if (!exists('site/style.css')) fail('缺少 showcase/site/style.css');
@@ -64,7 +58,14 @@ if (!fs.existsSync(INDEX)) {
   if (!exists('THIRD_PARTY_NOTICES.md')) fail('缺少 showcase/THIRD_PARTY_NOTICES.md');
 
   const tabs = (html.match(/class="tab/g) || []).length;
-  if (tabs < styles.length * 4) fail(`tab 数量不足：${tabs}，至少 ${styles.length * 4}`);
+  if (tabs < styles.length * 3) fail(`tab 数量不足：${tabs}，至少 ${styles.length * 3}`);
+
+  if (html.includes('data-pane="src"')) fail('页面里仍有源码 pane');
+  if (html.includes('上游源码')) fail('页面里仍有“上游源码”');
+  if (html.includes('上游成片')) fail('页面里仍有“上游成片”');
+  if (html.includes('上游')) fail('页面里仍有“上游”字样');
+  if (/mg-styles-15|huashu-art-motion/i.test(html)) fail('页面里仍有上游项目名');
+  if (html.includes('原文 ↗')) fail('页面里仍有提示词原文链接');
 
   const promptWraps = (html.match(/class="prompt-wrap"/g) || []).length;
   if (promptWraps !== styles.length) fail(`提示词展示块数量应为 ${styles.length}，实际 ${promptWraps}`);
@@ -136,6 +137,6 @@ if (problems.length) {
   process.exitCode = 1;
 } else {
   console.log('[showcase] 检查通过');
-  console.log(`  ${styles.length} 个风格 · ${styles.length * 4} 个 tab · ${fs.statSync(INDEX).size.toLocaleString()} bytes`);
+  console.log(`  ${styles.length} 个风格 · ${styles.length * 3} 个 tab · ${fs.statSync(INDEX).size.toLocaleString()} bytes`);
   for (const note of notes) console.log(`  ${note}`);
 }

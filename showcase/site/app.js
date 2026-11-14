@@ -13,9 +13,8 @@
   const now = $('#now');
   const toastEl = $('#toast');
   let toastTimer = 0;
-  let loadToken = 0;
 
-  const TABS = new Set(['prompt', 'brief', 'src', 'use']);
+  const TABS = new Set(['prompt', 'brief', 'use']);
 
   function toast(message) {
     if (!toastEl) return;
@@ -56,23 +55,19 @@
 
     const slug = decoded.slice(0, colon);
     const rest = decoded.slice(colon + 1);
-    if (rest.startsWith('src/')) return { slug, tab: 'src', path: rest.slice(4) || null };
     if (TABS.has(rest)) return { slug, tab: rest, path: null };
     return { slug, tab: 'prompt', path: null };
   }
 
-  function setHash(section, tab, filePath = null) {
+  function setHash(section, tab) {
     let next = '#' + section.id;
-    if (tab !== 'prompt') {
-      next += ':' + tab;
-      if (tab === 'src' && filePath) next += '/' + filePath;
-    }
+    if (tab !== 'prompt') next += ':' + tab;
     if (window.location.hash !== next) {
       history.replaceState(null, '', next);
     }
   }
 
-  function openTab(section, tab, filePath = null, updateHash = true) {
+  function openTab(section, tab, updateHash = true) {
     if (!TABS.has(tab)) tab = 'prompt';
     const buttons = $$('.tab', section);
     const panes = $$('.pane', section);
@@ -90,18 +85,7 @@
       pane.hidden = !active;
     });
 
-    if (tab === 'src') {
-      const source = $('.source', section);
-      if (source) {
-        if (filePath) {
-          loadFile(source, filePath);
-        } else if (source.dataset.loaded !== '1' && source.dataset.first) {
-          loadFile(source, source.dataset.first);
-        }
-      }
-    }
-
-    if (updateHash) setHash(section, tab, filePath);
+    if (updateHash) setHash(section, tab);
   }
 
   function applyHash(scroll) {
@@ -115,7 +99,7 @@
       applySearch();
     }
 
-    openTab(section, state.tab, state.path, false);
+    openTab(section, state.tab, false);
     if (scroll) {
       window.requestAnimationFrame(() => {
         section.scrollIntoView({ behavior: 'auto', block: 'start' });
@@ -138,94 +122,6 @@
           const target = buttons[(index + delta + buttons.length) % buttons.length];
           target.focus();
           target.click();
-        });
-      });
-    });
-  }
-
-  /* ---------- source browser ---------- */
-
-  function renderCode(pre, text) {
-    const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
-    pre._raw = text;
-
-    if (lines.length > 5000) {
-      pre.textContent = text;
-      return;
-    }
-
-    const fragment = document.createDocumentFragment();
-    lines.forEach((line, index) => {
-      const row = document.createElement('span');
-      row.className = 'cline';
-      const number = document.createElement('span');
-      number.className = 'ln';
-      number.textContent = String(index + 1);
-      number.setAttribute('aria-hidden', 'true');
-      const code = document.createElement('span');
-      code.className = 'lc';
-      code.textContent = line.length ? line : ' ';
-      row.append(number, code);
-      fragment.append(row);
-    });
-    pre.replaceChildren(fragment);
-  }
-
-  function encodePath(filePath) {
-    return String(filePath).split('/').map(encodeURIComponent).join('/');
-  }
-
-  async function loadFile(source, filePath) {
-    if (!source || !filePath) return;
-    const token = ++loadToken;
-    const pre = $('.code', source);
-    const pathLabel = $('.code-path', source);
-    const link = $('.code-link', source);
-    const base = source.dataset.base;
-    if (!pre || !base) return;
-
-    const buttons = $$('.file', source);
-    const button = buttons.find((item) => item.dataset.path === filePath) || null;
-    buttons.forEach((item) => item.classList.toggle('is-active', item === button));
-
-    if (pathLabel) pathLabel.textContent = filePath;
-    if (link) {
-      if (button?.dataset.url) {
-        link.href = button.dataset.url;
-        link.hidden = false;
-      } else {
-        link.hidden = true;
-        link.removeAttribute('href');
-      }
-    }
-
-    pre.textContent = '加载中…';
-
-    try {
-      const response = await fetch(base + '/' + encodePath(filePath), { cache: 'no-cache' });
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      const text = await response.text();
-      if (token !== loadToken) return;
-      renderCode(pre, text);
-      if (pathLabel) {
-        const count = text.replace(/\r\n?/g, '\n').split('\n').length;
-        pathLabel.textContent = filePath + ' · ' + count + ' 行';
-      }
-      source.dataset.loaded = '1';
-      source.dataset.current = filePath;
-    } catch (error) {
-      if (token !== loadToken) return;
-      pre.textContent = '加载失败：' + error.message + '\n\n如果是本地打开，请用 npm run showcase:dev 启动静态服务器。';
-      pre._raw = pre.textContent;
-    }
-  }
-
-  function initSource() {
-    $$('.source').forEach((source) => {
-      $$('.file', source).forEach((button) => {
-        button.addEventListener('click', () => {
-          const section = source.closest('.style');
-          if (section) openTab(section, 'src', button.dataset.path);
         });
       });
     });
@@ -348,7 +244,6 @@
   /* ---------- boot ---------- */
 
   initTabs();
-  initSource();
   initSearch();
   initScrollspy();
   initVideos();

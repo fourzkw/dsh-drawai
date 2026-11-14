@@ -92,8 +92,6 @@ skills/workbuddy/scripts/node_modules/
 !lib/motion/mgstyles/vendor/modules/**/dist/
 !lib/motion/mgstyles/vendor/modules/**/dist/**
 
-# 展示站（GitHub Pages）生成物：页面、复制出来的 demo、转码后的参考片都由 tools/showcase-*.mjs 生成
+# 展示站（GitHub Pages）生成物：页面与后续 DrawAI 样片
 /showcase/index.html
-/showcase/demos/
 /showcase/media/
-/.cache/showcase/
