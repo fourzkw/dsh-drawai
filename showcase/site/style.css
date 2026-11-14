@@ -631,6 +631,83 @@ button { font: inherit; }
 }
 .pane-head a { color: var(--ink-2); }
 
+/* ---------- prompt ---------- */
+.prompt-wrap { display: grid; gap: 14px; }
+.prompt-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.prompt-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--muted);
+  font: 10px var(--mono);
+  letter-spacing: 0.04em;
+}
+.prompt-kicker {
+  color: var(--accent);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.prompt-actions a {
+  color: var(--ink-2);
+  font: 9px var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+.prompt-actions a:hover { color: var(--accent); }
+.prompt-guide {
+  padding: 0 18px;
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+}
+.prompt-guide summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+  list-style: none;
+}
+.prompt-guide summary::-webkit-details-marker { display: none; }
+.prompt-guide summary span {
+  color: var(--muted);
+  font: 9px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.prompt-guide .md { padding: 0 0 16px; }
+.prompt-guide .md h2 { margin-top: 0; font-size: 16px; }
+.prompt-body-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font: 9px var(--mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.prompt-body .prompt { max-height: 620px; }
+.prompt-recipe { padding-bottom: 0; }
+.prompt-recipe > :first-child { margin-top: 0; }
+
 .copy {
   padding: 7px 11px;
   border: 1px solid var(--line);

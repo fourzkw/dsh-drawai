@@ -66,6 +66,9 @@ if (!fs.existsSync(INDEX)) {
   const tabs = (html.match(/class="tab/g) || []).length;
   if (tabs < styles.length * 4) fail(`tab 数量不足：${tabs}，至少 ${styles.length * 4}`);
 
+  const promptWraps = (html.match(/class="prompt-wrap"/g) || []).length;
+  if (promptWraps !== styles.length) fail(`提示词展示块数量应为 ${styles.length}，实际 ${promptWraps}`);
+
   const sections = (html.match(/class="style(?: |")/g) || []).length;
   if (sections < styles.length) fail(`section 数量不足：${sections}，至少 ${styles.length}`);
 

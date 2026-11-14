@@ -188,6 +188,78 @@ function renderBrief(markdown) {
   return parts.join('\n');
 }
 
+function renderMarkdown(markdown) {
+  try {
+    return marked.parse(markdown);
+  } catch {
+    return `<p>${esc(markdown)}</p>`;
+  }
+}
+
+function splitPrompt(markdown) {
+  const text = markdown.replace(/\r\n?/g, '\n').trim();
+  const fence = /```[a-zA-Z0-9_-]*\n([\s\S]*?)```/.exec(text);
+
+  if (!fence) {
+    return { hasPrompt: false, body: text, guide: '', chars: text.length };
+  }
+
+  let guide = `${text.slice(0, fence.index)}${text.slice(fence.index + fence[0].length)}`.trim();
+  guide = guide.replace(/(?:^|\n)##\s*提示词\s*$/u, '').trim();
+
+  const howIndex = guide.indexOf('## 怎么用');
+  if (howIndex > 0) {
+    guide = guide.slice(howIndex).replace(/^##\s*怎么用\s*\n?/u, '').trim();
+  }
+
+  guide = guide.replace(/\]\((\.\.\/[^)\s]+)\)/g, (_, href) => {
+    const target = href.replace(/^\.\.\//, '');
+    return `](${UPSTREAM_REPO}/blob/${catalog.commit}/${target})`;
+  });
+
+  const body = fence[1].trim();
+  return { hasPrompt: true, body, guide, chars: body.length };
+}
+
+function renderPrompt(style, markdown) {
+  const { hasPrompt, body, guide, chars } = splitPrompt(markdown);
+  const bodyId = `prompt-${style.slug}`;
+  const source = esc(promptSourceUrl(style));
+  const copyLabel = hasPrompt ? '复制提示词' : '复制配方';
+
+  const toolbar = `
+    <div class="prompt-bar">
+      <div class="prompt-meta">
+        <span class="prompt-kicker">${hasPrompt ? '上游写法' : '参考配方'}</span>
+        <span>${chars} 字符</span>
+      </div>
+      <div class="prompt-actions">
+        <a href="${source}" target="_blank" rel="noreferrer">原文 ↗</a>
+        <button class="copy" type="button" data-copy="${bodyId}">${copyLabel}</button>
+      </div>
+    </div>`;
+
+  if (!hasPrompt) {
+    return `<div class="prompt-wrap">
+      ${toolbar}
+      <div class="md prompt-recipe">${renderMarkdown(markdown)}</div>
+      <pre hidden id="${bodyId}">${esc(body)}</pre>
+    </div>`;
+  }
+
+  return `<div class="prompt-wrap">
+    ${toolbar}
+    ${guide ? `<details class="prompt-guide" open>
+      <summary>怎么用<span>使用说明</span></summary>
+      <div class="md">${renderMarkdown(guide)}</div>
+    </details>` : ''}
+    <div class="prompt-body">
+      <div class="prompt-body-head"><span>提示词正文</span><span class="prompt-count">${chars} 字符</span></div>
+      <pre class="code prompt" id="${bodyId}">${esc(body)}</pre>
+    </div>
+  </div>`;
+}
+
 function renderPlayer(style, film) {
   const number = style.slug.slice(0, 2);
   const rhythm = style.rhythm || {};
@@ -467,15 +539,7 @@ function renderSection(style, demo, film, mediaState) {
 
   const panes = `
     <section class="pane is-active" id="pane-prompt-${style.slug}" role="tabpanel" aria-labelledby="tab-prompt-${style.slug}" data-pane="prompt">
-      <div class="pane-head">
-        <p>上游提示词原文 · ${esc(style.prompt)}</p>
-        <a href="${esc(promptSourceUrl(style))}" target="_blank" rel="noreferrer">在 GitHub 打开 ↗</a>
-      </div>
-      <div class="pane-head" style="margin-top:-6px">
-        <p>整段复制给模型即可；这是上游写法，不是 DrawAI 的改写版。</p>
-        <button class="copy" type="button" data-copy="prompt-${style.slug}">复制提示词</button>
-      </div>
-      <pre class="code prompt" id="prompt-${style.slug}">${esc(promptText.trim())}</pre>
+      ${renderPrompt(style, promptText)}
     </section>
 
     <section class="pane" id="pane-brief-${style.slug}" role="tabpanel" aria-labelledby="tab-brief-${style.slug}" data-pane="brief" hidden>
