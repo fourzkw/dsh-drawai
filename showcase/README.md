@@ -34,7 +34,7 @@ npm run showcase:check   # 结构、深链、提示词与源码检查
 - `tools/showcase-build.mjs`：把 catalog、brief、prompt、demo 文本渲染成静态 HTML；不依赖浏览器运行时。没有样片 manifest 时，15 个样片位全部渲染成规格卡。
 - `tools/showcase-media.mjs`：已移除；不再下载或转码 mg-styles-15 的参考片。
 - `tools/check-showcase.mjs`：15 个 section、60 个 tab、深链、本地引用和提示词展示块；不会要求样片存在。
-- `.github/workflows/pages.yml`：推 `develop` 或手动触发，构建后发布到 Pages 的 `/styles/`。首次使用需在仓库 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。
+- `.github/workflows/pages.yml`：推 `develop` 或手动触发，构建后发布到 Pages 的 `/styles/`。仓库已在 **Settings → Pages → Build and deployment → Source** 启用 **GitHub Actions**（2026-11-14）；若 `configure-pages` 报 `Resource not accessible by integration`，先确认这里仍是 GitHub Actions，再重跑工作流。
 
 新增风格时只改 `src/motion/mgstyles/catalog.json` 和对应的 brief/prompt/demo，不需要改展示站代码；以后有 DrawAI 样片时，放到 `showcase/media/` 并写 `manifest.json` 即可被构建读取。
 
