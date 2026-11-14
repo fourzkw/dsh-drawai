@@ -50,6 +50,8 @@ const formatSeconds = (value) => {
   return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}s`;
 };
 
+const displayNumber = (index) => String(index + 1).padStart(2, '0');
+
 function readText(file, label) {
   if (!fs.existsSync(file)) {
     throw new Error(`缺少${label}：${path.relative(ROOT, file)}`);
@@ -230,8 +232,7 @@ function renderPrompt(style, markdown) {
   </div>`;
 }
 
-function renderPlayer(style, film) {
-  const number = style.slug.slice(0, 2);
+function renderPlayer(style, film, number) {
   const rhythm = style.rhythm || {};
   const portrait = rhythm.aspect === '9:16' || (film && film.h > film.w);
   const width = film?.w || (portrait ? 720 : 1280);
@@ -432,13 +433,12 @@ function renderUsage(style) {
   </div>`;
 }
 
-function renderSection(style, film, mediaState) {
-  const number = style.slug.slice(0, 2);
+function renderSection(style, film, mediaState, number) {
   const accent = isHex(style.palette?.accent) ? style.palette.accent : '#e8c547';
   const rhythm = style.rhythm || {};
   const engines = Array.isArray(style.engines) && style.engines.length ? style.engines : (style.engine ? [style.engine] : []);
   const portrait = rhythm.aspect === '9:16' || (film && film.h > film.w);
-  const player = renderPlayer(style, film);
+  const player = renderPlayer(style, film, number);
   if (player.hasVideo) mediaState.filmCount += 1;
 
   const searchText = [
@@ -488,7 +488,7 @@ function renderSection(style, film, mediaState) {
 
   return `<section class="style${portrait ? ' is-portrait' : ''}" id="${esc(style.slug)}" data-slug="${esc(style.slug)}" data-search="${esc(searchText)}" data-film="${player.hasVideo}" style="--accent:${esc(accent)}">
     <header class="style-head">
-      <span class="style-num">${esc(number)}</span>
+      <span class="style-num" title="风格库 ID：${esc(style.slug)}">${esc(number)}</span>
       <div class="style-title">
         <h2>${esc(style.name)}</h2>
         <p class="style-en">${esc(style.en)}</p>
@@ -562,11 +562,11 @@ if (fs.existsSync(MEDIA_MANIFEST)) {
 }
 
 const mediaState = { filmCount: 0 };
-const sections = catalog.styles.map((style) => renderSection(style, media.get(style.slug), mediaState));
+const sections = catalog.styles.map((style, index) => renderSection(style, media.get(style.slug), mediaState, displayNumber(index)));
 
-const index = catalog.styles.map((style) => `
-  <a class="index-item" href="#${esc(style.slug)}" data-slug="${esc(style.slug)}">
-    <span class="index-num">${esc(style.slug.slice(0, 2))}</span>
+const index = catalog.styles.map((style, index) => `
+  <a class="index-item" href="#${esc(style.slug)}" data-slug="${esc(style.slug)}" title="风格库 ID：${esc(style.slug)}">
+    <span class="index-num">${esc(displayNumber(index))}</span>
     <span class="index-name">${esc(style.name)}</span>
   </a>`).join('');
 
