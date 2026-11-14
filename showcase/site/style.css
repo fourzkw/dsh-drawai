@@ -492,6 +492,11 @@ button { font: inherit; }
   color: var(--ink);
   font: 12.5px var(--sans);
 }
+.facts-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font: 11px/1.6 var(--sans);
+}
 
 .spec-block h3 {
   margin: 0 0 11px;

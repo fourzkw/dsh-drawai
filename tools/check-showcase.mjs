@@ -110,7 +110,14 @@ if (fs.existsSync(MANIFEST)) {
 
 if (manifest) {
   const films = Array.isArray(manifest.films) ? manifest.films : Array.isArray(manifest.items) ? manifest.items : [];
+  const expected = ['22-hud', '20-pixel'];
   let filmCount = 0;
+
+  for (const slug of expected) {
+    if (!films.some((film) => film?.slug === slug && film.film !== false)) {
+      fail(`缺少已配置的 DrawAI 样片：${slug}`);
+    }
+  }
 
   for (const film of films) {
     if (!film?.slug || film.film === false) continue;
@@ -125,6 +132,9 @@ if (manifest) {
     }
     if (film.sha256 && !/^[0-9a-f]{64}$/.test(film.sha256)) fail(`${film.slug}: sha256 格式不对`);
   }
+
+  const rendered = (fs.readFileSync(INDEX, 'utf8').match(/<figure class="player" data-film="true"/g) || []).length;
+  if (rendered !== filmCount) fail(`页面渲染样片数 ${rendered} 与 manifest ${filmCount} 不一致`);
 
   notes.push(`样片 manifest：${filmCount} 条已配置`);
 } else {
