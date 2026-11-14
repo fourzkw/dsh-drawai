@@ -668,12 +668,14 @@ button { font: inherit; }
   text-decoration: none;
 }
 .prompt-actions a:hover { color: var(--accent); }
-.prompt-guide {
+.prompt-guide,
+.prompt-fold {
   padding: 0 18px;
   border-radius: var(--r-md);
   background: var(--bg-2);
 }
-.prompt-guide summary {
+.prompt-guide summary,
+.prompt-fold summary {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -684,8 +686,10 @@ button { font: inherit; }
   cursor: pointer;
   list-style: none;
 }
-.prompt-guide summary::-webkit-details-marker { display: none; }
-.prompt-guide summary span {
+.prompt-guide summary::-webkit-details-marker,
+.prompt-fold summary::-webkit-details-marker { display: none; }
+.prompt-guide summary span,
+.prompt-fold summary span {
   color: var(--muted);
   font: 9px var(--mono);
   letter-spacing: 0.12em;
@@ -693,19 +697,10 @@ button { font: inherit; }
 }
 .prompt-guide .md { padding: 0 0 16px; }
 .prompt-guide .md h2 { margin-top: 0; font-size: 16px; }
-.prompt-body-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0 0 8px;
-  color: var(--muted);
-  font: 9px var(--mono);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-}
-.prompt-body .prompt { max-height: 620px; }
-.prompt-recipe { padding-bottom: 0; }
+.prompt-fold-body { padding: 0; }
+.prompt-fold .md { padding: 0 0 16px; }
+.prompt-fold .md h2 { margin-top: 0; font-size: 16px; }
+.prompt-fold .prompt { max-height: 620px; margin: 0 0 16px; }
 .prompt-recipe > :first-child { margin-top: 0; }
 
 .copy {
