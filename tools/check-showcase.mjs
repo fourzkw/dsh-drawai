@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 展示站构建产物检查：15 个风格、提示词/移植说明、深链、媒体 manifest。
+ * 展示站构建产物检查：15 个风格、本地提示词/移植说明、深链、媒体 manifest。
  *
  *   node tools/check-showcase.mjs
  *   node tools/check-showcase.mjs --allow-missing-media
@@ -19,7 +19,8 @@ const allowMissingMedia = process.argv.includes('--allow-missing-media');
 const catalog = JSON.parse(fs.readFileSync(path.join(MG, 'catalog.json'), 'utf8'));
 const styles = catalog.styles;
 const problems = [];
-const notes = [];
+const notes = ['提示词：2 条本地，13 个未提供（不显示提示词 tab）'];
+let tabTotal = 0;
 
 function fail(message) {
   problems.push(message);
@@ -43,11 +44,7 @@ if (!fs.existsSync(INDEX)) {
     if (!new RegExp(`id="${slug}"`).test(html)) fail(`${slug}: 页面里没有 section id`);
     if (!html.includes(`href="#${slug}"`)) fail(`${slug}: 索引里没有深链`);
 
-    if (!fs.existsSync(path.join(MG, 'upstream', style.prompt))) fail(`${slug}: 缺少提示词 ${style.prompt}`);
     if (!fs.existsSync(path.join(MG, style.brief))) fail(`${slug}: 缺少移植说明 ${style.brief}`);
-
-    const prompt = fs.readFileSync(path.join(MG, 'upstream', style.prompt), 'utf8');
-    if (prompt.trim().length < 500) fail(`${slug}: 提示词过短（${prompt.trim().length} 字符）`);
 
     const brief = fs.readFileSync(path.join(MG, style.brief), 'utf8');
     if (!/^##\s+/m.test(brief)) fail(`${slug}: 移植说明没有二级标题`);
@@ -57,8 +54,10 @@ if (!fs.existsSync(INDEX)) {
   if (!exists('site/app.js')) fail('缺少 showcase/site/app.js');
   if (!exists('THIRD_PARTY_NOTICES.md')) fail('缺少 showcase/THIRD_PARTY_NOTICES.md');
 
-  const tabs = (html.match(/class="tab/g) || []).length;
-  if (tabs < styles.length * 3) fail(`tab 数量不足：${tabs}，至少 ${styles.length * 3}`);
+  const tabs = (html.match(/<button class="tab/g) || []).length;
+  tabTotal = tabs;
+  const expectedTabs = (styles.length - 2) * 2 + 2 * 3;
+  if (tabs !== expectedTabs) fail(`tab 数量应为 ${expectedTabs}，实际 ${tabs}`);
 
   const indexNumbers = [...html.matchAll(/class="index-num">(\d{2})</g)].map((match) => match[1]);
   const expectedNumbers = styles.map((_, index) => String(index + 1).padStart(2, '0'));
@@ -78,15 +77,19 @@ if (!fs.existsSync(INDEX)) {
   if (html.includes('data-play')) fail('页面里仍有自定义播放按钮');
 
   const promptWraps = (html.match(/class="prompt-wrap"/g) || []).length;
-  if (promptWraps !== styles.length) fail(`提示词展示块数量应为 ${styles.length}，实际 ${promptWraps}`);
+  if (promptWraps !== 2) fail(`本地提示词展示块数量应为 2，实际 ${promptWraps}`);
+  if (html.includes('prompt-empty')) fail('页面里仍有空提示词占位块');
 
   const promptFolds = (html.match(/class="prompt-fold"/g) || []).length;
-  if (promptFolds !== styles.length) fail(`提示词折叠块数量应为 ${styles.length}，实际 ${promptFolds}`);
+  if (promptFolds !== 2) fail(`提示词折叠块数量应为 2，实际 ${promptFolds}`);
   if (/class="prompt-fold"[^>]*\bopen\b/.test(html)) fail('提示词折叠块不应该默认展开');
   if (/class="prompt-guide"[^>]*\bopen\b/.test(html)) fail('“怎么用”说明不应该默认展开');
+  if (html.includes('You are the director')) fail('页面里仍有上游英文提示词');
+  if (html.includes('## 怎么用')) fail('页面里仍有上游“怎么用”段落');
+  if (html.includes('rubric.md')) fail('页面里仍有上游评分表引用');
 
   const promptCopies = (html.match(/data-copy="prompt-/g) || []).length;
-  if (promptCopies !== styles.length) fail(`折叠状态下的复制按钮数量应为 ${styles.length}，实际 ${promptCopies}`);
+  if (promptCopies !== 2) fail(`折叠状态下的复制按钮数量应为 2，实际 ${promptCopies}`);
 
   const sections = (html.match(/class="style(?: |")/g) || []).length;
   if (sections < styles.length) fail(`section 数量不足：${sections}，至少 ${styles.length}`);
@@ -148,7 +151,7 @@ if (manifest) {
 
   notes.push(`样片 manifest：${filmCount} 条已配置`);
 } else {
-  notes.push('样片：全部留空');
+  notes.push('样片：没有 manifest');
 }
 
 if (problems.length) {
@@ -157,6 +160,6 @@ if (problems.length) {
   process.exitCode = 1;
 } else {
   console.log('[showcase] 检查通过');
-  console.log(`  ${styles.length} 个风格 · ${styles.length * 3} 个 tab · ${fs.statSync(INDEX).size.toLocaleString()} bytes`);
+  console.log(`  ${styles.length} 个风格 · ${tabTotal} 个 tab · ${fs.statSync(INDEX).size.toLocaleString()} bytes`);
   for (const note of notes) console.log(`  ${note}`);
 }

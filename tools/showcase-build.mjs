@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 把 src/motion/mgstyles 的 catalog / brief / prompt
+ * 把 src/motion/mgstyles 的 catalog / brief，以及 showcase/native 的本地提示词
  * 生成为 showcase/index.html（构建期静态 HTML，不依赖浏览器端数据渲染）。
  *
  * 生成物：
@@ -19,6 +19,9 @@ const SHOWCASE = path.join(ROOT, 'showcase');
 const TEMPLATE = path.join(SHOWCASE, 'template.html');
 const OUTPUT = path.join(SHOWCASE, 'index.html');
 const MEDIA_MANIFEST = path.join(SHOWCASE, 'media', 'manifest.json');
+const NATIVE_DIR = path.join(SHOWCASE, 'native');
+const NATIVE_STYLES = path.join(NATIVE_DIR, 'styles.json');
+const NATIVE_PROMPTS = path.join(NATIVE_DIR, 'prompts');
 
 const SITE_URL = (process.env.SHOWCASE_URL || 'https://fourzkw.github.io/dsh-drawai/styles/').replace(/\/?$/, '/');
 
@@ -58,8 +61,8 @@ function readText(file, label) {
   return fs.readFileSync(file, 'utf8');
 }
 
-function promptFile(style) {
-  return path.join(MG, 'upstream', style.prompt);
+function readOptional(file) {
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
 }
 
 function briefFile(style) {
@@ -150,80 +153,31 @@ function renderMarkdown(markdown) {
   }
 }
 
-function cleanPromptGuide(value) {
-  return value
-    .split('\n')
-    .filter((line) => {
-      const text = line.trim();
-      if (!text) return true;
-      if (/^\*\*(?:原片|源码)\*\*/.test(text)) return false;
-      if (/rubric\.md|(?:^|[\s(])(?:\.\.\/)?demos\//.test(text)) return false;
-      return true;
-    })
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function splitPrompt(markdown) {
-  const text = markdown.replace(/\r\n?/g, '\n').trim();
-  const fence = /```[a-zA-Z0-9_-]*\n([\s\S]*?)```/.exec(text);
-
-  if (!fence) {
-    return { hasPrompt: false, body: text, guide: '', chars: text.length };
-  }
-
-  let guide = `${text.slice(0, fence.index)}${text.slice(fence.index + fence[0].length)}`.trim();
-  guide = guide.replace(/(?:^|\n)##\s*提示词\s*$/u, '').trim();
-
-  const howIndex = guide.indexOf('## 怎么用');
-  if (howIndex > 0) {
-    guide = guide.slice(howIndex).replace(/^##\s*怎么用\s*\n?/u, '').trim();
-  }
-
-  const body = fence[1].trim();
-  return { hasPrompt: true, body, guide: cleanPromptGuide(guide), chars: body.length };
+function nativePromptBody(markdown) {
+  const text = String(markdown || '').replace(/\r\n?/g, '\n').trim();
+  const heading = '## 提示词全文';
+  const index = text.indexOf(heading);
+  return index >= 0 ? text.slice(index + heading.length).trim() : text;
 }
 
 function renderPrompt(style, markdown) {
-  const { hasPrompt, body, guide, chars } = splitPrompt(markdown);
+  if (!markdown || !markdown.trim()) return '';
+
+  const body = nativePromptBody(markdown);
   const bodyId = `prompt-${style.slug}`;
-  const copyLabel = hasPrompt ? '复制提示词' : '复制配方';
-  const recipe = hasPrompt
-    ? ''
-    : markdown.replace(/\r\n?/g, '\n').replace(/^>\s?.*(?:\n|$)/gm, '').trim();
-  const displayChars = hasPrompt ? chars : recipe.length;
-
-  const toolbar = `
-    <div class="prompt-bar">
-      <div class="prompt-meta">
-        <span class="prompt-kicker">${hasPrompt ? '风格提示词' : '风格配方'}</span>
-        <span>${displayChars} 字符</span>
-      </div>
-      <div class="prompt-actions">
-        <button class="copy" type="button" data-copy="${bodyId}">${copyLabel}</button>
-      </div>
-    </div>`;
-
-  if (!hasPrompt) {
-    return `<div class="prompt-wrap">
-      ${toolbar}
-      <details class="prompt-fold">
-        <summary>参考配方<span>展开 / 收起 · ${displayChars} 字符</span></summary>
-        <div class="prompt-fold-body md prompt-recipe">${renderMarkdown(recipe)}</div>
-      </details>
-      <pre hidden id="${bodyId}">${esc(recipe)}</pre>
-    </div>`;
-  }
 
   return `<div class="prompt-wrap">
-    ${toolbar}
-    ${guide ? `<details class="prompt-guide">
-      <summary>怎么用<span>使用说明</span></summary>
-      <div class="md">${renderMarkdown(guide)}</div>
-    </details>` : ''}
+    <div class="prompt-bar">
+      <div class="prompt-meta">
+        <span class="prompt-kicker">中文提示词</span>
+        <span>${body.length} 字符</span>
+      </div>
+      <div class="prompt-actions">
+        <button class="copy" type="button" data-copy="${bodyId}">复制提示词</button>
+      </div>
+    </div>
     <details class="prompt-fold">
-      <summary>提示词正文<span>展开 / 收起 · ${chars} 字符</span></summary>
+      <summary>提示词正文<span>展开 / 收起 · ${body.length} 字符</span></summary>
       <div class="prompt-fold-body">
         <pre class="code prompt" id="${bodyId}">${esc(body)}</pre>
       </div>
@@ -442,12 +396,13 @@ function renderSection(style, film, mediaState, number) {
     (style.signature || []).join(' '),
   ].filter(Boolean).join(' ').toLowerCase();
 
-  const promptText = readText(promptFile(style), '提示词');
+  const promptText = readOptional(path.join(NATIVE_PROMPTS, `${style.slug}.md`));
+  const hasPrompt = Boolean(promptText && promptText.trim());
   const briefText = readText(briefFile(style), '移植说明');
   const briefHtml = renderBrief(briefText);
 
   const tabs = [
-    ['prompt', '提示词'],
+    ...(hasPrompt ? [['prompt', '提示词']] : []),
     ['brief', '移植说明'],
     ['use', '在 DrawAI 中使用'],
   ];
@@ -461,11 +416,11 @@ function renderSection(style, film, mediaState, number) {
   }).join('');
 
   const panes = `
-    <section class="pane is-active" id="pane-prompt-${style.slug}" role="tabpanel" aria-labelledby="tab-prompt-${style.slug}" data-pane="prompt">
+    ${hasPrompt ? `<section class="pane is-active" id="pane-prompt-${style.slug}" role="tabpanel" aria-labelledby="tab-prompt-${style.slug}" data-pane="prompt">
       ${renderPrompt(style, promptText)}
-    </section>
+    </section>` : ''}
 
-    <section class="pane" id="pane-brief-${style.slug}" role="tabpanel" aria-labelledby="tab-brief-${style.slug}" data-pane="brief" hidden>
+    <section class="pane${hasPrompt ? '' : ' is-active'}" id="pane-brief-${style.slug}" role="tabpanel" aria-labelledby="tab-brief-${style.slug}" data-pane="brief"${hasPrompt ? ' hidden' : ''}>
       <div class="brief">${briefHtml}</div>
     </section>
 
@@ -531,6 +486,13 @@ if (!Array.isArray(catalog.styles) || !catalog.styles.length) {
   throw new Error('catalog.json 里没有 styles');
 }
 
+const nativeStyles = fs.existsSync(NATIVE_STYLES)
+  ? JSON.parse(readText(NATIVE_STYLES, '本地风格参数'))
+  : {};
+const styles = catalog.styles.map((style) => (
+  nativeStyles[style.slug] ? { ...style, ...nativeStyles[style.slug] } : style
+));
+
 let media = new Map();
 if (fs.existsSync(MEDIA_MANIFEST)) {
   try {
@@ -548,9 +510,9 @@ if (fs.existsSync(MEDIA_MANIFEST)) {
 }
 
 const mediaState = { filmCount: 0 };
-const sections = catalog.styles.map((style, index) => renderSection(style, media.get(style.slug), mediaState, displayNumber(index)));
+const sections = styles.map((style, index) => renderSection(style, media.get(style.slug), mediaState, displayNumber(index)));
 
-const index = catalog.styles.map((style, index) => `
+const index = styles.map((style, index) => `
   <a class="index-item" href="#${esc(style.slug)}" data-slug="${esc(style.slug)}">
     <span class="index-num">${esc(displayNumber(index))}</span>
     <span class="index-name">${esc(style.name)}</span>
@@ -577,4 +539,4 @@ html = html.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => {
 fs.writeFileSync(OUTPUT, html, 'utf8');
 
 console.log(`[showcase] 写 ${path.relative(ROOT, OUTPUT)}`);
-console.log(`[showcase] ${catalog.styles.length} 个风格 · ${mediaState.filmCount} 条样片 · ${fs.statSync(OUTPUT).size.toLocaleString()} bytes`);
+console.log(`[showcase] ${styles.length} 个风格 · ${mediaState.filmCount} 条样片 · ${fs.statSync(OUTPUT).size.toLocaleString()} bytes`);
