@@ -242,21 +242,26 @@ function renderPrompt(style, markdown) {
   if (!hasPrompt) {
     return `<div class="prompt-wrap">
       ${toolbar}
-      <div class="md prompt-recipe">${renderMarkdown(markdown)}</div>
+      <details class="prompt-fold">
+        <summary>参考配方<span>展开 / 收起 · ${chars} 字符</span></summary>
+        <div class="prompt-fold-body md prompt-recipe">${renderMarkdown(markdown)}</div>
+      </details>
       <pre hidden id="${bodyId}">${esc(body)}</pre>
     </div>`;
   }
 
   return `<div class="prompt-wrap">
     ${toolbar}
-    ${guide ? `<details class="prompt-guide" open>
+    ${guide ? `<details class="prompt-guide">
       <summary>怎么用<span>使用说明</span></summary>
       <div class="md">${renderMarkdown(guide)}</div>
     </details>` : ''}
-    <div class="prompt-body">
-      <div class="prompt-body-head"><span>提示词正文</span><span class="prompt-count">${chars} 字符</span></div>
-      <pre class="code prompt" id="${bodyId}">${esc(body)}</pre>
-    </div>
+    <details class="prompt-fold">
+      <summary>提示词正文<span>展开 / 收起 · ${chars} 字符</span></summary>
+      <div class="prompt-fold-body">
+        <pre class="code prompt" id="${bodyId}">${esc(body)}</pre>
+      </div>
+    </details>
   </div>`;
 }
 

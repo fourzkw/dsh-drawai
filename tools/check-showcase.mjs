@@ -69,6 +69,14 @@ if (!fs.existsSync(INDEX)) {
   const promptWraps = (html.match(/class="prompt-wrap"/g) || []).length;
   if (promptWraps !== styles.length) fail(`提示词展示块数量应为 ${styles.length}，实际 ${promptWraps}`);
 
+  const promptFolds = (html.match(/class="prompt-fold"/g) || []).length;
+  if (promptFolds !== styles.length) fail(`提示词折叠块数量应为 ${styles.length}，实际 ${promptFolds}`);
+  if (/class="prompt-fold"[^>]*\bopen\b/.test(html)) fail('提示词折叠块不应该默认展开');
+  if (/class="prompt-guide"[^>]*\bopen\b/.test(html)) fail('“怎么用”说明不应该默认展开');
+
+  const promptCopies = (html.match(/data-copy="prompt-/g) || []).length;
+  if (promptCopies !== styles.length) fail(`折叠状态下的复制按钮数量应为 ${styles.length}，实际 ${promptCopies}`);
+
   const sections = (html.match(/class="style(?: |")/g) || []).length;
   if (sections < styles.length) fail(`section 数量不足：${sections}，至少 ${styles.length}`);
 
