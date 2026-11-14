@@ -32,3 +32,6 @@ jobs:
 
       - name: 客户端渲染用例
         run: node tools/check-render.mjs
+
+      - name: 展示页构建与静态检查
+        run: node tools/showcase-build.mjs && node tools/check-showcase.mjs --allow-missing-media

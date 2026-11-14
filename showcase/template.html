@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DrawAI 风格放映室 · 15 种整片视觉语言</title>
+<meta name="description" content="DrawAI 的 15 种整片视觉语言：样片位暂留空，每节仍有一份可复制的提示词、一份 Remotion 移植说明和上游源码。">
+<meta name="theme-color" content="#0b0c0f">
+<link rel="icon" href="site/favicon.svg" type="image/svg+xml">
+<meta property="og:type" content="website">
+<meta property="og:title" content="DrawAI 风格放映室">
+<meta property="og:description" content="15 种整片视觉语言，样片位暂留空；一份提示词、一份施工说明。">
+<meta property="og:url" content="{{SITE_URL}}">
+{{OG_IMAGE_META}}
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="{{SITE_URL}}">
+<link rel="stylesheet" href="site/style.css">
+<script src="site/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#styles">跳到风格列表</a>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#top">DrawAI <span>风格放映室</span></a>
+    <a class="top-link" href="#index">索引</a>
+    <p class="now" id="now">15 种整片风格</p>
+    <a class="top-link" href="https://github.com/fourzkw/dsh-drawai" target="_blank" rel="noreferrer">GitHub ↗</a>
+  </div>
+</div>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <p class="kicker">DrawAI · Motion Style Library</p>
+    <h1>风格放映室</h1>
+    <p class="lede">十五种整片视觉语言。样片位先留空，每节仍有一份可复制的提示词、一份移植说明，以及可以直接翻的上游源码。</p>
+    <div class="hero-actions">
+      <label class="search">
+        <span class="search-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 5 5"></path></svg></span>
+        <input id="search" type="search" placeholder="搜索风格、标签或关键词…" aria-label="搜索风格、标签或关键词" autocomplete="off" spellcheck="false">
+        <kbd>/</kbd>
+      </label>
+      <p class="hero-stat"><strong>15</strong> styles · <strong>15</strong> film slots · <strong>1</strong> prompt each</p>
+    </div>
+    <p class="search-status" id="search-status" hidden></p>
+    <p class="index-label"><span>风格索引</span><span>INDEX / 15</span></p>
+    <nav class="index" id="index" aria-label="风格索引">{{INDEX}}</nav>
+    <p class="hint">点击编号跳到风格。深链格式：<code>#09-bauhaus:prompt</code>、<code>#09-bauhaus:src/index.html</code>。</p>
+  </div>
+</header>
+
+<main id="styles" class="wrap">
+{{SECTIONS}}
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <div class="footer-grid">
+      <div>
+        <p class="footer-title">DrawAI 风格放映室</p>
+        <p class="footer-note">所有样片位当前留空，后续只放 DrawAI 生成的样片。提示词与源码来自 <a href="https://github.com/Vincentwei1021/mg-styles-15" target="_blank" rel="noreferrer">mg-styles-15</a>（MIT）；23 的水墨配方来自 <a href="https://github.com/alchaincyf/huashu-art-motion" target="_blank" rel="noreferrer">huashu-art-motion</a>（MIT）。</p>
+      </div>
+      <div>
+        <p class="footer-title">目录</p>
+        <p class="footer-note">catalog <code>{{SOURCE_COMMIT_SHORT}}</code> · 生成于 {{GENERATED_AT}}</p>
+        <p class="footer-note"><a href="THIRD_PARTY_NOTICES.md">第三方声明</a> · <a href="https://github.com/fourzkw/dsh-drawai">仓库</a></p>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
