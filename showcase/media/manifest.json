@@ -1,0 +1,31 @@
+{
+  "note": "DrawAI 自产样片。duration 是作品实际长度，不强制 10 秒。",
+  "films": [
+    {
+      "slug": "22-hud",
+      "title": "TARGET ACQUIRED",
+      "video": "media/22-hud.mp4",
+      "poster": "media/22-hud.jpg",
+      "w": 1280,
+      "h": 720,
+      "duration": 10,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/video.mp4",
+      "sha256": "ae6432351bf3e2a1c9382054edd903c1fe4789808f097f1b19c13b00d6ca365e"
+    },
+    {
+      "slug": "20-pixel",
+      "title": "小机器人寻找星星",
+      "video": "media/20-pixel.mp4",
+      "poster": "media/20-pixel.jpg",
+      "w": 1280,
+      "h": 720,
+      "duration": 12.1,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/pixel-star-robot/clip-2/source.mp4",
+      "sha256": "fa3109d561af598cc3f78e3931b0100e9247ff0172a85fe745ee86305b7acc71"
+    }
+  ]
+}

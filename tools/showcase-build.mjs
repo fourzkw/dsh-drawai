@@ -43,6 +43,13 @@ const esc = (value) => String(value ?? '')
 
 const isHex = (value) => /^#[0-9a-f]{3,8}$/i.test(String(value));
 
+const formatSeconds = (value) => {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  const rounded = Math.round(seconds * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}s`;
+};
+
 function readText(file, label) {
   if (!fs.existsSync(file)) {
     throw new Error(`缺少${label}：${path.relative(ROOT, file)}`);
@@ -242,6 +249,7 @@ function renderPlayer(style, film) {
     fs.existsSync(path.join(SHOWCASE, videoRel)),
   );
   const hasPoster = hasVideo && posterRel && fs.existsSync(path.join(SHOWCASE, posterRel));
+  const durationLabel = formatSeconds(film?.duration ?? rhythm.duration);
 
   if (!hasVideo) {
     return {
@@ -274,7 +282,7 @@ function renderPlayer(style, film) {
       </button>
       <figcaption>
         <span class="badge">DrawAI 样片</span>
-        <span>${width}×${height} · ${esc(String(rhythm.duration || 10))}s</span>
+        <span>${film?.title ? `${esc(film.title)} · ` : ''}${width}×${height} · ${durationLabel || '—'}</span>
       </figcaption>
     </figure>`,
     hasVideo: true,
@@ -322,19 +330,25 @@ function renderPalette(style) {
     </button>`).join('')}</div>`;
 }
 
-function renderFacts(style, engines) {
+function renderFacts(style, engines, film) {
   const rhythm = style.rhythm || {};
   const facts = [
     ['画幅', rhythm.aspect || '—'],
     ['帧率', rhythm.fps ? `${rhythm.fps} fps` : '—'],
-    ['时长', rhythm.duration ? `${rhythm.duration} s` : '—'],
+    ['基准片长', formatSeconds(rhythm.duration) || '—'],
+  ];
+
+  if (film?.duration) facts.push(['样片时长', formatSeconds(film.duration) || '—']);
+
+  facts.push(
     ['BPM', rhythm.bpm ?? '—'],
     ['切点', rhythm.cutFrames ? `${rhythm.cutFrames} 帧` : '—'],
     ['引擎', engines.length ? engines.join(' + ') : '—'],
-  ];
+  );
 
   return `<dl class="facts">${facts.map(([label, value]) => `
-    <div class="fact"><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>`;
+    <div class="fact"><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join('')}</dl>
+    ${film?.duration ? '<p class="note facts-note">基准片长是风格库的默认节奏；样片按作品实际长度展示，不强制 10 秒。</p>' : ''}`;
 }
 
 function renderFonts(style) {
@@ -397,7 +411,7 @@ function renderUsage(style) {
     ['建视频工程并套用风格', `motion_project {action:"create", nodeId:"<视频节点>", style:"${slug}"}`],
   ];
 
-  const natural = `用 ${slug} 做一条 10 秒的「${style.name}」；先出 3–6 秒样片，确认节奏、色板和转场后再渲全片。`;
+  const natural = `用 ${slug} 做一条「${style.name}」；先出 3–6 秒样片，确认节奏、色板和转场后再渲全片。`;
 
   const commandHtml = commands.map(([label, command], index) => {
     const id = `use-${slug}-${index}`;
@@ -491,7 +505,7 @@ function renderSection(style, film, mediaState) {
         <div class="panes">${panes}</div>
       </div>
       <aside class="spec">
-        ${renderFacts(style, engines)}
+        ${renderFacts(style, engines, film)}
 
         <div class="spec-block">
           <h3>色板</h3>
@@ -563,6 +577,7 @@ const ogImageMeta = ogImage ? `<meta property="og:image" content="${esc(ogImage)
 const values = {
   SITE_URL,
   OG_IMAGE_META: ogImageMeta,
+  FILM_COUNT: String(mediaState.filmCount),
   INDEX: index,
   SECTIONS: sections.join('\n'),
   SOURCE_COMMIT_SHORT: String(catalog.commit || '').slice(0, 8),
