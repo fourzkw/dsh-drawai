@@ -72,6 +72,9 @@ if (!fs.existsSync(INDEX)) {
   if (html.includes('上游')) fail('页面里仍有“上游”字样');
   if (/mg-styles-15|huashu-art-motion/i.test(html)) fail('页面里仍有上游项目名');
   if (html.includes('原文 ↗')) fail('页面里仍有提示词原文链接');
+  if (/待补|留空|film slot|pending/i.test(html)) fail('页面里仍有占位/待补文案');
+  if (/briefs\/|在 GitHub 打开|风格库 ID/.test(html)) fail('页面里仍有内部路径或标识');
+  if (/catalog [0-9a-f]{7,}|生成于/.test(html)) fail('页面里仍有构建元数据');
 
   const promptWraps = (html.match(/class="prompt-wrap"/g) || []).length;
   if (promptWraps !== styles.length) fail(`提示词展示块数量应为 ${styles.length}，实际 ${promptWraps}`);
