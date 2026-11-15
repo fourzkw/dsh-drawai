@@ -1,6 +1,6 @@
 # 第三方素材与许可
 
-这个展示页使用第三方风格目录的元数据（名称、色板、字体、节奏、动效），并放入六支 DrawAI 本地样片（赛博 HUD、像素风、液态、包豪斯、合成器浪潮、水墨）和六段本地中文提示词。页面不包含、也不引用第三方提示词、参考片或源码。
+这个展示页使用第三方风格目录的元数据（名称、色板、字体、节奏、动效），并放入九支 DrawAI 本地样片（赛博 HUD、像素风、液态、包豪斯、合成器浪潮、水墨、玻璃拟态、综艺花字、贴纸科普）和九段本地中文提示词。页面不包含、也不引用第三方提示词、参考片或源码。
 
 ## mg-styles-15
 
@@ -62,7 +62,7 @@ SOFTWARE.
 
 ## 本地样片的声音素材
 
-六支样片的画面均为 DrawAI 本地渲染，不包含第三方参考片画面。以下记录新增四支样片实际使用的声音来源与许可；`22-hud`、`20-pixel` 的声音记录见各自工程。
+九支样片的画面均为 DrawAI 本地渲染，不包含第三方参考片画面。以下记录各支样片实际使用的声音来源与许可；`22-hud`、`20-pixel` 的声音记录见各自工程。
 
 ### 07-liquid「IDEA BLOOM · 一滴灵感」
 
@@ -91,6 +91,24 @@ SOFTWARE.
 
 - BGM：[fs:180239](https://freesound.org/people/iluppai/sounds/180239/) *Chinese flute Hulusi* / iluppai，**CC0-1.0**。
 - SFX：[fs:273870](https://freesound.org/people/beskhu/sounds/273870/) *water drop 1.aif* / beskhu，**CC0-1.0**。
+
+### 12-aurora-glass「NIGHT NOTE · 夜空电台」
+
+- 环境铺底：[fs:620302](https://freesound.org/people/nlux/sounds/620302/) *Swirly Synth Chord Loop* / nlux，[**CC-BY-4.0**](https://creativecommons.org/licenses/by/4.0/)。
+- 卡片出现：[fs:878621](https://freesound.org/people/Qvantor/sounds/878621/) *Heal Restore* / Qvantor，**CC0-1.0**。
+- 字标出现：[fs:878433](https://freesound.org/people/zenosounds/sounds/878433/) *Crystal Notification Ping* / zenosounds，[**CC-BY-4.0**](https://creativecommons.org/licenses/by/4.0/)；工程内做过高通、低通与淡出处理。
+- CC-BY 素材要求署名；本段即署名记录，发布时请保留。
+
+### 18-hanazi「今天的小确幸」
+
+- BGM：*Piano Happy Solo Sunset Loop Mastered* / szegvari，Freesound **CC0-1.0**。
+- Pop：*The Best Bubble Pop Sound For Game and UI* / el_boss，Freesound **CC0-1.0**。
+- Bubble：*Bubble Pop* / TheBuilder15，Freesound **CC0-1.0**。
+- Chime：*Fantasy_ui_Button_6* / ZenithInfinitiveStudios，Freesound **CC0-1.0**。
+
+### 19-paperclip「水滴的旅行」
+
+- 100 BPM 轻拨弦与合成垫由工程内合成，48 kHz 立体声；水滴、蒸发、凝结、雨、循环五组音效也由工程内合成，无第三方音频素材。
 
 `09-bauhaus` 与 `23-ink-wash` 使用的 Freesound 文件为 22.05 kHz 单声道 HQ 预览 MP3，工程重采样到 48 kHz；音质上限受预览文件限制。
 

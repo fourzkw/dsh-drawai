@@ -67,6 +67,45 @@
       "sha256": "f949c75cb97f709a2a8bac0842775005215072cb11a3920d7504d3abbf4d0a7e"
     },
     {
+      "slug": "12-aurora-glass",
+      "title": "NIGHT NOTE · 夜空电台",
+      "video": "media/12-aurora-glass.mp4",
+      "poster": "media/12-aurora-glass.jpg",
+      "w": 1280,
+      "h": 720,
+      "duration": 10.6,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/night-note-aurora/clip-2/source.mp4",
+      "sha256": "7a43c430f77f32be175cb92a40ce234b6ab00e2b526e2edf293039f7caf5025a"
+    },
+    {
+      "slug": "18-hanazi",
+      "title": "今天的小确幸",
+      "video": "media/18-hanazi.mp4",
+      "poster": "media/18-hanazi.jpg",
+      "w": 720,
+      "h": 1280,
+      "duration": 10.1,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/happy-moments-hanazi/clip-2/source.mp4",
+      "sha256": "2be3870f0b08961b76c3bdf4a3021e77cb6265e64298d96a06e76a9827c9c01b"
+    },
+    {
+      "slug": "19-paperclip",
+      "title": "水滴的旅行",
+      "video": "media/19-paperclip.mp4",
+      "poster": "media/19-paperclip.jpg",
+      "w": 1280,
+      "h": 720,
+      "duration": 12.053,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/paperclip-water-cycle/clip-2/source.mp4",
+      "sha256": "ca3ebdb312d3d326336df1cb2f19c25f99f6c2d46bad1682a23513822a90580e"
+    },
+    {
       "slug": "23-ink-wash",
       "title": "雨过荷香",
       "video": "media/23-ink-wash.mp4",
