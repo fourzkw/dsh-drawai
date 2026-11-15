@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 展示站构建产物检查：15 个风格、本地提示词/移植说明、深链、媒体 manifest。
+ * 展示站构建产物检查：15 个风格、本地提示词/样片配对、移植说明、深链、媒体 manifest。
  *
  *   node tools/check-showcase.mjs
  *   node tools/check-showcase.mjs --allow-missing-media
@@ -19,7 +19,14 @@ const allowMissingMedia = process.argv.includes('--allow-missing-media');
 const catalog = JSON.parse(fs.readFileSync(path.join(MG, 'catalog.json'), 'utf8'));
 const styles = catalog.styles;
 const problems = [];
-const notes = ['提示词：2 条本地，13 个未提供（不显示提示词 tab）'];
+const promptDir = path.join(SHOWCASE, 'native', 'prompts');
+const promptStyles = styles.filter((style) => {
+  const file = path.join(promptDir, `${style.slug}.md`);
+  return fs.existsSync(file) && fs.statSync(file).size > 0;
+});
+const promptCount = promptStyles.length;
+const expectedPromptSlugs = ['22-hud', '20-pixel', '07-liquid', '09-bauhaus', '10-synthwave', '23-ink-wash'];
+const notes = [`提示词：${promptCount} 条本地，${styles.length - promptCount} 个未提供（不显示提示词 tab）`];
 let tabTotal = 0;
 
 function fail(message) {
@@ -30,10 +37,15 @@ function exists(relative) {
   return fs.existsSync(path.join(SHOWCASE, relative));
 }
 
+for (const slug of expectedPromptSlugs) {
+  if (!promptStyles.some((style) => style.slug === slug)) fail(`缺少本地提示词：${slug}`);
+}
+
 if (!fs.existsSync(INDEX)) {
   fail('缺少 showcase/index.html（先跑 npm run showcase:build）');
 } else {
   const html = fs.readFileSync(INDEX, 'utf8');
+  const htmlWithoutPrompts = html.replace(/<pre class="code prompt"[\s\S]*?<\/pre>/g, '');
 
   if (/\{\{[A-Z_]+\}\}/.test(html)) fail('index.html 里还有未替换的模板占位符');
   if (/>(?:undefined|NaN)</.test(html)) fail('index.html 里出现 undefined / NaN');
@@ -56,7 +68,7 @@ if (!fs.existsSync(INDEX)) {
 
   const tabs = (html.match(/<button class="tab/g) || []).length;
   tabTotal = tabs;
-  const expectedTabs = (styles.length - 2) * 2 + 2 * 3;
+  const expectedTabs = (styles.length - promptCount) * 2 + promptCount * 3;
   if (tabs !== expectedTabs) fail(`tab 数量应为 ${expectedTabs}，实际 ${tabs}`);
 
   const indexNumbers = [...html.matchAll(/class="index-num">(\d{2})</g)].map((match) => match[1]);
@@ -66,9 +78,10 @@ if (!fs.existsSync(INDEX)) {
   }
 
   if (html.includes('data-pane="src"')) fail('页面里仍有源码 pane');
-  if (html.includes('上游源码')) fail('页面里仍有“上游源码”');
-  if (html.includes('上游成片')) fail('页面里仍有“上游成片”');
-  if (html.includes('上游')) fail('页面里仍有“上游”字样');
+  if (htmlWithoutPrompts.includes('上游源码')) fail('页面里仍有“上游源码”');
+  if (htmlWithoutPrompts.includes('上游成片')) fail('页面里仍有“上游成片”');
+  // 本地提示词会保留“不复制上游镜头”等原话；只检查提示词之外的页面文案。
+  if (htmlWithoutPrompts.includes('上游')) fail('页面里仍有“上游”字样');
   if (/mg-styles-15|huashu-art-motion/i.test(html)) fail('页面里仍有上游项目名');
   if (html.includes('原文 ↗')) fail('页面里仍有提示词原文链接');
   if (/待补|留空|film slot|pending/i.test(html)) fail('页面里仍有占位/待补文案');
@@ -77,11 +90,11 @@ if (!fs.existsSync(INDEX)) {
   if (html.includes('data-play')) fail('页面里仍有自定义播放按钮');
 
   const promptWraps = (html.match(/class="prompt-wrap"/g) || []).length;
-  if (promptWraps !== 2) fail(`本地提示词展示块数量应为 2，实际 ${promptWraps}`);
+  if (promptWraps !== promptCount) fail(`本地提示词展示块数量应为 ${promptCount}，实际 ${promptWraps}`);
   if (html.includes('prompt-empty')) fail('页面里仍有空提示词占位块');
 
   const promptFolds = (html.match(/class="prompt-fold"/g) || []).length;
-  if (promptFolds !== 2) fail(`提示词折叠块数量应为 2，实际 ${promptFolds}`);
+  if (promptFolds !== promptCount) fail(`提示词折叠块数量应为 ${promptCount}，实际 ${promptFolds}`);
   if (/class="prompt-fold"[^>]*\bopen\b/.test(html)) fail('提示词折叠块不应该默认展开');
   if (/class="prompt-guide"[^>]*\bopen\b/.test(html)) fail('“怎么用”说明不应该默认展开');
   if (html.includes('You are the director')) fail('页面里仍有上游英文提示词');
@@ -89,16 +102,18 @@ if (!fs.existsSync(INDEX)) {
   if (html.includes('rubric.md')) fail('页面里仍有上游评分表引用');
 
   const promptCopies = (html.match(/data-copy="prompt-/g) || []).length;
-  if (promptCopies !== 2) fail(`折叠状态下的复制按钮数量应为 2，实际 ${promptCopies}`);
+  if (promptCopies !== promptCount) fail(`折叠状态下的复制按钮数量应为 ${promptCount}，实际 ${promptCopies}`);
 
   const sections = (html.match(/class="style(?: |")/g) || []).length;
   if (sections < styles.length) fail(`section 数量不足：${sections}，至少 ${styles.length}`);
 
   if (html.includes('04-3d-render')) fail('页面里出现了 04-3d-render（插件不支持这个风格）');
-  if (!new RegExp(`id="23-ink-wash"[^>]*data-film="false"`).test(html)) {
-    // 属性顺序可能不同，退化为逐个检查
-    const section = html.match(/<section[^>]*id="23-ink-wash"[^>]*>/);
-    if (!section || !section[0].includes('data-film="false"')) fail('23-ink-wash 没有标记为无参考片');
+
+  for (const style of promptStyles) {
+    const section = html.match(new RegExp(`<section[^>]*id="${style.slug}"[^>]*>`));
+    if (!section || !section[0].includes('data-film="true"')) {
+      fail(`${style.slug}: 有本地提示词但没有渲染样片（data-film="true"）`);
+    }
   }
 
   const localRefs = new Set();
@@ -123,7 +138,7 @@ if (fs.existsSync(MANIFEST)) {
 
 if (manifest) {
   const films = Array.isArray(manifest.films) ? manifest.films : Array.isArray(manifest.items) ? manifest.items : [];
-  const expected = ['22-hud', '20-pixel'];
+  const expected = ['22-hud', '20-pixel', '07-liquid', '09-bauhaus', '10-synthwave', '23-ink-wash'];
   let filmCount = 0;
 
   for (const slug of expected) {
@@ -143,7 +158,16 @@ if (manifest) {
       if (!film[key]) fail(`${film.slug}: manifest 缺 ${key}`);
       else if (!exists(film[key])) fail(`${film.slug}: 媒体文件不存在 ${film[key]}`);
     }
+    if (!Number.isFinite(Number(film.duration)) || Number(film.duration) <= 0) {
+      fail(`${film.slug}: duration 必须是正数`);
+    }
     if (film.sha256 && !/^[0-9a-f]{64}$/.test(film.sha256)) fail(`${film.slug}: sha256 格式不对`);
+  }
+
+  for (const style of promptStyles) {
+    if (!films.some((film) => film?.slug === style.slug && film.film !== false)) {
+      fail(`${style.slug}: 有本地提示词但 manifest 没有对应样片`);
+    }
   }
 
   const rendered = (fs.readFileSync(INDEX, 'utf8').match(/<figure class="player" data-film="true"/g) || []).length;
