@@ -2,6 +2,9 @@
 
 [![npm version](https://img.shields.io/npm/v/dsh-drawai)](https://www.npmjs.com/package/dsh-drawai) [![npm downloads](https://img.shields.io/npm/dt/dsh-drawai)](https://www.npmjs.com/package/dsh-drawai) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
+> **在线风格展示：<https://fourzkw.github.io/dsh-drawai/styles/>**  
+> 15 种整片风格索引、移植说明与调用方式；赛博 HUD、像素、液态、包豪斯、合成器浪潮与水墨六节附本地提示词和样片。
+
 **在 DeepSeek Harness 里，用自然语言和可编辑画布一起画图、处理素材、制作动效视频。**
 
 DrawAI 在右侧栏提供画布，也向对话中的模型提供读图、改图和视频工程工具。你可以自己拖动、连线、改字，也可以让模型继续编辑同一份文件。

@@ -1,0 +1,38 @@
+{
+  "22-hud": {
+    "palette": {
+      "page": "#020A0D",
+      "surface": "#0E3A42",
+      "field": "#0B7C8C",
+      "text": "#E8FEFF",
+      "muted": "#6B8C93",
+      "accent": "#00E5FF",
+      "border": "#FF2A1F"
+    },
+    "colors": ["#020A0D", "#0E3A42", "#0B7C8C", "#00E5FF", "#E8FEFF", "#FF2A1F", "#6B8C93"],
+    "fonts": {
+      "display": "\"Bahnschrift\",\"Arial Narrow\",sans-serif",
+      "text": "\"MiSans\",\"Microsoft YaHei\",sans-serif",
+      "mono": "\"Cascadia Mono\",monospace"
+    },
+    "rhythm": { "bpm": 120, "fps": 30, "duration": 10, "aspect": "16:9", "cutFrames": 5 }
+  },
+  "20-pixel": {
+    "palette": {
+      "page": "#1b1a33",
+      "surface": "#0d0b1a",
+      "field": "#2a2f5a",
+      "text": "#ffffff",
+      "muted": "#8cc8f5",
+      "accent": "#ffd166",
+      "border": "#5b9bea"
+    },
+    "colors": ["#0d0b1a", "#1b1a33", "#2a2f5a", "#5b9bea", "#ffd166", "#ffffff", "#8cc8f5"],
+    "fonts": {
+      "display": "\"Press Start 2P\",\"Fusion Pixel 12\",monospace",
+      "text": "\"Fusion Pixel 12\",monospace",
+      "mono": "\"Press Start 2P\",\"Fusion Pixel 12\",monospace"
+    },
+    "rhythm": { "bpm": 150, "fps": 30, "duration": 12.1, "aspect": "16:9", "cutFrames": 3 }
+  }
+}

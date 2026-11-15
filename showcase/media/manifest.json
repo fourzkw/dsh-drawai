@@ -1,0 +1,83 @@
+{
+  "note": "DrawAI 自产样片。duration 是作品实际长度，不强制 10 秒。",
+  "films": [
+    {
+      "slug": "22-hud",
+      "title": "TARGET ACQUIRED",
+      "video": "media/22-hud.mp4",
+      "poster": "media/22-hud.jpg",
+      "w": 1280,
+      "h": 720,
+      "duration": 10,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/video.mp4",
+      "sha256": "ae6432351bf3e2a1c9382054edd903c1fe4789808f097f1b19c13b00d6ca365e"
+    },
+    {
+      "slug": "20-pixel",
+      "title": "小机器人寻找星星",
+      "video": "media/20-pixel.mp4",
+      "poster": "media/20-pixel.jpg",
+      "w": 1280,
+      "h": 720,
+      "duration": 12.1,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/pixel-star-robot/clip-2/source.mp4",
+      "sha256": "fa3109d561af598cc3f78e3931b0100e9247ff0172a85fe745ee86305b7acc71"
+    },
+    {
+      "slug": "07-liquid",
+      "title": "IDEA BLOOM · 一滴灵感",
+      "video": "media/07-liquid.mp4",
+      "poster": "media/07-liquid.jpg",
+      "w": 1920,
+      "h": 1080,
+      "duration": 10.048,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/liquid-lab.drawai.media/clip-2/source.mp4",
+      "sha256": "df30ca98e0cf65a43fb525f73c543bead8ff57986a30225c8b557c2c83d8fa19"
+    },
+    {
+      "slug": "09-bauhaus",
+      "title": "PLAY THE DAY · 把今天调成喜欢的节奏",
+      "video": "media/09-bauhaus.mp4",
+      "poster": "media/09-bauhaus.jpg",
+      "w": 1920,
+      "h": 1080,
+      "duration": 10.1,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/bauhaus-play-day.drawai.media/clip-1/source.mp4",
+      "sha256": "7e3a9c8d19f7907ed3d3dcd291d431a6804a3e5355bc3d3394980e80e5463c16"
+    },
+    {
+      "slug": "10-synthwave",
+      "title": "NEON GROOVE · 让旋律点亮夜晚",
+      "video": "media/10-synthwave.mp4",
+      "poster": "media/10-synthwave.jpg",
+      "w": 1920,
+      "h": 1080,
+      "duration": 10.1,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/synthwave-record-shop.drawai.media/clip-2/source.mp4",
+      "sha256": "f949c75cb97f709a2a8bac0842775005215072cb11a3920d7504d3abbf4d0a7e"
+    },
+    {
+      "slug": "23-ink-wash",
+      "title": "雨过荷香",
+      "video": "media/23-ink-wash.mp4",
+      "poster": "media/23-ink-wash.jpg",
+      "w": 1920,
+      "h": 1080,
+      "duration": 12.1,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/rain-lotus-ink.drawai.media/clip-1/source.mp4",
+      "sha256": "f32d36642dbd9aaeab6c8c69740d69c5ec8d9735d5d2c2c6d0baab8856774bd6"
+    }
+  ]
+}
