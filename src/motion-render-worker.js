@@ -1,5 +1,5 @@
 import { ensureVideoRuntime, videoRuntimeRequire } from './motion/video-runtime.js'
-import { existsSync, rmSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, rmSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, isAbsolute, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import { prepareMotionProject } from './motion-project.js'
@@ -73,13 +73,31 @@ process.on('message', async (request) => {
         : `未找到本机 Chrome / Edge，下载 chrome-headless-shell 也失败：${detail}。请安装 Chrome，或用 DRAWAI_CHROME_PATH 指定浏览器路径。`)
     })
     if (cancelled) throw new Error('已取消动效生成')
+    // 报告人机器上到底是哪个浏览器在截图，光看日志看不出来：把路径与版本一起报出来（issue #46）。
+    // HeadlessBrowser 没有 version()，版本要从 CDP 的 Browser.getVersion 取；拿不到再退回
+    // 安装目录里的版本号目录（Chrome / Edge 都是 <Application>/<x.y.z.w>/ 这种排布）。
+    const browserVersion = await (async () => {
+      try {
+        const product = (await browser.connection?.send?.('Browser.getVersion'))?.value?.product
+        if (typeof product === 'string' && product) return product
+      } catch {}
+      if (!browserExecutable) return ''
+      try {
+        return readdirSync(dirname(browserExecutable)).find((name) => /^\d+\.\d+\.\d+\.\d+$/.test(name)) || ''
+      } catch { return '' }
+    })()
+    const browserInfo = { executable: browserExecutable || null, version: browserVersion || null, downloaded: !browserExecutable }
+    send({ type: 'progress', phase: 'browser', progress: .1, message: '浏览器 ' + (browserVersion || '版本未知')
+      + (browserExecutable ? ' · ' + browserExecutable : ' · 内置 chrome-headless-shell（没找到本机 Chrome / Edge）') })
     const inputProps = { plan: request.composition, assets: request.assets }
     const composition = await selectComposition({ serveUrl, id: 'DrawAiMotion', inputProps, puppeteerInstance: browser, browserExecutable })
-    if(request.operation==='compile'){send({type:'done',compiled:true});return}
+    if(request.operation==='compile'){send({type:'done',compiled:true,browser:browserInfo});return}
     send({ type: 'progress', phase: 'reviewing', progress: .1 })
     const qaDirectory = request.qaDirectory || join(dirname(request.output), 'qa'); mkdirSync(qaDirectory, { recursive: true })
     const audioCues = Array.isArray(request.composition?.audio) ? request.composition.audio : []
     const qa = { status: 'render-checks-passed', visualReview: 'manual-required', audio: audioCues.length ? 'mixed:' + audioCues.length : 'silent', frames: [], warnings: [] }
+    // 帧检报告里留一份「这次是哪个浏览器渲的」，回帖取证时不用再问一遍。
+    qa.browser = browserInfo
     if(request.operation==='still'){
       const frames=[]
       for(const frame of request.frames){
@@ -88,7 +106,7 @@ process.on('message', async (request) => {
         await renderStill({serveUrl,composition,inputProps,output:join(qaDirectory,filename),frame,puppeteerInstance:browser,browserExecutable,cancelSignal,logLevel:'error'})
         frames.push({frame,filename,sha256:createHash('sha256').update(readFileSync(join(qaDirectory,filename))).digest('hex')})
       }
-      send({type:'done',frames});return
+      send({type:'done',frames,browser:browserInfo});return
     }
     for (const shot of request.composition.shots) {
       const hashes = []
@@ -166,7 +184,7 @@ process.on('message', async (request) => {
     await renderStill({ serveUrl, composition, inputProps, output: request.poster,
       frame: posterShot.startFrame + Math.floor(posterShot.durationFrames / 2), puppeteerInstance: browser, browserExecutable, cancelSignal, logLevel: 'error' })
     writeFileSync(join(qaDirectory, 'report.json'), JSON.stringify(qa, null, 2))
-    send({ type: 'done', qa })
+    send({ type: 'done', qa, browser: browserInfo })
   } catch (error) { send({ type: 'error', error: error.message || String(error) }); process.exitCode = 1 }
   finally {
     await browser?.close({ silent: true }).catch(() => {})
