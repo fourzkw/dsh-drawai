@@ -24,7 +24,7 @@
     toastTimer = window.setTimeout(() => toastEl.classList.remove('is-visible'), 1600);
   }
 
-  async function copyText(text) {
+  async function copyText(text, message = '已复制') {
     const value = String(text ?? '');
     try {
       await navigator.clipboard.writeText(value);
@@ -39,7 +39,7 @@
       try { document.execCommand('copy'); } catch { /* ignore */ }
       area.remove();
     }
-    toast('已复制');
+    toast(message);
   }
 
   /* ---------- tabs + deep links ---------- */
@@ -216,10 +216,61 @@
     }, true);
   }
 
-  /* ---------- copy ---------- */
+  /* ---------- copy + template ---------- */
+
+  function templateValue() {
+    const node = $('#template-text');
+    return node ? node.textContent : '';
+  }
+
+  function fillTemplate(button) {
+    const base = templateValue();
+    if (!base) return '';
+
+    const slots = [
+      ['风格', button.dataset.fillStyle],
+      ['画幅与帧率', button.dataset.fillSpec],
+      ['时长', button.dataset.fillDuration],
+    ];
+
+    return slots.reduce((text, [label, value]) => {
+      if (!value) return text;
+      const pattern = new RegExp(`^(-\\s*${label}\\s*[：:]\\s*).*$`, 'm');
+      return text.replace(pattern, `$1${value}`);
+    }, base);
+  }
+
+  function initTemplate() {
+    const view = $('[data-doc]');
+    const toggle = $('[data-expand]');
+    if (!view || !toggle) return;
+
+    const label = $('span', toggle);
+    const sync = (open) => {
+      view.classList.toggle('is-open', open);
+      toggle.setAttribute('aria-expanded', String(open));
+      if (label) label.textContent = open ? '收起' : '展开全文';
+    };
+
+    toggle.addEventListener('click', () => sync(!view.classList.contains('is-open')));
+  }
 
   function initCopy() {
     document.addEventListener('click', (event) => {
+      const fillButton = event.target.closest('[data-copy-fill]');
+      if (fillButton) {
+        const target = document.getElementById('template-fill');
+        if (target) copyText(target.textContent, '已复制填空段');
+        return;
+      }
+
+      const presetButton = event.target.closest('[data-template-style]');
+      if (presetButton) {
+        const text = fillTemplate(presetButton);
+        if (text) copyText(text, '已复制模板 · 已按本节填好');
+        return;
+      }
+
       const copyButton = event.target.closest('[data-copy]');
       if (copyButton) {
         const target = document.getElementById(copyButton.dataset.copy);
@@ -238,6 +289,7 @@
   initSearch();
   initScrollspy();
   initVideos();
+  initTemplate();
   initCopy();
 
   applyHash(true);
