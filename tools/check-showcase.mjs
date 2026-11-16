@@ -25,7 +25,11 @@ const promptStyles = styles.filter((style) => {
   return fs.existsSync(file) && fs.statSync(file).size > 0;
 });
 const promptCount = promptStyles.length;
-const expectedPromptSlugs = ['22-hud', '20-pixel', '07-liquid', '09-bauhaus', '10-synthwave', '23-ink-wash', '12-aurora-glass', '18-hanazi', '19-paperclip'];
+const expectedPromptSlugs = [
+  '01-flat-vector', '03-isometric', '06-collage',
+  '07-liquid', '09-bauhaus', '10-synthwave', '12-aurora-glass',
+  '18-hanazi', '19-paperclip', '20-pixel', '22-hud', '23-ink-wash',
+];
 const notes = [`提示词：${promptCount} 条本地，${styles.length - promptCount} 个未提供（不显示提示词 tab）`];
 let tabTotal = 0;
 
@@ -154,7 +158,11 @@ if (fs.existsSync(MANIFEST)) {
 
 if (manifest) {
   const films = Array.isArray(manifest.films) ? manifest.films : Array.isArray(manifest.items) ? manifest.items : [];
-  const expected = ['22-hud', '20-pixel', '07-liquid', '09-bauhaus', '10-synthwave', '23-ink-wash', '12-aurora-glass', '18-hanazi', '19-paperclip'];
+  const expected = [
+    '01-flat-vector', '03-isometric', '06-collage',
+    '07-liquid', '09-bauhaus', '10-synthwave', '12-aurora-glass',
+    '18-hanazi', '19-paperclip', '20-pixel', '22-hud', '23-ink-wash',
+  ];
   let filmCount = 0;
 
   for (const slug of expected) {
@@ -177,7 +185,14 @@ if (manifest) {
     if (!Number.isFinite(Number(film.duration)) || Number(film.duration) <= 0) {
       fail(`${film.slug}: duration 必须是正数`);
     }
-    if (film.sha256 && !/^[0-9a-f]{64}$/.test(film.sha256)) fail(`${film.slug}: sha256 格式不对`);
+    if (!Number.isFinite(Number(film.w)) || Number(film.w) <= 0 || !Number.isFinite(Number(film.h)) || Number(film.h) <= 0) {
+      fail(`${film.slug}: w / h 必须是正数`);
+    }
+    if (!Number.isFinite(Number(film.fps)) || Number(film.fps) <= 0) {
+      fail(`${film.slug}: fps 必须是正数`);
+    }
+    if (!film.source) fail(`${film.slug}: manifest 缺 source`);
+    if (!/^[0-9a-f]{64}$/.test(film.sha256 || '')) fail(`${film.slug}: sha256 必须是 64 位小写十六进制`);
   }
 
   for (const style of promptStyles) {

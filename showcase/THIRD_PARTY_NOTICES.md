@@ -1,6 +1,6 @@
 # 第三方素材与许可
 
-这个展示页使用第三方风格目录的元数据（名称、色板、字体、节奏、动效），并放入九支 DrawAI 本地样片（赛博 HUD、像素风、液态、包豪斯、合成器浪潮、水墨、玻璃拟态、综艺花字、贴纸科普）和九段本地中文提示词。页面不包含、也不引用第三方提示词、参考片或源码。
+这个展示页使用第三方风格目录的元数据（名称、色板、字体、节奏、动效），并放入十二支 DrawAI 本地样片（扁平矢量、等轴 2.5D、拼贴、液态、包豪斯、合成器浪潮、玻璃拟态、综艺花字、贴纸科普、像素、赛博 HUD、水墨）和十二段本地中文提示词。页面不包含、也不引用第三方提示词、参考片或源码。`05-cel-boil`（小猫与红毛线）本轮未进展示页，其素材与许可记录也不在此列。
 
 ## mg-styles-15
 
@@ -62,7 +62,7 @@ SOFTWARE.
 
 ## 本地样片的声音素材
 
-九支样片的画面均为 DrawAI 本地渲染，不包含第三方参考片画面。以下记录各支样片实际使用的声音来源与许可；`22-hud`、`20-pixel` 的声音记录见各自工程。
+十二支样片的画面均为 DrawAI 本地渲染，不包含第三方参考片画面。以下记录各支样片实际使用的声音来源与许可；`22-hud`、`20-pixel` 的声音记录见各自工程。新增三支均未经过人工试听。
 
 ### 07-liquid「IDEA BLOOM · 一滴灵感」
 
@@ -109,6 +109,35 @@ SOFTWARE.
 ### 19-paperclip「水滴的旅行」
 
 - 100 BPM 轻拨弦与合成垫由工程内合成，48 kHz 立体声；水滴、蒸发、凝结、雨、循环五组音效也由工程内合成，无第三方音频素材。
+
+### 01-flat-vector「GROW DAY · 一颗种子的奇妙生长」
+
+声音修订版移除原时间轴的 31 条玻璃/钟琴提示音，改为 1 条配乐铺底 + 5 条音效 cue。以下为实际使用的第三方来源：
+
+- BGM：[fs:830500](https://freesound.org/people/shaunhillyard/sounds/830500/) *A Ukulele Tune* / shaunhillyard，**CC0-1.0**；截取 0–11 秒并做高通、低通、轻度压缩与淡入淡出。
+- 字标单音：[fs:218459](https://freesound.org/people/thomasjaunism/sounds/218459/) *Music box note* / thomasjaunism，**CC0-1.0**。
+- 收尾钟音：[fs:10464](https://freesound.org/people/batchku/sounds/10464/) *gbell_9-2_pp.aif* / batchku，**CC0-1.0**。
+- 落地、破土、绽放音效：工程内合成，无外部采样。
+- 声音未经过人工试听；只做了响度、真峰值、频谱、音效数量与音画同步检查。
+
+### 03-isometric「COAST CAFÉ · 漂浮的海边咖啡馆」
+
+无闪修订版保留原音轨。声音均来自 Freesound，**CC0-1.0**：
+
+- BGM：[fs:826622](https://freesound.org/people/xkeril/sounds/826622/) *Memories of a sweet summer (music) (loop)* / xkeril。
+- 海浪：[fs:852826](https://freesound.org/people/kkenny101/sounds/852826/) *Gentle Ocean Waves Loop* / kkenny101。
+- 杯碟：[fs:568758](https://freesound.org/people/bowlingballout/sounds/568758/) *Cup and Saucer 2.wav* / bowlingballout。
+- 小船落水：[fs:853279](https://freesound.org/people/el_boss/sounds/853279/) *Fishing Lure Plop Water - Game SFX (2 or 2)* / el_boss。
+- 工程内曾下载但未进入时间轴的候选：fs:478705、fs:842165、fs:189504；不作为本片声音来源。
+- 声音未经过人工试听；修订只验证了原音轨逐样本一致、响度与解码。
+
+### 06-collage「周末散步提案」
+
+- 音乐：工程内程序合成，90 BPM、12 秒，软 FM 电钢/拨弦、暖垫、轻旋律与极轻底噪；无第三方音乐采样。
+- 纸声：Freesound 两条 **CC0-1.0** 素材，经剪辑、低通与淡入淡出后作为拍入、滑动、撕纸与盖章音效：
+  - [fs:642770](https://freesound.org/people/meeser9/sounds/642770/) *Paper shuffling.mp3* / meeser9
+  - [fs:461694](https://freesound.org/people/leonelmail/sounds/461694/) *Paper crumpling and wadding into a ball softly 2* / leonelmail
+- 制作限制：上游私有抠图与纸张素材缺失，参考帧接口不可用，本片以原创 Canvas2D 素材完成；自动化视觉 QA 的 `energy-ppt` 为 fail（12 fps 阶梯 + 静止贴纸的结构性低动能）。声音未经过人工试听。
 
 `09-bauhaus` 与 `23-ink-wash` 使用的 Freesound 文件为 22.05 kHz 单声道 HQ 预览 MP3，工程重采样到 48 kHz；音质上限受预览文件限制。
 
