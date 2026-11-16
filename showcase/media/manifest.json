@@ -117,6 +117,45 @@
       "film": true,
       "source": "drawai:mydeepseek/rain-lotus-ink.drawai.media/clip-1/source.mp4",
       "sha256": "f32d36642dbd9aaeab6c8c69740d69c5ec8d9735d5d2c2c6d0baab8856774bd6"
+    },
+    {
+      "slug": "01-flat-vector",
+      "title": "GROW DAY · 一颗种子的奇妙生长",
+      "video": "media/01-flat-vector.mp4",
+      "poster": "media/01-flat-vector.jpg",
+      "w": 1920,
+      "h": 1080,
+      "duration": 11.1,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/seed-garden.drawai.media/clip-3/source.mp4",
+      "sha256": "7eddee300a4d85345fce9a5f81767d1054b4dc79dad3e81f32bcc0e880eb976a"
+    },
+    {
+      "slug": "03-isometric",
+      "title": "COAST CAFÉ · 漂浮的海边咖啡馆",
+      "video": "media/03-isometric.mp4",
+      "poster": "media/03-isometric.jpg",
+      "w": 1920,
+      "h": 1080,
+      "duration": 12.053,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/coast-cafe-isometric-remake.drawai.media/clip-3/source.mp4",
+      "sha256": "9416090a693759dedc4f11a8b41e0928d0ba2068eb459cefd65c2ec4e7b6ff8e"
+    },
+    {
+      "slug": "06-collage",
+      "title": "周末散步提案",
+      "video": "media/06-collage.mp4",
+      "poster": "media/06-collage.jpg",
+      "w": 1920,
+      "h": 1080,
+      "duration": 12.053,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/collage-weekend-walk.drawai.media/clip-2/source.mp4",
+      "sha256": "9926a0bd0e33ef2309a69c2a057979c01341199c026fd7d89bf1778cbe7cb299"
     }
   ]
 }

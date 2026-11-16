@@ -34,5 +34,14 @@
       "mono": "\"Press Start 2P\",\"Fusion Pixel 12\",monospace"
     },
     "rhythm": { "bpm": 150, "fps": 30, "duration": 12.1, "aspect": "16:9", "cutFrames": 3 }
+  },
+  "01-flat-vector": {
+    "rhythm": { "bpm": 120, "fps": 30, "duration": 11, "aspect": "16:9", "cutFrames": 15 }
+  },
+  "03-isometric": {
+    "rhythm": { "bpm": 120, "fps": 30, "duration": 12, "aspect": "16:9", "cutFrames": 15 }
+  },
+  "06-collage": {
+    "rhythm": { "bpm": 90, "fps": 30, "duration": 12, "aspect": "16:9", "cutFrames": 3 }
   }
 }
