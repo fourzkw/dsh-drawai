@@ -2609,5 +2609,226 @@ console.log('\n高级导出范围、尺寸与 SVG 文档')
   ok(hitSvg.attributes.fill === 'none' && hitSvg.attributes.stroke === 'transparent' && hitSvg.attributes['stroke-width'] === '12', '序列化后的命中带以属性形式带上 fill/stroke，不依赖页面 CSS：' + JSON.stringify(hitSvg.attributes))
 }
 
+console.log('\n缩放手柄：4 个角 + 整条边热区，尺寸按屏幕像素给（画布放大缩小，手柄大小不变）')
+{
+  // 飞书里手柄是"屏幕上的小方块"：画布缩到 50%、放大到 400%，手柄都同样大。
+  // 我们的 svg 是 viewBox + preserveAspectRatio:'none'，所以覆盖层要把屏幕像素折算成用户单位：
+  // pixel = 视野宽 / 视口宽。这里同一份文档换两种视野断言折算真的生效了。
+  const handleDoc = {
+    nodes: [
+      { id: 'r', x: 0, y: 0, w: 200, h: 100, label: '矩形' },
+      { id: 'rd', x: 0, y: 300, w: 200, h: 100, label: '圆角', style: 'rounded=1;arcSize=20;' },
+      { id: 't', x: 0, y: 200, w: 200, h: 100, label: '单行文字', style: 'text;html=1;whiteSpace=wrap;' },
+      { id: 'tb', x: 0, y: 400, w: 400, h: 200, label: '| 列 1 | 列 2 |\n| --- | --- |\n| a | b |', style: 'text;html=1;whiteSpace=wrap;' },
+    ],
+    edges: [],
+  }
+  const resizedCalls = []
+  const uiFor = (id) => ({
+    selectedIds: [id],
+    singleSelectedNodeId: id,
+    viewportSize: { w: 800, h: 600 },
+    onResizePointerDown: (nodeId, dir) => {
+      resizedCalls.push(nodeId + ':' + dir)
+    },
+    onHandlePointerDown: () => {},
+  })
+  const at100 = renderDiagram(handleDoc, 'light', 'px100', { current: null }, uiFor('r'), { x: -100, y: -100, w: 800, h: 600 })
+  const at400 = renderDiagram(handleDoc, 'light', 'px400', { current: null }, uiFor('r'), { x: -100, y: -100, w: 200, h: 600 })
+  const rectHandles = (tree) => byClass(tree, 'drawai-handle').filter((n) => n.type === 'rect')
+  const handles100 = rectHandles(at100)
+  const handles400 = rectHandles(at400)
+  ok(handles100.length === 4, '每个节点只给 4 个角手柄（实际 ' + handles100.length + ' 个）')
+  const handleDirs = handles100.map((n) => String(n.props.className).split(/\s+/).filter((c) => c.indexOf('drawai-rs-') === 0)[0])
+  ok(handleDirs.join(',') === 'drawai-rs-nw,drawai-rs-ne,drawai-rs-se,drawai-rs-sw', '角手柄方向：nw/ne/se/sw（' + handleDirs.join(',') + '）')
+  ok(
+    handles100.every((h) => h.props.width === 8 && h.props.height === 8 && h.props.strokeWidth === 1.5),
+    '100%：手柄 8×8、描边 1.5（用户单位 = 屏幕像素）',
+  )
+  // 视野 200 宽铺进 800 宽的视口 = 放大 4 倍：用户单位要除以 4 才是屏幕像素。
+  const pixel400 = 200 / 800
+  ok(
+    handles400.length === 4 && handles400.every((h) => Math.abs(h.props.width - 8 * pixel400) < 1e-6 && Math.abs(h.props.strokeWidth - 1.5 * pixel400) < 1e-6),
+    '放大 400%：手柄折算成 2 用户单位（屏幕上仍是 8px）：' + JSON.stringify(handles400.map((h) => h.props.width)),
+  )
+  const sel100 = byClass(at100, 'drawai-sel')[0]
+  const sel400 = byClass(at400, 'drawai-sel')[0]
+  ok(
+    sel100 !== undefined && sel100.props.x === 0 && sel100.props.y === 0 && sel100.props.width === 200 && sel100.props.height === 100,
+    '选中框贴边，不再外扩（' + (sel100 === undefined ? 'missing' : sel100.props.x + ',' + sel100.props.y + ' ' + sel100.props.width + '×' + sel100.props.height) + '）',
+  )
+  ok(sel100 !== undefined && sel100.props.rx === 0, '矩形选中框不额外加圆角（rx=' + (sel100 === undefined ? 'missing' : sel100.props.rx) + '）')
+  const rdTree = renderDiagram(handleDoc, 'light', 'pxrounded', { current: null }, uiFor('rd'), { x: -100, y: -100, w: 800, h: 600 })
+  const selRd = byClass(rdTree, 'drawai-sel')[0]
+  ok(selRd !== undefined && Math.abs(selRd.props.rx - 20) < 1e-6, '圆角节点选中框跟随节点圆角（arcSize=20 → rx=20，实际 ' + (selRd === undefined ? 'missing' : selRd.props.rx) + '）')
+  ok(sel100 !== undefined && sel100.props.strokeWidth === 2, '选中框线宽 2 屏幕像素（100%）')
+  ok(sel400 !== undefined && Math.abs(sel400.props.strokeWidth - 2 * pixel400) < 1e-6, '放大 400%：选中框线宽折算成 0.5 用户单位，屏幕上还是 2px')
+  // 四条边的透明热区：10 屏幕像素厚，盖在选中框上（内 5px / 外 5px）。
+  const zones100 = byClass(at100, 'drawai-edgezone')
+  const zones400 = byClass(at400, 'drawai-edgezone')
+  const zoneOf = (zones, dir) => zones.filter((n) => String(n.props.className).split(/\s+/).indexOf('drawai-edgezone-' + dir) >= 0)[0]
+  const zoneN = zoneOf(zones100, 'n')
+  const zoneE = zoneOf(zones100, 'e')
+  ok(zones100.length === 4, '四条边各有一个热区（实际 ' + zones100.length + ' 个）')
+  ok(
+    zoneN !== undefined && zoneN.props.x === -5 && zoneN.props.y === -5 && zoneN.props.width === 210 && zoneN.props.height === 10,
+    '北边热区：10px 厚、盖住整条边（' + (zoneN === undefined ? 'missing' : JSON.stringify({ x: zoneN.props.x, y: zoneN.props.y, w: zoneN.props.width, h: zoneN.props.height })) + '）',
+  )
+  ok(
+    zoneE !== undefined && zoneE.props.x === 195 && zoneE.props.y === -5 && zoneE.props.width === 10 && zoneE.props.height === 110,
+    '东边热区：10px 厚、盖住整条边（' + (zoneE === undefined ? 'missing' : JSON.stringify({ x: zoneE.props.x, y: zoneE.props.y, w: zoneE.props.width, h: zoneE.props.height })) + '）',
+  )
+  ok(zones100.every((z) => z.props.fill === 'transparent' && z.props.pointerEvents === 'all'), '热区透明但可命中（不挡画面、能接住按下）')
+  const isHorizontalZone = (z) => /drawai-edgezone-[ns](\s|$)/.test(String(z.props.className))
+  ok(zones400.every((z) => Math.abs(z.props.width - (isHorizontalZone(z) ? 200 + 10 * pixel400 : 10 * pixel400)) < 1e-6), '放大 400%：热区厚度同样按屏幕像素折算（2.5 用户单位）：' + JSON.stringify(zones400.map((z) => z.props.width)))
+  zoneN.props.onPointerDown({})
+  handles100[0].props.onPointerDown({})
+  ok(resizedCalls.join(',') === 'r:n,r:nw', '边热区与角手柄都接到 resize（' + resizedCalls.join(',') + '）')
+
+  // 连线点：四个浅蓝小圆点，推在框外 20 屏幕像素，半径 5 屏幕像素。
+  const links100 = byClass(at100, 'drawai-handle').filter((n) => n.type === 'circle')
+  const links400 = byClass(at400, 'drawai-handle').filter((n) => n.type === 'circle')
+  ok(links100.length === 4 && links100.every((h) => h.props.r === 5), '四面连线点：4 个、r=5（100%）')
+  ok(links100.every((h) => h.props.fill === '#b6caf9' && h.props.stroke === 'none'), '连线点改成浅蓝小圆点（#b6caf9、无描边）')
+  const east100 = links100.filter((h) => h.props.cx > 200)[0]
+  ok(east100 !== undefined && east100.props.cx === 200 + 20, '连线点推在边框外 20px：cx=' + (east100 === undefined ? 'missing' : east100.props.cx))
+  ok(links400.length === 4 && links400.every((h) => Math.abs(h.props.r - 5 * pixel400) < 1e-6), '放大 400%：连线点半径同样折算')
+
+  const dirsOf = (tree) => rectHandles(tree).map((n) => String(n.props.className).split(/\s+/).filter((c) => c.indexOf('drawai-rs-') === 0)[0])
+  const textTree = renderDiagram(handleDoc, 'light', 'pxtext', { current: null }, uiFor('t'), { x: -100, y: -100, w: 800, h: 600 })
+  const textDirs = dirsOf(textTree)
+  ok(
+    textDirs.join(',') === 'drawai-rs-nw,drawai-rs-ne,drawai-rs-se,drawai-rs-sw',
+    '文字：同样只给四个角手柄：' + textDirs.join(','),
+  )
+  const textHandles = rectHandles(textTree)
+  const textSpanW = textHandles[2].props.x - textHandles[0].props.x
+  const textSpanH = textHandles[2].props.y - textHandles[0].props.y
+  ok(textSpanW > 0 && textSpanW < 200 && textSpanH > 0 && textSpanH < 100, '手柄贴的是文字块（' + textSpanW + '×' + textSpanH + '），不是 200×100 的节点框')
+  const tableTree = renderDiagram(handleDoc, 'light', 'pxtable', { current: null }, uiFor('tb'), { x: -100, y: -100, w: 800, h: 600 })
+  const tableDirs = dirsOf(tableTree)
+  ok(tableDirs.length === 4, '表格：同样只给四个角手柄（' + tableDirs.join(',') + '）')
+  const tableHandles = rectHandles(tableTree)
+  const tableSpanH = tableHandles[2].props.y - tableHandles[0].props.y
+  ok(tableSpanH > 0 && tableSpanH < 200, '表格手柄贴的是表格实际高度（' + tableSpanH + '），不是节点里存的 200')
+
+  // 字号上限放宽到 48：等比放大表格时字号要跟着涨，卡在 20 的话表格高度就不再跟手。
+  const bigTableDoc = {
+    nodes: [{ id: 'tb2', x: 0, y: 0, w: 400, h: 200, label: '| 列 1 | 列 2 |\n| --- | --- |\n| a | b |', style: 'text;html=1;whiteSpace=wrap;fontSize=30;' }],
+    edges: [],
+  }
+  const bigTree = renderDiagram(bigTableDoc, 'light', 'bigtable', { current: null }, { selectedIds: [] }, null)
+  const cellText = byKey(bigTree, 'text-1-0')[0]
+  ok(cellText !== undefined && cellText.props.fontSize === 30, '表格字号上限放宽到 48：fontSize=30 不再被卡在 20（' + (cellText === undefined ? 'missing' : cellText.props.fontSize) + '）')
+}
+
+console.log('\n拖角等比：表格只改框、文字字号跟着变；Shift 在边和角上都生效')
+{
+  const tableBase = { dir: 'se', x: 0, y: 0, w: 400, h: 200, aspect: 2, scales: true, fontSize: 12, nodeX: 0, nodeY: 0, nodeW: 400, nodeH: 200 }
+  const grown = internals.resizeOutcome(tableBase, 80, 0, false)
+  ok(grown.w === 480 && Math.abs(grown.w / grown.h - 2) < 0.2, '表格拖角：宽 400→480，高按原比例跟上（' + grown.w + '×' + grown.h + '）')
+  ok(grown.fontSize === null, '表格拖角不改字号（resizeOutcome 返回 null）')
+  ok(Math.abs(grown.k - 1.2) < 1e-6, '等比系数 k = 新宽/原宽 = ' + grown.k)
+  const shrunk = internals.resizeOutcome(tableBase, -200, 0, false)
+  ok(shrunk.w === 200 && Math.abs(shrunk.w / shrunk.h - 2) < 0.2, '缩小一半：宽 200、高 100（' + shrunk.w + '×' + shrunk.h + '）')
+  ok(shrunk.fontSize === null, '缩小一半也不动字号')
+  // 文字：节点框 200×100，内容框只有 48×14 且不在节点框左上角 —— 等比时**内容框的对角**必须钉住，
+  // 同时节点框（= 换行宽度）按同一个 k 放大，否则放大后文字会重新折行。
+  const textBase = { dir: 'se', x: 76, y: 43, w: 48, h: 14, aspect: 48 / 14, scales: true, fontScales: true, fontSize: 12, nodeX: 0, nodeY: 0, nodeW: 200, nodeH: 100 }
+  const textGrown = internals.resizeOutcome(textBase, 48, 0, false)
+  const textFrameX = textGrown.x + (textGrown.w - 48 * textGrown.k) / 2
+  const textFrameY = textGrown.y + (textGrown.h - 14 * textGrown.k) / 2
+  ok(Math.abs(textFrameX - 76) <= 2 && Math.abs(textFrameY - 43) <= 2, '文字拖角：内容框的左上角钉住不动（' + textFrameX.toFixed(1) + ',' + textFrameY.toFixed(1) + '）')
+  ok(Math.abs(textGrown.w - 200 * textGrown.k) <= 10 && Math.abs(textGrown.h - 100 * textGrown.k) <= 10, '文字拖角：节点框（换行宽度）按同一个 k 放大（' + textGrown.w + '×' + textGrown.h + '）')
+  ok(textGrown.fontSize !== null && Math.abs(Number(textGrown.fontSize) - 12 * textGrown.k) < 0.2, '文字拖角：字号按同一个 k 放大（12→' + textGrown.fontSize + '）')
+  const textSide = internals.resizeOutcome({ dir: 'e', x: 76, y: 43, w: 48, h: 14, aspect: 48 / 14, scales: true, fontScales: true, fontSize: 12, nodeX: 0, nodeY: 0, nodeW: 200, nodeH: 100 }, 24, 0, false)
+  ok(textSide.w > 48 && textSide.fontSize !== null && Number(textSide.fontSize) > 12, '文字拖边也按内容框等比并改字号（' + textSide.w + '×' + textSide.h + '，fontSize=' + textSide.fontSize + '）')
+  const shapeBase = { dir: 'se', x: 0, y: 0, w: 400, h: 200, aspect: 2, scales: false, fontSize: 12, nodeX: 0, nodeY: 0, nodeW: 400, nodeH: 200 }
+  const free = internals.resizeOutcome(shapeBase, 80, 0, false)
+  ok(free.w === 480 && free.h === 200 && free.fontSize === null, '形状默认只改被拖的那条边（h 不动、字号不动）')
+  const shifted = internals.resizeOutcome(shapeBase, 80, 0, true)
+  ok(shifted.w === 480 && Math.abs(shifted.w / shifted.h - 2) < 0.2 && shifted.fontSize === null, '形状 Shift 拖角等比，但不缩字号')
+  const side = internals.resizeOutcome({ dir: 'e', x: 0, y: 0, w: 400, h: 200, aspect: 2, scales: false, fontSize: 12 }, 80, 0, true)
+  ok(side.w === 480 && Math.abs(side.w / side.h - 2) < 0.2, '拖边按住 Shift 也等比（width 480、height ' + side.h + '）')
+  const sideFree = internals.resizeOutcome({ dir: 'e', x: 0, y: 0, w: 400, h: 200, aspect: 2, scales: false, fontSize: 12 }, 80, 0, false)
+  ok(sideFree.w === 480 && sideFree.h === 200, '不按 Shift 拖边仍只改一条边')
+  const nw = internals.resizeOutcome({ dir: 'nw', x: 0, y: 0, w: 200, h: 100, aspect: 2, scales: false, fontSize: 12 }, -50, 0, true)
+  ok(nw.w === 250 && nw.x === -50 && nw.y === -30 && Math.abs(nw.w / nw.h - 2) < 0.2, '拖西北角等比：对边（东、南）原地不动（' + JSON.stringify(nw) + '）')
+  // 4 参老调用照旧（tools/check-route-preview.mjs 也在用这个形状）。
+  const legacy = internals.resizeBox({ x: 0, y: 0, w: 200, h: 100 }, 'e', 30, 0)
+  ok(legacy.w === 230 && legacy.h === 100, 'resizeBox 的 4 参调用行为不变')
+
+  // 端到端：真拖一次表格的角，把 resizeOutcome 的结果写回节点再渲染一次 ——
+  // 表格宽度跟着变，但字号与高度都不应该被 resize 改掉（字号交给工具条）。
+  const e2eDoc = {
+    nodes: [{ id: 'tb', x: 0, y: 0, w: 400, h: 200, label: '| 列 1 | 列 2 |\n| --- | --- |\n| a | b |', style: 'text;html=1;whiteSpace=wrap;' }],
+    edges: [],
+  }
+  const e2eView = { x: -100, y: -100, w: 800, h: 600 }
+  const beforeTree = renderDiagram(e2eDoc, 'light', 'e2e-before', { current: null }, { selectedIds: ['tb'], singleSelectedNodeId: 'tb', viewportSize: { w: 800, h: 600 }, onResizePointerDown: () => {} }, e2eView)
+  const beforeHandles = byClass(beforeTree, 'drawai-handle').filter((n) => n.type === 'rect')
+  const beforeFrame = { w: beforeHandles[2].props.x - beforeHandles[0].props.x, h: beforeHandles[2].props.y - beforeHandles[0].props.y }
+  const beforeFont = Number(byKey(beforeTree, 'text-1-0')[0].props.fontSize)
+  const geo = internals.nodeBoxOf(e2eDoc.nodes[0])
+  const drag = internals.resizeOutcome(
+    { dir: 'se', x: 0, y: 0, w: beforeFrame.w, h: beforeFrame.h, aspect: beforeFrame.w / beforeFrame.h, scales: true, fontSize: beforeFont, nodeX: geo.x, nodeY: geo.y, nodeW: geo.w, nodeH: geo.h },
+    100,
+    0,
+    false,
+  )
+  const afterDoc = JSON.parse(JSON.stringify(e2eDoc))
+  afterDoc.nodes[0].x = drag.x
+  afterDoc.nodes[0].y = drag.y
+  afterDoc.nodes[0].w = drag.w
+  afterDoc.nodes[0].h = drag.h
+  const afterTree = renderDiagram(afterDoc, 'light', 'e2e-after', { current: null }, { selectedIds: ['tb'], singleSelectedNodeId: 'tb', viewportSize: { w: 800, h: 600 }, onResizePointerDown: () => {} }, e2eView)
+  const afterHandles = byClass(afterTree, 'drawai-handle').filter((n) => n.type === 'rect')
+  const afterFrame = { w: afterHandles[2].props.x - afterHandles[0].props.x, h: afterHandles[2].props.y - afterHandles[0].props.y }
+  const afterFont = Number(byKey(afterTree, 'text-1-0')[0].props.fontSize)
+  ok(Math.abs(drag.w - 500) < 1 && Math.abs(afterFrame.w - 500) < 1, '端到端：拖宽 100 后节点与表格都变成 500 宽（' + drag.w + ' / ' + afterFrame.w + '）')
+  ok(afterFont === beforeFont && beforeFont === 12, '端到端：字号保持 12，不被拖角改掉（' + beforeFont + '→' + afterFont + '）')
+  ok(afterFrame.h === beforeFrame.h, '端到端：表格高度不跟着 resize 变（' + beforeFrame.h + '→' + afterFrame.h + '）')
+
+  // 文字节点端到端：拖角必须真的把 fontScales 写回 style，否则会出现"外框变大、字没变、
+  // 选中框原地不动"的假缩放（用户反馈的正是这个现象）。
+  const textDoc = {
+    nodes: [{ id: 'tx', x: 0, y: 0, w: 200, h: 100, label: '文字', style: 'text;html=1;whiteSpace=wrap;fontSize=12;' }],
+    edges: [],
+  }
+  const textView = { x: -100, y: -100, w: 800, h: 600 }
+  const textBeforeTree = renderDiagram(textDoc, 'light', 'text-e2e-before', { current: null }, { selectedIds: ['tx'], singleSelectedNodeId: 'tx', viewportSize: { w: 800, h: 600 }, onResizePointerDown: () => {} }, textView)
+  const textBeforeHandles = byClass(textBeforeTree, 'drawai-handle').filter((n) => n.type === 'rect')
+  const textBeforeFrame = {
+    x: textBeforeHandles[0].props.x + 4,
+    y: textBeforeHandles[0].props.y + 4,
+    w: textBeforeHandles[2].props.x - textBeforeHandles[0].props.x,
+    h: textBeforeHandles[2].props.y - textBeforeHandles[0].props.y,
+  }
+  const textBeforeFont = Number(byKey(textBeforeTree, 'label-0')[0].props.fontSize)
+  const textGeo = internals.nodeBoxOf(textDoc.nodes[0])
+  const textDrag = internals.resizeOutcome(
+    { dir: 'se', x: textBeforeFrame.x, y: textBeforeFrame.y, w: textBeforeFrame.w, h: textBeforeFrame.h, aspect: textBeforeFrame.w / textBeforeFrame.h, scales: true, fontScales: true, fontSize: textBeforeFont, nodeX: textGeo.x, nodeY: textGeo.y, nodeW: textGeo.w, nodeH: textGeo.h },
+    30,
+    0,
+    false,
+  )
+  const textAfterDoc = JSON.parse(JSON.stringify(textDoc))
+  textAfterDoc.nodes[0].x = textDrag.x
+  textAfterDoc.nodes[0].y = textDrag.y
+  textAfterDoc.nodes[0].w = textDrag.w
+  textAfterDoc.nodes[0].h = textDrag.h
+  textAfterDoc.nodes[0].style = 'text;html=1;whiteSpace=wrap;fontSize=' + textDrag.fontSize + ';'
+  const textAfterTree = renderDiagram(textAfterDoc, 'light', 'text-e2e-after', { current: null }, { selectedIds: ['tx'], singleSelectedNodeId: 'tx', viewportSize: { w: 800, h: 600 }, onResizePointerDown: () => {} }, textView)
+  const textAfterHandles = byClass(textAfterTree, 'drawai-handle').filter((n) => n.type === 'rect')
+  const textAfterFrame = {
+    w: textAfterHandles[2].props.x - textAfterHandles[0].props.x,
+    h: textAfterHandles[2].props.y - textAfterHandles[0].props.y,
+  }
+  const textAfterFont = Number(byKey(textAfterTree, 'label-0')[0].props.fontSize)
+  ok(textDrag.fontSize !== null && Number(textDrag.fontSize) > textBeforeFont, '文字端到端：拖角返回更大的字号（' + textBeforeFont + '→' + textDrag.fontSize + '）')
+  ok(textAfterFont > textBeforeFont, '文字端到端：字号真的写回 style 并重新渲染（' + textBeforeFont + '→' + textAfterFont + '）')
+  ok(textAfterFrame.w > textBeforeFrame.w && textAfterFrame.h > textBeforeFrame.h, '文字端到端：选中框跟着字号一起变大（' + textBeforeFrame.w + '×' + textBeforeFrame.h + '→' + textAfterFrame.w + '×' + textAfterFrame.h + '）')
+}
+
 console.log('\n' + (failures === 0 ? '全部通过' : failures + ' 项失败') + '（共 ' + checks + ' 项）')
 process.exitCode = failures === 0 ? 0 : 1
