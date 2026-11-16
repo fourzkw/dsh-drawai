@@ -66,15 +66,20 @@ rad、错 ±8px。宽度由 `strokeWidth(k,u,W0)` 给：撇 `W0*(1.12-0.62u^1.4)
 
 ## 5. Remotion 落地配方
 
+**引擎与上游一致：Canvas2D 逐帧重画。** 上游 `js/engine.js` 就是 `getContext("2d")` 每帧清屏重画
+（`drawPaper` / `drawTooth` / `outline` 全在 2D 画布上）；移植也走同一条路，**不要换成 SVG `<path>` 或
+DOM 拼贴**——那不是逐帧绘制，`stroke-width` 沿路径不能变，可变宽墨线会退化成等粗描线。
+确实要换，在 `STYLE.md` 写一行「偏离：引擎 canvas2d 改为 …，因为 …」，渲染会带 warning 通过。
+
 必须换掉的六处：
-1. Canvas2D 逐帧绘制 → 两条路：(A) SVG `<path>`，几十条 path 让 React diff，最省心；(B) `<canvas>` +
-   `useLayoutEffect`，依赖 `drawing(f).fq` 而不是 `f`，否则一帧画两遍。
-2. `requestAnimationFrame` → `frame`；`Math.random()` → `hs()` / `mulberry32(seed)`；`Date.now()` 删掉。
+1. `requestAnimationFrame` → `frame`；`Math.random()` → `hs()` / `mulberry32(seed)`；`Date.now()` 删掉。
+2. **驱动用 `drawing(f).fq`，不是 `f`**：一拍二要求每帧回到「这张画的起始帧」重画，拿 `f` 会一帧画两遍、
+   hold 段变成 24fps 抖。
 3. **CSS `transition`/`animation` 全禁**：会在 24fps 之间插出平滑假帧，一拍二立刻消失。
-4. 纸纹/尘土（不在仓库）→ `feTurbulence baseFrequency=0.85 numOctaves=3` 的 256px tile +
-   `mixBlendMode:'multiply'`、opacity 0.12。损失：没有真实纤维的断续走向，特写会「太干净」。
-5. 线宽：SVG `stroke-width` 不能沿路径变 → 真要变宽得把中线 offset 成多边形（`outline()` 移植，约 30 行）；
-   偷懒叠两遍 stroke（0.9 粗 + 0.6 细）造假压力，收笔处会露馅。
+4. 纸纹/尘土（不在仓库）→ 256px 噪声 tile + `mixBlendMode:'multiply'`、opacity 0.12；`scene-kit/look.tsx`
+   的 `<Grain seed={D.id} />` 就是这块，seed 随画号换。损失：没有真实纤维的断续走向，特写会「太干净」。
+5. 线宽：Canvas 的 `lineWidth` 也不能沿路径插值 → 按上游 `outline(pts, wfn)` 的意思**逐段**改宽度
+   （撇 `W0*(1.12-0.62u^1.4)`），圆头圆角接起来；偷懒叠两遍 stroke（0.9 粗 + 0.6 细）收笔处会露馅。
 6. `motionBlur.samples:1` 等于没有；smear 是手画的一帧拉伸，不是后期模糊。
 
 ```tsx
@@ -90,29 +95,44 @@ const wob = (pts: [number, number][], seed: number, amp = 2.4) => pts.map(([x, y
   x + amp * Math.sin(x * 0.014 + y * 0.006 + seed * 2.1) * Math.cos(y * 0.011 - seed * 1.3),
   y + amp * Math.cos(x * 0.009 - y * 0.013 + seed * 1.7),
 ]);
-const Stroke = ({pts, seed, w}: {pts: [number, number][]; seed: number; w: number}) => (
-  <path d={wob(pts, seed).map(([x, y], i) => `${i ? 'L' : 'M'}${x} ${y}`).join(' ')} fill="none"
-    stroke="#1c1613" strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" />
-);
+// 一笔：中线点列 → 逐段收窄的墨线（上游 outline 的意思）；ctx 已经按舞台平移过
+const ink = (ctx: CanvasRenderingContext2D, pts: [number, number][], seed: number, w: number, color: string) => {
+  const P = wob(pts, seed);
+  ctx.strokeStyle = color; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (let i = 1; i < P.length; i++) {
+    const u = i / (P.length - 1);
+    ctx.lineWidth = w * (1.12 - 0.62 * Math.pow(u, 1.4));   // 撇：1.12 → 0.5
+    ctx.beginPath(); ctx.moveTo(P[i - 1][0], P[i - 1][1]); ctx.lineTo(P[i][0], P[i][1]); ctx.stroke();
+  }
+};
 export const HandMade = () => {
   const f = useCurrentFrame();
-  const D = drawing(f);                       // 真正的时间是 D.fq，不是 f
-  const seed = D.id * 0.37 + 1;               // 同一张画内所有笔画共用一个 boil seed
-  return <AbsoluteFill style={{background: '#f4e9d0'}}>
-    <svg width={1920} height={1080} viewBox="0 0 1920 1080">
-      <filter id="tooth"><feTurbulence baseFrequency={0.85} numOctaves={3} /></filter>
-      <rect width="100%" height="100%" filter="url(#tooth)" opacity={0.12}
-        style={{mixBlendMode: 'multiply', transform: `translate(${(D.id % 4) * -37}px, ${(D.id % 3) * -29}px)`}} />
-      <g transform="translate(960 440)">      {/* 每笔一条中线折线；变宽要自己 offset 成多边形 */}
-        <Stroke pts={[[-330, 0], [0, -40], [330, 0]]} seed={seed} w={58} />
-        <Stroke pts={[[0, -300], [0, 300]]} seed={seed + 1} w={46} />
-      </g>
-    </svg>
-  </AbsoluteFill>;
+  const ref = useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(() => {
+    const ctx = ref.current?.getContext('2d');
+    if (!ctx) return;
+    const D = drawing(f);                     // 真正的时间是 D.fq，不是 f
+    const seed = D.id * 0.37 + 1;             // 同一张画内所有笔画共用一个 boil seed
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = '#f4e9d0'; ctx.fillRect(0, 0, 1920, 1080);
+    ctx.translate(960, 440);                  // 舞台
+    ctx.save(); ctx.translate(-5, 4);         // 填色层先画、偏 (-5,+4)
+    ink(ctx, [[-330, 0], [0, -40], [330, 0]], seed, 58, '#ffc425');
+    ctx.restore();
+    ink(ctx, [[-330, 0], [0, -40], [330, 0]], seed, 58, '#1c1613');
+    ink(ctx, [[0, -300], [0, 300]], seed + 1, 46, '#1c1613');
+  }, [f]);
+  return <>
+    <canvas ref={ref} width={1920} height={1080}
+      style={{ position: 'absolute', inset: 0, width: 1920, height: 1080 }} />
+    <Grain seed={drawing(f).id} opacity={0.12} />   {/* 纸齿：按画号换 seed，别按 f */}
+  </>;
 };
 ```
 
-填色层：同一组 `Stroke` 再画一遍，`stroke="#ffc425"`、平移 `(-5, 4)`、压在墨线下面。
+`useRef` / `useLayoutEffect` 从 `react` 取，`Grain` 从 `./scene-kit/look` 取。`useLayoutEffect` 在浏览器 paint 之前就画完，Remotion 截帧才拿得到；写在 `useEffect` 里可能截到空画布。
+
+填色层：同一组笔画再画一遍，`#ffc425`、`translate(-5, 4)`、压在墨线下面（`REG = {dx:-5, dy:4}`）。
 
 ## 6. 镜头结构模板
 
@@ -135,6 +155,8 @@ export const HandMade = () => {
 - 拿 `f` 而不是 `D.id` 当 boil seed，hold 段会变成 24fps 抖，节奏全散。
 - 填色偏移是**屏幕**像素：特写 `s=2.6` 时不除 scale 会错位 13px（`GLOBAL.amp`/`GLOBAL.ink` 管这个）。
 - 纸纹每张画换位置，否则看起来是「一张纸」而不是「一叠纸」。
+- 拿 SVG `<path>` 代替 canvas = 换成 DOM 描线：hold 段虽说不抖（`d` 由 `D.id` 决定），但等粗墨线一眼就假，
+  而且 `motion_render` 的引擎扫描会点名「canvas2d 缺席」（warning）。要保引擎保真就用 `<canvas>`。
 - `strokes` 落在 `7.25 + 0.125k`，正好 3 帧一笔；一帧一笔会糊成一坨。
 - 标题换成字体 = 放弃这个风格；`CHAR_*` 的笔画顺序与粗细剖面是这份片子的身份证。
 

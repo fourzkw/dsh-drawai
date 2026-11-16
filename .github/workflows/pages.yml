@@ -1,0 +1,76 @@
+name: pages
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'showcase/**'
+      - 'src/motion/mgstyles/**'
+      - 'tools/showcase-*.mjs'
+      - 'tools/check-showcase.mjs'
+      - '.github/workflows/pages.yml'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: 构建展示页
+        run: node tools/showcase-build.mjs
+
+      - name: 检查展示页
+        run: node tools/check-showcase.mjs
+
+      - name: 组装 Pages 目录
+        run: |
+          mkdir -p _site/styles
+          cp -R showcase/. _site/styles/
+          cat > _site/index.html <<'HTML'
+          <!doctype html>
+          <html lang="zh-CN">
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+          <meta http-equiv="refresh" content="0; url=./styles/">
+          <title>DrawAI 风格展示</title>
+          <p><a href="./styles/">进入 DrawAI 风格展示</a></p>
+          </html>
+          HTML
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}styles/
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

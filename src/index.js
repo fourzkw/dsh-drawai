@@ -7261,7 +7261,7 @@ function sanitizeNewName(raw) {
         const next = job.kind === 'pilot' && job.status === 'done'
           ? '样片文件不会自动显示在画布：在当前画布页创建或复用独立「样片」视频节点，记下其 ID，然后调用 motion_render {action:"apply",nodeId:"样片节点 ID",jobId:"' + job.id + '",source:"pilot"}；核对结果并告知用户。'
           : undefined
-        return { summary: '渲染任务：' + job.status + (job.message ? ' · ' + job.message : '') + (mix ? ' · ' + mix : ''), details: JSON.stringify({ ...job, ...(next ? { next } : {}) }) }
+        return { summary: '渲染任务：' + job.status + (job.message ? ' · ' + job.message : '') + (mix ? ' · ' + mix : '') + (job.browser?.version ? ' · 浏览器 ' + job.browser.version : ''), details: JSON.stringify({ ...job, ...(next ? { next } : {}) }) }
       }
       if (args.action === 'cancel') {
         if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
@@ -7363,7 +7363,7 @@ function sanitizeNewName(raw) {
           + gateWarnings.map((warning) => ' ⚠ ' + warning).join('') + '，用 motion_render status 查进度',
         details: JSON.stringify({ jobId: job.id, kind, output: outputPath(dir, outputName),
           ...(handle.render ? { render: handle.render } : {}),
-          ...(engineGate ? { engine: { required: engineGate.required, detected: engineGate.detected, missing: engineGate.missing, deviation: engineGate.deviation } } : {}),
+          ...(engineGate ? { engine: { required: engineGate.required, detected: engineGate.detected, missing: engineGate.missing, deviation: engineGate.deviation, warning: engineGate.warning } } : {}),
           ...(qualityGate ? { quality: { fonts: qualityGate.fonts, warnings: qualityGate.warnings } } : {}),
           next: kind === 'pilot' ? '用主节点和 jobId 查 status；完成后在同一画布页创建或复用独立样片视频节点，再 motion_render {action:"apply",nodeId:"样片节点 ID",jobId:"' + job.id + '",source:"pilot"} 回填并告知用户。' : '渲完 apply 到主视频节点' }) }
     },

@@ -91,3 +91,6 @@ skills/workbuddy/scripts/node_modules/
 !lib/motion/mgstyles/vendor/**
 !lib/motion/mgstyles/vendor/modules/**/dist/
 !lib/motion/mgstyles/vendor/modules/**/dist/**
+
+# 展示站（GitHub Pages）生成物：页面；样片 media 随站点提交
+/showcase/index.html

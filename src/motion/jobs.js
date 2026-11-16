@@ -78,7 +78,7 @@ export class RenderJobs {
     this.update(job, { status: 'running', phase: 'bundling' })
     handle.promise.then(
       (result) => this.update(job, { status: 'done', phase: 'done', progress: 1, endedAt: new Date().toISOString(), output: handle.output, frames: result.frames || null,
-        mix: result.mix || null, mixError: result.mixError || null }),
+        mix: result.mix || null, mixError: result.mixError || null, browser: result.browser || null }),
       (error) => this.update(job, { status: 'failed', phase: 'failed', endedAt: new Date().toISOString(), error: error.message || String(error) }),
     )
     return job

@@ -43,7 +43,7 @@ DrawAI 不再有后台制作 Agent：视频由当前对话直接写出来，插�
 
 参考图与镜头卡经 `diagram_apply` 连到视频节点，画布快照冻结进 `assets/`。音频用 `audio_asset` 导入节点，或直接给 `motion_audio add` 一个本地 mp3/wav/m4a。**镜头卡不进成片画面，但必须连线**：连线同时决定参考、镜头顺序和段长；画布上断连的卡会让 `create` 直接报错。
 
-**引擎保真**：整片风格的 `engines` 是上游真用的引擎。three.js 风格必须用 `three` / `@remotion/three` 真渲染；WebGL2 风格必须起 `getContext("webgl2")` 编译上游 GLSL；不许用 CSS 3D、div 层叠或 Canvas2D 渐变「简化」替代。`STYLE.md` 写明引擎契约与上游证据文件，`motion_render start` 渲染前会扫工程源码，重引擎缺失直接拒绝渲染；要偏离先在 `STYLE.md` 写「偏离：引擎 X 改为 Y，因为 Z」。
+**引擎保真**：整片风格的 `engines` 是上游真用的引擎。three.js 风格必须用 `three` / `@remotion/three` 真渲染；WebGL2 风格必须起 `getContext("webgl2")` 编译上游 GLSL；Canvas2D 风格必须 `getContext("2d")` 逐帧重画，不要换成 SVG `<path>` 摆一排或 DOM 拼贴（不是逐帧绘制，`stroke-width` 也做不出沿路径变宽，逐帧手绘 05 会退化成等粗描线）；不许用 CSS 3D、div 层叠或 Canvas2D 渐变「简化」替代。`STYLE.md` 写明引擎契约与上游证据文件，`motion_render start` 渲染前会扫工程源码：重引擎缺失直接拒绝渲染，Canvas2D 缺失带 warning 点名（写进 `summary` 与 `details.engine`）；要偏离先在 `STYLE.md` 写「偏离：引擎 X 改为 Y，因为 Z」。
 
 **动效保真**：`mg_style {action:"read"}` 返回的 `motion` 是上游源码扫出的动效画像（转场 wipe/切、impact、相机、motion blur 采样、颗粒、二次运动）。写场景前先 `mg_style {action:"frames", slug}` 取参考帧，逐张看完再动手；`STYLE.md` 的「效果配方」是必做项（转场/冲击/相机/运动模糊/颗粒/二次运动），只做形不做动会得到「形似而动不像」的片子。每镜写完把参考帧与 `motion_preview` 帧并排对一次。
 
