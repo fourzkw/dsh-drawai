@@ -129,7 +129,7 @@ export default function Scene() {
 4. **单场景 ≤120 行**：公共原语抽到 `components/`。
 5. 随机数用 `scene-kit/det.ts` 的确定性随机器，**禁止 `Math.random()`**（同一帧两次渲染必须一样）。
 6. 动画优先用闭式解（弹簧、落体、缓动），不要靠逐帧累积状态。
-7. three/WebGL 场景必须真用 `three` / `@remotion/three` / `webgl2` —— 渲染前会扫源码，重引擎缺失直接拒绝渲染。
+7. three/WebGL 场景必须真用 `three` / `@remotion/three` / `webgl2` —— 渲染前会扫源码，重引擎缺失直接拒绝渲染；Canvas2D 风格（01/02/05/06/08/18/19/23）必须 `getContext("2d")` 逐帧重画，拿 SVG `<path>` 顶替会收到 warning，且做不出沿路径变宽的墨线。
 
 `scene-kit/look.tsx` 提供 `<Look ssaa shadow exposure />`、`<Grain />`、`<Vignette />`；3D 片一定要挂 `<Look>`，否则锯齿和色带会很显眼。
 

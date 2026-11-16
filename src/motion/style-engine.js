@@ -24,12 +24,18 @@ export const ENGINE_GUIDANCE = {
   three: '在 <canvas> 里用 three 或 @remotion/three 真渲染：自建 WebGLRenderer、场景与相机，按 useCurrentFrame() 驱动 renderAt，后处理用 three/addons（UnrealBloomPass 等）。',
   webgl2: '起 canvas.getContext("webgl2")，把上游 GLSL（如 js/shaders.js）原样编译，按帧传 uniform；不要用 Canvas2D 渐变/模糊替代。',
   webgl: '起 canvas.getContext("webgl")，把上游 shader 原样编译，按帧传 uniform；不要用 Canvas2D 替代。',
-  canvas2d: '用 canvas 2D 逐帧绘制（路径 / 贴图 / 像素读写），不要用 DOM 拼贴替代逐帧绘制。',
+  canvas2d: '起 canvas.getContext("2d") 逐帧重画（路径 / 贴图 / 像素读写），与上游同一套引擎；SVG `<path>` / DOM 拼贴不算逐帧绘制，也不支持沿路径变宽。',
   dom: '用真实 DOM/CSS 合成（如多层 backdrop-filter 景深），不要用画布贴图或纯色块替代。',
 }
 
 /** 只在渲染前硬拦这三类：它们是「一眼能假、一动就露」的重引擎。 */
 export const GATED_ENGINES = new Set(['three', 'webgl2', 'webgl'])
+
+/**
+ * 软引擎：缺了不拒渲，但要喊一声。canvas2d 的活都能用 SVG `<path>` / DOM 拼出来，
+ * 观感接近，代价是沿路径变宽做不出来、也不是「每帧重画」；这类替代不该悄悄通过。
+ */
+export const SOFT_ENGINES = new Set(['canvas2d'])
 
 const SIGNALS = [
   ['three', /(?:from\s*|require\(\s*)['"]three(?:\/addons[^'"]*)?['"]|@remotion\/three/],
@@ -127,27 +133,42 @@ export function assertQualityEvidence(dir, style, options = {}) {
 
 /**
  * 渲染前调用。返回 {gated, required, detected, missing, deviation, warning}；
- * 重引擎缺失且没有偏离记录 → 直接抛错（不渲染）。
+ * 重引擎缺失且没有偏离记录 → 直接抛错（不渲染）；软引擎（canvas2d）缺失 → 只带 warning。
  */
 export function assertEngineFidelity(dir, style) {
   const required = style && (Array.isArray(style.engines) && style.engines.length ? style.engines : [style.engine]).filter(Boolean)
   if (!required || !required.length) return { gated: false, required: [], detected: [], missing: [], deviation: null, warning: '' }
-  const heavy = required.filter((engine) => GATED_ENGINES.has(engine))
-  if (!heavy.length) return { gated: false, required, detected: [], missing: [], deviation: null, warning: '' }
+  const checked = required.filter((engine) => GATED_ENGINES.has(engine) || SOFT_ENGINES.has(engine))
+  const heavy = checked.filter((engine) => GATED_ENGINES.has(engine))
+  if (!checked.length) return { gated: false, required, detected: [], missing: [], deviation: null, warning: '' }
   const scan = scanProjectEngines(dir)
-  const missing = heavy.filter((engine) => !scan.engines.includes(engine))
+  const missing = checked.filter((engine) => !scan.engines.includes(engine))
   const label = (engine) => ENGINE_LABEL[engine] || engine
-  if (!missing.length) return { gated: true, required, detected: scan.engines, missing, deviation: null, warning: '' }
+  if (!missing.length) return { gated: heavy.length > 0, required, detected: scan.engines, missing, deviation: null, warning: '' }
   const deviation = engineDeviation(dir)
+  const warnings = []
   if (deviation) {
-    return { gated: true, required, detected: scan.engines, missing,
-      warning: '这个风格上游用 ' + heavy.map(label).join(' + ') + '，工程里没检测到 ' + missing.map(label).join(' + ') + '；STYLE.md 已记录偏离：' + deviation.replace(/^偏离：/, '') }
+    warnings.push('这个风格上游用 ' + checked.map(label).join(' + ') + '，工程里没检测到 ' + missing.map(label).join(' + ')
+      + '；STYLE.md 已记录偏离：' + deviation.replace(/^偏离：/, ''))
+  } else {
+    const heavyMissing = missing.filter((engine) => GATED_ENGINES.has(engine))
+    if (heavyMissing.length) {
+      const evidence = (style.engineFiles || []).slice(0, 5).map((path) => '  - ' + path).join('\n')
+      throw new Error('引擎不符合风格要求，拒绝渲染：' + (style.name || style.slug || '') + '（' + (style.slug || '?') + '）上游用 '
+        + heavy.map(label).join(' + ') + '，但工程源码里没检测到 ' + heavyMissing.map(label).join(' + ') + '。\n'
+        + '不要用 CSS 3D / div 层叠 / Canvas2D 渐变「简化」重引擎 —— 那正是这个风格的判据。\n'
+        + heavy.map((engine) => '- ' + label(engine) + '：' + ENGINE_GUIDANCE[engine]).join('\n') + '\n'
+        + (evidence ? '上游实现（用 mg_style action:"source" 读正文）：\n' + evidence + '\n' : '')
+        + '确实要换实现：先在 STYLE.md 写一行「偏离：引擎 ' + heavy[0] + ' 改为 …，因为 …」，再渲染（会带 warning 通过）。')
+    }
+    const softMissing = missing.filter((engine) => SOFT_ENGINES.has(engine))
+    if (softMissing.length) {
+      const evidence = (style.engineFiles || []).slice(0, 3).join('、')
+      warnings.push('这个风格上游用 Canvas2D 逐帧重画' + (evidence ? '（' + evidence + '）' : '')
+        + '，但工程源码里没检测到 canvas 2D 上下文：多半是拿 SVG `<path>` / DOM 拼贴替代了逐帧绘制。'
+        + 'hold 段不会抖，但可变宽墨线与「每帧重画」的笔压会丢（这是这个风格的判据之一）。'
+        + '改用 `<canvas>` + `getContext("2d")`，或在 STYLE.md 写一行「偏离：引擎 canvas2d 改为 …，因为 …」。')
+    }
   }
-  const evidence = (style.engineFiles || []).slice(0, 5).map((path) => '  - ' + path).join('\n')
-  throw new Error('引擎不符合风格要求，拒绝渲染：' + (style.name || style.slug || '') + '（' + (style.slug || '?') + '）上游用 '
-    + heavy.map(label).join(' + ') + '，但工程源码里没检测到 ' + missing.map(label).join(' + ') + '。\n'
-    + '不要用 CSS 3D / div 层叠 / Canvas2D 渐变「简化」重引擎 —— 那正是这个风格的判据。\n'
-    + heavy.map((engine) => '- ' + label(engine) + '：' + ENGINE_GUIDANCE[engine]).join('\n') + '\n'
-    + (evidence ? '上游实现（用 mg_style action:"source" 读正文）：\n' + evidence + '\n' : '')
-    + '确实要换实现：先在 STYLE.md 写一行「偏离：引擎 ' + heavy[0] + ' 改为 …，因为 …」，再渲染（会带 warning 通过）。')
+  return { gated: heavy.length > 0, required, detected: scan.engines, missing, deviation, warning: warnings.join('；') }
 }
