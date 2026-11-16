@@ -77,10 +77,37 @@ try {
   assert.deepEqual(scanProjectEngines(dir).engines.includes('three'), true)
   ok('WebGL2 风格 + webgl2 上下文 → 通过')
 
-  // 7. Canvas2D 风格不硬拦（不制造误报）
+  // 7. Canvas2D 风格：缺了不拒渲，但要点名（软门禁）
   const flat = catalog.styles.find((item) => item.slug === '01-flat-vector')
-  assert.equal(assertEngineFidelity(dir, flat).gated, false)
-  ok('Canvas2D 风格不做重引擎门禁')
+  const noCanvas = assertEngineFidelity(dir, flat)
+  assert.equal(noCanvas.gated, false)
+  assert.deepEqual(noCanvas.missing, ['canvas2d'])
+  assert.match(noCanvas.warning, /Canvas2D/)
+  ok('Canvas2D 风格缺 canvas → warning、不拒绝渲染')
+
+  // 8. 拿 SVG <path> 逐帧顶替 → 同样被点名（逐帧手绘 05 的老问题）
+  const cel = catalog.styles.find((item) => item.slug === '05-cel-boil')
+  writeFileSync(join(dir, 'scene-2.tsx'), [
+    'export const Scene = () => <svg viewBox="0 0 1920 1080">',
+    '  <path d="M0 0 L100 100" stroke="#1c1613" />',
+    '</svg>',
+  ].join('\n'))
+  const svgOnly = assertEngineFidelity(dir, cel)
+  assert.deepEqual(svgOnly.missing, ['canvas2d'])
+  assert.match(svgOnly.warning, /SVG/)
+  ok('SVG <path> 顶替 canvas → warning 点名')
+
+  // 9. 真的起了 2D 上下文 → 干净通过；偏离行同样能放行
+  writeFileSync(join(dir, 'scene-2.tsx'), 'const ctx = canvas.getContext("2d")\n')
+  const canvasOk = assertEngineFidelity(dir, cel)
+  assert.deepEqual(canvasOk.missing, [])
+  assert.equal(canvasOk.warning, '')
+  ok('getContext("2d") → 通过')
+
+  writeFileSync(join(dir, 'scene-2.tsx'), 'export const Scene = () => null\n')
+  writeFileSync(join(dir, 'STYLE.md'), '# 风格\n\n偏离：引擎 canvas2d 改为 SVG path，因为逐条路径便于编辑\n')
+  assert.match(assertEngineFidelity(dir, cel).warning, /偏离/)
+  ok('Canvas2D 的偏离行 → 带 warning 通过')
 } finally {
   rmSync(dir, { recursive: true, force: true })
 }

@@ -7363,7 +7363,7 @@ function sanitizeNewName(raw) {
           + gateWarnings.map((warning) => ' ⚠ ' + warning).join('') + '，用 motion_render status 查进度',
         details: JSON.stringify({ jobId: job.id, kind, output: outputPath(dir, outputName),
           ...(handle.render ? { render: handle.render } : {}),
-          ...(engineGate ? { engine: { required: engineGate.required, detected: engineGate.detected, missing: engineGate.missing, deviation: engineGate.deviation } } : {}),
+          ...(engineGate ? { engine: { required: engineGate.required, detected: engineGate.detected, missing: engineGate.missing, deviation: engineGate.deviation, warning: engineGate.warning } } : {}),
           ...(qualityGate ? { quality: { fonts: qualityGate.fonts, warnings: qualityGate.warnings } } : {}),
           next: kind === 'pilot' ? '用主节点和 jobId 查 status；完成后在同一画布页创建或复用独立样片视频节点，再 motion_render {action:"apply",nodeId:"样片节点 ID",jobId:"' + job.id + '",source:"pilot"} 回填并告知用户。' : '渲完 apply 到主视频节点' }) }
     },
