@@ -110,7 +110,9 @@ async function api(path, init = {}, useUpload = false) {
   const text = await res.text()
   let json = null
   try { json = JSON.parse(text) } catch { /* 非 JSON 响应 */ }
-  if (!res.ok) throw new Error(`${init.method || 'GET'} ${path} → ${res.status} ${json?.message || text.slice(0, 200)}`)
+  // GitHub 的 422 只在 errors[] 里说人话（missing_field / already_exists…），别把它吞了。
+  const detail = json?.errors?.length ? ' ' + JSON.stringify(json.errors) : ''
+  if (!res.ok) throw new Error(`${init.method || 'GET'} ${path} → ${res.status} ${json?.message || text.slice(0, 200)}${detail}`)
   return json
 }
 
