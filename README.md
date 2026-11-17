@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-drawai)](https://www.npmjs.com/package/dsh-drawai) [![npm downloads](https://img.shields.io/npm/dt/dsh-drawai)](https://www.npmjs.com/package/dsh-drawai) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 > **在线风格展示：<https://fourzkw.github.io/dsh-drawai/styles/>**  
-> 15 种整片风格索引、移植说明与调用方式；其中九节附本地提示词和样片。
+> 15 种整片风格索引、移植说明与调用方式；其中十二节附本地提示词和样片。
 
 **在 DeepSeek Harness 里，用自然语言和可编辑画布一起画图、处理素材、制作动效视频。**
 
