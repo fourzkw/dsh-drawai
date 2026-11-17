@@ -373,10 +373,9 @@ console.log('\n[9] 打包入口落在工程目录里（issue #21/#22）')
 }
 
 
-console.log('\n[10] 整片风格 demo 的依赖随包 vendored（issue #27）')
+console.log('\n[10] 整片风格资源与本地参考帧')
 {
-  // 上游 demo 的 importmap 指向 /node_modules/*，装到用户机器上时插件根目录没有这些包；
-  // 没有 vendored 副本就会直接报「依赖没装在本机」，frames 拿不到参考帧。
+  // 保留随包风格依赖的完整性检查；参考帧不再通过执行 demo 取得。
   const vendor = 'lib/motion/mgstyles/vendor/modules/'
   const files = [
     'd3/dist/d3.min.js',
@@ -386,9 +385,8 @@ console.log('\n[10] 整片风格 demo 的依赖随包 vendored（issue #27）')
   ]
   for (const file of files) check('随包带了 ' + file, existsSync(vendor + file) && readFileSync(vendor + file).length > 1000)
   const frames = readFileSync('lib/motion/style-frames.js', 'utf8')
-  check('缺模块时同时查运行时与 vendored 副本', /VENDOR_MODULES/.test(frames) && /join\(VENDOR_MODULES, relative\)/.test(frames))
-  check('静态服务回落到 vendored 副本', /roots\.bundled/.test(frames))
-  check('不再把 source 说成等价退路', !/多数情况够用/.test(frames) && /有损降级/.test(frames))
+  check('本地参考帧读取模块随包构建', existsSync('lib/motion/style-reference-store.js') && /listStyleReferenceFrames/.test(frames))
+  check('参考帧读取不启动浏览器或上游演示', !/startStaticServer|findChrome|renderAt\(/.test(frames))
 }
 
 console.log('\n[11] demo 数据文件走单独的小素材包（issue #27 的另一半）')
@@ -404,9 +402,6 @@ console.log('\n[11] demo 数据文件走单独的小素材包（issue #27 的另
   const pack = readFileSync('lib/motion/asset-pack.js', 'utf8')
   check('asset-pack 暴露 demo 数据包的按需下载', /export async function ensureDemoAssets/.test(pack) && /export function demoAssetsFile/.test(pack))
   check('demo 数据包与字体素材包用同一套校验安装', /function installPack/.test(pack) && /lock\.sha256/.test(pack))
-  const frames = readFileSync('lib/motion/style-frames.js', 'utf8')
-  check('静态服务对 demo 的 .json 兜一层数据包', /DEMO_DATA_PATTERN/.test(frames) && /demoDataFile\(pathname\)/.test(frames))
-  check('贴图/字体不触发数据包下载', frames.includes('\\.json$/i') && /DEMO_DATA_PATTERN\.test/.test(frames))
 }
 
 console.log('\n' + (failures === 0 ? '全部通过。' : failures + ' 项失败。'))

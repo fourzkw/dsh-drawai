@@ -449,7 +449,7 @@ function renderUsage(style) {
   const slug = style.slug;
   const commands = [
     ['读完整风格施工包', `mg_style {action:"read", slug:"${slug}"}`],
-    ['抽参考帧', `mg_style {action:"frames", slug:"${slug}", count:8}`],
+    ['读取本地参考帧（可选）', `mg_style {action:"frames", slug:"${slug}", count:8}`],
     ['建视频工程并套用风格', `motion_project {action:"create", nodeId:"<视频节点>", style:"${slug}"}`],
   ];
 

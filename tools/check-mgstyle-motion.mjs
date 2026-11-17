@@ -48,14 +48,14 @@ try {
   const style = resolveMgStyle(catalog, '08-morph')
   const created = createProject(dir, { spec: { width: 1920, height: 1080, fps: 30, duration: 10 }, style, segments: 2 })
   const md = readFileSync(join(dir, 'STYLE.md'), 'utf8')
-  assert.ok(md.includes('## 效果配方（必做，逐项对照参考帧）'), 'STYLE.md 缺效果配方段')
+  assert.ok(md.includes('## 效果配方（按本片需要运用）'), 'STYLE.md 缺效果配方段')
   assert.ok(md.includes('field wipe'), '效果配方没写转场做法')
   assert.ok(md.includes('motionBlur samples 4 / shutter 0.5'), '效果配方没写运动模糊参数')
   assert.ok(md.includes('逐像素颗粒 256²'), '效果配方没写颗粒规格')
   assert.ok(md.includes('mg_style {action:"frames", slug:"08-morph"}'), '效果配方没给取帧命令')
   assert.ok(!md.includes('上游源码只作阅读参考'), 'STYLE.md 仍把上游源码说成只作阅读参考')
   assert.equal(created.timeline.style.motion.transitions, 'wipe', 'timeline 没记住 motion')
-  assert.ok(md.includes('## 引擎契约（硬规定）'), '引擎契约段被覆盖掉了')
+  assert.ok(md.includes('## 引擎契约'), '引擎契约段被覆盖掉了')
 } finally {
   rmSync(dir, { recursive: true, force: true })
 }
