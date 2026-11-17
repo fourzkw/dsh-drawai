@@ -404,5 +404,23 @@ console.log('\n[11] demo 数据文件走单独的小素材包（issue #27 的另
   check('demo 数据包与字体素材包用同一套校验安装', /function installPack/.test(pack) && /lock\.sha256/.test(pack))
 }
 
+console.log('\n[12] 整片风格参考帧走单独的小素材包（约 40MB）')
+{
+  // 参考帧是可选的：跟 145MB 的字体/素材库包分开，谁要谁下，不进 git / npm。
+  const lockPath = 'lib/motion/style-frames-lock.js'
+  check('构建产物里有参考帧素材包的 lock', existsSync(lockPath))
+  if (existsSync(lockPath)) {
+    const lock = readFileSync(lockPath, 'utf8')
+    check('lock 里有集合名、文件名、大小与 sha256', /STYLE_FRAMES_LOCK/.test(lock)
+      && /"collection": "collection-/.test(lock) && /"file": "drawai-style-frames-/.test(lock)
+      && /"sha256": "[0-9a-f]{64}"/.test(lock))
+  }
+  const pack = readFileSync('lib/motion/asset-pack.js', 'utf8')
+  check('asset-pack 暴露参考帧素材包的按需下载', /export async function ensureStyleFrames/.test(pack)
+    && /export function styleFramesSummary/.test(pack) && /export function styleFramesDir/.test(pack))
+  check('安装目标是集合子目录（装到父目录会删掉用户自己的集合）', /join\(styleFramesParent\(\), STYLE_FRAMES_COLLECTION\)/.test(pack))
+  check('mg_style 暴露 install 动作', /enum: \['list', 'search', 'read', 'source', 'frames', 'install'\]/.test(readFileSync('lib/index.js', 'utf8')))
+}
+
 console.log('\n' + (failures === 0 ? '全部通过。' : failures + ' 项失败。'))
 process.exit(failures === 0 ? 0 : 1)

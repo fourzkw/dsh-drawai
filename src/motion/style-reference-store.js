@@ -35,12 +35,21 @@ export function findStyleReferenceCollection(parent) {
   return null
 }
 
+/**
+ * 集合所在的父目录。默认 `~/.dsh/drawai-style-reference-frames`；DRAWAI_STYLE_FRAMES_DIR
+ * 可以在不碰用户目录的情况下换一个（测试、镜像、自定义安装）。
+ * 注意区分：DRAWAI_STYLE_REFERENCE_DIR 指的是**集合本身**，优先级更高。
+ */
+export function styleReferenceParent() {
+  return process.env.DRAWAI_STYLE_FRAMES_DIR || join(homedir(), '.dsh', 'drawai-style-reference-frames')
+}
+
 /** An explicit override names the collection itself, not its parent. */
 export function styleReferenceRoot() {
   const configured = process.env.DRAWAI_STYLE_REFERENCE_DIR
-  const parent = join(homedir(), '.dsh', 'drawai-style-reference-frames')
+  const parent = styleReferenceParent()
   const found = configured ? resolve(configured) : findStyleReferenceCollection(parent)
-  if (!found || !existsSync(found)) throw unavailable('未找到本地风格参考帧集合：' + (found || parent) + '。请先准备带 index.json 的 collection-* 目录，或设置 DRAWAI_STYLE_REFERENCE_DIR 指向参考帧目录；不会运行上游演示或下载素材。')
+  if (!found || !existsSync(found)) throw unavailable('未找到本地风格参考帧集合：' + (found || parent) + '。请先准备带 index.json 的 collection-* 目录，或设置 DRAWAI_STYLE_REFERENCE_DIR 指向参考帧目录；也可以用 mg_style {action:"install"} 下载官方参考帧素材包（约 40MB）。这个模块只读本地文件，不会运行上游演示。')
   const root = resolve(found)
   if (!statSync(root).isDirectory()) throw new Error('风格参考帧路径不是目录：' + root)
   return realpathSync(root)

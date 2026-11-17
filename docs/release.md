@@ -100,6 +100,24 @@ node tools/publish-assets.mjs --demo
 - 用户侧缓存 `~/.dsh/drawai-assets/demo-v1/`；环境变量 `DRAWAI_DEMO_ASSETS_DIR` 改位置、`DRAWAI_DEMO_ASSETS_URL` 指镜像。
 - 只有 `/demos/<slug>/assets/*.json` 会触发这个包；**贴图与字体不触发**（缺了照旧走 1px 占位与内置字体）——18-hanazi 的贴图就是「太专一、不收录」的例子。
 
+## 发布风格参考帧素材包（整片风格的本地参考帧）
+
+16 种整片风格共 149 个文件、40.3MB（126 张 jpg + 4 张 png + 每个风格的清单 + 上游许可与说明），取自上游 `Vincentwei1021/mg-styles-15` 的成片截帧（MIT，Copyright (c) 2026 Vincentwei1021，许可文本随包）。它同样**不进 git、不进 npm 包，也不并进 `assets-v1`**：不用参考帧的人不该陪这 40MB。
+
+```powershell
+# 1. 打包（默认取最新 collection-*，也可 --from <目录>；生成 dist/drawai-style-frames-<日期>.tar.gz 与 src/motion/style-frames-lock.js）
+node tools/build-style-frames-pack.mjs
+
+# 2. 传到 GitHub Release（tag = style-frames-<日期>）
+node tools/publish-assets.mjs --frames --dry-run
+node tools/publish-assets.mjs --frames
+```
+
+- 安装目标是**集合目录本身** `~/.dsh/drawai-style-reference-frames/collection-<日期>/`：`installPack` 会先删目标目录再改名，装到父目录会把用户自己放的其他集合一起删掉。父目录里已有的别的 `collection-*` 不受影响，插件按名称取最新的一份。
+- 用户侧：第一次读参考帧（`mg_style {action:"frames"}`）或手动 `mg_style {action:"install"}` 时下载一次，逐文件 sha256 校验后写 `.ready.json`，之后离线可用；目标目录存在但不是素材包装出来的集合时**拒绝覆盖**，并给出改名或改用 `DRAWAI_STYLE_REFERENCE_DIR` 的指引。
+- 环境变量：`DRAWAI_STYLE_FRAMES_DIR` 改父目录，`DRAWAI_STYLE_FRAMES_URL` 指镜像，`DRAWAI_STYLE_REFERENCE_DIR` 指向**集合本身**（自己准备的参考帧；设了就不再下载）。
+- 参考帧只做视觉参考：按主题独立设计，不照搬画面或分镜；画面里的第三方内容、字体可能另有许可。
+
 ## FFmpeg 自动获取完善（0.4.1，2026-11-08）
 
 - 首次真正用到 FFmpeg 时自动准备：`DRAWAI_FFMPEG_PATH` → 系统 `PATH` → 开发目录 → 已验证缓存 → 下载；显式路径或 PATH 中的版本不满足要求时列出缺失项并直接报错，不再静默换一个。

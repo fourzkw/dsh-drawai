@@ -28,7 +28,7 @@ try {
   const isolated = join(tmp, 'source'), motion = join(isolated, 'motion')
   mkdirSync(join(motion, 'mgstyles'), { recursive: true })
   writeFileSync(join(isolated, 'package.json'), '{"type":"module"}')
-  for (const file of ['media-catalog.js', 'style-reference-store.js', 'asset-pack.js', 'asset-pack-lock.js', 'demo-assets-lock.js', 'assets.js', 'json.js']) {
+  for (const file of ['media-catalog.js', 'style-reference-store.js', 'asset-pack.js', 'asset-pack-lock.js', 'demo-assets-lock.js', 'style-frames-lock.js', 'assets.js', 'json.js']) {
     copyFileSync(fileURLToPath(new URL('../src/motion/' + file, import.meta.url)), join(motion, file))
   }
   copyFileSync(fileURLToPath(new URL('../src/motion/mgstyles/catalog.json', import.meta.url)), join(motion, 'mgstyles', 'catalog.json'))

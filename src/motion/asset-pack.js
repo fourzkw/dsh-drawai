@@ -16,12 +16,14 @@ import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gunzipSync } from 'node:zlib'
 
 import { ASSETS_LOCK } from './asset-pack-lock.js'
 import { DEMO_ASSETS_LOCK } from './demo-assets-lock.js'
+import { STYLE_FRAMES_LOCK } from './style-frames-lock.js'
+import { styleReferenceParent, styleReferenceRoot } from './style-reference-store.js'
 
 export const ASSETS_VERSION = ASSETS_LOCK.version
 export const ASSETS_FILE = ASSETS_LOCK.file
@@ -40,6 +42,21 @@ export const DEMO_ASSETS_FILE = DEMO_ASSETS_LOCK.file
 export const DEMO_ASSETS_TAG = `demo-assets-${DEMO_ASSETS_VERSION}`
 export const DEMO_ASSETS_URL = process.env.DRAWAI_DEMO_ASSETS_URL || `https://github.com/${ASSETS_REPO}/releases/download/${DEMO_ASSETS_TAG}/${DEMO_ASSETS_FILE}`
 export const DEMO_ASSETS_PAGE = `https://github.com/${ASSETS_REPO}/releases/tag/${DEMO_ASSETS_TAG}`
+
+/**
+ * 整片风格参考帧（约 40MB / 149 文件）单独一个小包：参考帧是可选素材，不该让不用它的
+ * 人陪 145MB 的字体/素材库包一起下。安装位置是**集合目录本身**
+ * （`~/.dsh/drawai-style-reference-frames/collection-<版本>/`），不是它上一级 ——
+ * installPack 会先 rmSync 再改名，装到父目录会连用户自己放的其他集合一起删掉。
+ */
+export const STYLE_FRAMES_VERSION = STYLE_FRAMES_LOCK.version
+export const STYLE_FRAMES_FILE = STYLE_FRAMES_LOCK.file
+export const STYLE_FRAMES_COLLECTION = STYLE_FRAMES_LOCK.collection
+export const STYLE_FRAMES_TAG = `style-frames-${STYLE_FRAMES_VERSION}`
+/** 走 GitHub Release；镜像 / 内网可用 DRAWAI_STYLE_FRAMES_URL 指到自己的地址。 */
+export const STYLE_FRAMES_URL = process.env.DRAWAI_STYLE_FRAMES_URL
+  || `https://github.com/${ASSETS_REPO}/releases/download/${STYLE_FRAMES_TAG}/${STYLE_FRAMES_FILE}`
+export const STYLE_FRAMES_PAGE = `https://github.com/${ASSETS_REPO}/releases/tag/${STYLE_FRAMES_TAG}`
 
 const SENTINELS = ['fonts/font-faces.json', 'media-library']
 const READY_FILE = '.ready.json'
@@ -358,6 +375,110 @@ export async function requireAssets({ onProgress } = {}) {
       + '在此之前，画布与图片相关功能不受影响，只有动效（字体/素材库）用不了。',
       { dir: cacheDir(), cause: err },
     )
+  }
+}
+
+/** 素材包安装的父目录：DRAWAI_STYLE_FRAMES_DIR 或 ~/.dsh/drawai-style-reference-frames。 */
+export function styleFramesParent() {
+  return styleReferenceParent()
+}
+
+/** 素材包装出来的那个集合目录。父目录里可能还有用户自己的集合，互不影响。 */
+export function styleFramesDir() {
+  return join(styleFramesParent(), STYLE_FRAMES_COLLECTION)
+}
+
+function readReady(dir) {
+  try {
+    return JSON.parse(readFileSync(join(dir, READY_FILE), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+/** 参考帧现在能不能用、用的是哪一份。同步、只读，不下载。 */
+export function styleFramesState() {
+  const override = process.env.DRAWAI_STYLE_REFERENCE_DIR
+  const dir = override ? resolve(override) : styleFramesDir()
+  let root = null
+  try { root = styleReferenceRoot() } catch { root = null }
+  if (root) {
+    return {
+      ready: true,
+      source: override ? 'env' : (existsSync(join(dir, READY_FILE)) ? 'download' : 'local'),
+      // 用的是哪一份就报哪一份：可能是素材包装的，也可能是用户自己放/指定的旧集合。
+      root, dir, version: STYLE_FRAMES_VERSION, collection: basename(root),
+    }
+  }
+  return {
+    ready: false, source: null, root: null, dir, version: STYLE_FRAMES_VERSION,
+    collection: STYLE_FRAMES_COLLECTION, url: STYLE_FRAMES_URL, page: STYLE_FRAMES_PAGE,
+    ...(override ? { envOverride: true } : {}),
+  }
+}
+
+let framesInflight = null
+
+/**
+ * 保证参考帧可用：没有就下载那个 40MB 的包（一次），已经有就是同步检查。
+ * 环境变量指定了目录、或目标目录是用户自己放的集合时**不下载也不覆盖**。
+ * @param {{onProgress?: (got:number,total:number)=>void, force?: boolean}} [opts]
+ */
+export async function ensureStyleFrames(opts = {}) {
+  const state = styleFramesState()
+  if (state.ready && !opts.force) return { root: state.root, source: 'existing', downloaded: false, version: STYLE_FRAMES_VERSION }
+  if (state.envOverride) {
+    throw new AssetPackError('风格参考帧目录由 DRAWAI_STYLE_REFERENCE_DIR 指定（' + state.dir + '），但它不是带 index.json 的集合；指定了目录时不会自动下载。', { code: 'style-frames-env', url: STYLE_FRAMES_URL, dir: state.dir })
+  }
+  const dir = styleFramesDir()
+  if (existsSync(dir) && !existsSync(join(dir, READY_FILE))) {
+    throw new AssetPackError('目标目录已存在，但不是素材包安装出来的集合：' + dir
+      + '\n为避免删掉你自己准备的参考帧，这里不会覆盖它；先移走或改名，或用 DRAWAI_STYLE_REFERENCE_DIR 指向自己的集合。',
+      { code: 'style-frames-unmanaged', url: STYLE_FRAMES_URL, dir })
+  }
+  if (framesInflight) return framesInflight
+  framesInflight = installPack({ lock: STYLE_FRAMES_LOCK, url: STYLE_FRAMES_URL, dir, onProgress: opts.onProgress })
+  try {
+    return await framesInflight
+  } finally {
+    framesInflight = null
+  }
+}
+
+/** 工具层用：拿到参考帧根目录，或者抛一条人能照着做的错误。 */
+export async function requireStyleFrames({ onProgress } = {}) {
+  try {
+    const got = await ensureStyleFrames({ onProgress })
+    return got.root
+  } catch (err) {
+    throw new AssetPackError(
+      '风格参考帧素材包（16 种风格，一次性约 ' + Math.round((STYLE_FRAMES_LOCK.bytes || 0) / 1048576) + 'MB）还没准备好：' + (err?.message || err) + '\n'
+      + '怎么处理：\n'
+      + '  1) 联网后重试一次，插件会自动下载并逐文件校验；\n'
+      + '  2) 或者手动下载 ' + STYLE_FRAMES_URL + ' ，解压到 ' + styleFramesDir()
+      + '（目录里应当直接看到 index.json 和 01-… / 23-… 这些风格目录）；\n'
+      + '  3) 走代理的话先设 HTTPS_PROXY 再重试；\n'
+      + '  4) 也可以设置 DRAWAI_STYLE_REFERENCE_DIR 指向你自己准备的 collection 目录。\n'
+      + '参考帧只是可选参考：没有它也能按风格施工包继续做片子。',
+      { code: 'style-frames-unavailable', url: STYLE_FRAMES_URL, dir: styleFramesDir(), cause: err },
+    )
+  }
+}
+
+export function styleFramesSummary() {
+  const state = styleFramesState()
+  const ready = state.ready ? readReady(state.dir) : null
+  return {
+    ready: state.ready,
+    version: STYLE_FRAMES_VERSION,
+    collection: state.collection,
+    source: state.source,
+    root: state.root,
+    dir: state.dir,
+    files: ready?.files ?? null,
+    bytes: ready?.bytes ?? null,
+    url: STYLE_FRAMES_URL,
+    page: STYLE_FRAMES_PAGE,
   }
 }
 
