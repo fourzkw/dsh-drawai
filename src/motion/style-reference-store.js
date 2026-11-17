@@ -41,7 +41,8 @@ export function findStyleReferenceCollection(parent) {
  * 注意区分：DRAWAI_STYLE_REFERENCE_DIR 指的是**集合本身**，优先级更高。
  */
 export function styleReferenceParent() {
-  return process.env.DRAWAI_STYLE_FRAMES_DIR || join(homedir(), '.dsh', 'drawai-style-reference-frames')
+  // 环境变量给相对路径时也归一成绝对路径：安装和读帧报出来的目录要能直接复制粘贴。
+  return resolve(process.env.DRAWAI_STYLE_FRAMES_DIR || join(homedir(), '.dsh', 'drawai-style-reference-frames'))
 }
 
 /** An explicit override names the collection itself, not its parent. */
