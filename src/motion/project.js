@@ -84,7 +84,7 @@ function withStyle(timeline, style) {
     motion: style.motion || null } }
 }
 
-/** 效果配方：brief 只写「是什么」，这里写「怎么动」。每一项都要求对着参考帧做，不许用「差不多」糊过去。 */
+/** 效果配方：概括风格动作，参考帧可选且只用于理解视觉语言。 */
 function motionMarkdown(style) {
   const motion = style.motion
   if (!motion) return []
@@ -105,13 +105,13 @@ function motionMarkdown(style) {
     + ' | ' + (motion.secondary?.length ? '这些"让画面活着"的小动作至少保留两样，别只留主形变' : '画面靠主形变推进') + ' |')
   if (motion.feather) rows.push('| 软边 | 色块边缘有 FEATHER 解析软边 | 边缘不许是硬 polygon；按距离场/遮罩做柔边 |')
   return [
-    '## 效果配方（必做，逐项对照参考帧）',
+    '## 效果配方（按本片需要运用）',
     '',
     ...rows,
     '',
-    '取得参考帧：`mg_style {action:"frames", slug:"' + style.slug + '"}` → 返回 8 张 PNG，用 `read_image` 逐张看。',
-    '**上游未检测到 ≠ 可省**：配方是下限，不是上限；判据（signature）与参考帧才是验收标准。',
-    '做完每个镜头，把参考帧和 `motion_preview` 的成片帧并排放一次，逐行对上面的表——对不上的项要么改，要么在下面写一行「偏离：X 改为 Y，因为 Z」。',
+    '可选参考帧：`mg_style {action:"frames", slug:"' + style.slug + '"}` 读取本地已准备图片；缺失时依据施工包继续，不运行上游演示截帧。',
+    '根据判据（signature）和本片内容设计动作；参考帧仅用于理解视觉语言，不照搬原作的故事和构图。',
+    '制作后用 `motion_preview` 检查本片画面与动作；风格要求有偏离时记录原因。',
     '',
   ]
 }
@@ -127,9 +127,8 @@ function styleMarkdown(style) {
     '',
     style.oneLiner || '',
     '',
-    '来源：' + origin + '。上游是「HTML 页 + renderAt(t) + 截帧」，',
-    '这里不是逐行搬运（整份 HTML 搬进场景会跟 Remotion 的帧模型打架），但动效、转场、冲击、',
-    '相机与质感必须按下面的「效果配方」对齐——对不上就写偏离行，别静默省掉。',
+    '来源：' + origin + '。根据风格说明设计原创场景，参考资料只用于理解视觉语言。',
+    '动效、转场、冲击、相机与质感可参照下面的「效果配方」；有偏离时记录原因。',
     '',
     '## 判据（做不出这些就不算这个风格）',
     '',
