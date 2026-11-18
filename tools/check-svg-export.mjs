@@ -215,4 +215,38 @@ await assert.rejects(() => rasterizeSvgToPng(svgOf(20000, 200), { scale: 1 }), /
 await assert.rejects(() => rasterizeSvgToPng(svgOf(4000, 4000), { scale: 2 }), /PNG 尺寸过大/, '总量超限没被拦住')
 await assert.rejects(() => rasterizeSvgToPng(svgOf(4000, 4000), { scale: 2 }), /请调小 scale/, '报错没有告诉用户怎么办')
 
-console.log('check-svg-export: OK (正交化、箭头/虚线、配色与主题、隐藏图层、转义、换行、撑高、自环、stats、PNG、尺寸上限、scale 兜底)')
+// ── 16. 卡面（issue #53）：镜头卡/风格卡/视频/音频至少留下可读文字 ────────
+// 宿主画不出客户端那套 HTML 卡面，过去这里留的是**空底色框且一个字都不提**，
+// 用户拿到导出图会以为节点丢了。现在补一层文字近似 + 逐条 warning。
+const cards = buildExportSvg({
+  nodes: [
+    { id: 'card', x: 0, y: 0, w: 220, h: 160, label: '镜头一', data: { drawaiShotCard: '1', shotCardId: 'wall-reveal-moves', shotStyleKey: 'moves' } },
+    { id: 'style', x: 260, y: 0, w: 220, h: 160, label: '', data: { drawaiMgStyle: '1', mgStyleSlug: '09-bauhaus' } },
+    { id: 'film', x: 0, y: 220, w: 480, h: 270, label: '成片', data: { drawaiMotion: '1' } },
+    { id: 'song', x: 0, y: 520, w: 220, h: 90, label: '', data: { drawaiAudio: '1', audioName: 'whoosh', audioRole: 'sfx', audioDuration: '1.4' } },
+  ],
+  edges: [],
+  layers: [],
+}, {})
+assert.ok(cards.svg.includes('wall-reveal-moves'), '镜头卡的卡 id 没进导出件')
+// 卡面节点的**标签**不能再按普通节点画一遍：那会压到卡面文字上（导出图比画布还乱）。
+assert.equal(cards.svg.includes('镜头一'), false, '镜头卡的标签被额外画了一遍')
+assert.equal((cards.svg.match(/成片/g) || []).length, 1, '视频节点的标签被重复画了一遍')
+assert.ok(cards.svg.includes('09-bauhaus'), '风格卡的 slug 没进导出件')
+assert.ok(cards.svg.includes('空视频节点'), '空视频节点没有占位文字')
+assert.ok(cards.svg.includes('whoosh'), '音频节点的名字没进导出件')
+assert.ok(cards.svg.includes('音效 · 1.4 秒'), '音频节点没写用途与时长')
+assert.ok(cards.svg.includes('<g data-node-id="card">'), '卡面没有跟节点同组（叠放/包围盒会错）')
+for (const kind of ['镜头卡', '整片风格', '视频节点', '音频节点']) {
+  assert.ok(cards.warnings.some((line) => line.includes(kind)), '卡面降级没写进 warnings（缺 ' + kind + '）：' + cards.warnings.join(' / '))
+}
+// 卡面文字不能把包围盒撑出去：viewBox 仍然只由几何与标签决定。
+assert.ok(cards.viewBox.width > 0 && Number.isFinite(cards.viewBox.height))
+const darkCards = buildExportSvg({
+  nodes: [{ id: 'card', x: 0, y: 0, w: 220, h: 160, data: { drawaiShotCard: '1', shotCardId: 'c1', shotStyleKey: 's1' } }],
+  edges: [],
+  layers: [],
+}, { theme: 'dark' })
+assert.ok(darkCards.svg.includes('fill="#292535"'), '深色主题下镜头卡没换深色卡面')
+
+console.log('check-svg-export: OK (正交化、箭头/虚线、配色与主题、隐藏图层、转义、换行、撑高、自环、stats、PNG、尺寸上限、scale 兜底、卡面文字与降级警告)')

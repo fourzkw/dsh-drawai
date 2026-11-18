@@ -10,7 +10,8 @@
  *   · 几何（形状、连线、标签位置、换行、导出包围盒）照抄客户端的纯函数口径；
  *   · 文字量宽用 `charWidth`（CJK 按 1em、其余按 0.55em 估算）—— 与客户端
  *     **无 DOM 时的回退**同一套，常见标签断行一致，长标签可能差一行；
- *   · 视频/卡片/音频这类由客户端组件画的节点只画出通用形状，不还原内部画面。
+ *   · 视频/卡片/音频这类由客户端组件画的节点只画出通用形状 + 一层文字近似，不还原内部
+ *     画面；哪几个节点降级了会有逐条 warning（见 issue #53）。
  * 因此调用方要把保真度标成 `approximate`，并把 warnings 一并交出去。
  */
 
@@ -28,6 +29,9 @@ import {
 } from './style-kernel.js'
 import { createOrthogonalRouter, storedRoute } from './routing/router.js'
 import { getRoutingRuntime } from './routing/node-runtime.js'
+import { isShotCardNode } from './shotcard-core.js'
+import { isMgStyleNode } from './mgstyle-core.js'
+import { isAudioNode, isMotionNode } from './motion-core.js'
 
 /**
  * 没有折点的正交边，用**宿主这一份**路由器补一条真走线。
@@ -386,7 +390,7 @@ function labelTextBox(box) {
 function labelPaintBounds(node, geo) {
   const label = typeof node.label === 'string' ? node.label : ''
   if (label.length === 0) return null
-  if (isVideoNode(node)) return null
+  if (isFaceNode(node)) return null
   const style = styleOf(node)
   const fontSize = styleNumber(style, 'fontSize', FSIZE)
   const lineHeight = labelLineHeight(fontSize)
@@ -440,6 +444,16 @@ function nodeBoxOf(node) {
 function isVideoNode(node) {
   const data = node !== null && typeof node === 'object' ? node.data : null
   return data !== null && typeof data === 'object' && (typeof data.videoClip === 'string' || typeof data.motion === 'object')
+}
+
+/**
+ * 卡面节点：镜头卡 / 整片风格 / 音频 / 视频。
+ *
+ * 画布上它们被客户端组件占满，宿主导出只能画文字近似（见 faceSvg）。节点的**标签**
+ * 因此不能再按普通节点居中画 —— 那会压到卡面文字上，导出图比画布还乱（issue #53）。
+ */
+function isFaceNode(node) {
+  return isShotCardNode(node) || isMgStyleNode(node) || isAudioNode(node) || isMotionNode(node) || isVideoNode(node)
 }
 
 // ── 路径序列化（src/client.js:2469-2507）───────────────────────────────
@@ -800,7 +814,9 @@ function textSvg(spec) {
 function nodeLabelSvg(node, geo, palette) {
   const label = typeof node.label === 'string' ? node.label : ''
   if (label.length === 0) return ''
-  if (isVideoNode(node)) return ''
+  // 卡面节点（含视频）在画布上被客户端组件占满，标签不再另画 —— 否则资源名/卡名会压到
+  // 卡面文字上，导出图比画布还乱（issue #53）。
+  if (isFaceNode(node)) return ''
   const style = styleOf(node)
   const shape = shapeOf(node)
   if (shape === 'text') {
@@ -827,6 +843,136 @@ function nodeLabelSvg(node, geo, palette) {
     fill: colorOf(node, palette).font,
     opacity: Math.max(0, Math.min(100, styleNumber(style, 'textOpacity', 100))) / 100,
   })
+}
+
+// ── 卡面（issue #53）────────────────────────────────────────────────────
+
+/*
+ * 镜头卡 / 整片风格 / 音频 / 视频节点在画布上是客户端组件画的（HTML 卡面），宿主这条
+ * 路径按设计只画通用形状。过去这里连一个字的说明都没有：导出里它们就是几个空底色框，
+ * 而 warnings 只谈连线，`fidelity:"approximate"` 于是名不副实 —— 这就是 issue #53。
+ *
+ * 现在补一层文字近似：卡 id、风格 key、音频角色与时长都画成 <text>，并把"按文字降级"
+ * 逐节点写进 warnings。文字取节点 data 里的**原始 id**，不查目录：镜头卡/风格的目录只
+ * 内联在客户端 bundle 里（tools/build.mjs:131），宿主拿不到，复制一份必然与 catalog 漂移。
+ */
+const FACE_PAD = 14
+const FACE_INSET = 1
+
+/** 折行 + 限行：放不下的部分在最后一行用省略号收尾。 */
+function faceWrap(value, maxWidth, size, maxLines) {
+  const lines = wrapLabel(String(value === null || value === undefined ? '' : value).replace(/\s+/g, ' ').trim(), maxWidth, size)
+  if (lines.length <= maxLines) return lines
+  const kept = lines.slice(0, maxLines)
+  const last = Array.from(kept[maxLines - 1])
+  kept[maxLines - 1] = last.slice(0, Math.max(0, last.length - 1)).join('') + '…'
+  return kept
+}
+
+/** 单行放不下就按字符裁，末尾补省略号。 */
+function faceFit(value, maxWidth, size) {
+  const chars = Array.from(String(value === null || value === undefined ? '' : value))
+  let out = ''
+  let width = 0
+  for (let i = 0; i < chars.length; i += 1) {
+    const advance = charWidth(chars[i], size)
+    if (width + advance > maxWidth && out.length > 0) return out.slice(0, -1) + '…'
+    out += chars[i]
+    width += advance
+  }
+  return out
+}
+
+function faceRect(geo, fill, radius, inset) {
+  const pad = numberOr(inset, FACE_INSET)
+  return '<rect' + attrs({
+    x: fmt(geo.x + pad), y: fmt(geo.y + pad),
+    width: fmt(Math.max(0, geo.w - pad * 2)), height: fmt(Math.max(0, geo.h - pad * 2)),
+    rx: fmt(radius), ry: fmt(radius), fill: fill,
+  }) + '/>'
+}
+
+/** 一行卡面文字：`centerY` 是**这一行**的垂直中心（与客户端卡面同一套排版口径）。 */
+function faceText(x, centerY, lines, size, fill, opacity) {
+  const lh = labelLineHeight(size)
+  return textSvg({ x: x, top: numberOr(centerY, 0) - lh / 2, lines: lines, fontSize: size, fill: fill, anchor: 'start', opacity: opacity })
+}
+
+/** 卡面：镜头卡 / 整片风格 / 音频 / 空视频节点各画一层文字；不是卡就返回空串。 */
+function faceSvg(node, geo, palette, warnings) {
+  const data = node !== null && typeof node === 'object' && node.data !== null && typeof node.data === 'object' ? node.data : null
+  if (data === null) return ''
+  const dark = palette === DARK
+  const id = String(node.id === undefined ? '' : node.id)
+
+  if (isShotCardNode(node)) {
+    const pad = Math.min(18, Math.max(10, geo.w / 12))
+    const inner = Math.max(12, geo.w - pad * 2)
+    const ink = dark ? '#e5dff8' : '#44336b'
+    const dim = dark ? '#b9aee0' : '#6d5f92'
+    const parts = [faceRect(geo, dark ? '#292535' : '#f0edf8', 12)]
+    let center = geo.y + pad + 5
+    parts.push(faceText(geo.x + pad, center, [faceFit('镜头参考', inner, 11)], 11, dim, 0.8))
+    center += 24
+    const cardLines = faceWrap(data.shotCardId || node.label || '', inner, 15, 2)
+    for (let i = 0; i < cardLines.length; i += 1) parts.push(faceText(geo.x + pad, center + i * 20, [cardLines[i]], 15, ink, 1))
+    center += cardLines.length * 20 + 4
+    parts.push(faceText(geo.x + pad, center, [faceFit(data.shotStyleKey || '', inner, 12)], 12, dim, 0.8))
+    center += 16
+    const foot = geo.y + geo.h - pad - 4
+    if (foot > center + 8) parts.push(faceText(geo.x + pad, foot, [faceFit('双击预览 · 连线到视频', inner, 11)], 11, dim, 0.65))
+    warnings.push('镜头卡 "' + (data.shotCardId || id) + '" 的卡面按文字近似导出（SVG 里画不了 HTML 卡面，见 issue #53）')
+    return parts.join('')
+  }
+
+  if (isMgStyleNode(node)) {
+    const pad = Math.min(14, Math.max(10, geo.w / 14))
+    const inner = Math.max(12, geo.w - pad * 2)
+    const ink = dark ? '#efe3c2' : '#5a4a1a'
+    const parts = [faceRect(geo, dark ? '#2d2a20' : '#fdf6e3', 10)]
+    let center = geo.y + pad + 5
+    parts.push(faceText(geo.x + pad, center, [faceFit('整片风格', inner, 11)], 11, ink, 0.8))
+    center += 24
+    const nameLines = faceWrap(data.mgStyleSlug || node.label || '未选风格', inner, 15, 2)
+    for (let i = 0; i < nameLines.length; i += 1) parts.push(faceText(geo.x + pad, center + i * 20, [nameLines[i]], 15, ink, 1))
+    center += nameLines.length * 20
+    const foot = geo.y + geo.h - pad - 4
+    if (foot > center + 8) parts.push(faceText(geo.x + pad, foot, [faceFit('双击换风格 · 连线到视频', inner, 11)], 11, ink, 0.65))
+    warnings.push('整片风格 "' + (data.mgStyleSlug || id) + '" 的卡面按文字近似导出（配色与节奏在客户端的卡面上；宿主不持有风格目录）')
+    return parts.join('')
+  }
+
+  if (isAudioNode(node)) {
+    const ink = dark ? '#b8e5d5' : '#24594a'
+    const pad = 16
+    const inner = Math.max(12, geo.w - pad * 2)
+    let center = geo.y + pad + 7
+    const parts = [faceText(geo.x + pad, center, [faceFit('♫ ' + (data.audioName || node.label || '音频'), inner, 13)], 13, ink, 1)]
+    center += 26
+    const role = { sfx: '音效', bgm: '背景音乐', voice: '旁白' }[data.audioRole] || '音效'
+    const duration = data.audioDuration ? Number(data.audioDuration).toFixed(1) + ' 秒' : '待上传'
+    const rows = Math.max(1, Math.floor((geo.y + geo.h - pad - center) / 19))
+    parts.push(faceText(geo.x + pad, center, faceWrap(role + ' · ' + duration, inner, 13, rows), 13, ink, 1))
+    warnings.push('音频节点 "' + (data.audioName || id) + '" 的卡面按文字近似导出（波形由客户端的播放器画，宿主画不出）')
+    return parts.join('')
+  }
+
+  if (isMotionNode(node) && !isVideoNode(node)) {
+    const size = 14
+    const parts = [
+      faceText(geo.x + 8, geo.y - 15, [faceFit(node.label || '视频', geo.w - 16, 12)], 12, dark ? '#b8b2ad' : '#66605b', 1),
+      faceRect(geo, dark ? '#282523' : '#eeece9', 14, 0),
+      // 中间这行要居中，自己走 textSvg（faceText 一律左侧起排）。
+      textSvg({ x: geo.x + geo.w / 2, top: geo.y + geo.h / 2 - labelLineHeight(size) / 2, lines: ['空视频节点'], fontSize: size, fill: dark ? '#a8a29e' : '#928b84' }),
+    ]
+    warnings.push('视频节点 "' + (node.label || id) + '" 只导出空框：画面帧由客户端渲染，宿主画不了（见 issue #53）')
+    return parts.join('')
+  }
+
+  if (isVideoNode(node)) {
+    warnings.push('视频节点 "' + (node.label || id) + '" 只导出空框：画面帧由客户端渲染，宿主画不了（见 issue #53）')
+  }
+  return ''
 }
 
 // ── 连线 ────────────────────────────────────────────────────────────────
@@ -1198,11 +1344,13 @@ export function buildExportSvg(doc, options) {
   for (let i = 0; i < boxes.length; i += 1) {
     const box = boxes[i]
     const shape = shapeSvg(box.node, box.geo, palette, warnings)
+    // 卡面（镜头卡/整片风格/视频/音频）：宿主只能画一层文字近似，见 faceSvg。
+    const face = faceSvg(box.node, box.geo, palette, warnings)
     // 标签必须与形状同组：跨节点叠放时，后画的节点矩形不能盖住前一个节点的字
     // （客户端每个节点就是一个 <g>，形状与标签都在里面）。
     const text = nodeLabelSvg(box.node, box.geo, palette)
-    if (shape.length > 0 || text.length > 0) {
-      body.push('<g' + attrs({ 'data-node-id': box.id }) + '>' + shape + text + '</g>')
+    if (shape.length > 0 || face.length > 0 || text.length > 0) {
+      body.push('<g' + attrs({ 'data-node-id': box.id }) + '>' + shape + face + text + '</g>')
     }
     putRect(box.geo)
     putBounds(labelPaintBounds(box.node, box.geo))
