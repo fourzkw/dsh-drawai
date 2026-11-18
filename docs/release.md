@@ -1,5 +1,14 @@
 # 发布与收录流程 / Release & listing
 
+## 0.4.8 发布内容（2026-11-18）
+
+- 参考帧素材包支持**从本地安装**，内网 / 代理受限的机器不必再等那一次下载：`mg_style {action:"install", file:"…"}` 直接吃 Release 里的 `.tar.gz` 或已经解压好的集合目录，全程不联网。校验与自动下载同一套（lock 里的大小与 sha256，再按 manifest 逐文件比对），装好的集合多留一份根 `manifest.json`，解压目录因此也能再装、再校验；`.ready.json` 记 `origin:"file"`，`styleFramesSummary` 报 `source:"file"`。目标位置已经有一份别人准备的集合时拒绝覆盖，不会把它删掉。
+- 顺手补掉一个安装盲区：manifest 列了、包里却没有的文件以前会装成「就绪」，直到读某个风格才炸；现在直接判坏包。下载路径与本地安装共用同一段解包代码，两个素材包一起受益。
+- 多页画布在顶部出页签（#49、#51）：切页、按页重命名，打开多页 `.drawio` 不再只认第一页；页签状态与本地文件配对，刷新后仍在原页。
+- 导出与「看一眼」的镜头卡、整片风格卡改成 SVG 原生卡面（#53）：宿主侧渲染不再依赖浏览器组件，缩略图在导出图里也能画出来；新增 `tools/check-export-faces.mjs` 盯着卡面与导出的一致性。
+- 修带记忆插件的会话里 `motion_project` 直接起不来（#54）：工具描述里的 `{{…}}` 被提示词模板当成变量解析，改成不带大括号的写法，`check-package` 增加守卫防止再犯。
+- 文档与死代码：参考帧的离线说明与报错表按「只读本地」重写（`docs/motion-video.md`、`docs/motion-video-playbook.md`）；删掉未接入的镜头卡参考帧下载模块（`src/shotcard-reference.js`），它仍从 GitHub Pages 抓样片，是唯一残留的远程取帧路径，容易让人误以为 `frames` 要联网。
+
 ## 0.4.7 发布内容（2026-11-18）
 
 - 整片风格参考帧改读**本地预置**素材，并单独发成素材包（#27）：`mg_style {action:"frames"}` 不再起本地静态服务 + Chrome 打开上游 demo 截帧，改为读 `~/.dsh/drawai-style-reference-frames/collection-<日期>/`（按来源视频秒数取最近帧并去重、逐帧 sha256 校验）。参考帧 16 种风格共 149 个文件、40.3MB，发在 GitHub Release `style-frames-20261116`；第一次读帧或 `mg_style {action:"install"}` 时下载一次、逐文件校验后落到集合目录，之后离线可用。它不并进 145MB 的 `assets-v1`，也不进 git / npm 包 / Pages。
