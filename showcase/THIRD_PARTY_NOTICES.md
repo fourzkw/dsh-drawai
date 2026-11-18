@@ -1,6 +1,6 @@
 # 第三方素材与许可
 
-这个展示页使用第三方风格目录的元数据（名称、色板、字体、节奏、动效），并放入十二支 DrawAI 本地样片（扁平矢量、等轴 2.5D、拼贴、液态、包豪斯、合成器浪潮、玻璃拟态、综艺花字、贴纸科普、像素、赛博 HUD、水墨）和十二段本地中文提示词。页面不包含、也不引用第三方提示词、参考片或源码。`05-cel-boil`（小猫与红毛线）本轮未进展示页，其素材与许可记录也不在此列。
+这个展示页使用第三方风格目录的元数据（名称、色板、字体、节奏、动效），并放入十四支 DrawAI 本地样片（扁平矢量、等轴 2.5D、逐帧手绘、拼贴、液态、形变、包豪斯、合成器浪潮、玻璃拟态、综艺花字、贴纸科普、像素、赛博 HUD、水墨）和十四段本地中文提示词。页面不包含、也不引用第三方提示词、参考片或源码。
 
 ## mg-styles-15
 
@@ -62,7 +62,22 @@ SOFTWARE.
 
 ## 本地样片的声音素材
 
-十二支样片的画面均为 DrawAI 本地渲染，不包含第三方参考片画面。以下记录各支样片实际使用的声音来源与许可；`22-hud`、`20-pixel` 的声音记录见各自工程。新增三支均未经过人工试听。
+十四支样片的画面均为 DrawAI 本地渲染，不包含第三方参考片画面。以下记录各支样片已知的声音来源与许可；`22-hud`、`20-pixel` 的声音记录见各自工程。`08-morph` 的声音来源尚未确认。
+
+### 05-cel-boil「小猫与会跳舞的红毛线」（Canvas2D 重制版）
+
+- 本片使用 Freesound **CC0-1.0** 声音：[A Ukulele Tune](https://freesound.org/people/shaunhillyard/sounds/830500/) / shaunhillyard；[Clothes Rustling 1](https://freesound.org/people/WasabiWielder/sounds/334219/) / WasabiWielder；[Finger Tap 2_5](https://freesound.org/people/Joao_Janz/sounds/478285/) / Joao_Janz；[Funny Boing](https://freesound.org/people/se2001/sounds/543641/) / se2001；[Item Sparkle](https://freesound.org/people/Mr._Fritz_/sounds/545238/) / Mr._Fritz_。
+- [light_whoosh_sound_01_06182024](https://freesound.org/people/Artninja/sounds/761175/) / Artninja，[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)。
+- [Thud_4_HighShortReverb.wav](https://freesound.org/people/zimbot/sounds/122590/) / zimbot，[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)。
+- [single bubble pop 01](https://freesound.org/people/mokasza/sounds/810763/) / mokasza，[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)；原站标注为 AI 生成音效。
+- [CatPurr.wav](https://freesound.org/people/SophieMezaM/sounds/446023/) / SophieMezaM，[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/)。
+- 音效经截取、调整音量及淡入淡出，并混入成片。声音文件为 Freesound 的 22.05 kHz 单声道 HQ MP3 预览，最终经混音重编码；未确认经过人工试听。画面为 Canvas2D 原创绘制，使用的内置字体遵循 SIL OFL 1.1。
+
+### 08-morph「DrawAI · 一形万象」
+
+- 使用本地 Riso 版完整成片；提示词根据对应画布中保存的创作描述、分镜表和风格设置整理。
+- 成片含音轨，但当前可用记录未确认所用音乐与音效的具体来源和许可；不能将其认定为可自由再分发。
+- 画布的字体设置包含 Segoe UI、Microsoft YaHei 和 Consolas 等系统字体；字体文件不随站点分发，具体成片用字及相关使用条件尚未核实。
 
 ### 07-liquid「IDEA BLOOM · 一滴灵感」
 
