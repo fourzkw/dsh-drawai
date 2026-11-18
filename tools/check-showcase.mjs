@@ -25,7 +25,11 @@ const promptStyles = styles.filter((style) => {
   return fs.existsSync(file) && fs.statSync(file).size > 0;
 });
 const promptCount = promptStyles.length;
-const expectedPromptSlugs = ['22-hud', '20-pixel', '07-liquid', '09-bauhaus', '10-synthwave', '23-ink-wash'];
+const expectedPromptSlugs = [
+  '01-flat-vector', '03-isometric', '06-collage',
+  '07-liquid', '09-bauhaus', '10-synthwave', '12-aurora-glass',
+  '18-hanazi', '19-paperclip', '20-pixel', '22-hud', '23-ink-wash',
+];
 const notes = [`提示词：${promptCount} 条本地，${styles.length - promptCount} 个未提供（不显示提示词 tab）`];
 let tabTotal = 0;
 
@@ -45,7 +49,11 @@ if (!fs.existsSync(INDEX)) {
   fail('缺少 showcase/index.html（先跑 npm run showcase:build）');
 } else {
   const html = fs.readFileSync(INDEX, 'utf8');
-  const htmlWithoutPrompts = html.replace(/<pre class="code prompt"[\s\S]*?<\/pre>/g, '');
+  // 引用块会保留原话（提示词提到“不照搬上游镜头”，模板正文提到“上游作品”），
+  // 只检查引用块之外的页面文案。
+  const htmlWithoutPrompts = html
+    .replace(/<pre class="code prompt"[\s\S]*?<\/pre>/g, '')
+    .replace(/<pre class="code doc-text"[\s\S]*?<\/pre>/g, '');
 
   if (/\{\{[A-Z_]+\}\}/.test(html)) fail('index.html 里还有未替换的模板占位符');
   if (/>(?:undefined|NaN)</.test(html)) fail('index.html 里出现 undefined / NaN');
@@ -80,7 +88,6 @@ if (!fs.existsSync(INDEX)) {
   if (html.includes('data-pane="src"')) fail('页面里仍有源码 pane');
   if (htmlWithoutPrompts.includes('上游源码')) fail('页面里仍有“上游源码”');
   if (htmlWithoutPrompts.includes('上游成片')) fail('页面里仍有“上游成片”');
-  // 本地提示词会保留“不复制上游镜头”等原话；只检查提示词之外的页面文案。
   if (htmlWithoutPrompts.includes('上游')) fail('页面里仍有“上游”字样');
   if (/mg-styles-15|huashu-art-motion/i.test(html)) fail('页面里仍有上游项目名');
   if (html.includes('原文 ↗')) fail('页面里仍有提示词原文链接');
@@ -103,6 +110,19 @@ if (!fs.existsSync(INDEX)) {
 
   const promptCopies = (html.match(/data-copy="prompt-/g) || []).length;
   if (promptCopies !== promptCount) fail(`折叠状态下的复制按钮数量应为 ${promptCount}，实际 ${promptCopies}`);
+
+  // 通用制作模板：正文、填空说明、复制入口和每节的“套用模板”都在。
+  if (!/id="template"/.test(html)) fail('页面里没有通用制作模板区');
+  if (!/id="template-text"/.test(html)) fail('通用制作模板没有正文');
+  if (!/id="template-fill"/.test(html)) fail('通用制作模板没有可复制的填空段');
+  if (!html.includes('data-copy-fill')) fail('通用制作模板缺少“复制填空段”按钮');
+  const templateSlots = (html.match(/class="slot"/g) || []).length;
+  if (templateSlots !== 7) fail(`通用制作模板填空项应为 7，实际 ${templateSlots}`);
+  const templatePresets = (html.match(/data-template-style="/g) || []).length;
+  if (templatePresets !== promptCount) fail(`“套用模板”按钮数量应为 ${promptCount}，实际 ${templatePresets}`);
+  if (/data-fill-style=""/.test(html)) fail('“套用模板”按钮缺少本节风格名');
+  if (!html.includes('href="#template"')) fail('页面里没有指向通用制作模板的入口链接');
+  if (!exists('native/prompt-template.md')) fail('缺少 showcase/native/prompt-template.md');
 
   const sections = (html.match(/class="style(?: |")/g) || []).length;
   if (sections < styles.length) fail(`section 数量不足：${sections}，至少 ${styles.length}`);
@@ -138,7 +158,11 @@ if (fs.existsSync(MANIFEST)) {
 
 if (manifest) {
   const films = Array.isArray(manifest.films) ? manifest.films : Array.isArray(manifest.items) ? manifest.items : [];
-  const expected = ['22-hud', '20-pixel', '07-liquid', '09-bauhaus', '10-synthwave', '23-ink-wash'];
+  const expected = [
+    '01-flat-vector', '03-isometric', '06-collage',
+    '07-liquid', '09-bauhaus', '10-synthwave', '12-aurora-glass',
+    '18-hanazi', '19-paperclip', '20-pixel', '22-hud', '23-ink-wash',
+  ];
   let filmCount = 0;
 
   for (const slug of expected) {
@@ -161,7 +185,14 @@ if (manifest) {
     if (!Number.isFinite(Number(film.duration)) || Number(film.duration) <= 0) {
       fail(`${film.slug}: duration 必须是正数`);
     }
-    if (film.sha256 && !/^[0-9a-f]{64}$/.test(film.sha256)) fail(`${film.slug}: sha256 格式不对`);
+    if (!Number.isFinite(Number(film.w)) || Number(film.w) <= 0 || !Number.isFinite(Number(film.h)) || Number(film.h) <= 0) {
+      fail(`${film.slug}: w / h 必须是正数`);
+    }
+    if (!Number.isFinite(Number(film.fps)) || Number(film.fps) <= 0) {
+      fail(`${film.slug}: fps 必须是正数`);
+    }
+    if (!film.source) fail(`${film.slug}: manifest 缺 source`);
+    if (!/^[0-9a-f]{64}$/.test(film.sha256 || '')) fail(`${film.slug}: sha256 必须是 64 位小写十六进制`);
   }
 
   for (const style of promptStyles) {

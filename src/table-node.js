@@ -46,7 +46,9 @@ function serializeCanvasTable(model) {
 
 function tableNodeLayout(node, model) {
   const width = Math.max(1, Number(node.w) || 1)
-  const fs = Math.max(10, Math.min(20, styleNumber(node.style || '', 'fontSize', FSIZE)))
+  // 字号上下限放宽到 6–48：拖角等比缩放时字号要跟着节点一起放大缩小，
+  // 卡在 20 的话放大到 1.7 倍以后表格高度就不再跟手了（行高、换行都按 fs 算）。
+  const fs = Math.max(6, Math.min(48, styleNumber(node.style || '', 'fontSize', FSIZE)))
   const weights = model.storyboard && model.rows[0].length === 6 ? [0.10, 0.10, 0.18, 0.20, 0.27, 0.15] : model.rows[0].map(() => 1 / model.rows[0].length)
   const widths = weights.map(weight => width * weight)
   const lineHeight = labelLineHeight(fs)
@@ -56,6 +58,44 @@ function tableNodeLayout(node, model) {
   })
   const titleHeight = model.heading ? 30 : 0
   return { width, widths, fs, lineHeight, titleHeight, rows, height: titleHeight + rows.reduce((n, row) => n + row.height, 0) }
+}
+
+/**
+ * 每个单元格在**画布坐标系**里的矩形（行 → 列）。
+ *
+ * 表格从节点左上角起画，有标题时先占一条，所以 cell 的 y 要从 titleHeight 之后算 ——
+ * 就地编辑框、点选命中、右键菜单都靠它对齐，和画出来的格子必须逐像素一致。
+ */
+function tableCellRects(node, model) {
+  const layout = tableNodeLayout(node, model)
+  const left = numberOr(node.x, 0)
+  let y = numberOr(node.y, 0) + layout.titleHeight
+  const rects = []
+  for (const row of layout.rows) {
+    let x = left
+    const cells = []
+    for (let i = 0; i < row.wrapped.length; i += 1) {
+      const w = layout.widths[i]
+      cells.push({ x: x, y: y, w: w, h: row.height })
+      x += w
+    }
+    rects.push(cells)
+    y += row.height
+  }
+  return rects
+}
+
+/** 画布坐标里的点落在哪个单元格（0 起，行 0 = 表头）；不在表格上返回 null。 */
+function tableCellAt(node, model, point) {
+  if (!node || !model || !point) return null
+  const rects = tableCellRects(node, model)
+  for (let r = 0; r < rects.length; r += 1) {
+    for (let c = 0; c < rects[r].length; c += 1) {
+      const cell = rects[r][c]
+      if (point.x >= cell.x && point.x <= cell.x + cell.w && point.y >= cell.y && point.y <= cell.y + cell.h) return { row: r, col: c }
+    }
+  }
+  return null
 }
 
 function tableNodeSvg(node, geo, model) {
@@ -79,31 +119,4 @@ function tableNodeSvg(node, geo, model) {
     y += row.height
   })
   return children
-}
-
-function TableNodeEditor(props) {
-  const [model, setModel] = React.useState(() => ({ ...props.model, rows: props.model.rows.map(row => row.slice()) }))
-  const [activeRow, setActiveRow] = React.useState(1)
-  const [activeColumn, setActiveColumn] = React.useState(0)
-  const update = (r, c, value) => setModel(prev => ({ ...prev, rows: prev.rows.map((row, i) => i === r ? row.map((v, j) => j === c ? value : v) : row) }))
-  const addRow = () => setModel(prev => ({ ...prev, rows: prev.rows.concat([prev.rows[0].map(() => '')]) }))
-  const deleteRow = () => { if (activeRow < 1) return; setModel(prev => ({ ...prev, rows: prev.rows.filter((_, i) => i !== activeRow) })); setActiveRow(0) }
-  const addColumn = () => setModel(prev => ({ ...prev, rows: prev.rows.map(row => row.concat('')) }))
-  const deleteColumn = () => { if (model.rows[0].length <= 2) return; setModel(prev => ({ ...prev, rows: prev.rows.map(row => row.filter((_, i) => i !== activeColumn)) })); setActiveColumn(0) }
-  return React.createElement('div', { className: 'drawai-table-editor', role: 'dialog', 'aria-label': '编辑表格',
-    onPointerDown: e => e.stopPropagation(), onDoubleClick: e => e.stopPropagation(), onKeyDown: e => { e.stopPropagation(); if (e.key === 'Escape') props.onCancel(); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); props.onSave(model) } } },
-    React.createElement('div', { className: 'drawai-table-editor-bar' },
-      React.createElement('strong', null, model.heading || '编辑表格'),
-      React.createElement('button', { type: 'button', onClick: addRow }, '添加行'),
-      React.createElement('button', { type: 'button', onClick: deleteRow, disabled: activeRow < 1 }, '删除当前行'),
-      !model.storyboard && React.createElement('button', { type: 'button', onClick: addColumn }, '添加列'),
-      !model.storyboard && React.createElement('button', { type: 'button', onClick: deleteColumn, disabled: model.rows[0].length <= 2 }, '删除当前列'),
-      React.createElement('button', { type: 'button', onClick: props.onCancel }, '取消'),
-      React.createElement('button', { type: 'button', onClick: () => props.onSave(model) }, '保存')),
-    props.hasFormatting && React.createElement('p', { className: 'drawai-table-note' }, '修改单元格会清除原文字的局部样式。'),
-    React.createElement('div', { className: 'drawai-table-scroll' },
-      React.createElement('table', null, React.createElement('tbody', null,
-        model.rows.map((row, r) => React.createElement('tr', { key: r }, row.map((value, c) => React.createElement(r ? 'td' : 'th', { key: c },
-          React.createElement('textarea', { 'aria-label': (r ? '第' + r + '行' : '表头') + '第' + (c + 1) + '列', value, rows: 3,
-            onFocus: () => { setActiveRow(r); setActiveColumn(c) }, onChange: e => update(r, c, e.target.value) })))))))))
 }

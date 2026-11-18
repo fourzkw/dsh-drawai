@@ -520,6 +520,10 @@ const CSS = [
   // 画布 + 右侧常驻元素条：横排，条不挤工具栏宽度（飞书侧栏在左，我们放右边）。
   '.drawai-body{display:flex;flex:1;min-height:0;min-width:0;position:relative}',
   '.drawai-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,Consolas,monospace;color:var(--dsw-alias-label-secondary,#9aa0a6)}',
+  '.drawai-page-tabs{display:flex;align-items:center;gap:4px;flex:0 1 auto;min-width:0;overflow-x:auto;max-width:52%}',
+  '.drawai-page-tab{flex:0 0 auto;border:1px solid var(--dsw-alias-border-l1,#c9ccd1);background:transparent;color:inherit;font:inherit;font-size:var(--drawai-text-sm);line-height:1;padding:4px 10px;border-radius:var(--drawai-radius-pill);cursor:pointer;white-space:nowrap}',
+  '.drawai-page-tab:hover{background:var(--dsw-alias-bg-layer-2,#f0f1f3)}',
+  '.drawai-page-tab.on{background:var(--dsw-alias-brand-primary,#2f6fed);border-color:var(--dsw-alias-brand-primary,#2f6fed);color:#fff;font-weight:600}',
   '.drawai-btn{padding:2px 8px;cursor:pointer;white-space:nowrap}',
   '.drawai-btn:hover{border-color:var(--drawai-accent);background:var(--drawai-hover)}',
   // 视口由我们自己管（viewBox），所以不再让容器滚动 —— 否则滚轮会同时滚动和缩放。
@@ -552,8 +556,14 @@ const CSS = [
   '.drawai-node{cursor:move}',
   '.drawai-node-hit{cursor:pointer}',
   '.drawai-edge-hit{cursor:pointer;stroke:transparent;stroke-width:12;fill:none}',
-  '.drawai-sel{stroke:var(--drawai-accent,#1a73e8) !important;stroke-width:2 !important}',
+  // 选中框的线宽由元素属性给（2 屏幕像素，随画布缩放折算），这里只定颜色：
+  // 写死 stroke-width 会压过属性，放大画布时框就变粗了。
+  '.drawai-sel{stroke:var(--drawai-accent,#1a73e8) !important}',
   '.drawai-handle{cursor:crosshair}',
+  // 四边缩放缓冲带：整条边都是热区（飞书画板同样不画中点手柄），光标按方向给。
+  '.drawai-edgezone{cursor:crosshair}',
+  '.drawai-edgezone-n,.drawai-edgezone-s{cursor:ns-resize}',
+  '.drawai-edgezone-e,.drawai-edgezone-w{cursor:ew-resize}',
   // 「编辑数据」面板里的多行输入：等宽字体、跟着菜单宽度走。
   '.drawai-data{width:100%;box-sizing:border-box;font-family:ui-monospace,Consolas,monospace;font-size:var(--drawai-text-sm);line-height:1.5;color:inherit;background:transparent;border:1px solid currentColor;border-radius:var(--drawai-radius-sm);padding:4px;resize:vertical}',
   '.drawai-link{cursor:crosshair}',
@@ -614,7 +624,8 @@ const CSS = [
   // 背景透明、颜色与字号由 inline style 按**这个节点**给（见 renderDiagram 的 labelTextBox）。
   '.drawai-edit{position:absolute;z-index:5;box-sizing:border-box;outline:2px solid var(--drawai-accent,#1a73e8);outline-offset:-2px;border:none;border-radius:var(--drawai-radius-sm);background:transparent;color:#000;font-family:Helvetica, Arial, sans-serif;font-size:var(--drawai-text-sm);line-height:14px;text-align:center;padding:0;margin:0;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-word;user-select:text;-webkit-user-select:text}',
   '.drawai-canvas-edit{outline:none;border:0;border-radius:0;background:transparent;box-shadow:none}',
-  '.drawai-table-editor{position:absolute;z-index:30;inset:12px;display:flex;flex-direction:column;min-width:0;min-height:0;padding:12px;gap:8px;border:1px solid var(--dsw-alias-border-l2,#d5dbe4);border-radius:var(--drawai-radius-lg);background:var(--dsw-alias-bg-overlay,#fff);color:var(--dsw-alias-label-primary,#282c35);box-shadow:var(--drawai-elevation-3)}.drawai-table-editor-bar{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.drawai-table-editor-bar strong{margin-right:auto}.drawai-table-editor-bar button{padding:6px 8px;border:1px solid var(--drawai-border);border-radius:var(--drawai-radius-md);background:transparent;color:inherit;cursor:pointer}.drawai-table-editor-bar button:disabled{opacity:var(--drawai-disabled-opacity)}.drawai-table-note{margin:0;font-size:var(--drawai-text-xs);opacity:.7}.drawai-table-scroll{flex:1;min-height:0;overflow:auto}.drawai-table-scroll table{border-collapse:collapse;min-width:100%;table-layout:fixed}.drawai-table-scroll td,.drawai-table-scroll th{border:1px solid #cbd2dd;min-width:120px;padding:4px}.drawai-table-scroll th{background:var(--dsw-alias-bg-layer-2,#eef2f8)}.drawai-table-scroll textarea{box-sizing:border-box;width:100%;min-width:112px;min-height:60px;padding:4px;border:0;background:transparent;color:inherit;font-family:sans-serif;font-size:var(--drawai-text-sm);line-height:1.4;resize:vertical;user-select:text}.drawai-table-scroll th textarea{color:#263143;font-weight:bold}',
+  '.drawai-cell-editor{position:absolute;z-index:6;box-sizing:border-box;margin:0;padding:4px 4px;border:2px solid var(--drawai-accent,#1a73e8);border-radius:var(--drawai-radius-sm);background:#ffffff;color:#263143;font-family:sans-serif;font-weight:normal;resize:none;overflow:hidden;white-space:pre-wrap;word-break:break-all;outline:none;box-shadow:var(--drawai-focus-ring)}',
+'.drawai-cell-editor.drawai-cell-editor-head{background:#eef2f8;font-weight:bold}',
   '.drawai-rich-edit{overflow:auto;min-height:24px}',
   '.drawai-tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}',
   '.drawai-trace-surface{position:relative;width:100%;height:100%;overflow:hidden}.drawai-trace-surface>svg{display:block;pointer-events:none}.drawai-trace-progress{position:absolute;left:8px;right:8px;bottom:8px;pointer-events:none;line-height:0}.drawai-trace-progress progress{display:block;width:100%;height:5px;accent-color:var(--drawai-accent,#1a73e8)}',
@@ -703,7 +714,7 @@ const CSS = [
   // 禁用态只有一个透明度，系统开了「减少动态效果」就把动画和过渡压到最短。
   '.drawai-btn:active,.drawai-choice-button:active,.drawai-audio-panel button:active,.drawai-video-controls button:active,.drawai-video-more summary:active,.drawai-rail-chip:active,.drawai-toolbar-button:active,.drawai-primary-btn:active{transform:translateY(1px)}',
   '.drawai-btn:active,.drawai-choice-button:active,.drawai-audio-panel button:active,.drawai-video-controls button:active,.drawai-rail-chip:active{background:var(--drawai-hover)}',
-  '.drawai-btn:disabled,.drawai-choice-button:disabled,.drawai-primary-btn:disabled,.drawai-video-controls button:disabled,.drawai-video-method:disabled,.drawai-audio-panel button:disabled,.drawai-toolbar-button:disabled,.drawai-table-editor-bar button:disabled{opacity:var(--drawai-disabled-opacity)}',
+  '.drawai-btn:disabled,.drawai-choice-button:disabled,.drawai-primary-btn:disabled,.drawai-video-controls button:disabled,.drawai-video-method:disabled,.drawai-audio-panel button:disabled,.drawai-toolbar-button:disabled{opacity:var(--drawai-disabled-opacity)}',
   '@media (prefers-reduced-motion:reduce){.drawai-root,.drawai-root *,.drawai-root *::before,.drawai-root *::after{animation-duration:1ms!important;animation-iteration-count:1!important;transition-duration:1ms!important}}',
 ].join('\n')
 
@@ -1331,6 +1342,65 @@ function nodeBoxOf(node) {
   const need = table ? tableNodeLayout(node, table).height : nodeTextFitHeight(node)
   if (need > stored) return { x: x, y: y, w: w, h: snapTo(need, GRID), stored: stored }
   return { x: x, y: y, w: w, h: stored, stored: stored }
+}
+
+/**
+ * 选中框 / 手柄 / 选区工具条跟的是**看得见的内容**，不是文档里存的矩形。
+ *
+ * 两类节点天生"框比内容大很多"：
+ *   · 表格 —— 真实高度是 titleHeight + Σ行高算出来的，存的 node.h 只是最小高度；
+ *   · 独立文字 —— 字是居中画在一个更大的框里的（框本身只决定换行宽度）。
+ * 飞书里点中一个文字块/表格，框是紧贴内容的；这里按同样口径给出内容包围盒，
+ * 其余形状（矩形、圆形、图片…）的框就是节点框，原样返回。
+ */
+function nodeFrameBox(node, geo) {
+  const table = parseCanvasTable(node)
+  if (table !== null) {
+    const layout = tableNodeLayout(node, table)
+    return { x: geo.x, y: geo.y, w: geo.w, h: Math.min(geo.h, layout.height) }
+  }
+  if (shapeOf(node) === 'text' && typeof node.label === 'string' && node.label.length > 0) {
+    // 文字是按 labelTextBox 给的"文字区"排的，文字区通常比字本身宽（框只决定换行宽度），
+    // 所以这里按绘制口径反算：折行 → 最长一行有多宽、共几行高，再按 align 摆。
+    const boxText = labelTextBox({ node: node, geo: geo })
+    const fontSize = styleNumber(typeof node.style === 'string' ? node.style : '', 'fontSize', FSIZE)
+    const lineHeight = labelLineHeight(fontSize)
+    const lines = labelWraps(node) ? wrapLabel(node.label, boxText.w, fontSize) : String(node.label).split('\n')
+    let tight = 12
+    for (let i = 0; i < lines.length; i += 1) tight = Math.max(tight, textWidth(lines[i], fontSize))
+    tight = Math.min(boxText.w, tight)
+    const h = Math.min(boxText.h, lineHeight * lines.length)
+    const align = boxText.align === 'left' || boxText.align === 'right' ? boxText.align : 'center'
+    const x = align === 'left' ? boxText.x : align === 'right' ? boxText.x + boxText.w - tight : boxText.x + (boxText.w - tight) / 2
+    if (tight > 0 && h > 0) return { x: x, y: boxText.y, w: tight, h: h }
+  }
+  return { x: geo.x, y: geo.y, w: geo.w, h: geo.h }
+}
+
+/**
+ * 选中框的圆角：与 shapeElement 画圆角矩形同一口径（arcSize 缺省 15%，stadium 取半高），
+ * 其余形状是直角。这样选中框轮廓贴着节点自己的轮廓，而不是固定 4px 的小圆角。
+ */
+function nodeFrameRadius(node, box) {
+  const shape = shapeOf(node)
+  if (shape === 'stadium') return Math.min(box.w, box.h) / 2
+  if (shape === 'rounded') {
+    const style = typeof node.style === 'string' ? node.style : ''
+    const arc = styleNumber(style, 'arcSize', null)
+    return Math.min(box.w, box.h) * (arc === null ? 0.15 : arc / 100)
+  }
+  return 0
+}
+
+/**
+ * 高度由内容决定的节点（表格、独立文字）：拖角时用内容框作基准，按下手柄框不会跳。
+ *
+ * 表格和文字的角点按内容框整体等比映射到节点框；文字的边也按内容框等比（字号跟着变），
+ * 表格的边只改节点框宽度（高度由内容决定）。
+ */
+function contentFramedNode(node) {
+  if (parseCanvasTable(node) !== null) return true
+  return shapeOf(node) === 'text' && typeof node.label === 'string' && node.label.length > 0
 }
 
 // ---- 正交折线路由：6 个候选 + 包围盒避让 ----
@@ -4225,18 +4295,19 @@ function svgTreeToDom(tree, owner, namespace) {
  * `SecurityError: Tainted canvases may not be exported.` —— 导出一张 PNG 或让 AI
  * "看一眼"都会失败。
  *
- * 而 foreignObject 在 SVG-as-image 里本来就画不出来（Chrome 不渲染它），所以摘掉
- * 不会让画面少任何东西，只是让导出从"整张失败"变成"成功"。
+ * 而 foreignObject 里的 **HTML 本身就标脏**（issue #53 查出来的）：与里面的资源是不是
+ * blob: 无关，一个只装着 <div> 的 foreignObject 也会让 Chrome 157 拒绝 `getImageData` /
+ * `toDataURL`。所以"保留 HTML 卡面、导出图才和画布一样"这条路本来就走不通 —— 那正是
+ * 导出里镜头卡/风格卡变成空框的原因；卡面已改在导出模式用 SVG 原生图元画（见
+ * exportNodeFaces），这里只负责摘活件与兜底。
  *
  * 判据用两种：含 video / audio 的 foreignObject 整块摘；其余仍指向 blob: 的元素
  * 逐个摘（万一将来有别的活体挂件复用 blob: 源）。
  */
 function rasterSafeSvg(node, aggressive) {
   const clone = node.cloneNode(true)
-  // foreignObject 在 SVG-as-image 里 Chrome 本来就不渲染，但里面的 <video>(blob:)、
-  // <img>(远端地址)、<canvas> 都会把 canvas 标脏。默认只摘"有活件"的那几个，
-  // 保留纯 HTML 覆盖层（镜头卡卡面），导出图才和画布长得一样；万一仍被标脏，
-  // 调用方会带 aggressive=true 再来一次，把所有覆盖层都摘掉。
+  // 纯 HTML 覆盖层同样会标脏，但导出模式已经不产出了（见 exportNodeFaces）；单节点截图
+  // 之类的路径仍可能带过来，默认保留，万一失败由调用方带 aggressive=true 全摘兜底。
   for (const object of Array.from(clone.querySelectorAll('foreignObject'))) {
     const heavy = aggressive === true ||
       object.querySelector('video') !== null ||
@@ -5696,8 +5767,12 @@ const MIN_NODE_H = GRID * 4
  * 四条边与长宽就都是整格。
  *
  * 抽成模块级纯函数是为了能被命令行自测直接断言：吸附规则很容易被后续改动悄悄破坏。
+ *
+ * aspect（可选，宽/高）> 0 时按等比算：取拖动幅度大的那一轴定尺寸，另一轴照原比例推出来。
+ * 飞书里"按住 Shift 拖边或拖角"都是这个行为；表格和文字拖角永远走这条分支（高度由内容决定，
+ * 自由拉伸没有意义）。
  */
-function resizeBox(base, dir, rawDx, rawDy) {
+function resizeBox(base, dir, rawDx, rawDy, aspect) {
   const east = base.x + base.w
   const south = base.y + base.h
   let x = base.x
@@ -5714,7 +5789,54 @@ function resizeBox(base, dir, rawDx, rawDy) {
     h = Math.max(MIN_NODE_H, snapTo(base.h - rawDy, GRID))
     y = south - h
   }
+  // 等比：两轴都吸附到整格，所以比例是"格内近似"——整格是文档的不变量（走线、对齐都靠它）。
+  const ratio = typeof aspect === 'number' && aspect > 0 ? aspect : 0
+  if (ratio > 0) {
+    if (Math.abs(rawDx) >= Math.abs(rawDy)) h = Math.max(MIN_NODE_H, snapTo(w / ratio, GRID))
+    else w = Math.max(MIN_NODE_W, snapTo(h * ratio, GRID))
+    x = dir.indexOf('w') >= 0 ? east - w : base.x
+    y = dir.indexOf('n') >= 0 ? south - h : base.y
+  }
   return { x: x, y: y, w: w, h: h }
+}
+
+/**
+ * 一次缩放拖拽的**结果**：新的框（表格不在这里改字号；文字节点的字号跟着角点缩放）。
+ *
+ * 拖拽处理和命令行自测共用这一个函数，保证"按下手柄算出来的东西"和"测试断言的东西"是同一份逻辑。
+ * resize 就是 onResizePointerDown 存进 resizeRef 的那份基准（见那里的注释）：
+ * x/y/w/h 是**手柄所在的那个框**（形状=节点框，表格/文字=内容框），nodeX/nodeY/nodeW/nodeH
+ * 是文档里存着的节点框。
+ *
+ * 表格/文字的框仍然做"整体等比"的几何映射：它们的行高、列宽、换行都跟框走，只改 w/h 的话
+ * 高度不跟手（表格高度由内容决定）。这时节点框按同一个 k 缩放，而且要让**内容框的对角
+ * （没被拖的那个角）不动**。文字节点的字号跟着 k 一起变（否则文字块只改外框、字看不见地变大）；
+ * 表格的字号不跟着变，列宽变了按新宽度重排即可。
+ */
+function resizeOutcome(resize, rawDx, rawDy, shiftKey) {
+  const proportional = resize.scales === true || shiftKey === true
+  const box = resizeBox(
+    { x: resize.x, y: resize.y, w: resize.w, h: resize.h },
+    resize.dir,
+    rawDx,
+    rawDy,
+    proportional ? resize.aspect : 0,
+  )
+  const k = resize.scales === true && resize.w > 0 ? box.w / resize.w : 1
+  if (k === 1) return { x: box.x, y: box.y, w: box.w, h: box.h, k: 1, fontSize: null }
+  // 整体等比：内容框从对角锚点放大 k 倍，节点框跟着同一个 k 平移+缩放（相对位置不变）。
+  const east = resize.x + resize.w
+  const south = resize.y + resize.h
+  const frameX = resize.dir.indexOf('w') >= 0 ? east - resize.w * k : resize.x
+  const frameY = resize.dir.indexOf('n') >= 0 ? south - resize.h * k : resize.y
+  return {
+    x: frameX + (resize.nodeX - resize.x) * k,
+    y: frameY + (resize.nodeY - resize.y) * k,
+    w: Math.max(MIN_NODE_W, snapTo(resize.nodeW * k, GRID)),
+    h: Math.max(MIN_NODE_H, snapTo(resize.nodeH * k, GRID)),
+    k: k,
+    fontSize: resize.fontScales === true && resize.fontSize > 0 ? String(Math.round(resize.fontSize * k * 10) / 10) : null,
+  }
 }
 
 /**
@@ -6261,8 +6383,186 @@ function edgeLabelPosition(pts, edge) {
   return edgeLabelPointAt(pts, labelX, labelY, offX, offY)
 }
 
+/**
+ * 给 React 元素补一个 key。
+ *
+ * 直接复制元素对象而不是用 `React.cloneElement`：渲染结果在测试里也会被构造
+ * （tools/check-*.mjs 的 React 桩只有 createElement），少依赖一个 API 就少一处桩。
+ * 复制保留 $$typeof / type / props / ref，reconcile 时会被当成带 key 的兄弟。
+ */
+function elementWithKey(element, key) {
+  if (element === null || typeof element !== 'object' || element.type === undefined) return element
+  return Object.assign({}, element, { key })
+}
+
+// ── 导出卡面（issue #53）────────────────────────────────────────────────
+/*
+ * 画布上的卡面是 foreignObject 里的 HTML（见 renderDiagram 里的 audio-face / shotcard-face /
+ * mgstyle-face / motion-empty）。但**这种 SVG 没法当图片用**：只要里面有一个装着 HTML 的
+ * foreignObject，Chrome 就把 canvas 标脏，`toDataURL()` / `toBlob()` 抛
+ * `SecurityError: Tainted canvases may not be exported.`（157 实测：只有 <div> 也标脏）。
+ * 光栅导出因此只能带 aggressive=true 把所有卡面摘掉 —— 于是镜头卡、风格卡在导出图里
+ * 变成空底色框，正是 issue #53 报的现象。
+ *
+ * 所以导出/给 AI 看一眼时改走这里的 SVG 原生等效物：底色矩形 + 文字。不标脏、不触发
+ * 重试，卡面上的信息（卡 id、风格 key、音频角色与时长）也就保住了。交互画布仍用 HTML 卡面。
+ */
+const FACE_TEXT = 'Helvetica, Arial, sans-serif'
+
+/** 单行放不下就按字符裁，末尾补省略号。 */
+function fitFaceLine(value, size, maxWidth) {
+  const chars = Array.from(String(value === undefined || value === null ? '' : value))
+  let out = ''
+  let width = 0
+  for (let i = 0; i < chars.length; i += 1) {
+    const advance = textWidth(chars[i], size)
+    if (width + advance > maxWidth && out.length > 0) return out.slice(0, -1) + '…'
+    out += chars[i]
+    width += advance
+  }
+  return out
+}
+
+/** 折行 + 限行：放不下的部分在最后一行用省略号收尾。 */
+function wrapFaceLines(value, size, maxWidth, maxLines) {
+  const chars = Array.from(String(value === undefined || value === null ? '' : value).replace(/\s+/g, ' ').trim())
+  const lines = []
+  let index = 0
+  while (index < chars.length && lines.length < maxLines) {
+    let line = ''
+    let width = 0
+    while (index < chars.length) {
+      const advance = textWidth(chars[index], size)
+      if (width + advance > maxWidth && line.length > 0) break
+      line += chars[index]
+      width += advance
+      index += 1
+    }
+    if (lines.length === maxLines - 1 && index < chars.length) line = line.slice(0, -1) + '…'
+    lines.push(line)
+  }
+  return lines
+}
+
+/**
+ * 一个节点的导出卡面（SVG 原生元素数组）。
+ *
+ * 文案与 HTML 卡面一一对应；第二行起用 data 里的**原始 id**（shotCardId / shotStyleKey /
+ * mgStyleSlug），因为目录里的中文名在客户端才有，宿主那份要跟它保持一致。节点不是卡时返回空数组。
+ */
+function exportNodeFaces(node, geo, mode) {
+  const dark = mode === 'dark'
+  const data = node !== null && typeof node === 'object' && node.data !== null && typeof node.data === 'object' ? node.data : {}
+  const elements = []
+  const label = (key, x, centerY, size, fill, weight, anchor, value, opacity) => {
+    const style = { fontFamily: FACE_TEXT, fontSize: size + 'px', fill: fill, fontWeight: weight }
+    if (opacity !== undefined) style.fillOpacity = opacity
+    elements.push(React.createElement('text', Object.assign({
+      key: key, x: x, y: centerY, textAnchor: anchor, dominantBaseline: 'middle',
+      fontSize: size, fontFamily: FACE_TEXT, fill: fill, fontWeight: weight,
+    }, opacity === undefined ? {} : { fillOpacity: opacity }, { style: style }), value))
+  }
+  const panel = (key, x, y, width, height, fill, radius) => elements.push(React.createElement('rect', {
+    key: key, x: x, y: y, width: Math.max(0, width), height: Math.max(0, height),
+    rx: radius, ry: radius, fill: fill, style: { fill: fill },
+  }))
+
+  if (motionCore.isShotCardNode(node)) {
+    const card = motionCore.shotCatalog.cards.find((item) => item.id === data.shotCardId)
+    const style = card ? card.styles.find((item) => item.key === data.shotStyleKey) : null
+    const pad = Math.min(18, Math.max(10, geo.w / 12))
+    const inner = Math.max(12, geo.w - pad * 2)
+    const ink = dark ? '#e5dff8' : '#44336b'
+    const dim = dark ? '#b9aee0' : '#6d5f92'
+    panel('face-bg', geo.x + 1, geo.y + 1, geo.w - 2, geo.h - 2, dark ? '#292535' : '#f0edf8', 12)
+    let top = geo.y + pad
+    label('face-cat', geo.x + pad, top + 5, 11, dim, 'normal', 'start',
+      fitFaceLine('镜头参考 · ' + (motionCore.shotCatalog.categories[card && card.category]?.zh || '未知分类'), 11, inner), 0.8)
+    top += 24
+    for (const line of wrapFaceLines(data.shotCardId || node.label || '', 15, inner, 2)) {
+      label('face-id-' + Math.round(top), geo.x + pad, top + 6, 15, ink, 'bold', 'start', line)
+      top += 20
+    }
+    top += 4
+    label('face-style', geo.x + pad, top + 5, 12, dim, 'normal', 'start', fitFaceLine(data.shotStyleKey || '', 12, inner), 0.8)
+    top += 16
+    for (const line of wrapFaceLines((style && style.description) || (card && card.summary) || '', 11, inner, 3)) {
+      label('face-desc-' + Math.round(top), geo.x + pad, top + 5, 11, dim, 'normal', 'start', line, 0.65)
+      top += 17
+    }
+    if (geo.y + geo.h - pad - 8 > top + 8) {
+      label('face-hint', geo.x + pad, geo.y + geo.h - pad - 4, 11, dim, 'normal', 'start',
+        fitFaceLine('双击预览 · 连线到视频', 11, inner), 0.65)
+    }
+    return elements
+  }
+
+  if (motionCore.isMgStyleNode(node)) {
+    const style = motionCore.mgCatalog.styles.find((item) => item.slug === data.mgStyleSlug) || {}
+    const rhythm = style.rhythm || {}
+    const palette = style.palette || {}
+    const pad = Math.min(14, Math.max(10, geo.w / 14))
+    const inner = Math.max(12, geo.w - pad * 2)
+    const ink = dark ? '#efe3c2' : '#5a4a1a'
+    panel('face-bg', geo.x + 1, geo.y + 1, geo.w - 2, geo.h - 2, dark ? '#2d2a20' : '#fdf6e3', 10)
+    let top = geo.y + pad
+    const head = '整片风格' + (rhythm.aspect ? ' · ' + rhythm.aspect : '') + (rhythm.fps ? ' · ' + rhythm.fps + 'fps' : '')
+    label('face-cat', geo.x + pad, top + 5, 11, ink, 'normal', 'start', fitFaceLine(head, 11, inner), 0.8)
+    top += 24
+    for (const line of wrapFaceLines(style.name || data.mgStyleSlug || '未选风格', 15, inner, 2)) {
+      label('face-id-' + Math.round(top), geo.x + pad, top + 6, 15, ink, 'bold', 'start', line)
+      top += 20
+    }
+    let chipX = geo.x + pad
+    let chips = 0
+    for (const role of ['page', 'text', 'accent', 'field']) {
+      if (typeof palette[role] !== 'string' || palette[role] === '') continue
+      panel('face-chip-' + role, chipX, top + 2, 16, 16, palette[role], 4)
+      chipX += 20
+      chips += 1
+    }
+    if (chips > 0) top += 24
+    if (geo.y + geo.h - pad - 8 > top + 8) {
+      label('face-hint', geo.x + pad, geo.y + geo.h - pad - 4, 11, ink, 'normal', 'start',
+        fitFaceLine('双击换风格 · 连线到视频', 11, inner), 0.65)
+    }
+    return elements
+  }
+
+  if (motionCore.isAudioNode(node)) {
+    const ink = dark ? '#b8e5d5' : '#24594a'
+    const pad = 16
+    const inner = Math.max(12, geo.w - pad * 2)
+    let top = geo.y + pad
+    label('face-name', geo.x + pad, top + 7, 13, ink, 'bold', 'start',
+      fitFaceLine('♫ ' + (data.audioName || node.label || '音频'), 13, inner))
+    top += 26
+    const role = ({ sfx: '音效', bgm: '背景音乐', voice: '旁白' })[data.audioRole] || '音效'
+    const duration = data.audioDuration ? Number(data.audioDuration).toFixed(1) + ' 秒' : '待上传'
+    const lines = wrapFaceLines(role + ' · ' + duration, 13, inner, Math.max(1, Math.floor((geo.y + geo.h - pad - top) / 19)))
+    for (const line of lines) {
+      label('face-meta-' + Math.round(top), geo.x + pad, top + 6, 13, ink, 'normal', 'start', line)
+      top += 19
+    }
+    return elements
+  }
+
+  if (motionCore.isMotionNode(node) && !videoMetaOf(node)) {
+    label('face-title', geo.x + 8, geo.y - 15, 12, dark ? '#b8b2ad' : '#66605b', 'bold', 'start',
+      fitFaceLine(node.label || '视频', 12, Math.max(12, geo.w - 16)))
+    panel('face-bg', geo.x, geo.y, geo.w, geo.h, dark ? '#282523' : '#eeece9', 14)
+    label('face-empty', geo.x + geo.w / 2, geo.y + geo.h / 2, 14, dark ? '#a8a29e' : '#928b84', 'normal', 'middle', '空视频节点')
+    return elements
+  }
+
+  return elements
+}
+
 function renderDiagram(doc, mode, uid, svgRef, ui, view) {
   const skin = mode === 'dark' ? DARK : LIGHT
+  // 卡面怎么画：交互画布用 HTML（foreignObject），导出/给 AI 看一眼用 SVG 原生图元。
+  // 导出那条路必须是后者 —— 含 HTML 的 foreignObject 会把 canvas 标脏（issue #53）。
+  const faceMode = ui !== null && typeof ui === 'object' && ui.faces === 'text' ? 'text' : 'html'
   // 和 buildGeometry 用同一套几何：路由预览（局部命中/预览线）读的是 buildGeometry 的产物，
   // 两边各算一遍的话，只要默认值有一点差别，预览的落点就会和真正渲染的形状差几个像素。
   const geometry = buildGeometry(doc)
@@ -6280,6 +6580,13 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
   const vw = view !== undefined && view !== null ? view.w : maxX - minX + pad * 2
   const vh = view !== undefined && view !== null ? view.h : maxY - minY + pad * 2
   const viewBox = [vx, vy, vw, vh].join(' ')
+  // 画布上的覆盖层（选中框、缩放手柄、连线端点、预览线、辅助线）一律按**屏幕像素**定尺寸：
+  // 放大到 400% 时手柄还是 8px，不会长成 32px 把形状盖住；缩到 25% 时也还看得见、点得准。
+  // 飞书/drawio 都是这个口径（选中框与手柄的粗细、大小不随画布缩放变化）。
+  // pixel = "1 屏幕像素等于多少用户单位"：根 svg 是 preserveAspectRatio=none，横向正好是
+  // vw / 像素宽。导出与缩略图没有视口尺寸，退回 1 —— 那时用户单位就是像素，与改动前一致。
+  const viewportSize = ui === undefined || ui === null ? null : ui.viewportSize
+  const pixel = viewportSize !== null && viewportSize !== undefined && viewportSize.w > 0 && vw > 0 ? vw / viewportSize.w : 1
   const gridId = 'drawai-grid-' + uid
   const majorId = 'drawai-grid-major-' + uid
   const arrowId = 'drawai-arrow-' + uid
@@ -6511,8 +6818,10 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     // 刻意不再显示折点：它是"段平移"这套语义的内部记录，暴露出来只会让人多学一个概念。
     // 想撤销一条折弯用 Ctrl+Z；想全部回到自动，右键连线选「自动路由」。
     if (selected && ui !== undefined && ui !== null) {
-      const HANDLE_R = 4
-      const ENDPOINT_R = 5
+      // 半径与描边同样按**屏幕像素**折算（与节点缩放手柄同一口径）：放大画布时把手不会
+      // 长成一大团把线盖住，缩小画布时也还点得准。
+      const HANDLE_R = 4 * pixel
+      const ENDPOINT_R = 5 * pixel
       const handleCircle = (key, pos, onDown, fill, radius, stroke) =>
         React.createElement('circle', {
           key: key,
@@ -6522,7 +6831,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
           r: radius,
           fill: fill,
           stroke: stroke,
-          strokeWidth: 2,
+          strokeWidth: 2 * pixel,
           onPointerDown: onDown,
           // 双击把手 = 双击这条线。把手正压在**段的中点**上，而中点恰恰是"给线加文字"
           // 最自然会去双击的地方：单击选中（把手随即出现）→ 第二下打在把手上 →
@@ -6558,7 +6867,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
         const atEnd = s === pts.length - 2
         let pos = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
         if ((atStart || atEnd) && !(atStart && atEnd) && segLen < (HANDLE_R + ENDPOINT_R) * 2) pos = atStart ? b : a
-        const radius = Math.max(3, Math.min(HANDLE_R, segLen / 2))
+        const radius = Math.max(3 * pixel, Math.min(HANDLE_R, segLen / 2))
         children.push(handleCircle('edge-seg-' + i + '-' + s, pos, downAt('segment', s), '#ffffff', radius, '#f2a900'))
       }
     }
@@ -6577,8 +6886,8 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             d: d,
             fill: 'none',
             stroke: ACCENT,
-            strokeWidth: 2,
-            strokeDasharray: '6 4',
+            strokeWidth: 2 * pixel,
+            strokeDasharray: 6 * pixel + ' ' + 4 * pixel,
           }),
         )
         const end = sequence[sequence.length - 1]
@@ -6592,8 +6901,8 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
               x2: preview.x,
               y2: preview.y,
               stroke: ACCENT,
-              strokeWidth: 2,
-              strokeDasharray: '6 6',
+              strokeWidth: 2 * pixel,
+              strokeDasharray: 6 * pixel + ' ' + 6 * pixel,
               markerEnd: 'url(#' + arrowId + ')',
             }),
           )
@@ -6609,8 +6918,8 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             x2: preview.x,
             y2: preview.y,
             stroke: ACCENT,
-            strokeWidth: 2,
-            strokeDasharray: '6 4',
+            strokeWidth: 2 * pixel,
+            strokeDasharray: 6 * pixel + ' ' + 4 * pixel,
           }),
         )
       }
@@ -6712,18 +7021,26 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     }
     const drawing = ui && ui.traceDrawing && ui.traceDrawing.id === node.id ? ui.traceDrawing : null
     const paintNode = drawing ? Object.assign({}, node, { style: styleWithSvgMarkup(node.style || '', '<svg xmlns="http://www.w3.org/2000/svg"/>', '1') }) : node
-    const groupChildren = [shapeElement(paintNode, geo, colorOf(node, mode), mode)]
+    // 数组子元素必须有 key：第一个是形状本体，之后还要 push 表格 / foreignObject 等。
+    // 少了这个 key，表格节点（往同一数组里追加几十个 cell）会触发 React 的
+    // "Each child in a list should have a unique key" 警告。
+    const shapeKid = shapeElement(paintNode, geo, colorOf(node, mode), mode)
+    const groupChildren = [elementWithKey(shapeKid, 'shape')]
     if (drawing) {
       groupChildren.push(React.createElement('foreignObject', {
         key: 'trace-drawing', x: geo.x, y: geo.y, width: geo.w, height: geo.h,
       }, React.createElement(TraceDrawingSurface, { key: node.id, id: node.id, drawing: drawing.drawing,
         aspect: styleGet(node.style || '', 'imageAspect', '1'), onComplete: () => ui.onTraceDrawingComplete(node.id) })))
     }
-    if(ui && motionCore.isAudioNode(node))groupChildren.push(React.createElement('foreignObject',{key:'audio-face',x:geo.x+10,y:geo.y+10,width:Math.max(0,geo.w-20),height:Math.max(0,geo.h-20),pointerEvents:'none'},
+    // 导出/给 AI 看一眼：卡面走 SVG 原生图元，不带 foreignObject（见 exportNodeFaces）。
+    if (faceMode === 'text') {
+      for (const face of exportNodeFaces(node, geo, mode)) groupChildren.push(face)
+    }
+    if(faceMode === 'html' && motionCore.isAudioNode(node))groupChildren.push(React.createElement('foreignObject',{key:'audio-face',x:geo.x+10,y:geo.y+10,width:Math.max(0,geo.w-20),height:Math.max(0,geo.h-20),pointerEvents:'none'},
       React.createElement('div',{xmlns:'http://www.w3.org/1999/xhtml',style:{color:mode==='dark'?'#b8e5d5':'#24594a',fontSize:13,padding:6,overflow:'hidden',height:'100%',boxSizing:'border-box'}},
         React.createElement('strong',null,'♫ '+(node.data.audioName||node.label||'音频')),
         React.createElement('p',null,({sfx:'音效',bgm:'背景音乐',voice:'旁白'}[node.data.audioRole]||'音效')+' · '+(node.data.audioDuration?Number(node.data.audioDuration).toFixed(1)+' 秒':'待上传')))))
-    if (ui && motionCore.isShotCardNode(node)) {
+    if (faceMode === 'html' && motionCore.isShotCardNode(node)) {
       const card = motionCore.shotCatalog.cards.find((item) => item.id === node.data.shotCardId)
       const style = card?.styles.find((item) => item.key === node.data.shotStyleKey)
       groupChildren.push(React.createElement('foreignObject', { key: 'shotcard-face', x: geo.x + 1, y: geo.y + 1, width: Math.max(0, geo.w - 2), height: Math.max(0, geo.h - 2), pointerEvents: 'none' },
@@ -6735,7 +7052,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
           React.createElement('div', { style: { fontSize: 11, lineHeight: 1.7, overflow: 'hidden', opacity: .65 } }, style?.description || card?.summary),
           React.createElement('small', { style: { marginTop: 'auto', opacity: .65 } }, '双击预览 · 连线到视频'))))
     }
-    if (ui && motionCore.isMgStyleNode(node)) {
+    if (faceMode === 'html' && motionCore.isMgStyleNode(node)) {
       const style = motionCore.mgCatalog.styles.find((item) => item.slug === node.data.mgStyleSlug) || {}
       const chip = (role, color) => React.createElement('span', { key: role, style: { width: 16, height: 16, borderRadius: 4, background: color, border: '1px solid #0002', display: 'inline-block' } })
       groupChildren.push(React.createElement('foreignObject', { key: 'mgstyle-face', x: geo.x + 1, y: geo.y + 1, width: Math.max(0, geo.w - 2), height: Math.max(0, geo.h - 2), pointerEvents: 'none' },
@@ -6746,7 +7063,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
           React.createElement('div', { style: { display: 'flex', gap: 4 } }, ['page', 'text', 'accent', 'field'].map((role) => style.palette?.[role] ? chip(role, style.palette[role]) : null)),
           React.createElement('small', { style: { marginTop: 'auto', opacity: .65 } }, '双击换风格 · 连线到视频'))))
     }
-    if (ui && motionCore.isMotionNode(node) && !videoMetaOf(node)) {
+    if (faceMode === 'html' && motionCore.isMotionNode(node) && !videoMetaOf(node)) {
       groupChildren.push(React.createElement('foreignObject', { key: 'video-node-title', x: geo.x + 8, y: geo.y - 25, width: geo.w - 16, height: 20, pointerEvents: 'none' },
         React.createElement('div', { xmlns: 'http://www.w3.org/1999/xhtml', style: { color: mode === 'dark' ? '#b8b2ad' : '#66605b', fontSize: 12, fontWeight: 600 } }, node.label || '视频')))
       groupChildren.push(React.createElement('foreignObject', { key: 'motion-empty', x: geo.x, y: geo.y, width: geo.w, height: geo.h },
@@ -6760,43 +7077,77 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
         meta: videoMetaOf(node), poster: videoPosterOf(node),
         onPlay: () => { if (ui.onVideoPlay) ui.onVideoPlay(node.id) } })))
     }
-    // 单选一个节点时给 8 个方向的缩放手柄。
-    if (selected && ui !== undefined && ui !== null && ui.singleSelectedNodeId === node.id && typeof ui.onResizePointerDown === 'function') {
-      const dirs = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w']
-      for (let d = 0; d < dirs.length; d += 1) {
-        const dir = dirs[d]
-        const hx = dir.indexOf('w') >= 0 ? geo.x : dir.indexOf('e') >= 0 ? geo.x + geo.w : geo.x + geo.w / 2
-        const hy = dir.indexOf('n') >= 0 ? geo.y : dir.indexOf('s') >= 0 ? geo.y + geo.h : geo.y + geo.h / 2
-        groupChildren.push(
-          React.createElement('rect', {
-            key: 'rs-' + dir,
-            className: 'drawai-handle drawai-rs-' + dir,
-            x: hx - 4,
-            y: hy - 4,
-            width: 8,
-            height: 8,
-            fill: '#ffffff',
-            stroke: ACCENT,
-            strokeWidth: 1.5,
-            onPointerDown: (event) => ui.onResizePointerDown(node.id, dir, event),
-          }),
-        )
-      }
-    }
+    // 选中框与手柄贴内容走（表格按行高、文字按文字块），见 nodeFrameBox。
+    const frameBox = nodeFrameBox(node, geo)
+    // 选中框贴边走：线压在节点轮廓上，圆角取节点自己的圆角（飞书画板就是这个外观）。
+    // 线宽 2px 是**屏幕像素**（见 pixel），放大后框不会变粗。
     if (selected) {
       groupChildren.push(
         React.createElement('rect', {
           key: 'sel',
-          x: geo.x - 3,
-          y: geo.y - 3,
-          width: geo.w + 6,
-          height: geo.h + 6,
-          rx: 4,
+          x: frameBox.x,
+          y: frameBox.y,
+          width: frameBox.w,
+          height: frameBox.h,
+          rx: nodeFrameRadius(node, frameBox),
           fill: 'none',
+          strokeWidth: 2 * pixel,
           className: 'drawai-sel',
           pointerEvents: 'none',
         }),
       )
+    }
+    // 单选一个节点时给缩放手柄 + 四边热区。尺寸与位置都在**屏幕像素**里算（pixel = 1 像素等于多少
+    // 用户单位）：画布放大到 400% 手柄仍是 8px，缩到 25% 也仍点得准，且始终贴着内容框。
+    if (selected && ui !== undefined && ui !== null && ui.singleSelectedNodeId === node.id && typeof ui.onResizePointerDown === 'function') {
+      // 四条边各一条 10px 厚的透明热区：整条边任意位置都能开始缩放（飞书画板不画中点手柄），
+      // 光标按方向给 ns/ew-resize；热区一半在框外，贴边按下去也算。角手柄后画，压在热区上面。
+      const edgeThick = 10 * pixel
+      const edgeHalf = edgeThick / 2
+      const zones = [
+        ['n', frameBox.x - edgeHalf, frameBox.y - edgeHalf, frameBox.w + edgeThick, edgeThick],
+        ['e', frameBox.x + frameBox.w - edgeHalf, frameBox.y - edgeHalf, edgeThick, frameBox.h + edgeThick],
+        ['s', frameBox.x - edgeHalf, frameBox.y + frameBox.h - edgeHalf, frameBox.w + edgeThick, edgeThick],
+        ['w', frameBox.x - edgeHalf, frameBox.y - edgeHalf, edgeThick, frameBox.h + edgeThick],
+      ]
+      for (let z = 0; z < zones.length; z += 1) {
+        const zone = zones[z]
+        groupChildren.push(
+          React.createElement('rect', {
+            key: 'edgezone-' + zone[0],
+            className: 'drawai-edgezone drawai-edgezone-' + zone[0],
+            x: zone[1],
+            y: zone[2],
+            width: zone[3],
+            height: zone[4],
+            fill: 'transparent',
+            pointerEvents: 'all',
+            onPointerDown: (event) => ui.onResizePointerDown(node.id, zone[0], event),
+          }),
+        )
+      }
+      // 飞书画板只有 4 个角手柄；边上的缩放靠上面的整条边热区，不再画中点方块。
+      const dirs = ['nw', 'ne', 'se', 'sw']
+      const half = 4 * pixel
+      for (let d = 0; d < dirs.length; d += 1) {
+        const dir = dirs[d]
+        const hx = dir.indexOf('w') >= 0 ? frameBox.x : frameBox.x + frameBox.w
+        const hy = dir.indexOf('n') >= 0 ? frameBox.y : frameBox.y + frameBox.h
+        groupChildren.push(
+          React.createElement('rect', {
+            key: 'rs-' + dir,
+            className: 'drawai-handle drawai-rs-' + dir,
+            x: hx - half,
+            y: hy - half,
+            width: 8 * pixel,
+            height: 8 * pixel,
+            fill: '#ffffff',
+            stroke: ACCENT,
+            strokeWidth: 1.5 * pixel,
+            onPointerDown: (event) => ui.onResizePointerDown(node.id, dir, event),
+          }),
+        )
+      }
     }
     // 标签的画法也在文档里：fontSize / fontColor / whiteSpace。
     // whiteSpace=nowrap 不换行（drawio 的语义就是这个），其余（含缺省）按宽度换行。
@@ -6850,23 +7201,23 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     }
     // 四面引出端点：上下左右各一个，从这里拖到另一个节点 = 连一条边，
     // 并且**记住是从哪一边引出的**（拖出来的线从那一边出来，不会按算法另挑一边）。
-    // 位置推在边框外 16px —— 边框上有 8 个缩放手柄，挤在一起会点错。
+    // 位置推在内容框外 20px（屏幕像素），与飞书的浅蓝快捷点同距；边框上只有 4 个角手柄，不会点错。
     if (selected && ui !== undefined && ui !== null && typeof ui.onHandlePointerDown === 'function') {
       const sides = ['n', 'e', 's', 'w']
+      const gap = 20 * pixel
       for (let d = 0; d < sides.length; d += 1) {
         const side = sides[d]
-        const hx = side === 'e' || side === 'w' ? geo.x + (side === 'e' ? geo.w + 16 : -16) : geo.x + geo.w / 2
-        const hy = side === 'n' || side === 's' ? geo.y + (side === 's' ? geo.h + 16 : -16) : geo.y + geo.h / 2
+        const hx = side === 'e' || side === 'w' ? frameBox.x + (side === 'e' ? frameBox.w + gap : -gap) : frameBox.x + frameBox.w / 2
+        const hy = side === 'n' || side === 's' ? frameBox.y + (side === 's' ? frameBox.h + gap : -gap) : frameBox.y + frameBox.h / 2
         groupChildren.push(
           React.createElement('circle', {
             key: 'link-' + side,
             className: 'drawai-handle drawai-link',
             cx: hx,
             cy: hy,
-            r: 5,
-            fill: '#0a7d32',
-            stroke: '#ffffff',
-            strokeWidth: 2,
+            r: 5 * pixel,
+            fill: '#b6caf9',
+            stroke: 'none',
             onPointerDown: (event) => ui.onHandlePointerDown(node.id, side, event),
           }),
         )
@@ -6882,8 +7233,9 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
       const to = ui.connectTo
       const straight = () => {
         const side = typeof ui.connectSide === 'string' ? ui.connectSide : 'e'
-        const x = side === 'e' || side === 'w' ? geo.x + (side === 'e' ? geo.w + 16 : -16) : geo.x + geo.w / 2
-        const y = side === 'n' || side === 's' ? geo.y + (side === 's' ? geo.h + 16 : -16) : geo.y + geo.h / 2
+        const gap = 20 * pixel
+        const x = side === 'e' || side === 'w' ? frameBox.x + (side === 'e' ? frameBox.w + gap : -gap) : frameBox.x + frameBox.w / 2
+        const y = side === 'n' || side === 's' ? frameBox.y + (side === 's' ? frameBox.h + gap : -gap) : frameBox.y + frameBox.h / 2
         return [{ x: x, y: y }, { x: to.x, y: to.y }]
       }
       const pts = preview !== null && preview !== undefined && Array.isArray(preview.points) && preview.points.length >= 2 ? preview.points : straight()
@@ -6896,8 +7248,8 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             d: d,
             fill: 'none',
             stroke: ACCENT,
-            strokeWidth: 2,
-            strokeDasharray: '6 4',
+            strokeWidth: 2 * pixel,
+            strokeDasharray: 6 * pixel + ' ' + 4 * pixel,
           }),
         )
         const anchor = pts[0]
@@ -6914,8 +7266,8 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
               x2: to.x,
               y2: to.y,
               stroke: ACCENT,
-              strokeWidth: 2,
-              strokeDasharray: '6 6',
+              strokeWidth: 2 * pixel,
+              strokeDasharray: 6 * pixel + ' ' + 6 * pixel,
               markerEnd: 'url(#' + arrowId + ')',
             }),
           )
@@ -6927,10 +7279,10 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             className: 'drawai-preview',
             cx: anchor.x,
             cy: anchor.y,
-            r: 3.5,
+            r: 3.5 * pixel,
             fill: ACCENT,
             stroke: '#ffffff',
-            strokeWidth: 1.5,
+            strokeWidth: 1.5 * pixel,
           }),
         )
       }
@@ -6948,14 +7300,14 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
         React.createElement('rect', {
           key: 'hot-ring',
           className: 'drawai-hot-ring',
-          x: geo.x - 6,
-          y: geo.y - 6,
-          width: geo.w + 12,
-          height: geo.h + 12,
-          rx: 8,
+          x: geo.x - 6 * pixel,
+          y: geo.y - 6 * pixel,
+          width: geo.w + 12 * pixel,
+          height: geo.h + 12 * pixel,
+          rx: 8 * pixel,
           fill: 'none',
           stroke: ACCENT,
-          strokeWidth: 2.5,
+          strokeWidth: 2.5 * pixel,
         }),
       )
 
@@ -6976,10 +7328,10 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             className: on ? 'drawai-anchor drawai-anchor-on' : 'drawai-anchor',
             cx: a.x,
             cy: a.y,
-            r: on ? 6 : 4,
+            r: (on ? 6 : 4) * pixel,
             fill: on ? ACCENT : '#ffffff',
             stroke: on ? '#ffffff' : ACCENT,
-            strokeWidth: 2,
+            strokeWidth: 2 * pixel,
           }),
         )
       }
@@ -7040,8 +7392,8 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             d: d,
             fill: 'none',
             stroke: ACCENT,
-            strokeWidth: 2,
-            strokeDasharray: '6 4',
+            strokeWidth: 2 * pixel,
+            strokeDasharray: 6 * pixel + ' ' + 4 * pixel,
             pointerEvents: 'none',
           }),
         )
@@ -7055,8 +7407,8 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
             x2: toPt.x,
             y2: toPt.y,
             stroke: ACCENT,
-            strokeWidth: 2,
-            strokeDasharray: '6 4',
+            strokeWidth: 2 * pixel,
+            strokeDasharray: 6 * pixel + ' ' + 4 * pixel,
             pointerEvents: 'none',
           }),
         )
@@ -7075,8 +7427,8 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
           height: bh,
           fill: 'rgba(56,107,255,0.12)',
           stroke: ACCENT,
-          strokeWidth: 1,
-          strokeDasharray: '4 3',
+          strokeWidth: 1 * pixel,
+          strokeDasharray: 4 * pixel + ' ' + 3 * pixel,
           pointerEvents: 'none',
         }),
       )
@@ -7094,14 +7446,14 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
     children.push(
       React.createElement(
         'line',
-        Object.assign({ key: 'guide-' + i, stroke: ACCENT, strokeWidth: 1, strokeDasharray: '4 3', pointerEvents: 'none' }, geom),
+        Object.assign({ key: 'guide-' + i, stroke: ACCENT, strokeWidth: 1 * pixel, strokeDasharray: 4 * pixel + ' ' + 3 * pixel, pointerEvents: 'none' }, geom),
       ),
     )
   }
 
   // 使用与 viewBox 同一帧量到的像素尺寸。100% 会在容器拖动时先拉伸旧视口，
   // ResizeObserver / React 尚未提交更新的那一帧，节点与文字就会被缩放。
-  const viewportSize = ui && ui.viewportSize
+  // viewportSize 在函数开头就取过了（覆盖层的 pixel 要用），这里直接用。
   const width = viewportSize && viewportSize.w > 0 ? viewportSize.w : '100%'
   const height = viewportSize && viewportSize.h > 0 ? viewportSize.h : '100%'
   // 宿主的 svg { max-width:100%; height:auto } 不能压缩尚未更新的旧画面。
@@ -7109,7 +7461,7 @@ function renderDiagram(doc, mode, uid, svgRef, ui, view) {
   if (typeof width === 'number' && typeof height === 'number') {
     Object.assign(viewportStyle, { width, height, maxWidth: 'none', maxHeight: 'none' })
   }
-  return React.createElement('svg', { ref: svgRef, viewBox: viewBox, width, height, preserveAspectRatio: 'none', style: viewportStyle }, children)
+  return React.createElement('svg', { key: 'diagram', ref: svgRef, viewBox: viewBox, width, height, preserveAspectRatio: 'none', style: viewportStyle }, children)
 }
 
 /**
@@ -7690,8 +8042,12 @@ function CanvasView(props) {
   const editingState = React.useState(null)
   const editing = editingState[0]
   const setEditing = editingState[1]
-  const [tableEditor, setTableEditor] = React.useState(null)
+  // 表格是就地编辑：state 只记"正在改哪一格"，不再挂一整张表的弹窗模型。
+  const [cellEdit, setCellEdit] = React.useState(null)
   const richEditorRef = React.useRef(null)
+  // Esc / 换格会先关掉编辑框，随后才轮到 blur —— 这个标记让 blur 知道"不是用户点走了"。
+  const cellSkipBlurRef = React.useRef(false)
+  const cellEditorRef = React.useRef(null)
   const richDirtyRef = React.useRef(false)
   const richFormatRef = React.useRef(false)
   const richSelectionRef = React.useRef(null)
@@ -9619,40 +9975,117 @@ function CanvasView(props) {
    * 于是编辑框里的断行与字号跟提交后画出来的标签一模一样（需求"输入时的效果与
    * 输入完成后统一"）。定位仍然换算到**画布容器**的坐标系（画布是定位上下文）。
    */
-  function openTableEditor(id) {
+  /**
+   * 一格在**画布容器**里的像素框。表格用的是画布坐标，乘 ctm 的 scale 再减容器原点，
+   * 于是编辑框正好盖在画出来的格子上（缩放后也一样：字号同样乘 scale）。
+   */
+  function tableCellBox(node, model, row, col) {
+    const svg = svgRef.current
+    const canvas = canvasRef.current
+    if (svg === null || canvas === null) return null
+    const ctm = svg.getScreenCTM()
+    if (ctm === null) return null
+    const rects = tableCellRects(node, model)
+    if (row < 0 || row >= rects.length || col < 0 || col >= rects[row].length) return null
+    const rect = canvas.getBoundingClientRect()
+    const cell = rects[row][col]
+    const layout = tableNodeLayout(node, model)
+    const scale = numberOr(ctm.a, 1)
+    return {
+      left: cell.x * scale + numberOr(ctm.e, 0) - rect.left,
+      top: cell.y * scale + numberOr(ctm.f, 0) - rect.top,
+      width: Math.max(24, cell.w * scale),
+      height: Math.max(18, cell.h * scale),
+      fontSize: Math.max(6, layout.fs * scale),
+      lineHeight: Math.max(8, layout.lineHeight * scale),
+    }
+  }
+
+  /** 打开某一格的编辑框（就地改，不弹页）。`givenModel` 用于换格时沿用刚提交的模型。 */
+  function openTableCell(id, row, col, givenModel) {
     const node = nodeById(id)
-    const model = parseCanvasTable(node)
-    if (!node || !model || !filterEditableIds(docRef.current, [id]).includes(id)) return
+    if (node === null) return
+    const model = givenModel || parseCanvasTable(node)
+    if (!model || !model.rows.length) return
+    if (!filterEditableIds(docRef.current, [id]).includes(id)) return
+    const rows = model.rows
+    const r = Math.max(0, Math.min(rows.length - 1, Math.floor(row) || 0))
+    const c = Math.max(0, Math.min(rows[r].length - 1, Math.floor(col) || 0))
+    const box = tableCellBox(node, model, r, c)
+    if (box === null) return
     setEditing(null)
     setSelectedIds([id])
     setMenu(null)
-    setTableEditor({ id, model, original: node.label, path: target, page: pageIndex, hasFormatting: typeof node.labelHtml === 'string' })
+    cellSkipBlurRef.current = false
+    setCellEdit(Object.assign({ id: id, row: r, col: c, text: rows[r][c], model: model,
+      original: node.label, path: target, page: pageIndex, hasFormatting: typeof node.labelHtml === 'string' }, box))
   }
 
-  function saveTableEditor(model) {
-    if (!tableEditor) return
-    const node = nodeById(tableEditor.id)
-    if (target !== tableEditor.path || pageIndex !== tableEditor.page || !node || node.label !== tableEditor.original) {
-      setSaveNote('表格已被其他修改更新，请重新打开后编辑')
-      return
-    }
-    if (JSON.stringify(model) !== JSON.stringify(tableEditor.model)) {
-      applyLocal((next) => {
-        const changed = next.nodes.find(item => item.id === tableEditor.id)
+  /**
+   * 提交当前格。`next` 可以是 `(model) => ({row, col})`：Enter/Tab 提交后直接跳到下一格
+   * （飞书表格的手感），返回 null 表示"到头了就关掉"。
+   */
+  function commitTableCell(next) {
+    const edit = cellEdit
+    if (edit === null) return
+    const node = nodeById(edit.id)
+    const text = edit.text
+    const model = Object.assign({}, edit.model, {
+      rows: edit.model.rows.map((row, r) => r === edit.row ? row.map((v, c) => c === edit.col ? text : v) : row),
+    })
+    const dirty = text !== edit.model.rows[edit.row][edit.col]
+    if (node !== null && dirty && target === edit.path && pageIndex === edit.page) {
+      applyLocal((doc) => {
+        const changed = doc.nodes.find(item => item.id === edit.id)
         if (!changed) return
         changed.label = serializeCanvasTable(model)
-        changed.data = { ...changed.data, drawaiTableEscaped: '1' }
+        changed.data = Object.assign({}, changed.data, { drawaiTableEscaped: '1' })
         if (typeof changed.labelHtml === 'string') changed.labelHtml = null
         changed.h = Math.max(Number(changed.h) || 0, tableNodeLayout(changed, model).height)
       })
     }
-    setTableEditor(null)
+    const move = typeof next === 'function' ? next(model) : null
+    if (move !== null) openTableCell(edit.id, move.row, move.col, model)
+    else setCellEdit(null)
+  }
+
+  function cancelTableCell() {
+    // Esc / 换格引起的 blur 不应该提交：先立标记，blur 回调看到它就直接放弃。
+    cellSkipBlurRef.current = true
+    setCellEdit(null)
+  }
+
+  /** 行列增删：菜单里点一下就走这里，和改单元格一样走 applyLocal（可撤销）。 */
+  function applyTableOp(id, op, row, col) {
+    setMenu(null)
+    const node = nodeById(id)
+    const model = parseCanvasTable(node)
+    if (node === null || model === null || !model.rows.length) return
+    const rows = model.rows.map((cells) => cells.slice())
+    const width = rows[0].length
+    const emptyRow = () => rows[0].map(() => '')
+    if (op === 'row-above') rows.splice(row, 0, emptyRow())
+    else if (op === 'row-below') rows.splice(row + 1, 0, emptyRow())
+    else if (op === 'row-delete') { if (rows.length <= 2) return; rows.splice(row, 1) }
+    else if (op === 'col-left') rows.forEach((cells) => cells.splice(col, 0, ''))
+    else if (op === 'col-right') rows.forEach((cells) => cells.splice(col + 1, 0, ''))
+    else if (op === 'col-delete') { if (width <= 2) return; rows.forEach((cells) => cells.splice(col, 1)) }
+    else return
+    const modelNext = Object.assign({}, model, { rows: rows })
+    applyLocal((doc) => {
+      const changed = doc.nodes.find(item => item.id === id)
+      if (!changed) return
+      changed.label = serializeCanvasTable(modelNext)
+      changed.data = Object.assign({}, changed.data, { drawaiTableEscaped: '1' })
+      if (typeof changed.labelHtml === 'string') changed.labelHtml = null
+      changed.h = Math.max(Number(changed.h) || 0, tableNodeLayout(changed, modelNext).height)
+    })
   }
 
   function openNodeEditor(id) {
     const node = nodeById(id)
     if (node === null) return
-    if (isTableNode(node)) { openTableEditor(id); return }
+    if (isTableNode(node)) { openTableCell(id, 0, 0); return }
     if (motionCore.isShotCardNode(node)) { setShotLibrary({ replaceId: node.id, initialSelection: { cardId: node.data.shotCardId, styleKey: node.data.shotStyleKey } }); return }
     if (motionCore.isMgStyleNode(node)) { setMgLibrary({ replaceId: node.id, initialSelection: { slug: node.data.mgStyleSlug } }); return }
     const svg = svgRef.current
@@ -9685,6 +10118,13 @@ function CanvasView(props) {
       return
     }
     if (node !== null && !nodeShowsLabel(node)) return
+    // 表格：双击落在哪一格就开哪一格（双击表头也能改列名），不用先选中再找按钮。
+    if (node !== null && isTableNode(node)) {
+      const model = parseCanvasTable(node)
+      const hit = model === null ? null : tableCellAt(node, model, toUserSpace(event))
+      openTableCell(id, hit === null ? 0 : hit.row, hit === null ? 0 : hit.col)
+      return
+    }
     openNodeEditor(id)
   }
 
@@ -9923,17 +10363,15 @@ function CanvasView(props) {
     if (resize !== null) {
       const point = toUserSpace(event)
       if (point === null) return
-      // 缩放的最小单位是**一格**：交给 resizeBox（尺寸按 GRID 吸附、对边原地不动、下限也取整格）。
-      const box = resizeBox(
-        { x: resize.x, y: resize.y, w: resize.w, h: resize.h },
-        resize.dir,
-        point.x - resize.originX,
-        point.y - resize.originY,
-      )
-      const x = box.x
-      const y = box.y
-      const w = box.w
-      const h = box.h
+      // 缩放的最小单位是**一格**：交给 resizeOutcome（尺寸按 GRID 吸附、对边原地不动、下限也取整格）。
+      // 等比：表格/文字（内容定高，自由拉伸没有意义）拖角永远等比；其余形状按住 Shift 才等比，
+      // 边和角都吃 Shift —— 飞书里"等比例拉伸"就是按住 Shift 拖边或拖角。
+      const result = resizeOutcome(resize, point.x - resize.originX, point.y - resize.originY, event.shiftKey === true)
+      const x = result.x
+      const y = result.y
+      const w = result.w
+      const h = result.h
+      const fontSize = result.fontSize
       applyLocal((next) => {
         for (let i = 0; i < next.nodes.length; i += 1) {
           if (next.nodes[i].id !== resize.id) continue
@@ -9941,6 +10379,7 @@ function CanvasView(props) {
           next.nodes[i].y = y
           next.nodes[i].w = w
           next.nodes[i].h = h
+          if (fontSize !== null && fontSize !== undefined) next.nodes[i].style = stylePatch(next.nodes[i].style || '', { fontSize: fontSize })
           break
         }
       }, 'resize:' + resize.id + ':' + resize.dir)
@@ -10105,15 +10544,37 @@ function CanvasView(props) {
     const node = nodeById(id)
     const point = toUserSpace(event)
     if (node === null || point === null) return
+    // 拖拽基准取**手柄所在的那个框**：形状是节点框，表格/文字是内容框（看得见的那一圈）。
+    // 基准不是手柄所在的框的话，一按下去框就先跳一下；表格尤其明显（存的 h 可能比表格本身高很多，
+    // 按节点框算比例会把高度算成两倍多，等比缩放直接跑偏）。
+    const geo = nodeBoxOf(node)
+    const framed = contentFramedNode(node)
+    const textNode = shapeOf(node) === 'text' && typeof node.label === 'string' && node.label.length > 0
+    // 文字节点的选中框是紧贴文字的，任何方向缩放都按内容框走并同步改字号；表格只有角点
+    // 按内容框等比（边只改宽度，高度由内容决定）；普通形状拖角用节点框。
+    const base = textNode || (framed && dir.length === 2) ? nodeFrameBox(node, geo) : geo
+    const aspect = base.w > 0 && base.h > 0 ? base.w / base.h : 1
     resizeRef.current = {
       id: id,
       dir: dir,
       originX: point.x,
       originY: point.y,
-      x: numberOr(node.x, 0),
-      y: numberOr(node.y, 0),
-      w: numberOr(node.w, FALLBACK_NODE_W),
-      h: numberOr(node.h, FALLBACK_NODE_H),
+      x: base.x,
+      y: base.y,
+      w: base.w,
+      h: base.h,
+      // 拖角等比用的原始宽高比；scales 表示"这个节点缩放永远等比"
+      // （文字所有方向、表格的角点：高度由内容决定，自由拉伸没有意义）。
+      aspect: aspect,
+      scales: textNode || (framed && dir.length === 2),
+      // 文字节点的缩放同时改字号；表格只改框。
+      fontScales: textNode,
+      fontSize: textNode ? styleNumber(typeof node.style === 'string' ? node.style : '', 'fontSize', FSIZE) : null,
+      // 文档里存着的节点框：等比时节点框要按同一个比例缩，而锚点看的是内容框。
+      nodeX: geo.x,
+      nodeY: geo.y,
+      nodeW: geo.w,
+      nodeH: geo.h,
     }
     requestCapture(event)
   }
@@ -10128,7 +10589,7 @@ function CanvasView(props) {
     const withGrid = typeof options.grid === 'boolean' ? options.grid : !transparent && showGrid
     const area = exportGeometry(boundsDoc, options)
     const output = exportOutputSize(area.width, area.height, Object.assign({ format: 'svg' }, options))
-    const clone = svgTreeToDom(renderDiagram(boundsDoc, mode, uid + '-export', { current: null }, { showGrid: withGrid },
+    const clone = svgTreeToDom(renderDiagram(boundsDoc, mode, uid + '-export', { current: null, faces: 'text' }, { showGrid: withGrid },
       { x: area.x, y: area.y, w: area.width, h: area.height }), document)
     // 框按**这一刻会画出来的东西**取：`paintedBounds` 用渲染器同一批函数算出
     // 节点框、标签、每条边的实际走线与线上的文字（与 `renderDiagram` 同一个口径）。
@@ -10397,6 +10858,15 @@ function CanvasView(props) {
   }
 
   function onNodeContextMenu(id, event) {
+    // 表格的右键菜单是「这一格」的：行列增删都按落点算，菜单项直接作用在那个格子上。
+    const tableNode = nodeById(id)
+    const tableModel = tableNode === null ? null : (isTableNode(tableNode) ? parseCanvasTable(tableNode) : null)
+    if (tableModel !== null && !(selectedIds.length > 1 && selectedIds.indexOf(id) >= 0)) {
+      const hit = tableCellAt(tableNode, tableModel, toUserSpace(event))
+      setSelectedIds([id])
+      openMenu('tableCell', id, event, false, { row: hit === null ? 0 : hit.row, col: hit === null ? 0 : hit.col })
+      return
+    }
     // 右键的节点**已经在选区里**且选区不止一个 → 用户想收拾的是这一整批（对齐/分布），
     // 而不是要把选区缩成这一个。选单个时保持原行为（形状/配色/改标签/删除）。
     if (selectedIds.length > 1 && selectedIds.indexOf(id) >= 0) {
@@ -12329,8 +12799,18 @@ function CanvasView(props) {
     onResizePointerDown: onResizePointerDown,
   }
 
+  /**
+   * 菜单行是同一个 children 数组里的兄弟，React 要求每个都带 key。
+   * 各处 `rows.push(...)` 写法新旧不一，统一在这里补：已有 key 的保持原样，缺的按顺序生成。
+   */
+  function keyedRows(rows) {
+    return rows.map((row, index) =>
+      row && typeof row === 'object' && row.type !== undefined && row.key == null ? elementWithKey(row, 'row-' + index) : row)
+  }
+
   function menuTitle(text) {
-    return React.createElement('div', { className: 'drawai-menu-title' }, text)
+    // 菜单行是同一个 children 数组里的兄弟，必须带 key；用文字派生，避免同一菜单里多个标题撞车。
+    return React.createElement('div', { key: 'menu-title-' + String(text), className: 'drawai-menu-title' }, text)
   }
 
   /**
@@ -12841,13 +13321,13 @@ function CanvasView(props) {
   }
 
   function renderSelectionToolbar() {
-    if (!active || doc === null || view === null || tableEditor !== null || menu !== null || placeEdgeKind !== null || placeTool !== null) return null
+    if (!active || doc === null || view === null || cellEdit !== null || menu !== null || placeEdgeKind !== null || placeTool !== null) return null
     const ids = filterEditableIds(doc, selectedIds)
     const nodes = doc.nodes.filter((n) => ids.indexOf(n.id) >= 0)
     const edges = doc.edges.filter((e) => ids.indexOf(e.id) >= 0)
     if (nodes.length + edges.length === 0) return null
     const cells = nodes.concat(edges)
-    const boxes = nodes.map((n) => nodeBoxOf(n))
+    const boxes = nodes.map((n) => nodeFrameBox(n, nodeBoxOf(n)))
     for (const edge of edges) {
       const points = edgeRoutePoints(doc, edge, routeMemoryRef.current) || []
       for (const p of points) boxes.push({ x: p.x, y: p.y, w: 0, h: 0 })
@@ -12863,7 +13343,7 @@ function CanvasView(props) {
       const node = nodes[0]
       return React.createElement(NodeToolCard, { canvasRef, className: 'drawai-selection-toolbar', role: 'toolbar', 'aria-label': '表格操作', fallbackTop: bottom + 12,
         style: { width: '96px', left: center - 48 + 'px', top: top - 72 + 'px' } },
-        React.createElement('button', { type: 'button', className: 'drawai-toolbar-button', onClick: () => openTableEditor(node.id), 'aria-label': '编辑表格' },
+        React.createElement('button', { type: 'button', className: 'drawai-toolbar-button', onClick: () => openTableCell(node.id, 0, 0), 'aria-label': '编辑表格' },
           railIcon('table'), React.createElement('span', { className: 'drawai-color-label' }, '编辑表格')))
     }
     if(nodes.length===1&&edges.length===0&&motionCore.isAudioNode(nodes[0])){
@@ -13440,7 +13920,7 @@ function CanvasView(props) {
       )
       const leftD = Math.max(0, Math.min(menu.left, size.w - 214))
       const topD = Math.max(0, Math.min(menu.top, size.h - 8))
-      return React.createElement('div', { className: 'drawai-menu', style: { left: leftD + 'px', top: topD + 'px' } }, rows)
+      return React.createElement('div', { className: 'drawai-menu', style: { left: leftD + 'px', top: topD + 'px' } }, keyedRows(rows))
     }
 
     // 「SVG 内容…」面板：svg 节点的图形标记就是一段文本，摊在多行框里改（与「编辑数据…」同一套）。
@@ -13482,7 +13962,7 @@ function CanvasView(props) {
       )
       const leftS = Math.max(0, Math.min(menu.left, size.w - 214))
       const topS = Math.max(0, Math.min(menu.top, size.h - 8))
-      return React.createElement('div', { className: 'drawai-menu', style: { left: leftS + 'px', top: topS + 'px' } }, rows)
+      return React.createElement('div', { className: 'drawai-menu', style: { left: leftS + 'px', top: topS + 'px' } }, keyedRows(rows))
     }
 
     if (menu.kind === 'canvas') {
@@ -13515,6 +13995,57 @@ function CanvasView(props) {
           React.createElement('button', { className: 'drawai-btn', onClick: () => alignSelection('distributeY'), disabled: !canDistribute, title: canDistribute ? '垂直等距' : '需要选中至少 3 个节点' }, '垂直等距'),
         ),
       )
+    } else if (menu.kind === 'tableCell') {
+      // 表格：行列操作都挂在这一格上（参考飞书表格），不再另开一页编辑。
+      const tableNode = nodeById(menu.id)
+      const tableModel = tableNode === null ? null : parseCanvasTable(tableNode)
+      const cellRow = typeof menu.row === 'number' ? menu.row : 0
+      const cellCol = typeof menu.col === 'number' ? menu.col : 0
+      const rowCount = tableModel === null ? 0 : tableModel.rows.length
+      const colCount = tableModel === null || !tableModel.rows.length ? 0 : tableModel.rows[0].length
+      const fixedCols = tableModel !== null && tableModel.storyboard === true
+      rows.push(menuTitle('表格：第 ' + (cellRow + 1) + ' 行 · 第 ' + (cellCol + 1) + ' 列'))
+      rows.push(
+        React.createElement(
+          'div',
+          { className: 'drawai-menu-row' },
+          React.createElement('button', { className: 'drawai-btn', onClick: () => { setMenu(null); openTableCell(menu.id, cellRow, cellCol) } }, '编辑此格'),
+        ),
+      )
+      rows.push(
+        React.createElement(
+          'div',
+          { className: 'drawai-menu-row' },
+          React.createElement('button', { className: 'drawai-btn', onClick: () => applyTableOp(menu.id, 'row-above', cellRow, cellCol) }, '上方插入行'),
+          React.createElement('button', { className: 'drawai-btn', onClick: () => applyTableOp(menu.id, 'row-below', cellRow, cellCol) }, '下方插入行'),
+        ),
+      )
+      rows.push(
+        React.createElement(
+          'div',
+          { className: 'drawai-menu-row' },
+          React.createElement('button', { className: 'drawai-btn', onClick: () => applyTableOp(menu.id, 'row-delete', cellRow, cellCol), disabled: rowCount <= 2, title: rowCount <= 2 ? '至少要留 2 行' : '删除第 ' + (cellRow + 1) + ' 行' }, '删除本行'),
+        ),
+      )
+      if (!fixedCols) {
+        rows.push(
+          React.createElement(
+            'div',
+            { className: 'drawai-menu-row' },
+            React.createElement('button', { className: 'drawai-btn', onClick: () => applyTableOp(menu.id, 'col-left', cellRow, cellCol) }, '左侧插入列'),
+            React.createElement('button', { className: 'drawai-btn', onClick: () => applyTableOp(menu.id, 'col-right', cellRow, cellCol) }, '右侧插入列'),
+          ),
+        )
+        rows.push(
+          React.createElement(
+            'div',
+            { className: 'drawai-menu-row' },
+            React.createElement('button', { className: 'drawai-btn', onClick: () => applyTableOp(menu.id, 'col-delete', cellRow, cellCol), disabled: colCount <= 2, title: colCount <= 2 ? '至少要留 2 列' : '删除第 ' + (cellCol + 1) + ' 列' }, '删除本列'),
+          ),
+        )
+      } else {
+        rows.push(React.createElement('div', { className: 'drawai-note' }, '分镜表的列是固定的（结构由视频工作流决定），不能增删列。'))
+      }
     } else if (menu.kind === 'node') {
       const node = nodeById(menu.id)
       const label = node !== null && typeof node.label === 'string' ? node.label : menu.id
@@ -13852,7 +14383,7 @@ function CanvasView(props) {
     return React.createElement(
       'div',
       { className: 'drawai-menu', style: { left: left + 'px', top: top + 'px', maxWidth: maxWidth === undefined ? undefined : maxWidth + 'px' } },
-      rows,
+      keyedRows(rows),
     )
   }
 
@@ -13924,7 +14455,7 @@ function CanvasView(props) {
       if (docMenu === 'view' && pageCount > 1) rows.push(React.createElement('label', { className: 'drawai-page-picker' }, '页面',
         React.createElement('select', { 'aria-label': '切换页面', value: pageIndex, onChange: (event) => switchPage(Number(event.target.value)) },
           Array.from({ length: pageCount }, (_, index) => React.createElement('option', { key: index, value: index }, '第 ' + (index + 1) + ' / ' + pageCount + ' 页')))))
-      return React.createElement('div', { className: 'drawai-menu drawai-docmenu', style: panelStyle(docMenuPos) }, rows)
+      return React.createElement('div', { className: 'drawai-menu drawai-docmenu', style: panelStyle(docMenuPos) }, keyedRows(rows))
     }
     // 宿主把"列不出来"的原因也带回来了 —— 必须显示，否则用户只看到"找不到文件"，无从判断。
     const listNotes = list !== null && Array.isArray(list.notes) ? list.notes : []
@@ -14196,7 +14727,7 @@ function CanvasView(props) {
         ),
       )
     }
-    return React.createElement('div', { className: 'drawai-menu drawai-docmenu', style: panelStyle(docMenuPos) }, rows)
+    return React.createElement('div', { className: 'drawai-menu drawai-docmenu', style: panelStyle(docMenuPos) }, keyedRows(rows))
   }
 
   const modeTag = mode === 'light' ? 'draw.io 外观' : '暗色外观'
@@ -14350,7 +14881,7 @@ function CanvasView(props) {
     const target = event === null || event === undefined ? null : event.target
     if (isSelectableTextTarget(target)) return
     const closest = target !== null && target !== undefined && typeof target.closest === 'function' ? target.closest.bind(target) : null
-    if (closest !== null && closest('.drawai-table-editor') !== null) return
+    if (closest !== null && closest('.drawai-cell-editor') !== null) return
     // Formatting controls must not steal focus or clear the selected text in
     // the contenteditable before the command is applied (capture runs first).
     if (closest !== null && (closest('.drawai-selection-toolbar') !== null || closest('.drawai-palette-panel') !== null)) {
@@ -14561,6 +15092,27 @@ function CanvasView(props) {
     'div',
     { className: 'drawai-head' },
     React.createElement('span', { className: 'drawai-path', title: status.path }, status.path),
+    pageCount > 1
+      ? React.createElement(
+          'div',
+          { className: 'drawai-page-tabs', role: 'tablist', 'aria-label': '画布页' },
+          Array.from({ length: pageCount }, (_, index) =>
+            React.createElement(
+              'button',
+              {
+                key: 'page-tab-' + index,
+                type: 'button',
+                role: 'tab',
+                'aria-selected': index === pageIndex ? 'true' : 'false',
+                className: 'drawai-page-tab' + (index === pageIndex ? ' on' : ''),
+                title: '切换到第 ' + (index + 1) + ' 页（共 ' + pageCount + ' 页）',
+                onClick: () => { switchPage(index) },
+              },
+              '第 ' + (index + 1) + ' 页',
+            ),
+          ),
+        )
+      : null,
     React.createElement(
       'div',
       { className: 'drawai-tools' },
@@ -14608,12 +15160,53 @@ function CanvasView(props) {
       for (const cell of cells) if (cell.id === editing.id) cell.label = editing.text
     }
     const canvasChildren = [renderDiagram(previewDoc, mode, uid, svgRef, ui, view)]
-    if (tableEditor !== null) canvasChildren.push(React.createElement(TableNodeEditor, { key: 'table-editor-' + tableEditor.id, model: tableEditor.model,
-      hasFormatting: tableEditor.hasFormatting, onSave: saveTableEditor, onCancel: () => setTableEditor(null) }))
+    if (cellEdit !== null) canvasChildren.push(React.createElement('textarea', {
+      key: 'cell-editor-' + cellEdit.id + '-' + cellEdit.row + '-' + cellEdit.col,
+      className: 'drawai-cell-editor' + (cellEdit.row === 0 ? ' drawai-cell-editor-head' : ''),
+      ref: cellEditorRef,
+      value: cellEdit.text,
+      style: { left: cellEdit.left + 'px', top: cellEdit.top + 'px', width: cellEdit.width + 'px', height: cellEdit.height + 'px',
+        fontSize: cellEdit.fontSize + 'px', lineHeight: cellEdit.lineHeight + 'px' },
+      'aria-label': '第' + (cellEdit.row + 1) + '行第' + (cellEdit.col + 1) + '列',
+      spellCheck: false,
+      autoFocus: true,
+      onFocus: (event) => event.target.select(),
+      onChange: (event) => setCellEdit(current => current === null ? null : Object.assign({}, current, { text: event.target.value })),
+      onBlur: () => {
+        if (cellSkipBlurRef.current) { cellSkipBlurRef.current = false; return }
+        commitTableCell(null)
+      },
+      onKeyDown: (event) => {
+        // Enter 提交并下移、Tab 提交并右移 —— 和飞书表格一致；Shift+Enter 才是单元格内换行。
+        const model = cellEdit.model
+        if (event.key === 'Escape') { event.preventDefault(); cancelTableCell(); return }
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault()
+          commitTableCell(() => ({ row: cellEdit.row + 1, col: cellEdit.col }))
+          return
+        }
+        if (event.key === 'Tab') {
+          event.preventDefault()
+          const step = event.shiftKey ? -1 : 1
+          commitTableCell(() => {
+            const width = model.rows[cellEdit.row].length
+            const next = cellEdit.col + step
+            if (next >= 0 && next < width) return { row: cellEdit.row, col: next }
+            return null
+          })
+        }
+      },
+    }))
     const selectionToolbar = renderSelectionToolbar()
-    if (selectionToolbar !== null) canvasChildren.push(selectionToolbar)
+    // 数组子元素必须有 key：工具栏/菜单是同一个 children 数组里的兄弟，缺 key 会触发
+    // React 的 "unique key" 警告（工具栏自身内部的 controls 已各自带 key）。
+    if (selectionToolbar !== null) {
+      canvasChildren.push(elementWithKey(selectionToolbar, 'selection-toolbar'))
+    }
     const menuNode = renderMenu()
-    if (menuNode !== null) canvasChildren.push(menuNode)
+    if (menuNode !== null) {
+      canvasChildren.push(elementWithKey(menuNode, 'context-menu'))
+    }
     if (editing !== null) {
       // 就地改标签：用**绝对定位的元素盖在节点的文字区上**。
       // 不用 SVG foreignObject —— React 会把 <svg> 后代一律建成 SVG 命名空间元素，
@@ -15190,6 +15783,7 @@ exports.__routeInternals = {
   // 移动单位（节点整格 / 连线半格）：自测直接断言这几个纯函数，规则被改坏就会红。
   snapTo: snapTo,
   resizeBox: resizeBox,
+  resizeOutcome: resizeOutcome,
   segmentMoveOf: segmentMoveOf,
   GRID: GRID,
   EDGE_GRID: EDGE_GRID,

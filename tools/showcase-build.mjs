@@ -22,6 +22,7 @@ const MEDIA_MANIFEST = path.join(SHOWCASE, 'media', 'manifest.json');
 const NATIVE_DIR = path.join(SHOWCASE, 'native');
 const NATIVE_STYLES = path.join(NATIVE_DIR, 'styles.json');
 const NATIVE_PROMPTS = path.join(NATIVE_DIR, 'prompts');
+const NATIVE_TEMPLATE = path.join(NATIVE_DIR, 'prompt-template.md');
 
 const SITE_URL = (process.env.SHOWCASE_URL || 'https://fourzkw.github.io/dsh-drawai/styles/').replace(/\/?$/, '/');
 
@@ -155,9 +156,97 @@ function renderMarkdown(markdown) {
 
 function nativePromptBody(markdown) {
   const text = String(markdown || '').replace(/\r\n?/g, '\n').trim();
-  const heading = '## 提示词全文';
-  const index = text.indexOf(heading);
-  return index >= 0 ? text.slice(index + heading.length).trim() : text;
+  // 必须匹配独立成行的标题：维护者说明里可能提到 `## 提示词全文`，按 indexOf 会切错。
+  const match = /^##\s*提示词全文\s*$/m.exec(text);
+  return match ? text.slice(match.index + match[0].length).trim() : text;
+}
+
+/* ---------- 通用制作模板 ---------- */
+
+function templateFillBlock(body) {
+  const start = body.indexOf('【本次内容】');
+  if (start < 0) return '';
+  const closing = body.indexOf('以上信息已经确定', start);
+  if (closing < 0) return body.slice(start).trim();
+  const stop = body.indexOf('\n\n', closing);
+  return body.slice(start, stop < 0 ? body.length : stop).trim();
+}
+
+function templateSlots(fill) {
+  const lines = fill.split('\n');
+  const slots = [];
+
+  lines.forEach((line, index) => {
+    const match = /^-\s*([^：:]+?)\s*[：:]\s*(.*)$/.exec(line);
+    if (!match) return;
+    let hint = match[2].trim();
+    if (!hint) hint = (lines[index + 1] || '').trim().replace(/^-\s*/, '');
+    hint = hint.replace(/^\[/, '').replace(/\]$/, '').replace(/^填写/, '').trim();
+    if (hint) slots.push([match[1].trim(), hint]);
+  });
+
+  return slots.slice(0, 10);
+}
+
+function templateSpec(style) {
+  const rhythm = style.rhythm || {};
+  const sizes = { '16:9': '1920×1080', '9:16': '1080×1920', '1:1': '1080×1080', '4:3': '1440×1080' };
+  const size = sizes[rhythm.aspect] || '';
+  if (!size) return '';
+  const fps = rhythm.fps ? `${rhythm.fps} fps` : '';
+  return [size, fps].filter(Boolean).join('、');
+}
+
+function renderTemplate(markdown, styleCount) {
+  const body = nativePromptBody(markdown);
+  if (!body) return '';
+
+  const fill = templateFillBlock(body);
+  const slots = templateSlots(fill);
+  const lineCount = body.split('\n').length;
+
+  const slotHtml = slots.map(([name, hint], index) => `
+        <li class="slot">
+          <span class="slot-num">${String(index + 1).padStart(2, '0')}</span>
+          <span class="slot-body">
+            <span class="slot-name">${esc(name)}</span>
+            <span class="slot-hint">${esc(hint)}</span>
+          </span>
+        </li>`).join('');
+
+  return `<section class="briefing" id="template" aria-labelledby="template-title">
+  <div class="wrap">
+    <header class="briefing-head">
+      <p class="briefing-kicker">Template · 开工之前</p>
+      <h2 id="template-title">通用制作模板</h2>
+      <p class="briefing-lede">后面 ${styleCount} 节说明“这一支长什么样”，这份模板说明“这条片子怎么交”。把这几项填掉，整段发给 DrawAI：它会读完风格、做分镜、渲染、自检，再按交付报告回报。</p>
+    </header>
+    <div class="briefing-body">
+      <div class="briefing-fill">
+        <p class="briefing-label"><span>填空 ${slots.length} 项</span><span>Fill in</span></p>
+        <ol class="slots">${slotHtml}
+        </ol>
+        <p class="briefing-note">模板管流程与验收，风格提示词管画面与技法。两段一起发，才不会各做各的。</p>
+      </div>
+      <div class="briefing-doc">
+        <div class="doc-bar">
+          <p class="doc-meta"><span class="doc-kicker">模板正文</span><span>${body.length} 字符 · 复制后可改</span></p>
+          <div class="doc-actions">
+            <button class="copy" type="button" data-copy-fill title="只复制【本次内容】，方便和某一节的风格提示词拼着用">复制填空段</button>
+            <button class="copy is-primary" type="button" data-copy="template-text">复制完整模板</button>
+          </div>
+        </div>
+        <div class="doc-view" data-doc>
+          <pre class="code doc-text" id="template-text">${esc(body)}</pre>
+        </div>
+        <button class="doc-toggle" type="button" data-expand aria-expanded="false" aria-controls="template-text">
+          <span>展开全文</span><span class="doc-toggle-meta">${lineCount} 行</span>
+        </button>
+        <pre id="template-fill" hidden>${esc(fill)}</pre>
+      </div>
+    </div>
+  </div>
+</section>`;
 }
 
 function renderPrompt(style, markdown) {
@@ -165,6 +254,8 @@ function renderPrompt(style, markdown) {
 
   const body = nativePromptBody(markdown);
   const bodyId = `prompt-${style.slug}`;
+  const duration = Number(style.rhythm?.duration);
+  const durationLabel = Number.isFinite(duration) && duration > 0 ? `${duration} 秒` : '';
 
   return `<div class="prompt-wrap">
     <div class="prompt-bar">
@@ -173,6 +264,11 @@ function renderPrompt(style, markdown) {
         <span>${body.length} 字符</span>
       </div>
       <div class="prompt-actions">
+        <button class="copy is-accent" type="button" data-template-style="${esc(style.slug)}"
+          data-fill-style="${esc(`${style.name}（${style.slug}）`)}"
+          data-fill-spec="${esc(templateSpec(style))}"
+          data-fill-duration="${esc(durationLabel)}"
+          title="复制通用制作模板，风格与规格按本节填好">套用模板</button>
         <button class="copy" type="button" data-copy="${bodyId}">复制提示词</button>
       </div>
     </div>
@@ -353,7 +449,7 @@ function renderUsage(style) {
   const slug = style.slug;
   const commands = [
     ['读完整风格施工包', `mg_style {action:"read", slug:"${slug}"}`],
-    ['抽参考帧', `mg_style {action:"frames", slug:"${slug}", count:8}`],
+    ['读取本地参考帧（可选）', `mg_style {action:"frames", slug:"${slug}", count:8}`],
     ['建视频工程并套用风格', `motion_project {action:"create", nodeId:"<视频节点>", style:"${slug}"}`],
   ];
 
@@ -369,7 +465,7 @@ function renderUsage(style) {
 
   const naturalId = `use-${slug}-nl`;
   return `<div class="usage">
-    <p class="note">一条片子只接一种整片风格。先在画布上连一个「整片风格」节点，或让 <code>motion_project</code> 直接写 <code>theme.ts</code> / <code>STYLE.md</code>。</p>
+    <p class="note">一条片子只接一种整片风格。先在画布上连一个「整片风格」节点，或让 <code>motion_project</code> 直接写 <code>theme.ts</code> / <code>STYLE.md</code>。要把流程、声音和交付一起交出去，用<a href="#template">通用制作模板</a>起头。</p>
     ${commandHtml}
     <div class="cmd">
       <div class="cmd-head"><span>自然语言起点</span><button class="copy" type="button" data-copy="${naturalId}">复制</button></div>
@@ -522,12 +618,16 @@ const firstFilm = [...media.values()].find((item) => item.film !== false && item
 const ogImage = firstFilm ? new URL(firstFilm.poster, SITE_URL).toString() : '';
 const ogImageMeta = ogImage ? `<meta property="og:image" content="${esc(ogImage)}">` : '';
 
+const templateHtml = renderTemplate(readText(NATIVE_TEMPLATE, '通用制作模板'), styles.length);
+if (!templateHtml) throw new Error('通用制作模板没有正文：showcase/native/prompt-template.md');
+
 const values = {
   SITE_URL,
   OG_IMAGE_META: ogImageMeta,
   FILM_COUNT: String(mediaState.filmCount),
   INDEX: index,
   SECTIONS: sections.join('\n'),
+  TEMPLATE: templateHtml,
 };
 
 let html = fs.readFileSync(TEMPLATE, 'utf8');

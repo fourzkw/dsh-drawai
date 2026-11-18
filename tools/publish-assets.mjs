@@ -2,9 +2,10 @@
 /**
  * 把 dist/ 里的素材包传到 GitHub Release。
  *
- * 两个包各发各的：
- *   node tools/publish-assets.mjs          # assets-v1 字体 + 素材库（约 145MB）
- *   node tools/publish-assets.mjs --demo   # demo-assets-v1 上游 demo 的共享数据（约 160KB）
+ * 三个包各发各的：
+ *   node tools/publish-assets.mjs            # assets-v1 字体 + 素材库（约 145MB）
+ *   node tools/publish-assets.mjs --demo     # demo-assets-v1 上游 demo 的共享数据（约 160KB）
+ *   node tools/publish-assets.mjs --frames   # style-frames-<日期> 整片风格参考帧（约 40MB）
  *
  * 鉴权顺序：GITHUB_TOKEN 环境变量 → `git credential fill`（GCM 里存的 github.com 凭据）。
  * 只用来建 release / 传 asset，不打印 token。
@@ -20,6 +21,7 @@ import { fileURLToPath } from 'node:url'
 
 import { ASSETS_LOCK } from '../src/motion/asset-pack-lock.js'
 import { DEMO_ASSETS_LOCK } from '../src/motion/demo-assets-lock.js'
+import { STYLE_FRAMES_LOCK } from '../src/motion/style-frames-lock.js'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const REPO = 'fourzkw/dsh-drawai'
@@ -57,6 +59,27 @@ const PACKS = {
       '- 打包：`node tools/build-demo-assets-pack.mjs`',
       '- 发布：`node tools/publish-assets.mjs --demo`',
     ].join('\n'),
+    build: 'node tools/build-demo-assets-pack.mjs',
+  },
+  frames: {
+    lock: STYLE_FRAMES_LOCK,
+    tag: `style-frames-${STYLE_FRAMES_LOCK.version}`,
+    title: `Style reference frames ${STYLE_FRAMES_LOCK.version}（16 种整片风格的参考帧）`,
+    body: [
+      '整片风格参考帧：16 种风格共 ' + STYLE_FRAMES_LOCK.files + ' 个文件（126 张 jpg + 4 张 png + 每个风格的清单 + 上游许可与说明），约 40MB。',
+      '',
+      '它们取自上游 [Vincentwei1021/mg-styles-15](https://github.com/Vincentwei1021/mg-styles-15) 的成片截帧',
+      '（MIT，Copyright (c) 2026 Vincentwei1021），只作视觉参考：按主题独立设计，不照搬画面或分镜。',
+      '画面里的第三方内容、字体可能另有许可；详见包内 `LICENSE-mg-styles-15.txt` 与 `README.md`。',
+      '',
+      '插件第一次读参考帧（`mg_style {action:"frames"}`）时自动下载，逐文件校验后落到',
+      '`~/.dsh/drawai-style-reference-frames/' + STYLE_FRAMES_LOCK.collection + '/`，之后离线可用；',
+      '也可以先跑 `mg_style {action:"install"}` 预下载。参考帧是可选的，没有它也能按风格施工包做片子。',
+      '',
+      '- 打包：`node tools/build-style-frames-pack.mjs`',
+      '- 发布：`node tools/publish-assets.mjs --frames`',
+    ].join('\n'),
+    build: 'node tools/build-style-frames-pack.mjs',
   },
 }
 
@@ -87,13 +110,16 @@ async function api(path, init = {}, useUpload = false) {
   const text = await res.text()
   let json = null
   try { json = JSON.parse(text) } catch { /* 非 JSON 响应 */ }
-  if (!res.ok) throw new Error(`${init.method || 'GET'} ${path} → ${res.status} ${json?.message || text.slice(0, 200)}`)
+  // GitHub 的 422 只在 errors[] 里说人话（missing_field / already_exists…），别把它吞了。
+  const detail = json?.errors?.length ? ' ' + JSON.stringify(json.errors) : ''
+  if (!res.ok) throw new Error(`${init.method || 'GET'} ${path} → ${res.status} ${json?.message || text.slice(0, 200)}${detail}`)
   return json
 }
 
 async function main() {
   const dry = process.argv.includes('--dry-run')
-  const pack = PACKS[process.argv.includes('--demo') ? 'demo' : 'assets']
+  const picked = process.argv.includes('--demo') ? 'demo' : process.argv.includes('--frames') ? 'frames' : 'assets'
+  const pack = PACKS[picked]
   const { lock } = pack
   const FILE = join(ROOT, 'dist', lock.file)
   if (!existsSync(FILE)) throw new Error('找不到素材包：' + FILE + '（先跑 ' + pack.build + '）')

@@ -1,5 +1,25 @@
 # 发布与收录流程 / Release & listing
 
+## 0.4.8 发布内容（2026-11-18）
+
+- 参考帧素材包支持**从本地安装**，内网 / 代理受限的机器不必再等那一次下载：`mg_style {action:"install", file:"…"}` 直接吃 Release 里的 `.tar.gz` 或已经解压好的集合目录，全程不联网。校验与自动下载同一套（lock 里的大小与 sha256，再按 manifest 逐文件比对），装好的集合多留一份根 `manifest.json`，解压目录因此也能再装、再校验；`.ready.json` 记 `origin:"file"`，`styleFramesSummary` 报 `source:"file"`。目标位置已经有一份别人准备的集合时拒绝覆盖，不会把它删掉。
+- 顺手补掉一个安装盲区：manifest 列了、包里却没有的文件以前会装成「就绪」，直到读某个风格才炸；现在直接判坏包。下载路径与本地安装共用同一段解包代码，两个素材包一起受益。
+- 多页画布在顶部出页签（#49、#51）：切页、按页重命名，打开多页 `.drawio` 不再只认第一页；页签状态与本地文件配对，刷新后仍在原页。
+- 导出与「看一眼」的镜头卡、整片风格卡改成 SVG 原生卡面（#53）：宿主侧渲染不再依赖浏览器组件，缩略图在导出图里也能画出来；新增 `tools/check-export-faces.mjs` 盯着卡面与导出的一致性。
+- 修带记忆插件的会话里 `motion_project` 直接起不来（#54）：工具描述里的 `{{…}}` 被提示词模板当成变量解析，改成不带大括号的写法，`check-package` 增加守卫防止再犯。
+- 文档与死代码：参考帧的离线说明与报错表按「只读本地」重写（`docs/motion-video.md`、`docs/motion-video-playbook.md`）；删掉未接入的镜头卡参考帧下载模块（`src/shotcard-reference.js`），它仍从 GitHub Pages 抓样片，是唯一残留的远程取帧路径，容易让人误以为 `frames` 要联网。
+
+## 0.4.7 发布内容（2026-11-18）
+
+- 整片风格参考帧改读**本地预置**素材，并单独发成素材包（#27）：`mg_style {action:"frames"}` 不再起本地静态服务 + Chrome 打开上游 demo 截帧，改为读 `~/.dsh/drawai-style-reference-frames/collection-<日期>/`（按来源视频秒数取最近帧并去重、逐帧 sha256 校验）。参考帧 16 种风格共 149 个文件、40.3MB，发在 GitHub Release `style-frames-20261116`；第一次读帧或 `mg_style {action:"install"}` 时下载一次、逐文件校验后落到集合目录，之后离线可用。它不并进 145MB 的 `assets-v1`，也不进 git / npm 包 / Pages。
+- 素材包安装有边界：安装目标是集合子目录本身（`installPack` 会先删目录再改名，装到父目录会连用户自己的集合一起删掉）；`DRAWAI_STYLE_REFERENCE_DIR` 指定了目录就只认它、不自动下载；目标目录存在但不是素材包装出来的集合时拒绝覆盖。`DRAWAI_STYLE_FRAMES_DIR` 换父目录、`DRAWAI_STYLE_FRAMES_URL` 换镜像。缺包时 `frames` 会先下载，失败则给出手动解压/代理/指定目录的指引，并说明参考帧可选、没有也能按施工包做片。
+- 修渲染成品只剩背景色、场景子元素不出现（#46）：bundle 缓存复用判据收紧为 `index.html` + `bundle.js` + key，重建前先清空输出目录——旧分块按构建 id 命名且不清目录，入口文件丢了仍会命中缓存，于是页面能打开但画不出东西。渲染日志与帧检报告同时带上浏览器路径与版本（CDP `Browser.getVersion`，回退安装目录版本号），并写 `.out/qa/report.json`。
+- 引擎门禁分级：`three` / `webgl2` 缺真引擎直接拒绝渲染（样片也拦），`canvas2d` 缺失只记 warning 并在 `summary` 与 `details.engine` 里点名；`05-cel-boil` 逐帧手绘改回 Canvas2D 实现。
+- 表格改成画布上就地编辑：双击单元格进入编辑，`Enter` / `Tab` / `Shift+Enter` / `Esc` 按表格语义走，右键菜单增删行列（最少保留 2×2），删掉原来的浮层编辑器。缩放换成四角手柄 + 整边热区，手柄按屏幕像素定尺寸；文字节点缩放同步改字号，选中框贴合表格与文字的实际内容。
+- 设计规范收口：控件与画布配色收进 `--drawai-*` token 与阶梯（字号 / 圆角 / 间距 / 阴影 / 动效），新增 [`docs/design-system.md`](design-system.md)，守护测试 `check-design-tokens` 从 9 项扩到 13 项（做过负向验证）。
+- 新增整片风格展示站（仓库内 `showcase/`，不进 npm 包）：15 种风格的索引、移植说明与调用方式，十二节附本地提示词与样片，发布在 <https://fourzkw.github.io/dsh-drawai/styles/>；页面不引用上游参考片、提示词或字体，样片音乐与音效的来源和许可写在 `showcase/THIRD_PARTY_NOTICES.md`。
+- 工程侧：新增 `tools/check-motion-bundle-cache.mjs`、`tools/check-style-reference-{store,media,host}.mjs`、`tools/check-style-frames-pack.mjs` 并挂进 `npm test`；`check-package` 增加参考帧素材包检查（[12] 段：lock 形状、安装位置是集合子目录、`mg_style` 有 `install` 动作）；`publish-assets.mjs` 支持 `--frames`，GitHub 校验失败时打印 `errors[]` 明细。
+
 ## 0.4.6 发布内容（2026-11-12）
 
 - 修中文或含 URL 编码路径的画布打开后显示成空白：右栏标签的地址（`pathFromAddress()`）把 `dsh-resource://…/测试画布.drawio` 里的 `%E6%B5%8B…` 原样交给宿主读文件，宿主按字面量找不到，回 `exists:false` + 空文档，界面当成可编辑空画布——保存还会在磁盘上按编码串新建一个空文件。现在先 `decodeURIComponent` 再走原有的 `dsh-resource://`、`file://` 与盘符处理；不是合法编码（例如文件名里本来就有 `100%`）就保留原串（#41，PR #42）。
@@ -99,6 +119,24 @@ node tools/publish-assets.mjs --demo
 - 源文件在打包时从 unpkg 下载（`world-atlas@2.0.2`，数据源 Natural Earth 公有领域，包本身 ISC），缓存在 `dist/demo-assets-src/`，之后离线可重复打包；`--refresh` 强制重下。
 - 用户侧缓存 `~/.dsh/drawai-assets/demo-v1/`；环境变量 `DRAWAI_DEMO_ASSETS_DIR` 改位置、`DRAWAI_DEMO_ASSETS_URL` 指镜像。
 - 只有 `/demos/<slug>/assets/*.json` 会触发这个包；**贴图与字体不触发**（缺了照旧走 1px 占位与内置字体）——18-hanazi 的贴图就是「太专一、不收录」的例子。
+
+## 发布风格参考帧素材包（整片风格的本地参考帧）
+
+16 种整片风格共 149 个文件、40.3MB（126 张 jpg + 4 张 png + 每个风格的清单 + 上游许可与说明），取自上游 `Vincentwei1021/mg-styles-15` 的成片截帧（MIT，Copyright (c) 2026 Vincentwei1021，许可文本随包）。它同样**不进 git、不进 npm 包，也不并进 `assets-v1`**：不用参考帧的人不该陪这 40MB。
+
+```powershell
+# 1. 打包（默认取最新 collection-*，也可 --from <目录>；生成 dist/drawai-style-frames-<日期>.tar.gz 与 src/motion/style-frames-lock.js）
+node tools/build-style-frames-pack.mjs
+
+# 2. 传到 GitHub Release（tag = style-frames-<日期>）
+node tools/publish-assets.mjs --frames --dry-run
+node tools/publish-assets.mjs --frames
+```
+
+- 安装目标是**集合目录本身** `~/.dsh/drawai-style-reference-frames/collection-<日期>/`：`installPack` 会先删目标目录再改名，装到父目录会把用户自己放的其他集合一起删掉。父目录里已有的别的 `collection-*` 不受影响，插件按名称取最新的一份。
+- 用户侧：第一次读参考帧（`mg_style {action:"frames"}`）或手动 `mg_style {action:"install"}` 时下载一次，逐文件 sha256 校验后写 `.ready.json`，之后离线可用；目标目录存在但不是素材包装出来的集合时**拒绝覆盖**，并给出改名或改用 `DRAWAI_STYLE_REFERENCE_DIR` 的指引。
+- 环境变量：`DRAWAI_STYLE_FRAMES_DIR` 改父目录，`DRAWAI_STYLE_FRAMES_URL` 指镜像，`DRAWAI_STYLE_REFERENCE_DIR` 指向**集合本身**（自己准备的参考帧；设了就不再下载）。
+- 参考帧只做视觉参考：按主题独立设计，不照搬画面或分镜；画面里的第三方内容、字体可能另有许可。
 
 ## FFmpeg 自动获取完善（0.4.1，2026-11-08）
 

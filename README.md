@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-drawai)](https://www.npmjs.com/package/dsh-drawai) [![npm downloads](https://img.shields.io/npm/dt/dsh-drawai)](https://www.npmjs.com/package/dsh-drawai) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 > **在线风格展示：<https://fourzkw.github.io/dsh-drawai/styles/>**  
-> 15 种整片风格索引、移植说明与调用方式；赛博 HUD、像素、液态、包豪斯、合成器浪潮与水墨六节附本地提示词和样片。
+> 15 种整片风格索引、移植说明与调用方式；其中十二节附本地提示词和样片。
 
 **在 DeepSeek Harness 里，用自然语言和可编辑画布一起画图、处理素材、制作动效视频。**
 
@@ -111,8 +111,9 @@ Freesound 搜索结果带许可信息，使用前请自行确认是否符合用�
 
 | 组件 | 何时使用 | 默认位置与配置 |
 |---|---|---|
-| **视频运行环境** | 首次渲染、网页素材采集或风格参考帧截取 | `~/.dsh/drawai-video-runtime/`；可用 `DRAWAI_VIDEO_RUNTIME_DIR` 指定目录、`DRAWAI_RUNTIME_REGISTRY` 指定 npm 镜像 |
+| **视频运行环境** | 首次渲染或网页素材采集 | `~/.dsh/drawai-video-runtime/`；可用 `DRAWAI_VIDEO_RUNTIME_DIR` 指定目录、`DRAWAI_RUNTIME_REGISTRY` 指定 npm 镜像 |
 | **动效字体和素材库** | 建立视频工程或使用插件素材库时 | `~/.dsh/drawai-assets/v1/`；首次下载约 145 MB；可用 `DRAWAI_ASSETS_DIR` 指定目录、`DRAWAI_ASSETS_URL` 指定下载地址 |
+| **整片风格参考帧** | 第一次读某种风格的参考帧，或手动 `mg_style {action:"install"}` | `~/.dsh/drawai-style-reference-frames/collection-<日期>/`；首次下载约 40 MB，可选；可用 `DRAWAI_STYLE_FRAMES_DIR` 换父目录、`DRAWAI_STYLE_FRAMES_URL` 换下载地址，或用 `DRAWAI_STYLE_REFERENCE_DIR` 指向自己准备的集合；离线时用 `mg_style {action:"install", file:"<本地 .tar.gz 或解压后的集合目录>"}` 直接装，不联网 |
 | **FFmpeg** | 音频导入、素材探测、视频导出、帧检和混音等 | `~/.dsh/drawai-ffmpeg/<平台>-<架构>/`；也可用 `DRAWAI_FFMPEG_PATH` 指定已有程序，或用 `DRAWAI_FFMPEG_DIR` 设置缓存目录 |
 | **浏览器** | 动效预览与渲染、部分网页采集 | 使用可用的 Chrome / Edge；也可通过 `DRAWAI_CHROME_PATH` 指定。部分渲染路径可能下载 Chromium |
 

@@ -73,10 +73,10 @@
 1. `mg_style {action:"read", slug}` 先看 `engines / engineFiles / engineNote`；`{action:"source", files:[…]}` 读该引擎的上游实现正文（shader、renderer、后处理）。
 2. three.js 风格（03 / 10 / 22）：在 `<canvas>` 里用 `three` 或 `@remotion/three` 建 WebGLRenderer + 场景/相机，按 `useCurrentFrame()` 驱动 `renderAt`，后处理用 `three/addons`。
 3. WebGL2 风格（07 / 09 / 12 / 20）：`getContext("webgl2")` + 上游 GLSL 原样编译，逐帧传 uniform；该风格同时要 Canvas2D 层的（09 分色版、20 索引帧）两层都要在。
-4. Canvas2D / DOM 风格按 `engines` 来（DOM 风格如 04 用多层 `backdrop-filter` 景深，不是画布贴图）。
+4. Canvas2D / DOM 风格按 `engines` 来（DOM 风格如 04 用多层 `backdrop-filter` 景深，不是画布贴图）。Canvas2D 风格必须 `getContext("2d")` 逐帧重画（01 / 02 / 05 / 06 / 08 / 18 / 19 / 23）；SVG `<path>` 摆一排让 React diff「最省心」，但 `stroke-width` 不能沿路径变宽，墨线会退化成等粗——逐帧手绘（05）尤其不能这么干。
 5. **禁止用更省事的方式替代**：CSS 3D、`transform: perspective` 摆 div、纯 Canvas2D 渐变/模糊冒充实 3D 或 shader、静态图位移——静帧像、一动就露。
-6. `motion_render start` 会扫工程源码（不含 `.out` / `node_modules`）：重引擎 `three / webgl2 / webgl` 缺失直接拒绝渲染。确实要换实现，先在 `STYLE.md` 写一行「偏离：引擎 X 改为 Y，因为 Z」，渲染带 warning 通过，偏离会记进任务返回。
-7. **动效也要看真片**：`mg_style {action:"frames", slug}` 从上游 demo 按 `cues.json` 的时间点抽 8 张参考帧（缺字体/纸纹会用占位兜底并在 `notes` 里写明）。写场景前先 `read_image` 逐张看，再按 `STYLE.md` 的「效果配方」逐项做：转场是 wipe 还是切、落地有没有 impact/地面环、相机有没有漂移/推/甩/抖、motion blur 几采样、颗粒是逐像素还是几百个点、有没有蒸汽/拍翼这类二次运动。规范只验"形"不验"动"，不看帧就会做成"形似而动不像"。
+6. `motion_render start` 会扫工程源码（不含 `.out` / `node_modules`）：重引擎 `three / webgl2 / webgl` 缺失直接拒绝渲染；Canvas2D 缺失不拒渲，但会在 `summary` / `details.engine` 里带 warning 点名。确实要换实现，先在 `STYLE.md` 写一行「偏离：引擎 X 改为 Y，因为 Z」，渲染带 warning 通过，偏离会记进任务返回。
+7. **动效也要看真片**：`mg_style {action:"frames", slug}` 从**本地预置**参考帧里按来源视频秒数取 8 张（不给 `times` 就均匀铺开；给了就取最近帧并去重；`notes` 说明素材来源与覆盖范围，许可见返回的 `license`，不跑上游演示）。第一次用而本机还没有集合时会下载一次约 40MB 素材包，之后离线可用。写场景前先 `read_image` 逐张看，再按 `STYLE.md` 的「效果配方」逐项做：转场是 wipe 还是切、落地有没有 impact/地面环、相机有没有漂移/推/甩/抖、motion blur 几采样、颗粒是逐像素还是几百个点、有没有蒸汽/拍翼这类二次运动。规范只验"形"不验"动"，不看帧就会做成"形似而动不像"。
 
 > 判定标准：把成片和上游 demo 并排放，**运动质感要能对上**（透视、光照、流体/印刷颗粒、后处理辉光），不是"颜色差不多"。
 
