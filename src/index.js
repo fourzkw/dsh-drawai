@@ -7021,7 +7021,7 @@ function sanitizeNewName(raw) {
         items: { type: 'json' },
         description: '分镜表：[{intent:"这一镜要做什么", onScreen:"画面上出现什么", copy:"配字"}]，按镜头顺序；也可以给 ["一句话"] 简写。会写成 storyboard.md。',
       },
-      theme: { type: 'string', description: '配色主题名：vintage-kraft / deep-ocean / obsidian-violet / modern-light / midnight / solar-pop / coral-burst / color-play / paper-ink。给了就在工程里生成 theme.ts，场景用 {{PAPER, INK, DUST, STAMP}} 引用。' },
+      theme: { type: 'string', description: '配色主题名：vintage-kraft / deep-ocean / obsidian-violet / modern-light / midnight / solar-pop / coral-burst / color-play / paper-ink。给了就在工程里生成 theme.ts，场景里从 ./theme 导入 PAPER、INK、DUST、STAMP 引用。' },
       themeTokens: {
         type: 'object',
         additionalProperties: true,

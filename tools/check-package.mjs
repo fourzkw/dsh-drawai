@@ -181,6 +181,12 @@ for (const tool of registered) {
     return spec === null || typeof spec !== 'object' || (spec.type === undefined && spec.oneOf === undefined)
   })
   check(tool.name + ' 的参数都声明了类型（type 或 oneOf）', untyped.length === 0, untyped.join(', ') || 'ok')
+  // 工具描述会进每个会话的上下文；DSH 把 `{{名字}}` 当提示词变量展开，描述里出现这种 token
+  // 时，把描述整段存进记忆的插件会报 malformed prompt variable reference，连带整个会话起不来
+  // （issue #54）。这里守住"注册出去的文字里没有未转义的双大括号变量"。
+  const braced = (JSON.stringify(tool.description === undefined ? '' : tool.description) + JSON.stringify(schema || null))
+    .match(/\{\{[^{}]+\}\}/g) || []
+  check(tool.name + ' 的描述里没有 {{…}} 提示词变量', braced.length === 0, braced.join(' ') || 'ok')
   if (tool.name === 'diagram_apply') {
     const required = Array.isArray(schema.required) ? schema.required : []
     check('diagram_apply 的 ops 是必填', required.includes('ops'), 'required=' + JSON.stringify(required))
