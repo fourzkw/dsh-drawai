@@ -190,7 +190,7 @@ draft_content.json   draft:true 时额外写一份草稿（结构按剪映 36000
 - 建工程：挂了风格节点（或 `motion_project {action:"create", style:"09-bauhaus"}`）时，`palette` 写成风格化的 `theme.ts`、brief 全文写成 `STYLE.md`、`fonts` 合进主题，风格的 `rhythm`（fps / 时长 / 画幅）成为 spec 缺省值；`timeline.json` 顶部记 `style`，`STYLE.md` 进 `BRIEF.md` 的约定段。`design.json` 的 `production.mgStyle` 记住 slug / commit / 判据 / brief 哈希，便于追溯像不像。
 - 引擎契约：每种风格的 `catalog.json` 都记了 `engine / engines / engineNote / engineFiles`，由 `tools/mgstyles-catalog.mjs` **扫描上游源码自动检测并校验**（声明与实测不符会让生成直接失败）。three.js 的风格（03 等轴 / 10 复古霓虹 / 22 HUD）必须用 `three` 或 `@remotion/three` 真渲染；WebGL2 的风格（07 液态 / 12 极光 / 09 包豪斯印刷 pass / 20 像素 CRT）必须起 `getContext("webgl2")` 编译上游 GLSL；Canvas2D / DOM 风格同样按 `engines` 来。**不许用 CSS 3D、div 层叠、Canvas2D 渐变模糊「简化」替代**——那正是这些风格的判据；Canvas2D 风格（01 / 02 / 05 / 06 / 08 / 18 / 19 / 23）也不要换成 SVG `<path>` 或 DOM 拼贴：那不是逐帧绘制，`stroke-width` 沿路径不能变，墨线会退化成等粗。
 - 引擎门禁：`STYLE.md` 写入「引擎契约」段（上游证据文件 + 逐引擎做法）；`motion_render start`（样片与成片）渲染前扫工程源码（不含 `.out`/`node_modules`），重引擎 `three / webgl2 / webgl` 缺失直接报错拒绝渲染；Canvas2D 缺失不拒渲，但会在 `summary` 与 `details.engine` 里带一条 warning 点名（拿 SVG 逐帧顶替就是这么暴露的）。确实要换实现，先在 `STYLE.md` 写一行「偏离：引擎 X 改为 Y，因为 Z」，渲染会带 warning 通过。
-- 动效画像与参考帧：`catalog.json` 的 `motion` 是从上游源码扫出来的（`transitions: wipe|cut`、`impact`、`camera`、`motionBlur:{samples,shutter}`、`grain:{size}`、`secondary`、`feather`）。`mg_style {action:"frames", slug}` 只读**本地预置**的参考帧（`~/.dsh/drawai-style-reference-frames/collection-<日期>/`，按来源视频秒数取最近帧并去重），不启动浏览器、不跑上游演示；第一次用而本地还没有集合时会下载一次约 40MB 的素材包（`mg_style {action:"install"}` 可提前下），逐文件 sha256 校验后离线可用。写场景前逐张看，再按 `STYLE.md`「效果配方」逐项做；只做形不做动，就是「形似而动不像」。参考帧是可选的：没有它照样按施工包做，别谎称看过没看到的帧。
+- 动效画像与参考帧：`catalog.json` 的 `motion` 是从上游源码扫出来的（`transitions: wipe|cut`、`impact`、`camera`、`motionBlur:{samples,shutter}`、`grain:{size}`、`secondary`、`feather`）。`mg_style {action:"frames", slug}` 只读**本地预置**的参考帧（`~/.dsh/drawai-style-reference-frames/collection-<日期>/`，按来源视频秒数取最近帧并去重），不启动浏览器、不跑上游演示；第一次用而本地还没有集合时会下载一次约 40MB 的素材包（`mg_style {action:"install"}` 可提前下；`install` 带 `file` 时直接从本地包 / 解压目录安装，不联网），逐文件 sha256 校验后离线可用。写场景前逐张看，再按 `STYLE.md`「效果配方」逐项做；只做形不做动，就是「形似而动不像」。参考帧是可选的：没有它照样按施工包做，别谎称看过没看到的帧。
 - 效果配方：建工程时 `STYLE.md` 会写「## 效果配方（必做，逐项对照参考帧）」表——转场 / 冲击 / 相机 / 运动模糊 / 颗粒 / 二次运动 / 软边，每项都有「上游怎么做」与「这里必须做到」，并附取帧命令；`timeline.style.motion` 同时留档，便于事后核对。
 - 字体是最大损失：上游 46 个字体文件不在仓库里，brief 第 3 节给的是 Windows 自带替代栈与字距补偿；需要在 `BRIEF.md` 里如实写「字体非原版」。
 - 索引与源码库用 `manifest.json` 的 commit 对齐：`mg 风格索引与源码库版本不匹配` 就重跑 `node tools/mgstyles-catalog.mjs`。新增/修改风格 brief 后也要重跑它（fragment 在 `src/motion/mgstyles/catalog.d/<slug>.json`）。
@@ -214,13 +214,14 @@ draft_content.json   draft:true 时额外写一份草稿（结构按剪映 36000
 - **npm 包**：装不了新依赖。`three` / `@react-three/fiber` 已在插件里；要用别的库得事先 vendor。
 - **音效**：`motion_sfx` 需要网络，离线时只能用工程里已有的素材或自己导入。
 - **`mg_style frames`**：读**本地预置**参考帧（`~/.dsh/drawai-style-reference-frames/collection-<日期>/`），不启动浏览器、不跑上游演示，所以**离线可用**。要联网的只有本机还没有集合时的那一次下载（约 40MB，逐文件 sha256 校验；`action:"install"` 可提前下）。下载不成就先 `action:"read"` 拿施工包与 `motion` 画像照做 —— 参考帧是可选参考，但别谎称看过没看到的帧。
+- **本地安装参考帧包**：把 Release 里的 `drawai-style-frames-<日期>.tar.gz` 用 U 盘 / 内网镜像拷到本机，跑 `mg_style {action:"install", file:"D:/downloads/drawai-style-frames-20261116.tar.gz"}`——**完全不联网**，大小、sha256、manifest 逐文件校验与自动下载同一套。已经把包解开过的话，直接给集合目录（里面有 `index.json` 与 `manifest.json` 的那一层）也行。装好的集合会写 `.ready.json` 并记 `origin:"file"`，`frames`、`styleFramesSummary` 会报 `source: "file"`；目标位置若已经是别人准备的集合，会拒绝覆盖而不是删掉它。
 
 ### 常见报错对照
 
 | 报错 | 真正的原因 |
 |---|---|
-| `未找到本地风格参考帧集合：…` | 本机还没有集合；`mg_style {action:"install"}` 预下，或设 `DRAWAI_STYLE_REFERENCE_DIR` 指向自己的集合 |
-| `风格参考帧素材包（…）还没准备好：…` | 自动下载失败（离线 / 代理 / 镜像不可达）；参考帧可选，按施工包继续，或按报错里的四条指引手动解压 |
+| `未找到本地风格参考帧集合：…` | 本机还没有集合；`mg_style {action:"install"}` 预下，`mg_style {action:"install", file:"…"}` 从本地 `.tar.gz` / 解压目录装（不联网），或设 `DRAWAI_STYLE_REFERENCE_DIR` 指向自己的集合 |
+| `风格参考帧素材包（…）还没准备好：…` | 自动下载失败（离线 / 代理 / 镜像不可达）；参考帧可选，按施工包继续，或按报错里的指引手动解压 / 用 `install` 的 `file` 参数本地安装 |
 | `本地参考帧未收录风格：…` | 集合里没有这个 slug；换一个风格，或换一份更全的集合 |
 | `各镜加起来是 X 帧，视频节点是 Y 帧` | 分镜表帧区间之和 ≠ 节点时长；报错里给了两种改法 |
 | `字体没注册，拒绝渲染` | 场景里用了没 `@font-face` / 没放进 assets 的 family |

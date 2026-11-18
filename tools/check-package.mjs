@@ -426,6 +426,11 @@ console.log('\n[12] 整片风格参考帧走单独的小素材包（约 40MB）'
     && /export function styleFramesSummary/.test(pack) && /export function styleFramesDir/.test(pack))
   check('安装目标是集合子目录（装到父目录会删掉用户自己的集合）', /join\(styleFramesParent\(\), STYLE_FRAMES_COLLECTION\)/.test(pack))
   check('mg_style 暴露 install 动作', /enum: \['list', 'search', 'read', 'source', 'frames', 'install'\]/.test(readFileSync('lib/index.js', 'utf8')))
+  // 离线 / 内网安装：install 可以吃本地 .tar.gz 或已解压目录，校验与下载路径同一套。
+  check('asset-pack 支持从本地文件安装参考帧', /export async function installStyleFramesFromFile/.test(pack)
+    && /origin: 'file'/.test(pack))
+  const toolIndex = readFileSync('lib/index.js', 'utf8')
+  check('mg_style install 接受 file 参数并走本地安装', /installStyleFramesFromFile\(args\.file\)/.test(toolIndex) && /file: \{ type: 'string'/.test(toolIndex))
 }
 
 console.log('\n' + (failures === 0 ? '全部通过。' : failures + ' 项失败。'))

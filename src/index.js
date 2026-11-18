@@ -56,7 +56,7 @@ import { previewProject } from './motion/preview.js'
 import { RenderJobs, applyJobKind } from './motion/jobs.js'
 import { assetsDirectory, captureAsset, cropAsset, fetchAsset, listAssets, colorsOf, probeAudio } from './motion/assets.js'
 import { listMediaLibrary, importMediaLibrary } from './motion/media-catalog.js'
-import { assetsSummary, ensureAssets, requireAssets, requireStyleFrames, styleFramesSummary } from './motion/asset-pack.js'
+import { assetsSummary, ensureAssets, installStyleFramesFromFile, requireAssets, requireStyleFrames, styleFramesSummary } from './motion/asset-pack.js'
 import { parseProjectJson } from './motion/json.js'
 import { analyzeBeats, snapFrame } from './motion/beats.js'
 import { resolveSync, verifySync, assetPath, filmHash } from './motion/sync.js'
@@ -6680,14 +6680,15 @@ function sanitizeNewName(raw) {
   })))
   ctx.effect(() => registerHostTool(defineTool({
     name: 'mg_style',
-    description: 'DrawAI 内置的 15 种整片 MG 动效风格（mg-styles 库）：扁平矢量 / 线条动画 / 等轴 2.5D / 逐帧手绘 / 拼贴 / 液态 / 形变 / 包豪斯 / 80s 复古 / 玻璃拟态 / 综艺花字 / 粗描边贴纸科普 / 像素 / 赛博 HUD / 水墨写意。上游那支 04-3d-render（C4D/Blender 质感的 CGI 软着陆）没有收录：画面是 Blender 离线渲的，插件里没有同等质感的等价物——用 CSS 滤镜凑出来的 CGI 只会更假，需要那种质感就外部渲好当素材回灌（motion_assets capture / 参考段）。这是「整片风格」（一种片子的整体视觉语言），与 shotcraft_search 的「单镜动效卡」互补、可同时用。action:"list" 列出全部；"search" 按关键词检索；"read" 读某个风格的施工包（可检验判据 + 色板 + 字体 + 节奏 + 效果配方 + 上游提示词 + Remotion 移植 brief）；"source" 读上游成片源码正文；"frames" 读取本地参考帧（不启动上游演示，缺素材包时下载一次约 40MB）；"install" 预下载/检查参考帧素材包。参考帧是可选的，缺失时报告原因并按施工包继续。选中后 diagram_apply 加 shape:"mgstyle" 节点并连到视频节点，motion_project 会把风格写进工程主题与 STYLE.md。',
+    description: 'DrawAI 内置的 15 种整片 MG 动效风格（mg-styles 库）：扁平矢量 / 线条动画 / 等轴 2.5D / 逐帧手绘 / 拼贴 / 液态 / 形变 / 包豪斯 / 80s 复古 / 玻璃拟态 / 综艺花字 / 粗描边贴纸科普 / 像素 / 赛博 HUD / 水墨写意。上游那支 04-3d-render（C4D/Blender 质感的 CGI 软着陆）没有收录：画面是 Blender 离线渲的，插件里没有同等质感的等价物——用 CSS 滤镜凑出来的 CGI 只会更假，需要那种质感就外部渲好当素材回灌（motion_assets capture / 参考段）。这是「整片风格」（一种片子的整体视觉语言），与 shotcraft_search 的「单镜动效卡」互补、可同时用。action:"list" 列出全部；"search" 按关键词检索；"read" 读某个风格的施工包（可检验判据 + 色板 + 字体 + 节奏 + 效果配方 + 上游提示词 + Remotion 移植 brief）；"source" 读上游成片源码正文；"frames" 读取本地参考帧（不启动上游演示，缺素材包时下载一次约 40MB）；"install" 预下载/检查参考帧素材包（给 file 就从本地 .tar.gz 或已解压的集合安装，不联网）；参考帧是可选的，缺失时报告原因并按施工包继续。选中后 diagram_apply 加 shape:"mgstyle" 节点并连到视频节点，motion_project 会把风格写进工程主题与 STYLE.md。',
     parameters: { action: { type: 'string', enum: ['list', 'search', 'read', 'source', 'frames', 'install'], required: true },
       slug: { type: 'string', description: '风格 slug，如 09-bauhaus' },
       query: { type: 'string', description: 'search：关键词（中英文风格名、用途、视觉特征）' },
       limit: { type: 'number', description: 'list/search 返回条数，默认 15/8' },
       files: { type: 'array', items: { type: 'string' }, description: 'source：上游源码相对路径（如 demos/09-bauhaus/film.js）；不传则列出该风格全部文件' },
       times: { type: 'array', items: { type: 'number' }, description: 'frames：来源视频的时间点（秒），返回最接近的本地参考帧并去重；合集素材使用合集时间，见结果 timeBasis' },
-      count: { type: 'number', description: 'frames：最多返回几张本地参考帧，默认 8；可用不足时返回实际数量' } },
+      count: { type: 'number', description: 'frames：最多返回几张本地参考帧，默认 8；可用不足时返回实际数量' },
+      file: { type: 'string', description: 'install：本地素材包路径，Release 里的 .tar.gz 或已经解压好的集合目录；给了就完全不联网，校验（大小/sha256/逐文件）与自动下载一致' } },
     output: { schema: { type: 'object', additionalProperties: false, properties: { summary: { type: 'string', required: true }, details: { type: 'string', required: true } } },
       render: (_args, value) => [{ type: 'text', text: value.summary + '\n' + value.details }] },
     async execute(args) {
@@ -6708,6 +6709,14 @@ function sanitizeNewName(raw) {
             styles: matches.slice(0, limit) }) }
       }
       if (action === 'install') {
+        // 给了 file 就完全不联网：本地 .tar.gz 或已经解压好的集合目录，校验与下载路径一致。
+        if (typeof args.file === 'string' && args.file.trim()) {
+          const installed = await installStyleFramesFromFile(args.file)
+          const state = styleFramesSummary()
+          return { summary: '已从本地素材包装好风格参考帧：' + state.collection + '（' + installed.files + ' 个文件）',
+            details: JSON.stringify({ ...state, installed: { source: installed.source, files: installed.files, root: installed.root },
+              hint: '用 action:"frames" slug:"…" 取某个风格的参考帧。本地安装与自动下载校验一致：大小、sha256、manifest 逐文件；不会联网。' }) }
+        }
         await ensureMotionStyleFrames('安装风格参考帧素材包')
         const state = styleFramesSummary()
         return { summary: '风格参考帧素材包已就绪：' + state.collection + (state.files ? '（' + state.files + ' 个文件）' : ''),

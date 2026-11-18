@@ -82,8 +82,49 @@ try {
   await assert.rejects(pack.ensureStyleFrames(), /不是素材包安装/)
   assert.match(readFileSync(join(dir, 'README.md'), 'utf8'), /我自己的参考帧/, '拒绝安装时不能动已有文件')
 
-  // dist 里如果已经打好了包，它必须和 lock 一致（否则就是发了包却忘了重新打包）。
+  // 本地安装：给 file 就完全不联网，大小 / sha256 / manifest 逐文件校验与下载路径一致。
+  // 覆盖率依赖 dist 里的真实包；没有包时只验证「找不到文件 / 格式不对」这两条提前返回。
+  rmSync(dir, { recursive: true, force: true })
   const archive = resolve('dist', STYLE_FRAMES_LOCK.file)
+  if (existsSync(archive)) {
+    const installed = await pack.installStyleFramesFromFile(archive)
+    assert.equal(installed.source, 'file')
+    assert.equal(installed.downloaded, false)
+    assert.equal(installed.files, STYLE_FRAMES_LOCK.files)
+    state = pack.styleFramesState()
+    assert.equal(state.ready, true, '装了本地包之后应当就绪')
+    assert.equal(state.source, 'file', '本地安装要能和自动下载区分开')
+    assert.equal(state.collection, STYLE_FRAMES_LOCK.collection)
+    assert.ok(existsSync(join(pack.styleFramesDir(), 'manifest.json')), '装好的集合要留下 manifest，方便再校验')
+
+    // 同一个集合以目录形态再装一次：目标是自己装的，允许覆盖。
+    const fromDir = await pack.installStyleFramesFromFile(pack.styleFramesDir())
+    assert.equal(fromDir.files, STYLE_FRAMES_LOCK.files)
+    assert.equal(fromDir.source, 'file')
+
+    // 大小 / 哈希对不上就拒收，且不能把已装好的那份弄坏。
+    const bad = join(root, 'bad.tar.gz')
+    const bytes = readFileSync(archive)
+    const corrupted = Buffer.from(bytes)
+    corrupted[corrupted.length - 1] ^= 0xff
+    writeFileSync(bad, corrupted)
+    await assert.rejects(pack.installStyleFramesFromFile(bad), /sha256|大小不对/)
+    assert.equal(pack.styleFramesState().ready, true, '拒收坏包时不能动已装好的集合')
+  } else {
+    assert.ok(true, 'dist 里还没有 ' + STYLE_FRAMES_LOCK.file + '，跳过本地包安装的端到端校验')
+  }
+
+  // 提前返回的两条：路径不存在、扩展名不对。都不联网、不动目标目录。
+  await assert.rejects(pack.installStyleFramesFromFile(join(root, 'nope.tar.gz')), /找不到这个素材包/)
+  const zip = join(root, 'pack.zip')
+  writeFileSync(zip, 'x')
+  await assert.rejects(pack.installStyleFramesFromFile(zip), /只认 \.tar\.gz/)
+  const emptyDir = join(root, 'extracted')
+  mkdirSync(emptyDir, { recursive: true })
+  writeFileSync(join(emptyDir, 'index.json'), '{"styles":[]}\n')
+  await assert.rejects(pack.installStyleFramesFromFile(emptyDir), /没有 manifest\.json/)
+
+  // dist 里如果已经打好了包，它必须和 lock 一致（否则就是发了包却忘了重新打包）。
   if (existsSync(archive)) {
     assert.equal(statSync(archive).size, STYLE_FRAMES_LOCK.bytes, 'dist 里的参考帧包与 lock 大小不一致，重新打包')
     const digest = createHash('sha256').update(readFileSync(archive)).digest('hex')
