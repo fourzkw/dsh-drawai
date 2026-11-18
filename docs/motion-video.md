@@ -213,14 +213,15 @@ draft_content.json   draft:true 时额外写一份草稿（结构按剪映 36000
 - **字体**：`fonts.googleapis.com` 用不了，字体只能预先放进工程 `assets/` 并在场景里用 `@font-face` 注册（或 `staticFile` 引用）。字体门禁会拦"声明了但没注册"的 family —— 这是有意的：静默退回系统字体在成片里很难看，也很难事后发现。
 - **npm 包**：装不了新依赖。`three` / `@react-three/fiber` 已在插件里；要用别的库得事先 vendor。
 - **音效**：`motion_sfx` 需要网络，离线时只能用工程里已有的素材或自己导入。
-- **`mg_style frames`**：上游 demo 的 importmap 指向 `/node_modules/*`，缺包时页面根本加载不起来。报错会直接列出缺哪个包 —— 这时别反复重试，改 `action:"source"` 读 `demos/<slug>/js/*.js` + `cue.json` 反推动效。目前 `three` 在，`opentype.js / simplex-noise / topojson-client` 不在，所以少数 demo（如 03-isometric 的标题挤出字）取不了帧。
+- **`mg_style frames`**：读**本地预置**参考帧（`~/.dsh/drawai-style-reference-frames/collection-<日期>/`），不启动浏览器、不跑上游演示，所以**离线可用**。要联网的只有本机还没有集合时的那一次下载（约 40MB，逐文件 sha256 校验；`action:"install"` 可提前下）。下载不成就先 `action:"read"` 拿施工包与 `motion` 画像照做 —— 参考帧是可选参考，但别谎称看过没看到的帧。
 
 ### 常见报错对照
 
 | 报错 | 真正的原因 |
 |---|---|
-| `上游 demo 没有就绪（45 秒），缺资源：…` | 页面依赖的资源没服务出来，看列出的路径 |
-| `这个 demo 的依赖没装在本机（…）` | importmap 指向的 npm 包不在插件 `node_modules` 里 |
+| `未找到本地风格参考帧集合：…` | 本机还没有集合；`mg_style {action:"install"}` 预下，或设 `DRAWAI_STYLE_REFERENCE_DIR` 指向自己的集合 |
+| `风格参考帧素材包（…）还没准备好：…` | 自动下载失败（离线 / 代理 / 镜像不可达）；参考帧可选，按施工包继续，或按报错里的四条指引手动解压 |
+| `本地参考帧未收录风格：…` | 集合里没有这个 slug；换一个风格，或换一份更全的集合 |
 | `各镜加起来是 X 帧，视频节点是 Y 帧` | 分镜表帧区间之和 ≠ 节点时长；报错里给了两种改法 |
 | `字体没注册，拒绝渲染` | 场景里用了没 `@font-face` / 没放进 assets 的 family |
 | `分镜表 N 行，时间轴是 M 段` | 分镜表行数与镜头卡排布不一致；多出的行不会自动开段 |
