@@ -380,7 +380,7 @@ async function main() {
       provider: 'openai',
       apiUrl: openai.base + '/v1',
       apiKey: 'sk-test-key',
-      model: 'gpt-image-1',
+      model: 'gpt-image-2.5-sunburst',
       prompt: '一只戴墨镜的猫',
       width: 1024,
       height: 1024,
