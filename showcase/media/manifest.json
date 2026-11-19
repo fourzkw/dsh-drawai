@@ -182,6 +182,19 @@
       "film": true,
       "source": "drawai:mydeepseek/collage-weekend-walk.drawai.media/clip-2/source.mp4",
       "sha256": "9926a0bd0e33ef2309a69c2a057979c01341199c026fd7d89bf1778cbe7cb299"
+    },
+    {
+      "slug": "02-line-art",
+      "title": "海的来信",
+      "video": "media/02-line-art.mp4",
+      "poster": "media/02-line-art.jpg",
+      "w": 1920,
+      "h": 1080,
+      "duration": 12.053,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/sea-letter-goldline-12s.drawai.media/clip-1/source.mp4",
+      "sha256": "dbb04f8af73ed61b443e02b385a3fa9a49de3ef90693a72a252e77a56864239a"
     }
   ]
 }

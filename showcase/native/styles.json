@@ -1,4 +1,7 @@
 {
+  "02-line-art": {
+    "rhythm": { "bpm": 72, "fps": 30, "duration": 12, "aspect": "16:9", "cutFrames": 13 }
+  },
   "22-hud": {
     "palette": {
       "page": "#020A0D",

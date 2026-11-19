@@ -26,7 +26,7 @@ const promptStyles = styles.filter((style) => {
 });
 const promptCount = promptStyles.length;
 const expectedPromptSlugs = [
-  '01-flat-vector', '03-isometric', '05-cel-boil', '06-collage',
+  '01-flat-vector', '02-line-art', '03-isometric', '05-cel-boil', '06-collage',
   '07-liquid', '08-morph', '09-bauhaus', '10-synthwave', '12-aurora-glass',
   '18-hanazi', '19-paperclip', '20-pixel', '22-hud', '23-ink-wash',
 ];
@@ -159,7 +159,7 @@ if (fs.existsSync(MANIFEST)) {
 if (manifest) {
   const films = Array.isArray(manifest.films) ? manifest.films : Array.isArray(manifest.items) ? manifest.items : [];
   const expected = [
-    '01-flat-vector', '03-isometric', '05-cel-boil', '06-collage',
+    '01-flat-vector', '02-line-art', '03-isometric', '05-cel-boil', '06-collage',
     '07-liquid', '08-morph', '09-bauhaus', '10-synthwave', '12-aurora-glass',
     '18-hanazi', '19-paperclip', '20-pixel', '22-hud', '23-ink-wash',
   ];
