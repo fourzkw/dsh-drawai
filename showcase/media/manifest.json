@@ -41,6 +41,32 @@
       "sha256": "df30ca98e0cf65a43fb525f73c543bead8ff57986a30225c8b557c2c83d8fa19"
     },
     {
+      "slug": "05-cel-boil",
+      "title": "小猫与会跳舞的红毛线",
+      "video": "media/05-cel-boil.mp4",
+      "poster": "media/05-cel-boil.jpg",
+      "w": 1920,
+      "h": 1080,
+      "duration": 10.1,
+      "fps": 24,
+      "film": true,
+      "source": "drawai:mydeepseek/cat-yarn-boil-reel.drawai.media/clip-2/source.mp4",
+      "sha256": "683fcaa5aeab8639eec502fa333185364f8824afc7483320f7239ac7c52bc999"
+    },
+    {
+      "slug": "08-morph",
+      "title": "DrawAI · 一形万象",
+      "video": "media/08-morph.mp4",
+      "poster": "media/08-morph.jpg",
+      "w": 1920,
+      "h": 1080,
+      "duration": 10.1,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/exports/成片/一形万象_DrawAI_riso_10s.mp4",
+      "sha256": "aaed6024b56ef7c5b1ce33bcd2c67ec14cd574621a32bf2bc3c82ce3c3447815"
+    },
+    {
       "slug": "09-bauhaus",
       "title": "PLAY THE DAY · 把今天调成喜欢的节奏",
       "video": "media/09-bauhaus.mp4",
@@ -156,6 +182,19 @@
       "film": true,
       "source": "drawai:mydeepseek/collage-weekend-walk.drawai.media/clip-2/source.mp4",
       "sha256": "9926a0bd0e33ef2309a69c2a057979c01341199c026fd7d89bf1778cbe7cb299"
+    },
+    {
+      "slug": "02-line-art",
+      "title": "海的来信",
+      "video": "media/02-line-art.mp4",
+      "poster": "media/02-line-art.jpg",
+      "w": 1920,
+      "h": 1080,
+      "duration": 12.053,
+      "fps": 30,
+      "film": true,
+      "source": "drawai:mydeepseek/sea-letter-goldline-12s.drawai.media/clip-1/source.mp4",
+      "sha256": "dbb04f8af73ed61b443e02b385a3fa9a49de3ef90693a72a252e77a56864239a"
     }
   ]
 }

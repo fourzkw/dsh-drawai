@@ -1,4 +1,5 @@
 import { loadVideoModule } from './motion/video-runtime.js'
+import { headlessBrowserOptions } from './motion/headless-browser.js'
 import {existsSync,mkdirSync,writeFileSync} from 'node:fs'
 import {join} from 'node:path'
 import {randomUUID,createHash} from 'node:crypto'
@@ -12,7 +13,7 @@ export async function captureMotionPage(args,{directory,signal,browserExecutable
   const executable=[browserExecutable,process.env.DRAWAI_CHROME_PATH,'C:/Program Files/Google/Chrome/Application/chrome.exe','C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find(p=>p&&existsSync(p))
   signal?.throwIfAborted()
   const { openBrowser } = await loadVideoModule('@remotion/renderer', {signal})
-  const browser=await openBrowser('chrome',{browserExecutable:executable,logLevel:'error'})
+  const browser=await openBrowser('chrome',headlessBrowserOptions(executable,{logLevel:'error'}))
   const abort=()=>{void browser.close({silent:true}).catch(()=>{})};signal?.addEventListener('abort',abort,{once:true})
   try{
     signal?.throwIfAborted()
