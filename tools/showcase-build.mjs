@@ -264,15 +264,15 @@ function renderPrompt(style, markdown) {
         <span>${body.length} 字符</span>
       </div>
       <div class="prompt-actions">
-        <button class="copy is-accent" type="button" data-template-style="${esc(style.slug)}"
+        <button class="copy is-accent" type="button" data-copy="${bodyId}">复制原提示词</button>
+        <button class="copy" type="button" data-template-style="${esc(style.slug)}"
           data-fill-style="${esc(`${style.name}（${style.slug}）`)}"
           data-fill-spec="${esc(templateSpec(style))}"
           data-fill-duration="${esc(durationLabel)}"
           title="复制模板，填写自己的主题">用此风格创作</button>
-        <button class="copy" type="button" data-copy="${bodyId}">复制提示词</button>
       </div>
     </div>
-    <p class="prompt-hint">用此风格创作：复制模板，填写自己的主题。复制提示词：参考或修改这支样片。</p>
+    <p class="prompt-hint">复制原提示词：参考或修改这支样片。用此风格创作：复制模板，填写自己的主题。</p>
     <details class="prompt-fold">
       <summary>提示词正文<span>展开 / 收起 · ${body.length} 字符</span></summary>
       <div class="prompt-fold-body">

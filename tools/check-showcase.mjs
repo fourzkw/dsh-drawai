@@ -112,6 +112,12 @@ if (!fs.existsSync(INDEX)) {
 
   const promptCopies = (html.match(/data-copy="prompt-/g) || []).length;
   if (promptCopies !== promptCount) fail(`折叠状态下的复制按钮数量应为 ${promptCount}，实际 ${promptCopies}`);
+  const promptActions = [...html.matchAll(/<div class="prompt-actions">([\s\S]*?)<\/div>/g)];
+  if (promptActions.length !== promptCount || promptActions.some((match) => {
+    const copy = match[1].indexOf('data-copy="prompt-');
+    const create = match[1].indexOf('data-template-style=');
+    return copy < 0 || create < 0 || copy > create || !match[1].includes('>复制原提示词</button>');
+  })) fail('原提示词复制入口应排在风格创作入口之前');
 
   // 通用制作模板：正文、填空说明、复制入口和每节的创作入口都在。
   if (!/id="template"/.test(html)) fail('页面里没有通用制作模板区');

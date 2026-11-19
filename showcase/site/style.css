@@ -652,12 +652,14 @@ button { font: inherit; }
 .copy:hover { border-color: var(--accent); color: var(--ink); }
 .copy.is-done { border-color: var(--accent); color: var(--accent); }
 .copy.is-accent {
-  border-color: rgba(232, 197, 71, 0.38);
-  color: rgba(232, 197, 71, 0.92);
+  border-color: #e8c547;
+  background: #e8c547;
+  color: #14150f;
 }
 .copy.is-accent:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: #f5dc79;
+  background: #f5dc79;
+  color: #14150f;
 }
 
 /* ---------- code / markdown ---------- */
