@@ -1,8 +1,8 @@
 // Isolated video dependencies: no Remotion/esbuild is loaded or installed at plugin startup.
 import { spawn, spawnSync } from 'node:child_process'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, parse } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -36,7 +36,7 @@ export function videoRuntimeRequire(directory = videoRuntimeDirectory()) {
   return createRequire(join(directory, 'package.json'))
 }
 
-function validate(directory, native = false) {
+function validate(directory) {
   const require = videoRuntimeRequire(directory)
   for (const [name, version] of Object.entries(spec.dependencies)) {
     let file
@@ -55,14 +55,35 @@ function validate(directory, native = false) {
       throw new Error('视频依赖未安装在独立目录：' + name)
     if (JSON.parse(readFileSync(file, 'utf8')).version !== version) throw new Error('视频依赖版本不匹配：' + name)
   }
-  if (!native) return
-  // Validate in a child so Windows DLL handles and cached module paths don't
-  // pin the staging directory while it is atomically renamed into the cache.
-  const checked = spawnSync(process.execPath, ['-e',
-    "const r=require('node:module').createRequire(process.argv[1]);const b=r('@remotion/bundler');r('@remotion/renderer');if(!b.BundlerInternals.esbuild.transformSync('const n: number = 1',{loader:'ts'}).code)process.exit(1)",
-    join(directory, 'package.json')], { windowsHide: true, encoding: 'utf8', timeout: 90000,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
-  if (checked.status !== 0) throw new Error('视频二进制验证失败：' + (checked.error?.message || checked.stderr))
+}
+
+const NATIVE_PROBE = "const r=require('node:module').createRequire(process.argv[1]);const b=r('@remotion/bundler');r('@remotion/renderer');if(!b.BundlerInternals.esbuild.transformSync('const n: number = 1',{loader:'ts'}).code)process.exit(1)"
+
+/**
+ * 原生依赖校验放在子进程里：Windows 上 DLL 句柄不能钉住待 rename 的 staging。
+ * 必须异步 —— 以前 spawnSync(timeout: 90000) 会卡住宿主事件循环，连取消都进不来（issue #57）。
+ */
+function validateNative(directory, { signal } = {}) {
+  return new Promise((done, fail) => {
+    const child = spawn(process.execPath, ['-e', NATIVE_PROBE, join(directory, 'package.json')], {
+      windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+    })
+    let stderr = '', settled = false, timer = null
+    function finish(error) {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
+      if (error) fail(error); else done()
+    }
+    function abort() { killTree(child); finish(new Error('已取消视频环境初始化')) }
+    timer = setTimeout(() => { killTree(child); finish(new Error('视频二进制验证失败：90 秒内没有完成')) }, 90000)
+    child.stderr.on('data', (chunk) => { stderr = (stderr + chunk).slice(-2000) })
+    child.on('error', finish)
+    child.on('close', (code) => finish(code === 0 ? null : new Error('视频二进制验证失败：' + stderr)))
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) abort()
+  })
 }
 
 export function videoRuntimeState() {
@@ -83,12 +104,13 @@ function install(directory, { signal, onProgress }) {
   return new Promise((done, fail) => {
     const child = spawn(process.execPath, [cli, 'ci', '--ignore-scripts', '--include=optional', '--no-audit', '--no-fund',
       '--registry=' + url.href, '--fetch-retries=1', '--fetch-timeout=30000', '--loglevel=error'], {
-      cwd: directory, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'],
+      cwd: directory, windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'], detached: process.platform !== 'win32',
       env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_ENV: 'production', npm_config_ignore_scripts: 'true' },
     })
     let stderr = '', settled = false
-    const abort = () => child.kill()
-    const timer = setTimeout(() => child.kill(), 10 * 60000)
+    // npm 会再拉起孙进程：只 kill 这一层在 Windows 上会留下它们（issue #57）。
+    const abort = () => killTree(child)
+    const timer = setTimeout(() => killTree(child), 10 * 60000)
     const progress = setInterval(() => onProgress?.({ phase: 'runtime-installing', message: '正在下载和校验视频依赖，首次初始化可能需要数分钟' }), 5000)
     const finish = error => {
       if (settled) return
@@ -105,6 +127,55 @@ function install(directory, { signal, onProgress }) {
   })
 }
 
+/** Windows 上 child.kill() 只杀进程本身；npm 拉起的孙进程要 taskkill /T 才会一起退出。 */
+function killTree(child) {
+  const pid = child?.pid
+  if (!pid) { try { child?.kill() } catch { /* ignore */ } return }
+  if (process.platform === 'win32') {
+    try { spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }) } catch { try { child.kill() } catch { /* ignore */ } }
+    return
+  }
+  try { process.kill(-pid, 'SIGKILL') } catch { try { child.kill('SIGKILL') } catch { /* ignore */ } }
+}
+
+function delay(ms) { return new Promise((done) => setTimeout(done, ms)) }
+
+/** 上次失败留下的 staging 里依赖完整且已通过校验 → 直接复用，不再 259MB 重装。 */
+function stagedRuntimeReady(staging) {
+  try {
+    const ready = JSON.parse(readFileSync(join(staging, '.ready.json'), 'utf8'))
+    if (ready.fingerprint !== fingerprint || ready.key !== key) return false
+    validate(staging)
+    return true
+  } catch { return false }
+}
+
+/**
+ * 把校验通过的 staging 移进缓存。Windows 上 rename 会因杀软/索引服务占用目录报 EPERM，
+ * 这里重试、最后一次退化成复制 —— 以前 rename 一次就失败、finally 又把 259MB 删掉（issue #57）。
+ */
+async function promote(source, target) {
+  if (existsSync(target)) {
+    const previous = JSON.parse(readFileSync(join(target, 'package.json'), 'utf8'))
+    if (previous.name !== spec.name) throw new Error('缓存位置包含其他文件，请指定独立目录')
+    rmSync(target, { recursive: true, force: true })
+  }
+  let lastError = null
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try { renameSync(source, target); return } catch (error) {
+      lastError = error
+      if (!['EPERM', 'EBUSY', 'EACCES', 'ENOTEMPTY'].includes(error.code)) throw error
+      await delay(150 * (attempt + 1))
+    }
+  }
+  try {
+    cpSync(source, target, { recursive: true, errorOnExist: false })
+    rmSync(source, { recursive: true, force: true })
+  } catch (error) {
+    throw new Error('视频运行环境已就绪但无法移入缓存（' + (lastError?.code || lastError?.message || 'unknown') + '）：' + error.message)
+  }
+}
+
 async function initialize({ signal, onProgress }) {
   const directory = videoRuntimeDirectory(), lock = directory + '.lock'
   if (existsSync(directory)) {
@@ -114,7 +185,8 @@ async function initialize({ signal, onProgress }) {
   mkdirSync(dirname(directory), { recursive: true })
   // Coordinate independent render workers. A dead owner's lock is recoverable.
   let ownsLock = false
-  const deadline = Date.now() + 11 * 60000
+  // 5 分钟拿不到锁就放弃：11 分钟对一次工具调用来说等于"卡死"（issue #57）。
+  const deadline = Date.now() + 5 * 60000
   while (!ownsLock) {
     signal?.throwIfAborted()
     try {
@@ -137,33 +209,44 @@ async function initialize({ signal, onProgress }) {
       }
       if (Date.now() > deadline) throw new Error('等待其他视频环境初始化超时，请重试')
       onProgress?.({ phase: 'runtime-installing', message: '正在等待共享视频运行环境就绪' })
-      await new Promise(done => setTimeout(done, 500))
+      await delay(500)
     }
   }
-  const staging = directory + '.tmp-' + randomUUID()
+  // 固定名字的 staging：上次失败留下的可以复用，不用每次从零重装。
+  const staging = directory + '.staging'
+  let keepStaging = false
   try {
     if (videoRuntimeState().ready) return directory
-    onProgress?.({ phase: 'runtime-installing', message: '首次使用：正在初始化独立视频运行环境' })
     signal?.throwIfAborted()
+    if (stagedRuntimeReady(staging)) {
+      onProgress?.({ phase: 'runtime-checking', message: '复用上次已校验的视频依赖，直接写入缓存' })
+      signal?.throwIfAborted()
+      await promote(staging, directory)
+      onProgress?.({ phase: 'runtime-ready', message: '视频运行环境已就绪，后续离线复用' })
+      return directory
+    }
+    rmSync(staging, { recursive: true, force: true })
+    onProgress?.({ phase: 'runtime-installing', message: '首次使用：正在初始化独立视频运行环境' })
     mkdirSync(staging)
     writeFileSync(join(staging, 'package.json'), readFileSync(MANIFEST))
     writeFileSync(join(staging, 'package-lock.json'), readFileSync(LOCK))
     await install(staging, { signal, onProgress })
     signal?.throwIfAborted()
     onProgress?.({ phase: 'runtime-checking', message: '正在验证视频运行环境' })
-    validate(staging, true)
+    validate(staging)
+    await validateNative(staging, { signal })
+    signal?.throwIfAborted()
     writeFileSync(join(staging, '.ready.json'), JSON.stringify({ fingerprint, key }))
     // Only replace this cache after installation and native-binary validation succeed.
-    if (existsSync(directory)) {
-      const previous = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'))
-      if (previous.name !== spec.name) throw new Error('缓存位置包含其他文件，请指定独立目录')
-      rmSync(directory, { recursive: true, force: true })
-    }
-    renameSync(staging, directory)
+    await promote(staging, directory)
     onProgress?.({ phase: 'runtime-ready', message: '视频运行环境已就绪，后续离线复用' })
     return directory
+  } catch (error) {
+    // 依赖已装好、只差移入缓存：保留 staging，下次直接 promote，不再重装 259MB。
+    if (!existsSync(directory) && existsSync(join(staging, '.ready.json'))) keepStaging = true
+    throw error
   } finally {
-    rmSync(staging, { recursive: true, force: true })
+    if (!keepStaging) rmSync(staging, { recursive: true, force: true })
     rmSync(lock, { recursive: true, force: true })
   }
 }
