@@ -425,7 +425,10 @@ function renderMotion(style) {
   }
   if (motion.camera) chips.push('相机运动');
   if (motion.impact) chips.push('冲击帧');
-  if (motion.grain) chips.push(`颗粒 ${motion.grain}`);
+  if (motion.grain) {
+    const value = motion.grain;
+    chips.push(typeof value === 'string' || typeof value === 'number' ? `颗粒 ${value}` : '颗粒');
+  }
   if (motion.motionBlur) {
     const blur = motion.motionBlur;
     chips.push(`运动模糊 ${blur.samples ?? '?'}× / ${blur.shutter ?? '?'}`);
@@ -561,7 +564,8 @@ function renderSection(style, film, mediaState, number) {
         </div>
 
         <div class="spec-block">
-          <h3>一眼认出</h3>
+          <h3>参考风格细节</h3>
+          <p class="note">以下为参考风格的实现细节，不一定出现在上方样片中。</p>
           ${renderSignature(style)}
         </div>
 
@@ -624,7 +628,9 @@ if (!templateHtml) throw new Error('通用制作模板没有正文：showcase/na
 const values = {
   SITE_URL,
   OG_IMAGE_META: ogImageMeta,
+  STYLE_COUNT: String(styles.length),
   FILM_COUNT: String(mediaState.filmCount),
+  PROMPT_COUNT: String(styles.filter((style) => readOptional(path.join(NATIVE_PROMPTS, `${style.slug}.md`))?.trim()).length),
   INDEX: index,
   SECTIONS: sections.join('\n'),
   TEMPLATE: templateHtml,

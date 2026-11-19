@@ -57,6 +57,7 @@ if (!fs.existsSync(INDEX)) {
 
   if (/\{\{[A-Z_]+\}\}/.test(html)) fail('index.html 里还有未替换的模板占位符');
   if (/>(?:undefined|NaN)</.test(html)) fail('index.html 里出现 undefined / NaN');
+  if (html.includes('[object Object]')) fail('index.html 里出现未格式化的对象');
 
   for (const style of styles) {
     const { slug } = style;

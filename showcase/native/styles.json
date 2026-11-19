@@ -1,8 +1,10 @@
 {
   "02-line-art": {
+    "oneLiner": "细线连续生长，勾勒简洁画面；留白与柔和光泽营造轻盈的叙事感。",
     "rhythm": { "bpm": 72, "fps": 30, "duration": 12, "aspect": "16:9", "cutFrames": 13 }
   },
   "22-hud": {
+    "oneLiner": "深色背景搭配发光细线、扫描图形与动态数据，呈现科幻界面质感。",
     "palette": {
       "page": "#020A0D",
       "surface": "#0E3A42",
@@ -21,6 +23,7 @@
     "rhythm": { "bpm": 120, "fps": 30, "duration": 10, "aspect": "16:9", "cutFrames": 5 }
   },
   "20-pixel": {
+    "oneLiner": "低分辨率像素、有限色板与阶梯式动作，唤起复古游戏画面的感觉。",
     "palette": {
       "page": "#1b1a33",
       "surface": "#0d0b1a",
@@ -39,12 +42,42 @@
     "rhythm": { "bpm": 150, "fps": 30, "duration": 12.1, "aspect": "16:9", "cutFrames": 3 }
   },
   "01-flat-vector": {
+    "oneLiner": "简洁色块与几何造型配合弹跳和变形，呈现明快的扁平动画。",
     "rhythm": { "bpm": 120, "fps": 30, "duration": 11, "aspect": "16:9", "cutFrames": 15 }
   },
   "03-isometric": {
+    "oneLiner": "等轴视角呈现立体场景，模块化造型与层次分明的空间构成画面。",
     "rhythm": { "bpm": 120, "fps": 30, "duration": 12, "aspect": "16:9", "cutFrames": 15 }
   },
   "06-collage": {
+    "oneLiner": "撕纸边缘、印刷纹理与错层贴纸拼合成画面，带有手工剪贴的节奏。",
     "rhythm": { "bpm": 90, "fps": 30, "duration": 12, "aspect": "16:9", "cutFrames": 3 }
+  },
+  "05-cel-boil": {
+    "oneLiner": "手绘线条逐帧轻微抖动，配合纸张质感与错位填色，呈现鲜活的手作感。"
+  },
+  "07-liquid": {
+    "oneLiner": "柔软流体在光影中流动、融合与回弹，呈现富有弹性的液态质感。"
+  },
+  "08-morph": {
+    "oneLiner": "简洁轮廓在不同形态之间连续变换，以流畅过渡连接画面。"
+  },
+  "09-bauhaus": {
+    "oneLiner": "基础几何与鲜明色块按节奏组合、切换，形成利落的构成式画面。"
+  },
+  "10-synthwave": {
+    "oneLiner": "霓虹光色、透视网格与复古电子视觉交织，营造合成器浪潮氛围。"
+  },
+  "12-aurora-glass": {
+    "oneLiner": "柔和色光缓慢流动，搭配半透明玻璃层次，营造轻盈朦胧的空间感。"
+  },
+  "18-hanazi": {
+    "oneLiner": "多层描边的醒目花字配合弹跳与手绘装饰，让文字成为画面主角。"
+  },
+  "19-paperclip": {
+    "oneLiner": "粗描边贴纸、简洁图形与文字组合，用轻松的视觉语言讲解内容。"
+  },
+  "23-ink-wash": {
+    "oneLiner": "宣纸纹理、浓淡墨色与留白相互映衬，呈现写意水墨的韵味。"
   }
 }
