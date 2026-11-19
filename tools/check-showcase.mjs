@@ -77,7 +77,7 @@ if (!fs.existsSync(INDEX)) {
 
   const tabs = (html.match(/<button class="tab/g) || []).length;
   tabTotal = tabs;
-  const expectedTabs = (styles.length - promptCount) * 2 + promptCount * 3;
+  const expectedTabs = styles.length + promptCount;
   if (tabs !== expectedTabs) fail(`tab 数量应为 ${expectedTabs}，实际 ${tabs}`);
 
   const indexNumbers = [...html.matchAll(/class="index-num">(\d{2})</g)].map((match) => match[1]);
@@ -87,6 +87,7 @@ if (!fs.existsSync(INDEX)) {
   }
 
   if (html.includes('data-pane="src"')) fail('页面里仍有源码 pane');
+  if (html.includes('data-tab="use"') || html.includes('data-pane="use"')) fail('页面里仍有“在 DrawAI 中使用”标签');
   if (htmlWithoutPrompts.includes('上游源码')) fail('页面里仍有“上游源码”');
   if (htmlWithoutPrompts.includes('上游成片')) fail('页面里仍有“上游成片”');
   if (htmlWithoutPrompts.includes('上游')) fail('页面里仍有“上游”字样');
@@ -112,7 +113,7 @@ if (!fs.existsSync(INDEX)) {
   const promptCopies = (html.match(/data-copy="prompt-/g) || []).length;
   if (promptCopies !== promptCount) fail(`折叠状态下的复制按钮数量应为 ${promptCount}，实际 ${promptCopies}`);
 
-  // 通用制作模板：正文、填空说明、复制入口和每节的“套用模板”都在。
+  // 通用制作模板：正文、填空说明、复制入口和每节的创作入口都在。
   if (!/id="template"/.test(html)) fail('页面里没有通用制作模板区');
   if (!/id="template-text"/.test(html)) fail('通用制作模板没有正文');
   if (!/id="template-fill"/.test(html)) fail('通用制作模板没有可复制的填空段');
@@ -120,8 +121,8 @@ if (!fs.existsSync(INDEX)) {
   const templateSlots = (html.match(/class="slot"/g) || []).length;
   if (templateSlots !== 7) fail(`通用制作模板填空项应为 7，实际 ${templateSlots}`);
   const templatePresets = (html.match(/data-template-style="/g) || []).length;
-  if (templatePresets !== promptCount) fail(`“套用模板”按钮数量应为 ${promptCount}，实际 ${templatePresets}`);
-  if (/data-fill-style=""/.test(html)) fail('“套用模板”按钮缺少本节风格名');
+  if (templatePresets !== promptCount) fail(`“用此风格创作”按钮数量应为 ${promptCount}，实际 ${templatePresets}`);
+  if (/data-fill-style=""/.test(html)) fail('“用此风格创作”按钮缺少本节风格名');
   if (!html.includes('href="#template"')) fail('页面里没有指向通用制作模板的入口链接');
   if (!exists('native/prompt-template.md')) fail('缺少 showcase/native/prompt-template.md');
 

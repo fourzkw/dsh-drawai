@@ -330,10 +330,6 @@ button { font: inherit; }
   box-shadow: 0 30px 70px rgba(0, 0, 0, 0.5);
 }
 
-@media (min-width: 981px) {
-  .player { position: sticky; top: 76px; }
-}
-
 .player video {
   display: block;
   width: 100%;
@@ -600,6 +596,12 @@ button { font: inherit; }
   text-decoration: none;
 }
 .prompt-actions a:hover { color: var(--accent); }
+.prompt-hint {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 13px;
+  line-height: 1.6;
+}
 .prompt-guide,
 .prompt-fold {
   padding: 0 18px;
@@ -759,50 +761,6 @@ button { font: inherit; }
   font: 14px var(--mono);
 }
 .brief-section[open] summary::after { content: "−"; }
-
-/* ---------- usage ---------- */
-.usage {
-  display: grid;
-  gap: 14px;
-  max-width: 920px;
-}
-.usage .note {
-  margin: 0;
-  color: var(--muted);
-  font-size: 12.5px;
-  line-height: 1.75;
-}
-.usage .note code {
-  padding: 1px 4px;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--ink);
-  font: 0.92em var(--mono);
-}
-.cmd {
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--r-md);
-  background: var(--bg-2);
-}
-.cmd-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--line);
-  color: var(--muted);
-  font: 9px var(--mono);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.cmd pre {
-  margin: 0;
-  padding: 12px;
-  overflow: auto;
-  color: #d8d2c6;
-  font: 11.5px/1.65 var(--mono);
-}
 
 /* ---------- template briefing ---------- */
 .briefing {

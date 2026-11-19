@@ -226,7 +226,7 @@ function renderTemplate(markdown, styleCount) {
         <p class="briefing-label"><span>填空 ${slots.length} 项</span><span>Fill in</span></p>
         <ol class="slots">${slotHtml}
         </ol>
-        <p class="briefing-note">模板管流程与验收，风格提示词管画面与技法。两段一起发，才不会各做各的。</p>
+        <p class="briefing-note">模板用于填写新主题和交付要求；也可以按需参考各样片的提示词。</p>
       </div>
       <div class="briefing-doc">
         <div class="doc-bar">
@@ -268,10 +268,11 @@ function renderPrompt(style, markdown) {
           data-fill-style="${esc(`${style.name}（${style.slug}）`)}"
           data-fill-spec="${esc(templateSpec(style))}"
           data-fill-duration="${esc(durationLabel)}"
-          title="复制通用制作模板，风格与规格按本节填好">套用模板</button>
+          title="复制模板，填写自己的主题">用此风格创作</button>
         <button class="copy" type="button" data-copy="${bodyId}">复制提示词</button>
       </div>
     </div>
+    <p class="prompt-hint">用此风格创作：复制模板，填写自己的主题。复制提示词：参考或修改这支样片。</p>
     <details class="prompt-fold">
       <summary>提示词正文<span>展开 / 收起 · ${body.length} 字符</span></summary>
       <div class="prompt-fold-body">
@@ -448,35 +449,6 @@ function renderSignature(style) {
   return `<ul class="sig">${signature.map((item) => `<li>${esc(item)}</li>`).join('')}</ul>`;
 }
 
-function renderUsage(style) {
-  const slug = style.slug;
-  const commands = [
-    ['读完整风格施工包', `mg_style {action:"read", slug:"${slug}"}`],
-    ['读取本地参考帧（可选）', `mg_style {action:"frames", slug:"${slug}", count:8}`],
-    ['建视频工程并套用风格', `motion_project {action:"create", nodeId:"<视频节点>", style:"${slug}"}`],
-  ];
-
-  const natural = `用 ${slug} 做一条「${style.name}」；先出 3–6 秒样片，确认节奏、色板和转场后再渲全片。`;
-
-  const commandHtml = commands.map(([label, command], index) => {
-    const id = `use-${slug}-${index}`;
-    return `<div class="cmd">
-      <div class="cmd-head"><span>${esc(label)}</span><button class="copy" type="button" data-copy="${id}">复制</button></div>
-      <pre id="${id}">${esc(command)}</pre>
-    </div>`;
-  }).join('');
-
-  const naturalId = `use-${slug}-nl`;
-  return `<div class="usage">
-    <p class="note">一条片子只接一种整片风格。先在画布上连一个「整片风格」节点，或让 <code>motion_project</code> 直接写 <code>theme.ts</code> / <code>STYLE.md</code>。要把流程、声音和交付一起交出去，用<a href="#template">通用制作模板</a>起头。</p>
-    ${commandHtml}
-    <div class="cmd">
-      <div class="cmd-head"><span>自然语言起点</span><button class="copy" type="button" data-copy="${naturalId}">复制</button></div>
-      <pre id="${naturalId}">${esc(natural)}</pre>
-    </div>
-  </div>`;
-}
-
 function renderSection(style, film, mediaState, number) {
   const accent = isHex(style.palette?.accent) ? style.palette.accent : '#e8c547';
   const rhythm = style.rhythm || {};
@@ -503,7 +475,6 @@ function renderSection(style, film, mediaState, number) {
   const tabs = [
     ...(hasPrompt ? [['prompt', '提示词']] : []),
     ['brief', '移植说明'],
-    ['use', '在 DrawAI 中使用'],
   ];
 
   const tabButtons = tabs.map(([key, label], index) => {
@@ -523,9 +494,7 @@ function renderSection(style, film, mediaState, number) {
       <div class="brief">${briefHtml}</div>
     </section>
 
-    <section class="pane" id="pane-use-${style.slug}" role="tabpanel" aria-labelledby="tab-use-${style.slug}" data-pane="use" hidden>
-      ${renderUsage(style)}
-    </section>`;
+    `;
 
   return `<section class="style${portrait ? ' is-portrait' : ''}" id="${esc(style.slug)}" data-slug="${esc(style.slug)}" data-search="${esc(searchText)}" data-film="${player.hasVideo}" style="--accent:${esc(accent)}">
     <header class="style-head">

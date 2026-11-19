@@ -14,7 +14,7 @@
   const toastEl = $('#toast');
   let toastTimer = 0;
 
-  const TABS = new Set(['prompt', 'brief', 'use']);
+  const TABS = new Set(['prompt', 'brief']);
 
   function toast(message) {
     if (!toastEl) return;
@@ -267,7 +267,7 @@
       const presetButton = event.target.closest('[data-template-style]');
       if (presetButton) {
         const text = fillTemplate(presetButton);
-        if (text) copyText(text, '已复制模板 · 已按本节填好');
+        if (text) copyText(text, '已复制模板，请填写自己的主题');
         return;
       }
 

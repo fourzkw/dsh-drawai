@@ -1,10 +1,10 @@
 # DrawAI 风格放映室
 
-独立静态站，展示 DrawAI 的 15 种整片风格索引：移植说明、调用方式，以及十五节的本地提示词和样片。它不嵌入插件，风格目录从 `src/motion/mgstyles/` 读取，构建后发布到 GitHub Pages。
+独立静态站，展示 DrawAI 的 15 种整片风格索引：移植说明，以及十五节的本地提示词和样片。它不嵌入插件，风格目录从 `src/motion/mgstyles/` 读取，构建后发布到 GitHub Pages。
 
 页面编号按展示顺序编为 01–15；URL 深链仍使用风格库原始 slug（如 `#05-cel-boil`），所以页面编号和提示词文件名里的编号可能不同。
 
-英雄区之后是「通用制作模板」（`#template`），说明“一条片子怎么交”：左边是七项填空提示，右边是模板正文，默认只露出开头，可展开，可整段复制或只复制【本次内容】。每个带提示词的风格节还有一个「套用模板」，会把该节的风格名、画幅与帧率、时长填进模板后再复制，省掉手抄。顶栏、英雄区和页脚都有指向它的入口。
+英雄区之后是「通用制作模板」（`#template`），说明“一条片子怎么交”：左边是七项填空提示，右边是模板正文，默认只露出开头，可展开，可整段复制或只复制【本次内容】。每个带提示词的风格节还有一个「用此风格创作」，会把该节的风格名、画幅与帧率、时长填进模板后再复制，方便填写自己的主题；「复制提示词」用于参考或修改对应样片。顶栏、英雄区和页脚都有指向模板的入口。
 
 **当前有十五支本地样片和十五段本地提示词**：`01-flat-vector`（11 秒，声音修订版）、`02-line-art`（12.05 秒，一笔画）、`03-isometric`（12.05 秒，无闪修订版）、`05-cel-boil`（10 秒，Canvas2D 重制版）、`06-collage`（12 秒）、`08-morph`（10.1 秒，DrawAI Riso 版）、`22-hud`（10 秒）、`20-pixel`（12.1 秒）、`07-liquid`（10.05 秒）、`09-bauhaus`（10.1 秒）、`10-synthwave`（10.1 秒）、`23-ink-wash`（12.1 秒）、`12-aurora-glass`（10.6 秒）、`18-hanazi`（10.1 秒，竖屏）、`19-paperclip`（12.05 秒）。样片按作品实际长度播放，不强制 10 秒。
 
@@ -51,8 +51,8 @@ npm run showcase:check   # 结构、深链、提示词与移植说明检查
 
 ## 构建与部署
 
-- `tools/showcase-build.mjs`：把 catalog、brief、本地提示词和通用制作模板渲染成静态 HTML；不依赖浏览器运行时。只有 `showcase/native/prompts/` 里有文件的风格才显示提示词 tab，其余不显示提示词 tab。模板正文取 `## 提示词全文` 之后的部分，填空项和每节「套用模板」的数据（风格名、画幅帧率、时长）也在这里生成。
-- `tools/check-showcase.mjs`：15 个 section、深链、本地引用；按实际提示词数量计算 tab（当前 45 个）与提示词展示块（当前 15 个），并校验通用制作模板：`#template`、正文、7 个填空项、复制入口、`promptCount` 个「套用模板」按钮，以及指向它的入口链接。它要求当前列出的 15 段提示词和 15 支样片都存在，但不把数量或未展示的风格写成永久限制。
+- `tools/showcase-build.mjs`：把 catalog、brief、本地提示词和通用制作模板渲染成静态 HTML；不依赖浏览器运行时。只有 `showcase/native/prompts/` 里有文件的风格才显示提示词 tab，其余不显示提示词 tab。模板正文取 `## 提示词全文` 之后的部分，填空项和每节「用此风格创作」的数据（风格名、画幅帧率、时长）也在这里生成。
+- `tools/check-showcase.mjs`：15 个 section、深链、本地引用；按实际提示词数量计算 tab（当前 30 个）与提示词展示块（当前 15 个），并校验通用制作模板：`#template`、正文、7 个填空项、复制入口、`promptCount` 个「用此风格创作」按钮，以及指向它的入口链接。它要求当前列出的 15 段提示词和 15 支样片都存在，但不把数量或未展示的风格写成永久限制。
 - `.github/workflows/pages.yml`：推 `develop` 或手动触发，构建后发布到 Pages 的 `/styles/`。仓库已在 **Settings → Pages → Build and deployment → Source** 启用 **GitHub Actions**（2026-11-14）；若 `configure-pages` 报 `Resource not accessible by integration`，先确认这里仍是 GitHub Actions，再重跑工作流。
 
 新增风格时只改 `src/motion/mgstyles/catalog.json` 和对应的 brief；需要提示词时把本地中文提示词放到 `showcase/native/prompts/<slug>.md`，并在 `showcase/native/styles.json` 里写本地色板/字体/节奏（可选）。以后有 DrawAI 样片时，把完整源片转成 H.264 MP4 放到 `showcase/media/`，按视频同尺寸生成 JPEG 封面，并在 `manifest.json` 里写实际宽高、容器时长、来源与 sha256；媒体文件随站点一起提交。
