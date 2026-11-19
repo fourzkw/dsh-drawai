@@ -40,7 +40,8 @@ import { getRoutingRuntime } from './routing/node-runtime.js'
 import { motionInput, motionInputKey, assertMotionEditable, applyMotionResult, isMotionNode, motionNodeData, motionSettings, mergeMotionSettings, isAudioNode, audioNodeData, audioNodeSettings, motionReferenceEdges, motionReferenceRole, unlinkedShotCards } from './motion-core.js'
 import { createAudioService } from './audio-service.js'
 import { frozenAudioFile, importAudioFile } from './audio-media.js'
-import { ffmpegState } from './ffmpeg-manager.js'
+import { ensureFfmpeg, ffmpegCacheDirectory, ffmpegState } from './ffmpeg-manager.js'
+import { ensureVideoRuntime, videoRuntimeState, videoRuntimeDirectory } from './motion/video-runtime.js'
 import { shotCardCatalog, enforceMotionCards, motionCardContract, mgStyleCatalog, mgStyleKit, mgStyleSources, mgStyleFile, mgStyleFileSize } from './motion-library.js'
 import { searchShotCards, resolveShotStyle, shotCardData, isShotCardNode } from './shotcard-core.js'
 import { searchMgStyles, resolveMgStyle, mgStyleData, isMgStyleNode } from './mgstyle-core.js'
@@ -2505,6 +2506,11 @@ const SKILL_BODY_VIDEO = `# DrawAI 画布做视频：从问到出片
 
 画一条视频分十步，执行者就是你自己。**第 0 步（问人）、品牌素材、定卡并连卡、分镜表、样片，这五步不能跳**。
 
+**环境准备（第一次用，或换机器/升级后）**：视频运行时与 FFmpeg 是两套独立组件，首次要联网装约 260MB 运行时 + 110MB FFmpeg。
+先用 motion_setup {action:"status"} 只读检查；缺什么就 motion_setup {action:"prepare"} 装齐（返回逐步进度，可随时取消）。
+motion_preview / motion_render / motion_qa / motion_export 有意**不在自己的调用里静默下载**：环境没就绪时它们直接报错并指回 motion_setup，
+免得一次工具调用卡在 100MB 级下载上既看不到进度、也无法中断。装过一次之后就不再需要这一步。
+
 0. 先问人，再动手 — **没问过风格就开工是最贵的错**。用 ask_user_question 一次问齐这四件事（不要每步都打断）：
    - 风格与气质：暗底开发感 / 明亮克制 / 高饱和冲击 / 复古纸质 / 电影感黑金……有没有参考片、参考站；
    - 主题与受众：给谁看（开发者、客户、投资人），最想让人记住的一件事是什么；
@@ -2867,7 +2873,7 @@ const SKILL_DEFINITIONS = [
   {
     name: 'drawai-video',
     description:
-      '用 DrawAI 画布做视频：定镜头卡与整片风格、写分镜表、生成工程、出样片与成片；含品牌素材收集、配音与踩点。',
+      '用 DrawAI 画布做视频：motion_setup 准备环境、定镜头卡与整片风格、写分镜表、生成工程、出样片与成片；含品牌素材收集、配音与踩点。',
     whenToUse:
       '用户让你做视频/宣传片/产品片/MG 动画、给已有视频改镜头或配音、把画布上的流程做成片子，或问"样片怎么出""镜头卡怎么连""配乐怎么踩点"时。',
     content: SKILL_BODY_VIDEO,
@@ -7217,9 +7223,86 @@ function sanitizeNewName(raw) {
     },
   })))
 
+  // 视频工具的环境前置检查（issue #57）：只检查、不安装。
+  // 以前第一次 motion_preview 会在拼图时**静默下载** 110MB FFmpeg（motion_render 更早还要装 259MB 运行时），
+  // 而下载发生在一次工具调用的 await 里：没有进度、宿主不能中止、慢网络下能卡几十分钟。
+  // 现在安装归 motion_setup 显式执行，其它工具在环境没就绪时立刻给出可操作提示。
+  async function assertMotionEnvironment(exec, options = {}) {
+    const need = options.need || ['runtime', 'ffmpeg']
+    const problems = []
+    if (need.includes('runtime')) {
+      const runtime = videoRuntimeState()
+      if (!runtime.ready) problems.push('视频运行时未安装（' + runtime.directory + '）')
+    }
+    if (need.includes('ffmpeg')) {
+      try {
+        await ensureFfmpeg({ allowDownload: false, signal: exec?.signal })
+      } catch (error) {
+        exec?.signal?.throwIfAborted()
+        const detail = String(error?.message || '').split('\n')[0].slice(0, 160)
+        problems.push('FFmpeg 不可用' + (detail ? '（' + detail + '）' : ''))
+      }
+    }
+    if (problems.length === 0) return
+    throw new Error('视频环境未就绪：' + problems.join('；')
+      + '。请先调用 motion_setup（action: "prepare"）准备环境（首次约需下载 260MB 视频运行时与 110MB FFmpeg，可随时取消），完成后再重试当前操作。')
+  }
+
+  // 显式准备视频环境：把"装 260MB 运行时 + 110MB FFmpeg"从 preview 的 await 里挪到一次用户看得见的调用。
+  ctx.effect(() => registerHostTool(defineTool({
+    name: 'motion_setup',
+    description: '检查或准备视频环境（独立的 Remotion 运行时 + FFmpeg），**不渲染、不改工程**。status 只读：报两件组件是否就绪、装在哪、缺什么；prepare 联网补齐缺失部分（首次约 260MB 运行时 + 110MB FFmpeg），返回每一步进度与最终版本，可随时取消。motion_preview / motion_render / motion_qa / motion_export 在环境未就绪时会直接拒绝并提示先跑这里——不再在工具调用里静默下载大文件（issue #57）。',
+    parameters: { action: { type: 'string', enum: ['status', 'prepare'], required: true } },
+    output: { schema: { type: 'object', additionalProperties: false, properties: { summary: { type: 'string', required: true }, details: { type: 'string', required: true } } },
+      render: (_args, value) => [{ type: 'text', text: value.summary + '\n' + value.details }] },
+    async execute(args, exec) {
+      const action = args.action === 'prepare' ? 'prepare' : 'status'
+      const runtime = videoRuntimeState()
+      if (action === 'status') {
+        let ffmpegError = null
+        try {
+          await ensureFfmpeg({ allowDownload: false, signal: exec.signal })
+        } catch (error) {
+          exec.signal?.throwIfAborted()
+          ffmpegError = String(error?.message || '').split('\n')[0].slice(0, 200)
+        }
+        const state = ffmpegState()
+        const ffmpeg = state.status === 'ready'
+          ? { ready: true, path: state.path, source: state.source, version: state.version }
+          : { ready: false, error: ffmpegError || state.error || '未找到可用的 FFmpeg' }
+        const ready = runtime.ready && ffmpeg.ready
+        return { summary: ready ? '视频环境已就绪' : '视频环境未就绪',
+          details: JSON.stringify({
+            ready,
+            runtime: { ready: runtime.ready, directory: runtime.directory },
+            ffmpeg,
+            cache: { runtime: videoRuntimeDirectory(), ffmpeg: ffmpegCacheDirectory() },
+            next: ready ? undefined : '调用 motion_setup {action:"prepare"} 准备缺失组件；本机已有 FFmpeg 时优先用 DRAWAI_FFMPEG_PATH 指定（需 5.1+），离线安装运行时可用 DRAWAI_RUNTIME_REGISTRY 设置镜像',
+          }) }
+      }
+      const started = Date.now()
+      const steps = []
+      // 进度只留最近 50 条，同时写 stderr：宿主拿不到工具内进度，日志至少能用于事后排查。
+      const onProgress = (event) => {
+        const message = typeof event?.message === 'string' ? event.message : ''
+        if (!message || steps[steps.length - 1] === message) return
+        steps.push(message)
+        if (steps.length > 50) steps.splice(0, steps.length - 50)
+        console.error('[drawai] ' + message)
+      }
+      const directory = await ensureVideoRuntime({ signal: exec.signal, onProgress })
+      const binary = await ensureFfmpeg({ signal: exec.signal, onProgress })
+      const state = ffmpegState()
+      const seconds = Math.round((Date.now() - started) / 1000)
+      return { summary: '视频环境已就绪（用时 ' + seconds + ' 秒）',
+        details: JSON.stringify({ runtime: { ready: true, directory },
+          ffmpeg: { ready: true, path: binary, source: state.source, version: state.version }, steps }) }
+    },
+  })))
+
   ctx.effect(() => registerHostTool(defineTool({
     name: 'motion_preview',
-    description: '渲染工程里的几帧并**直接返回拼图**（同一轮就能看见画面）。第一次调用要打包（约 10–30 秒），之后同一份源码复用缓存只要几秒。frames 是绝对帧号，例如 [0,60,120,180]；省略时取每段的中点（最多 6 帧），定调阶段只写 scene-0 时用它看一张定妆帧。**要看画质（锯齿、色带、字重）就传 crop：只出 1:1 原尺寸局部**，拼图是缩过的，缩过的图看不出这些毛病。',
+    description: '渲染工程里的几帧并**直接返回拼图**（同一轮就能看见画面）。第一次调用要打包（约 10–30 秒），之后同一份源码复用缓存只要几秒；视频环境没装好时会直接拒绝并提示先跑 motion_setup，不在本调用里静默下载 100MB+。frames 是绝对帧号，例如 [0,60,120,180]；省略时取每段的中点（最多 6 帧），定调阶段只写 scene-0 时用它看一张定妆帧。**要看画质（锯齿、色带、字重）就传 crop：只出 1:1 原尺寸局部**，拼图是缩过的，缩过的图看不出这些毛病。',
     parameters: {
       path: { type: 'string' }, page: { type: 'number' }, nodeId: { type: 'string', required: true },
       frames: { type: 'array', items: { type: 'number' }, description: '绝对帧号数组，最多 9 帧；省略 = 每段中点' },
@@ -7244,6 +7327,7 @@ function sanitizeNewName(raw) {
     async execute(args, exec) {
       const scope = await motionScope(args, exec)
       if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
+      await assertMotionEnvironment(exec)
       const loaded = await loadDoc(scope.path, scope.sessionId, args.page)
       const node = loaded.doc.nodes.find((item) => item.id === args.nodeId)
       if (!node) throw new Error('找不到视频节点 ' + args.nodeId)
@@ -7254,7 +7338,7 @@ function sanitizeNewName(raw) {
         const timeline = readTimeline(dir)
         return timeline.shots.slice(0, 6).map((shot) => shot.startFrame + Math.floor(shot.durationFrames * 0.6))
       })()
-      const preview = await previewProject(dir, { frames, cols: args.cols, crop: jsonValue(args.crop), attachments: ctx.get?.('attachments') })
+      const preview = await previewProject(dir, { frames, cols: args.cols, crop: jsonValue(args.crop), attachments: ctx.get?.('attachments'), signal: exec.signal })
       const payload = { summary: '已渲染 ' + frames.length + ' 帧并拼图' + (preview.crop ? '（1:1 局部 ' + preview.crop.w + '×' + preview.crop.h + '）' : ''), details: JSON.stringify({ frames: preview.frames, sheet: preview.sheet, crop: preview.crop }) }
       const ref = preview.attachment
       if (ref && typeof ref.attachmentId === 'string') {
@@ -7369,6 +7453,7 @@ function sanitizeNewName(raw) {
         })
       }
       if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
+      await assertMotionEnvironment(exec)
       const renderFrames = jsonArray(args.frames)
       const renderRange = jsonArray(args.range)
       const operation = renderFrames.length ? 'still' : 'full'
@@ -7435,6 +7520,7 @@ function sanitizeNewName(raw) {
           details: JSON.stringify(saved) }
       }
       if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
+      await assertMotionEnvironment(exec, { need: ['ffmpeg'] })
       const film = args.file ? workspacePath(scope, isAbsolute(args.file) ? args.file : joinPath(dir, args.file)) : workspacePath(scope, outputPath(dir, 'film.mp4'))
       if (!existsSync(film)) throw new Error('没有可检的片子：' + film + '（先 motion_render start 出一版）')
       const timeline = readTimeline(dir)
@@ -7481,6 +7567,7 @@ function sanitizeNewName(raw) {
         return { summary: '导出过的素材包', details: JSON.stringify(listExports(dir)) }
       }
       if (policyFor(scope.sessionId)?.mode === 'read-only') throw new Error('当前会话为只读')
+      await assertMotionEnvironment(exec, { need: ['ffmpeg'] })
       const timeline = readTimeline(dir)
       const result = await exportPackage({ dir, timeline, name: args.name || 'jianying', draft: Boolean(args.draft),
         subtitles: jsonValue(args.subtitles), film: args.file ? workspacePath(scope, isAbsolute(args.file) ? args.file : joinPath(dir, args.file)) : undefined })
