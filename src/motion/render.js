@@ -125,8 +125,28 @@ export function renderProject(dir, options = {}) {
   })
   let settled = false
   let cancelTimer
+  // cancel 只依赖 child，先定义好：调用方取消时要靠它通知 worker。
+  const cancel = () => {
+    if (child.connected) child.send({ type: 'cancel' })
+    cancelTimer = setTimeout(() => child.kill(), 5000)
+  }
+  const signal = options.signal
   const rendered = new Promise((resolve, reject) => {
-    const finish = (fn, value) => { if (settled) return; settled = true; clearTimeout(cancelTimer); fn(value) }
+    const finish = (fn, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(cancelTimer)
+      signal?.removeEventListener('abort', onAbort)
+      fn(value)
+    }
+    // 取消不该等 worker 优雅收尾：先让 promise 结算，把控制权还给工具调用；
+    // 同时给它发 cancel，5 秒后仍然活着就 kill（和 motion_render 的 cancel 一致）。
+    const onAbort = () => {
+      if (child.connected) child.send({ type: 'cancel' })
+      const killer = setTimeout(() => { try { child.kill() } catch { /* 已经退出了 */ } }, 5000)
+      killer.unref?.()
+      finish(reject, signal.reason instanceof Error ? signal.reason : new Error('已取消渲染'))
+    }
     const timeout = setTimeout(() => { child.kill(); finish(reject, new Error('渲染超过 ' + Math.round(timeoutFor(render, composition.durationFrames) / 60000) + ' 分钟，请拆小场景或在 timeline.json 的 render.timeoutMs 里放大预算')) }, options.timeoutMs || (timeoutFor(render, composition.durationFrames) + 11 * 60000))
     let stderr = ''
     child.stderr.on('data', (bytes) => { stderr = (stderr + bytes).slice(-4000) })
@@ -140,12 +160,12 @@ export function renderProject(dir, options = {}) {
       clearTimeout(timeout)
       if (!settled) finish(reject, new Error('渲染进程退出（' + code + '）：' + stderr))
     })
+    if (signal) {
+      if (signal.aborted) onAbort()
+      else signal.addEventListener('abort', onAbort, { once: true })
+    }
     child.send(request)
   })
-  const cancel = () => {
-    if (child.connected) child.send({ type: 'cancel' })
-    cancelTimer = setTimeout(() => child.kill(), 5000)
-  }
   // 渲完之后再过一遍响度归一 + 限幅。
   // 只对整片做：切片渲染（frameRange）归一化会把片段当整条量，结果是错的。
   // 归一化的目标可以在 timeline.json 的 audioMix 里改，也可以在调用时用 options.mix 覆盖。

@@ -24,11 +24,19 @@ export async function runFfmpeg(args, options = {}) {
       cwd, windowsHide: true, stdio: ['ignore', 'ignore', fd],
     })
     const timer = setTimeout(() => child.kill(), options.timeoutMs || 300000)
+    // 取消要能打断正在跑的 ffmpeg，而不是等它自己结束（issue #57）。
+    const onAbort = () => { try { child.kill() } catch { /* 已经退出了 */ } }
+    if (options.signal) {
+      if (options.signal.aborted) onAbort()
+      else options.signal.addEventListener('abort', onAbort, { once: true })
+    }
     const finish = (code, error) => {
       clearTimeout(timer)
+      options.signal?.removeEventListener('abort', onAbort)
       try { closeSync(fd) } catch { /* 已关 */ }
       let stderr = ''
       try { stderr = readFileSync(logPath, 'utf8') } catch { /* 没有日志 */ }
+      if (!error && options.signal?.aborted) error = options.signal.reason instanceof Error ? options.signal.reason : new Error('已取消')
       if (error) reject(Object.assign(error, { stderr }))
       else if (code === 0 || options.allowFail) resolve(stderr)
       else reject(Object.assign(new Error('ffmpeg 退出码 ' + code + '：' + stderr.trim().split('\n').slice(-2).join(' ')), { stderr }))

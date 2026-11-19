@@ -49,6 +49,13 @@ const READY_FILE = '.ready.json'
 const READY_SCHEMA = 1
 const MAX_DOWNLOAD_BYTES = 400 * 1024 * 1024
 const DOWNLOAD_IDLE_MS = 90_000
+/**
+ * 下载总时限。idle 计时器只能发现"完全没有数据"，慢速滴流（十几 KB/s）会让一个
+ * 工具调用挂上几个小时；总时限到了就中止，把控制权还给调用方。
+ * 可用 DRAWAI_FFMPEG_DOWNLOAD_TIMEOUT_MS 覆盖（下限 60 秒）。
+ */
+const DOWNLOAD_TOTAL_MS = 10 * 60 * 1000
+const DOWNLOAD_TIMEOUT_ENV = 'DRAWAI_FFMPEG_DOWNLOAD_TIMEOUT_MS'
 const LOCK_STALE_MS = 10 * 60 * 1000
 const LOCK_WAIT_MS = 3 * 60 * 1000
 /** 项目用到 -fps_mode（FFmpeg 5.1 起）等较新选项，更老的构建会在真实任务里失败。 */
@@ -69,11 +76,15 @@ export const FFMPEG_REGISTRY = Object.freeze({
   'win32-x64': Object.freeze({
     version: '8.1.2',
     archive: 'zip',
-    url: 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip',
+    // 同一个文件的两个地址：gyan.dev 的静态站经常 503 / 限速（issue #57），
+    // 作者自己在 GitHub Releases 上的镜像可达性好得多；哈希与大小完全一致，
+    // 所以哪个地址先来都按同一份 sha256 校验。
+    url: 'https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.zip',
+    mirrors: ['https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip'],
     size: 109728040,
     sha256: 'db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec',
     license: 'GPL-3.0-or-later',
-    credit: 'gyan.dev（FFmpeg 官方下载页列出的 Windows 构建）',
+    credit: 'gyan.dev（FFmpeg 官方下载页列出的 Windows 构建，GitHub Releases 同步镜像）',
     homepage: 'https://www.gyan.dev/ffmpeg/builds/',
   }),
   'win32-arm64': Object.freeze({
@@ -216,6 +227,8 @@ export function ensureFfmpeg(options = {}) {
     `${platform}-${arch}`,
     cacheDir,
     options.registry ? 'custom' : 'default',
+    // 允许/禁止自动下载必须分开缓存：否则一次"只检查"会把并发调用的下载意图吞掉。
+    options.allowDownload === false ? 'no-download' : 'download',
     explicitBinaryPath() || '',
     process.env.PATH || '',
   ].join('|')
@@ -605,8 +618,49 @@ async function replaceDirectory(source, target) {
   }
 }
 
+/** 下载地址列表：显式镜像优先，然后是注册表主页，再是备用镜像。 */
+function downloadUrls(entry) {
+  const mirror = (process.env.DRAWAI_FFMPEG_MIRROR || '').trim()
+  const viaMirror = (value) => {
+    if (!mirror) return value
+    const name = basename(new URL(value).pathname)
+    return mirror.endsWith('/') ? mirror + name : mirror + '/' + name
+  }
+  const list = []
+  if (mirror) list.push(viaMirror(entry.url))
+  list.push(entry.url)
+  for (const alternative of entry.mirrors || []) list.push(viaMirror(alternative))
+  return [...new Set(list)]
+}
+
+/** 下载总预算；DRAWAI_FFMPEG_DOWNLOAD_TIMEOUT_MS 可覆盖（下限 60 秒）。 */
+function downloadTotalMs() {
+  const configured = Number(process.env[DOWNLOAD_TIMEOUT_ENV])
+  return Number.isFinite(configured) && configured >= 60_000 ? configured : DOWNLOAD_TOTAL_MS
+}
+
 async function downloadArchive(entry, destination, { signal, onProgress }) {
-  const url = downloadUrl(entry)
+  const urls = downloadUrls(entry)
+  const deadline = Date.now() + downloadTotalMs()
+  const failures = []
+  for (const [index, url] of urls.entries()) {
+    if (index) {
+      rmSync(destination, { force: true })
+      emit(onProgress, { phase: 'download', message: `换一个下载地址重试（${index + 1}/${urls.length}）…` })
+    }
+    try {
+      return await downloadFrom(entry, url, destination, { signal, onProgress, deadline })
+    } catch (error) {
+      if (isAbort(error) || signal?.aborted) throw abortedError()
+      failures.push(error.message)
+      // 总预算已用完就别再换源了，把时间还给调用方。
+      if (Date.now() >= deadline) break
+    }
+  }
+  throw ffmpegError(`下载 FFmpeg 失败：${failures.join('；')}。${recoveryHint()}`, 'FFMPEG_DOWNLOAD')
+}
+
+async function downloadFrom(entry, url, destination, { signal, onProgress, deadline }) {
   emit(onProgress, {
     phase: 'download',
     message: `正在下载 FFmpeg ${entry.version}${entry.size ? `（约 ${formatBytes(entry.size)}，仅首次）` : '（仅首次）'}…`,
@@ -615,7 +669,9 @@ async function downloadArchive(entry, destination, { signal, onProgress }) {
   })
   const controller = new AbortController()
   let idleTimedOut = false
+  let totalTimedOut = false
   let idleTimer = null
+  let totalTimer = null
   let received = 0
   let total = entry.size || 0
   let lastEmit = 0
@@ -634,6 +690,10 @@ async function downloadArchive(entry, destination, { signal, onProgress }) {
     signal.addEventListener('abort', onAbort, { once: true })
   }
   resetIdle()
+  totalTimer = setTimeout(() => {
+    totalTimedOut = true
+    controller.abort()
+  }, Math.max(1000, deadline - Date.now()))
   try {
     response = await fetch(url, {
       signal: controller.signal,
@@ -675,27 +735,19 @@ async function downloadArchive(entry, destination, { signal, onProgress }) {
     return { bytes: received, sha256: hash.digest('hex') }
   } catch (error) {
     await response?.body?.cancel?.().catch(() => {})
+    if (totalTimedOut) {
+      throw ffmpegError(`下载 FFmpeg 超过 ${Math.round(downloadTotalMs() / 60000)} 分钟仍未完成（已收到 ${formatBytes(received)}），已中止。`, 'FFMPEG_DOWNLOAD', { cause: error })
+    }
     if (idleTimedOut) {
-      throw ffmpegError(`下载 FFmpeg 超时（${Math.round(DOWNLOAD_IDLE_MS / 1000)} 秒没有收到数据）。已清理临时文件，请检查网络后重试当前操作。${proxyHint()}`, 'FFMPEG_DOWNLOAD', { cause: error })
+      throw ffmpegError(`下载 FFmpeg 超时（${Math.round(DOWNLOAD_IDLE_MS / 1000)} 秒没有收到数据）。`, 'FFMPEG_DOWNLOAD', { cause: error })
     }
     if (signal?.aborted || error?.name === 'AbortError') throw abortedError()
-    throw ffmpegError(`下载 FFmpeg 失败：${describeError(error)}（${url}）。已清理临时文件，联网后重试当前操作即可。${proxyHint()}`, 'FFMPEG_DOWNLOAD', { cause: error })
+    throw ffmpegError(`下载 FFmpeg 失败：${describeError(error)}（${url}）`, 'FFMPEG_DOWNLOAD', { cause: error })
   } finally {
     clearTimeout(idleTimer)
+    clearTimeout(totalTimer)
     signal?.removeEventListener('abort', onAbort)
   }
-}
-
-/**
- * 下载地址。可用 DRAWAI_FFMPEG_MIRROR 指向镜像前缀（例如公司内网镜像）：
- * 实际地址为 `<mirror>/<原文件名>`。镜像只改下载位置，哈希/大小仍然按注册表校验。
- */
-function downloadUrl(entry) {
-  const mirror = (process.env.DRAWAI_FFMPEG_MIRROR || '').trim()
-  if (!mirror) return entry.url
-  const name = basename(new URL(entry.url).pathname)
-  if (!mirror.endsWith('/')) return `${mirror}/${name}`
-  return `${mirror}${name}`
 }
 
 /** Node 的 fetch 不会自动使用 HTTP(S)_PROXY；检测到代理时给出可操作的替代方案。 */
@@ -703,6 +755,16 @@ function proxyHint() {
   const proxy = process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || process.env.ALL_PROXY || process.env.all_proxy
   if (!proxy) return ''
   return ` 检测到代理 ${proxy}，但程序内置下载不会自动使用它；可设置 DRAWAI_FFMPEG_MIRROR 指向可直连的镜像，或手动安装后把 DRAWAI_FFMPEG_PATH 设为 ffmpeg 可执行文件路径。`
+}
+
+/**
+ * 下载失败后的出路。以前只在检测到代理时才给建议，但"下载慢/源站 503"和代理无关，
+ * 用户照样需要知道可以改用本机已装的 FFmpeg。
+ */
+function recoveryHint() {
+  return ' 可改用本机已有的 FFmpeg：把 DRAWAI_FFMPEG_PATH 指向 ffmpeg 可执行文件（需要 5.1 或更新）；'
+    + '或给 DRAWAI_FFMPEG_MIRROR 指向能直连的镜像；也可以先用系统包管理器装好 FFmpeg 并确认在 PATH 里。'
+    + proxyHint()
 }
 
 async function extractTarXz(archive, directory, { signal }) {

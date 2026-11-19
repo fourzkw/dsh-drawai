@@ -18,7 +18,7 @@ import { execFileSync } from 'node:child_process'
 import { composeClientBody, dedentBody, extractBody } from './build.mjs'
 
 const EXPECTED_INJECT = ['tools', 'fs', 'sessions', 'sandboxPolicy', 'webServer']
-const EXPECTED_TOOLS = ['shotcraft_search', 'mg_style', 'audio_asset', 'diagram_read', 'diagram_export', 'motion_task', 'motion_project', 'motion_spec', 'motion_preview', 'motion_render', 'motion_qa', 'motion_export', 'motion_assets', 'motion_sfx', 'motion_audio', 'motion_sync', 'motion_audio_verify', 'motion_voice', 'diagram_apply']
+const EXPECTED_TOOLS = ['shotcraft_search', 'mg_style', 'audio_asset', 'diagram_read', 'diagram_export', 'motion_task', 'motion_project', 'motion_spec', 'motion_setup', 'motion_preview', 'motion_render', 'motion_qa', 'motion_export', 'motion_assets', 'motion_sfx', 'motion_audio', 'motion_sync', 'motion_audio_verify', 'motion_voice', 'diagram_apply']
 const EXPECTED_ROUTE = '/drawai/api/save'
 const EXPECTED_DIAGNOSTICS = '/drawai/api/diagnostics'
 
@@ -262,7 +262,7 @@ console.log('\n[4] 内嵌技能：换了电脑、只装了插件时模型怎么�
     check('画布技能讲了 ' + needle, canvasBody.indexOf(needle) >= 0)
   }
   const videoBody = bodyOf(videoSkill)
-  for (const needle of ['motion_project', 'motion_render', 'motion_preview', 'motion_qa', 'motion_audio', 'motion_assets', 'motion_spec', 'shotcraft_search', 'mg_style', '分镜表', '样片', 'STYLE.md', '踩点', 'drawai-canvas', 'diagram_apply']) {
+  for (const needle of ['motion_setup', 'motion_project', 'motion_render', 'motion_preview', 'motion_qa', 'motion_audio', 'motion_assets', 'motion_spec', 'shotcraft_search', 'mg_style', '分镜表', '样片', 'STYLE.md', '踩点', 'drawai-canvas', 'diagram_apply']) {
     check('视频技能讲了 ' + needle, videoBody.indexOf(needle) >= 0)
   }
   // 拆分靠的就是这条边界：视频流程跑进画布技能，说明有人把两段又粘回去了。
