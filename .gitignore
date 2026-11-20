@@ -20,6 +20,8 @@ _local/
 /.tools/
 /.tmp/
 /.tmp-video/
+# 本机临时脚本与日志（发版闸门要求工作树干净，这类东西不该出现在 git status 里）
+/tmp/
 
 # 本地 drawio webapp junction（见 docs/design.md「开发回路」）。
 # 必须带前导 /：裸的 vendor/ 会在任意层级匹配，把 src/routing/vendor 一起忽略掉，
