@@ -1,5 +1,14 @@
 # 发布与收录流程 / Release & listing
 
+## 0.4.9 发布内容（2026-11-20）
+
+- 新增 `motion_setup`（`status` / `prepare`），把「装 260MB 视频运行时 + 110MB FFmpeg」从一次工具调用的 `await` 里挪出来（#57）：`status` 只读报告两件组件是否就绪、装在哪、缺什么、下一步做什么；`prepare` 联网补齐缺失部分并返回逐步进度，可随时取消，装过一次之后不再需要。`motion_preview` / `motion_render`（start）/ `motion_qa`（inspect）/ `motion_export`（run）在环境未就绪时**立刻拒绝**并指回 `motion_setup`，不再在自己的调用里静默下载；未就绪的报错带缓存路径与 `DRAWAI_FFMPEG_PATH` / `DRAWAI_RUNTIME_REGISTRY` 两个变量，便于离线安装。已经装好环境的老用户无感。
+- 取消真的能取消（同一处 #57）：`motion_preview` 交给宿主的 promise 以前不含 `signal`，用户取消之后拼图（乃至它的下载）仍要自己跑完，宿主只能一直等这次 `await` 结算。现在 `signal` 一路传到 `renderProject` / `cropFile` / `contactSheet`，拼图的 `execFile` 直接带 `signal`；`renderProject` 取消时先给 worker 发 cancel、5 秒后 kill，并立刻以 `signal.reason` 结算，不再等 worker 优雅退出；`runFfmpeg` 补上「abort → kill 正在编码的进程」，编码中的取消不再是空转。
+- 运行时安装更抗摔：staging 改成固定名字且可复用，上次失败的依赖完整、校验通过就不再重装 259MB；`rename` 撞上杀软/索引占用（`EPERM` / `EBUSY` / `EACCES` / `ENOTEMPTY`）重试 8 次后复制兜底，不再「失败一次就把刚装好的 259MB 删掉」；原生依赖校验从 `spawnSync(timeout: 90000)` 改成异步 `spawn`（以前会卡住宿主事件循环，连取消都进不来）；abort 与超时按进程树杀（Windows 走 `taskkill /T /F`）；初始化锁等待从 11 分钟收紧到 5 分钟。
+- FFmpeg 下载换源并加总预算：win32-x64 原本只从 gyan.dev 取 109MB 安装包（国内常 503 或只有十几 KB/s），而下载器只盯「90 秒没收到数据」，慢速滴流能挂几个小时。主地址换成 GyanD/codexffmpeg 8.1.2 的 GitHub 同步发布包（109,728,040 字节，sha256 与注册表逐字节一致，校验值不用改），gyan.dev 降为 `mirrors` 兜底；`DRAWAI_FFMPEG_MIRROR` 现在对每个候选地址都生效、失败自动换下一个源；新增 `DRAWAI_FFMPEG_DOWNLOAD_TIMEOUT_MS`（默认 10 分钟、下限 60 秒）作为跨所有重试的总预算，慢速连接不再无限期挂着；失败文案不再只在检测到代理时才给建议，无条件提示 `DRAWAI_FFMPEG_PATH`（本机已有 5.1+ 可直接指过去）、镜像变量与系统包管理器三条出路。只影响首次安装或缓存失效时的下载，已就绪的解析路径不变。
+- 修用本机 Edge / Chrome 渲染后 Alt+Tab 里残留白窗：插件把完整浏览器交给 `openBrowser` 却没传 `chromeMode`，Remotion 于是按默认走老无头模式（`--headless=old`），部分 Windows 机器会留下能被 Alt+Tab 枚举的窗口对象（标题就是 bundle 页面的「Remotion Bundle」）。`motion_preview` / `motion_render` / `motion_capture` 收集素材共 4 处 `openBrowser` 统一改走 `src/motion/headless-browser.js`：有本机浏览器时 `chromeMode:"chrome-for-testing"`（即 `--headless=new`），没有则照旧下载 chrome-headless-shell（它本身没有窗口，也不会因此多下几百 MB）。
+- 展示站（<https://fourzkw.github.io/dsh-drawai/styles/>）补到 15 种风格各有样片：新增 02-line-art 一笔画「海的来信」12 秒、05-cel-boil（Canvas2D 重制版）、08-morph（Riso 版）与三份本地中文提示词，样片从 11 支增到 15 支；风格简介、声音模板与页面层级重排，原提示词复制入口提到首位并突出，播放器不再遮挡操作入口。manifest 记录样片的实际宽高、容器时长、来源与 sha256，`check-showcase` 复核风格数、提示词条数、时长与哈希格式。
+
 ## 0.4.8 发布内容（2026-11-18）
 
 - 参考帧素材包支持**从本地安装**，内网 / 代理受限的机器不必再等那一次下载：`mg_style {action:"install", file:"…"}` 直接吃 Release 里的 `.tar.gz` 或已经解压好的集合目录，全程不联网。校验与自动下载同一套（lock 里的大小与 sha256，再按 manifest 逐文件比对），装好的集合多留一份根 `manifest.json`，解压目录因此也能再装、再校验；`.ready.json` 记 `origin:"file"`，`styleFramesSummary` 报 `source:"file"`。目标位置已经有一份别人准备的集合时拒绝覆盖，不会把它删掉。
