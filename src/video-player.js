@@ -17,6 +17,10 @@ function createVideoController(request, environment = {}) {
   let elementPositioned = false
   let anchor = 0
   let anchorTime = 0
+  // 进行中的 seek 目标。video.currentTime 的赋值是异步生效的，期间浏览器仍会按旧位置
+  // 派发 timeupdate；若直接采纳，会把刚拖到的位置覆盖回旧值。暂停态下再没有后续
+  // timeupdate 来纠正，进度条就永久停在旧位置——表现为「一拖就弹回开头」。
+  let seekTarget = null
   const idle = Object.freeze({ status: 'idle', time: 0, duration: 0, index: 0, loop: true, muted: false, fit: 'contain', expanded: false })
   const get = (id) => sessions.get(id) || idle
   const emit = () => listeners.forEach((fn) => fn())
@@ -278,6 +282,8 @@ function createVideoController(request, environment = {}) {
     if (id === activeId) {
       anchor = now()
       anchorTime = time
+      // 记住目标值，用来识别 seek 生效前那些携带旧位置的 timeupdate
+      seekTarget = { id, time }
       seekAudio(state, time)
       if (element && element.readyState >= 1) element.currentTime = time
     }
@@ -376,6 +382,12 @@ function createVideoController(request, environment = {}) {
       } else if (type === 'ended') {
         patch(id, { status: 'ended', time: video.currentTime })
       } else if (type === 'timeupdate' || type === 'pause' || type === 'play') {
+        // seek 生效前 video.currentTime 仍是旧位置；此刻还在等 seekTarget 就忽略这个滞后的
+        // timeupdate（否则点进度条会弹回拖动前的位置，暂停时更不会再有事件纠正）。
+        const pending = seekTarget && seekTarget.id === id ? seekTarget : null
+        const atTarget = pending ? Math.abs(video.currentTime - pending.time) <= 0.35 : true
+        if (pending && atTarget) seekTarget = null
+        if (pending && !atTarget && type === 'timeupdate') return
         patch(id, { time: video.currentTime, status: type === 'pause' && s.status === 'playing' ? 'paused' : type === 'play' ? 'playing' : s.status })
       }
     },
