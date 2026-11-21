@@ -930,6 +930,177 @@ button { font: inherit; }
 }
 .doc-view.is-open { max-height: none; }
 .doc-view.is-open::after { opacity: 0; }
+
+/* ---------- 开始使用 ---------- */
+.start {
+  background:
+    radial-gradient(120% 150% at 6% 0%, rgba(232, 197, 71, 0.075), transparent 56%),
+    var(--bg);
+}
+
+.start-steps {
+  display: grid;
+  gap: clamp(22px, 3vw, 32px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.start-step {
+  display: grid;
+  gap: 13px;
+  padding-top: clamp(18px, 2.6vw, 26px);
+  border-top: 1px solid var(--line);
+}
+.start-step:first-child { padding-top: 0; border-top: 0; }
+
+.start-step-head {
+  display: grid;
+  grid-template-columns: 2.6ch minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.start-num {
+  color: var(--accent);
+  font: 500 clamp(21px, 2.6vw, 28px)/1 var(--mono);
+  letter-spacing: -0.06em;
+  opacity: 0.9;
+}
+
+.start-step-body { min-width: 0; }
+.start-step-title {
+  margin: 0;
+  color: var(--ink);
+  font: 600 clamp(17px, 2vw, 21px)/1.25 var(--serif);
+  letter-spacing: -0.01em;
+}
+.start-note {
+  max-width: 74ch;
+  margin: 7px 0 0;
+  color: var(--ink-2);
+  font-size: 13.5px;
+  line-height: 1.8;
+}
+
+.start-note code,
+.start-points code,
+.start-table code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  font: 0.92em var(--mono);
+}
+
+.start-doc { margin-left: calc(2.6ch + 14px); }
+.start-prompt {
+  max-height: 300px;
+  font-size: 12.5px;
+  line-height: 1.85;
+}
+
+.start-points {
+  display: grid;
+  gap: 6px;
+  max-width: 82ch;
+  margin: 0 0 0 calc(2.6ch + 14px);
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.75;
+}
+.start-points li { position: relative; padding-left: 13px; }
+.start-points li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.75em;
+  width: 5px;
+  height: 1px;
+  background: var(--accent);
+}
+.start-points b { color: var(--ink-2); font-weight: 600; }
+
+.start-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 0 0 0 calc(2.6ch + 14px);
+  padding: 0;
+  list-style: none;
+}
+.start-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  color: var(--ink-2);
+  font: 11.5px var(--mono);
+  letter-spacing: 0.02em;
+}
+
+.start-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin: 0 0 0 calc(2.6ch + 14px);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.start-link {
+  padding-bottom: 1px;
+  border-bottom: 1px solid rgba(232, 197, 71, 0.4);
+  color: var(--accent);
+  font: 11px var(--mono);
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+.start-link:hover { border-color: var(--accent); }
+
+.start-table {
+  margin-top: clamp(24px, 3.4vw, 36px);
+  padding-top: clamp(18px, 2.6vw, 26px);
+  border-top: 1px solid var(--line);
+  overflow-x: auto;
+}
+.start-table table {
+  width: 100%;
+  min-width: 520px;
+  margin-top: 10px;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+.start-table th,
+.start-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(242, 238, 230, 0.08);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.start-table th {
+  color: var(--muted);
+  font: 400 10px var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.start-table td:first-child { color: var(--ink-2); }
+.start-table td:nth-child(3) { white-space: nowrap; color: var(--muted); }
+
+.start-net { margin-top: clamp(20px, 2.6vw, 28px); }
+.start-net-title {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font: 10px var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.start-net .start-points { margin-left: 0; }
+
 @media (min-width: 981px) {
   .doc-view { max-height: 424px; }
   .briefing-fill {
@@ -1071,6 +1242,9 @@ button { font: inherit; }
   .doc-meta span:last-child { display: none; }
   .doc-actions { width: 100%; }
   .doc-actions .copy { flex: 1; text-align: center; }
+  .start-step-head { grid-template-columns: 2.2ch minmax(0, 1fr); gap: 10px; }
+  .start-num { font-size: 19px; letter-spacing: -0.02em; }
+  .start-table table { min-width: 460px; }
   .hero-cue { font-size: 12px; }
 }
 

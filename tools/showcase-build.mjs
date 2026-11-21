@@ -23,6 +23,7 @@ const NATIVE_DIR = path.join(SHOWCASE, 'native');
 const NATIVE_STYLES = path.join(NATIVE_DIR, 'styles.json');
 const NATIVE_PROMPTS = path.join(NATIVE_DIR, 'prompts');
 const NATIVE_TEMPLATE = path.join(NATIVE_DIR, 'prompt-template.md');
+const NATIVE_START = path.join(NATIVE_DIR, 'start-prompt.txt');
 
 const SITE_URL = (process.env.SHOWCASE_URL || 'https://fourzkw.github.io/dsh-drawai/styles/').replace(/\/?$/, '/');
 
@@ -244,6 +245,93 @@ function renderTemplate(markdown, styleCount) {
         </button>
         <pre id="template-fill" hidden>${esc(fill)}</pre>
       </div>
+    </div>
+  </div>
+</section>`;
+}
+
+/* ---------- 开始使用 ---------- */
+
+function renderStart(prompt, slots, styleCount) {
+  const text = String(prompt || '').replace(/\r\n?/g, '\n').trim();
+  if (!text) return '';
+
+  const chips = slots.map(([name]) => `<span class="start-chip">${esc(name)}</span>`).join('');
+
+  return `<section class="briefing start" id="start" aria-labelledby="start-title">
+  <div class="wrap">
+    <header class="briefing-head">
+      <p class="briefing-kicker">Start · 第一次用</p>
+      <h2 id="start-title">开始使用</h2>
+      <p class="briefing-lede">三步开工：先把环境装好（只做一次），再填一份通用制作模板，最后挑一种风格。装环境那段话直接复制给 DrawAI，检查、下载、清单都由它来做。</p>
+    </header>
+    <ol class="start-steps">
+      <li class="start-step">
+        <div class="start-step-head">
+          <span class="start-num">01</span>
+          <div class="start-step-body">
+            <h3 class="start-step-title">装环境 · 只做一次</h3>
+            <p class="start-note">新装插件后，把下面这段发给 DrawAI：它会先读出还缺什么，再补齐视频运行时、FFmpeg、动效字体与素材包、整片风格参考帧，最后回报一张清单。约 550MB，装完落在 <code>~/.dsh</code>，重装插件不用重下。</p>
+          </div>
+        </div>
+        <div class="briefing-doc start-doc">
+          <div class="doc-bar">
+            <p class="doc-meta"><span class="doc-kicker">环境提示词</span><span>先检查 · 再下载</span></p>
+            <div class="doc-actions">
+              <button class="copy is-primary" type="button" data-copy="start-prompt">复制提示词</button>
+            </div>
+          </div>
+          <pre class="code prompt start-prompt" id="start-prompt">${esc(text)}</pre>
+        </div>
+        <ul class="start-points">
+          <li><b>浏览器</b>：用本机的 Chrome 或 Edge；一个都没有时，渲染会自己下一个精简内核。</li>
+          <li><b>随时复查</b>：说一句「motion_setup status」：只读当前状态，不会重复下载。</li>
+          <li><b>之后还会补</b>：素材包和参考帧漏装也没关系，建工程或读某个风格时会自己补齐。</li>
+        </ul>
+      </li>
+      <li class="start-step">
+        <div class="start-step-head">
+          <span class="start-num">02</span>
+          <div class="start-step-body">
+            <h3 class="start-step-title">填一份通用制作模板</h3>
+            <p class="start-note">下面 ${slots.length} 项就是一条片子的全部交代。填完把整段发给 DrawAI，它会先读风格目录、做分镜表，再渲染和自检。</p>
+          </div>
+        </div>
+        <ul class="start-chips">${chips}</ul>
+        <p class="start-links"><a class="start-link" href="#template">去填模板 ↓</a><span>每个风格节的「用此风格创作」会先把风格、画幅与帧率、时长填好。</span></p>
+      </li>
+      <li class="start-step">
+        <div class="start-step-head">
+          <span class="start-num">03</span>
+          <div class="start-step-body">
+            <h3 class="start-step-title">挑一种风格开工</h3>
+            <p class="start-note">下面 ${styleCount} 种整片视觉语言都带样片和中文提示词：先看样片挑气质，再决定是复制提示词当参考，还是直接在模板上填自己的主题。</p>
+          </div>
+        </div>
+        <p class="start-links"><a class="start-link" href="#index">看风格索引 ↓</a><span>页面顶部也能按风格名、标签或关键词搜索。</span></p>
+      </li>
+    </ol>
+    <div class="start-table">
+      <p class="briefing-label"><span>它装了什么</span><span>What gets installed</span></p>
+      <table>
+        <thead><tr><th>组件</th><th>位置</th><th>体积</th><th>什么时候装</th></tr></thead>
+        <tbody>
+          <tr><td>视频运行时（Remotion + three）</td><td><code>~/.dsh/drawai-video-runtime/</code></td><td>约 260MB</td><td>第 01 步</td></tr>
+          <tr><td>FFmpeg</td><td>本机已有就直接用，否则 <code>~/.dsh/drawai-ffmpeg/</code></td><td>约 110MB</td><td>第 01 步</td></tr>
+          <tr><td>动效字体与素材库</td><td><code>~/.dsh/drawai-assets/v1/</code></td><td>约 145MB</td><td>第 01 步提前下；漏了会在建工程时补</td></tr>
+          <tr><td>整片风格参考帧</td><td><code>~/.dsh/drawai-style-reference-frames/</code></td><td>约 40MB</td><td>同上；读某个风格时也会补</td></tr>
+          <tr><td>浏览器</td><td>本机的 Chrome / Edge</td><td>—</td><td>装好即可，不用另外下</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="start-net">
+      <p class="start-net-title">还要联网的几件事</p>
+      <ul class="start-points">
+        <li><b>音效</b>：按关键词去 freesound.org 找，要联网。</li>
+        <li><b>旁白</b>：走 edge-tts（Python 3 + edge-tts）；拿不到时退回系统自带语音，离线也能出声。</li>
+        <li><b>品牌素材</b>：按网站抓取，要联网；自有素材和截图直接放进画布。</li>
+        <li><b>走代理</b>：素材包与参考帧认 <code>HTTPS_PROXY</code>；FFmpeg 那条不吃代理，用 <code>DRAWAI_FFMPEG_PATH</code> 指现成的；运行时用 <code>DRAWAI_RUNTIME_REGISTRY</code> 换镜像。</li>
+      </ul>
     </div>
   </div>
 </section>`;
@@ -591,8 +679,13 @@ const firstFilm = [...media.values()].find((item) => item.film !== false && item
 const ogImage = firstFilm ? new URL(firstFilm.poster, SITE_URL).toString() : '';
 const ogImageMeta = ogImage ? `<meta property="og:image" content="${esc(ogImage)}">` : '';
 
-const templateHtml = renderTemplate(readText(NATIVE_TEMPLATE, '通用制作模板'), styles.length);
+const templateMarkdown = readText(NATIVE_TEMPLATE, '通用制作模板');
+const templateHtml = renderTemplate(templateMarkdown, styles.length);
 if (!templateHtml) throw new Error('通用制作模板没有正文：showcase/native/prompt-template.md');
+
+const startSlots = templateSlots(templateFillBlock(nativePromptBody(templateMarkdown)));
+const startHtml = renderStart(readText(NATIVE_START, '开始使用提示词'), startSlots, styles.length);
+if (!startHtml) throw new Error('开始使用提示词为空：showcase/native/start-prompt.txt');
 
 const values = {
   SITE_URL,
@@ -603,6 +696,7 @@ const values = {
   INDEX: index,
   SECTIONS: sections.join('\n'),
   TEMPLATE: templateHtml,
+  START: startHtml,
 };
 
 let html = fs.readFileSync(TEMPLATE, 'utf8');
