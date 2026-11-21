@@ -3,7 +3,7 @@
  *
  * 用法：node tools/check-media.mjs
  */
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -103,6 +103,29 @@ const result = unpackCanvasBundle(bundle, dest, 'copied')
 ok(result.path === 'copied.drawio', 'unpackCanvasBundle renames stem')
 ok(existsSync(join(dest, 'copied.drawio')), 'unpacked drawio exists')
 ok(existsSync(join(dest, 'copied.media', 'clip-1', 'manifest.json')), 'unpacked media follows new stem')
+
+console.log('canvas bundle zip: filename with ".." is not traversal')
+{
+  const ddotsDrawio = join(root, 'dots.drawio')
+  writeFileSync(ddotsDrawio, '<mxfile><diagram name="p1"/></mxfile>', 'utf8')
+  const ddotsMedia = join(root, 'dots.media')
+  mkdirSync(ddotsMedia, { recursive: true })
+  writeFileSync(join(ddotsMedia, 'sheet..png'), 'PNG-DOTS')
+  const ddotsZip = packCanvasBundle(ddotsDrawio)
+  const ddotsDest = join(root, 'dots-imported')
+  unpackCanvasBundle(ddotsZip, ddotsDest, 'dots-copied')
+  ok(existsSync(join(ddotsDest, 'dots-copied.media', 'sheet..png')), 'media filename containing ".." is kept')
+
+  // A real parent-directory traversal must still be rejected.
+  const evilZip = buildZip([
+    { name: 'evil.drawio', data: Buffer.from('<mxfile/>') },
+    { name: 'evil.media/../escaped.txt', data: Buffer.from('ESCAPED') },
+  ])
+  const evilDest = join(root, 'evil-imported')
+  unpackCanvasBundle(evilZip, evilDest, 'evil-copied')
+  ok(existsSync(join(evilDest, 'evil-copied.media', '..', 'escaped.txt')) === false,
+    'parent-directory traversal stays outside the media root')
+}
 
 console.log('copyMediaBeside (save-as pairing)')
 const other = join(root, 'other.drawio')
