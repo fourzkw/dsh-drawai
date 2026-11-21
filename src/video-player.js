@@ -157,8 +157,16 @@ function createVideoController(request, environment = {}) {
     })
   }
   function positionElement(id, video) {
-    if (video.readyState < 1 || elementPositioned) return
-    const duration = Number.isFinite(video.duration) ? video.duration : 0
+    if (video.readyState < 1) return
+    const duration = Number.isFinite(video.duration) && video.duration > 0
+      ? video.duration
+      : (Number(get(id).duration) || 0)
+    // elementPositioned 一旦置位就不再整体早退：早期 duration 可能还是 0，
+    // 早退会让它永远停在 0（进度条 max=0 从而拖不动）。这里只补时长，不重复定位播放头。
+    if (elementPositioned) {
+      if (duration > 0 && duration !== get(id).duration) patch(id, { duration })
+      return
+    }
     const time = duration > 0 ? Math.min(get(id).time, duration) : get(id).time
     video.currentTime = time
     elementPositioned = true
@@ -204,7 +212,15 @@ function createVideoController(request, environment = {}) {
         const source = await request('media-source-url', { clip: meta.clip })
         if (!current()) return
         if (!source) throw new Error('无法读取源视频')
-        patch(id, { kind: 'raster', url: makeUrl(source), fps, status: 'ready' })
+        // 先用 manifest 的时长预置 duration：video.duration 未就绪时进度条 max=0 会禁用拖动，
+        // 且 seek 里把时间钳到 [0, duration] 会恒为 0，表现为「一拖就回到开头」。
+        const seededDuration = Number(manifest.duration) > 0
+          ? Number(manifest.duration)
+          : (frames.length > 0 && fps > 0 ? frames.length / fps : 0)
+        patch(id, {
+          kind: 'raster', url: makeUrl(source), fps, status: 'ready',
+          ...(seededDuration > 0 ? { duration: seededDuration } : {}),
+        })
       } else {
         if (!frames.length) throw new Error('还没有 SVG 帧，请导入媒体或添加帧')
         const svgs = new Array(frames.length)
@@ -252,7 +268,10 @@ function createVideoController(request, environment = {}) {
   function seek(id, value) {
     const state = get(id)
     if (!state.kind || state.status === 'loading' || state.status === 'error') return
-    const time = Math.max(0, Math.min(state.duration, Number(value) || 0))
+    // duration 未就绪（0）时不要把时间钳成 0——否则每次拖动都跳回开头。
+    const raw = Number(value) || 0
+    const bound = Number(state.duration) > 0 ? Number(state.duration) : Math.max(0, raw)
+    const time = Math.max(0, Math.min(bound, raw))
     patch(id, { time, index: state.kind === 'svg' ? frameIndexOf(state, time) : 0,
       status: state.status === 'ended' ? 'paused' : state.status })
     if (state.cache) loadSvgWindow(id, get(id).index).catch(() => {})
