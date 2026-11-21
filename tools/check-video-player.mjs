@@ -345,4 +345,105 @@ console.log('Video playback controller')
   check(composeClientBody().includes('function placeVideoStill') && composeClientBody().includes('grabVideoStill'), 'client places a grabbed video frame as an image node')
   h.controller.reset()
 }
+// A tiny renderer for VideoSurface: the fake React above keeps the hover flag in a closure,
+// which is what lets the chrome be inspected outside that block.
+function surfaceHarness(controller) {
+  const source = readFileSync(new URL('../src/video-player.js', import.meta.url), 'utf8').replace(/^export \{[^\n]+\}\s*$/m, '')
+  let hovered = false
+  const React = {
+    createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
+    useState: (init) => {
+      if (init === false) return [hovered, (value) => { hovered = typeof value === 'function' ? value(hovered) : value }]
+      return [typeof init === 'function' ? init() : init, () => {}]
+    },
+    useEffect: () => {},
+    useRef: () => ({ current: null }),
+  }
+  const VideoSurface = new Function('React', source + '\nreturn VideoSurface')(React)
+  const flat = (value) => !value ? [] : Array.isArray(value) ? value.flatMap(flat) : typeof value !== 'object' ? [] : [value, ...flat(value.children)]
+  return {
+    enter() { hovered = true },
+    bar(props) {
+      const tree = flat(VideoSurface(props))
+      return tree.find((n) => n.props && n.props.className === 'drawai-video-chrome-progress')
+    },
+  }
+}
+{
+  // Regression: a released session must not reset the clock to 0. On the canvas a released
+  // session means a brand new <video> (new ticket URL), which alone would play from 0 -- that
+  // is what "drag the progress bar and the video reloads at the start" looked like.
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { base64: 'AA==' })
+  const c = h.controller
+  await c.play(node('keep', 'raster'), meta('keep', 'raster'))
+  const first = { currentTime: 0, duration: 40, readyState: 2, play: () => Promise.resolve(), pause() {} }
+  c.attach('keep', first)
+  c.mediaEvent('keep', first, 'loadedmetadata')
+  c.seek('keep', 12.5)
+  check(c.get('keep').time === 12.5 && first.currentTime === 12.5, 'seeking a raster clip moves the element and the clock')
+  // Data change (mediaClip edited away and back) releases the session in between.
+  c.prune([{ id: 'keep', data: { drawaiMedia: '1', mediaClip: 'other', mediaKind: 'raster' } }])
+  check(c.get('keep').status === 'idle', 'prune releases a session whose node data no longer matches')
+  await c.play(node('keep', 'raster'), meta('keep', 'raster'))
+  check(c.get('keep').time === 12.5, 'replaying a released clip resumes from its last position instead of 0')
+  const second = { currentTime: 0, duration: 40, readyState: 1, play: () => Promise.resolve(), pause() {} }
+  c.attach('keep', second)
+  c.mediaEvent('keep', second, 'loadedmetadata')
+  check(second.currentTime === 12.5, 'the rebuilt video element is positioned at the remembered time')
+  // A different clip must start at 0 even though it shares the controller.
+  await c.play(node('fresh', 'raster'), meta('fresh', 'raster'))
+  check(c.get('fresh').time === 0, 'a different clip is not seeded with another clip position')
+  // Stop is an explicit "back to the beginning".
+  c.seek('keep', 20)
+  c.stop('keep')
+  check(c.get('keep').time === 0, 'stop returns to the beginning')
+  await c.play(node('keep', 'raster'), meta('keep', 'raster'))
+  check(c.get('keep').time === 0, 'a stopped clip starts from the beginning again')
+  // Ending clears the memory: the documented contract is "play again starts over".
+  const third = { currentTime: 39.9, duration: 40, readyState: 2, play: () => Promise.resolve(), pause() {} }
+  c.attach('keep', third)
+  c.mediaEvent('keep', third, 'loadedmetadata')
+  c.mediaEvent('keep', third, 'ended')
+  c.reset()
+  await c.play(node('keep', 'raster'), meta('keep', 'raster'))
+  check(c.get('keep').time === 0, 'a finished clip starts from the beginning next time')
+  c.reset()
+}
+{
+  // Regression: without a known duration the hover bar used to be disabled (max=0), so a click
+  // was swallowed; enabling it naively would have turned every click into seek(0).
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { base64: 'AA==' })
+  const c = h.controller
+  const ui = surfaceHarness(c)
+  ui.enter()
+  const props = { controller: c, node: node('idle', 'raster'), meta: meta('idle', 'raster'), poster: '', onPlay: () => {} }
+  const bar = ui.bar(props)
+  check(bar !== undefined, 'hover chrome renders a progress bar')
+  check(bar.props.disabled === false, 'progress bar stays clickable before the first play')
+  check(bar.props.max === 0 && bar.props.value === 0, 'unknown duration still paints the bar at the start')
+  bar.props.onChange({ target: { value: '0' } })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  check(c.get('idle').status === 'playing', 'clicking the bar starts playback to obtain the duration')
+  check(c.get('idle').time === 0, 'the startup click does not seek to 0 on a live element')
+  // Once the duration is known the same click must land on the requested position.
+  const el = { currentTime: 0, duration: 8, readyState: 2, play: () => Promise.resolve(), pause() {} }
+  c.attach('idle', el)
+  c.mediaEvent('idle', el, 'loadedmetadata')
+  const bar2 = ui.bar(props)
+  check(bar2 !== undefined && bar2.props.max === 8, 'the bar picks up the measured duration')
+  bar2.props.onChange({ target: { value: '6' } })
+  check(c.get('idle').time === 6 && el.currentTime === 6, 'clicking the bar with a known duration seeks there')
+  c.reset()
+}
+{
+  // Declared duration (node data) must unlock the bar before any <video> exists.
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { base64: 'AA==' })
+  const c = h.controller
+  const ui = surfaceHarness(c)
+  ui.enter()
+  const declared = { clip: 'declared', kind: 'raster', fps: 10, duration: 20 }
+  const bar = ui.bar({ controller: c, node: node('declared', 'raster'), meta: declared, poster: '', onPlay: () => {} })
+  check(bar.props.max === 20 && bar.props.disabled === false, 'a declared media duration makes the bar usable before playback')
+  c.reset()
+}
 console.log('\nAll ' + checks + ' video playback checks passed')

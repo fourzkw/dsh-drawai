@@ -113,10 +113,14 @@ function videoMetaOf(node) {
   const clip = typeof d.mediaClip === 'string' ? d.mediaClip : null
   if (clip === null || clip.length === 0) return null
   const fps = Number(d.mediaFps)
+  const duration = Number(d.mediaDuration)
   return {
     clip: clip,
     kind: d.mediaKind === 'raster' ? 'raster' : 'svg',
     fps: Number.isFinite(fps) && fps > 0 ? fps : DEFAULT_MEDIA_FPS,
+    // 导入时记下的媒体时长：还没起播（没有 <video> 元数据）时进度条用它，
+    // 否则 max=0 会把点击/拖动一律钳回开头。
+    duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
     posterFrame: Math.max(0, Math.floor(Number(d.mediaPosterFrame) || 0)),
   }
 }

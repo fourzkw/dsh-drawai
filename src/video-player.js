@@ -20,9 +20,29 @@ function createVideoController(request, environment = {}) {
   const idle = Object.freeze({ status: 'idle', time: 0, duration: 0, index: 0, loop: true, muted: false, fit: 'contain', expanded: false })
   const get = (id) => sessions.get(id) || idle
   const emit = () => listeners.forEach((fn) => fn())
+  /**
+   * 每个 clip 的最后位置。
+   *
+   * 播放位置本来就该活过会话：节点数据一变（`prune`）、面板切换（`reset`）或者重新导入，
+   * 会话会被释放；再次起播时 `<video>` 是新建的、`src` 也是新票，元素自己只会从 0 开始。
+   * 于是画布上"拖一下进度条"看起来就是视频重载回到开头。记住位置，重建后落回原处。
+   */
+  const positions = new Map()
+  function remember(state) {
+    if (!state || typeof state.clip !== 'string' || state.clip === '') return
+    const time = Number(state.time)
+    if (Number.isFinite(time) && time > 0.01) positions.set(state.clip, time)
+    else positions.delete(state.clip)
+  }
+  function recalledTime(clip, duration) {
+    const time = Number(positions.get(clip))
+    if (!Number.isFinite(time) || time <= 0) return 0
+    return Number.isFinite(duration) && duration > 0 ? Math.min(time, duration) : time
+  }
   const patch = (id, values) => {
     if (!sessions.has(id)) return
     sessions.set(id, Object.assign({}, get(id), values))
+    if (values && 'time' in values) remember(sessions.get(id))
     emit()
   }
   const cancel = () => {
@@ -189,7 +209,9 @@ function createVideoController(request, environment = {}) {
     const token = ++generation
     if (previous.url) revoke(previous.url)
     disposeAudio(previous)
-    sessions.set(id, Object.assign({}, idle, { id, clip: meta.clip, sourceKind: meta.kind, active: true, status: 'loading', expanded: previous.expanded, muted: previous.muted }))
+    const knownDuration = Number(meta.duration) > 0 ? Number(meta.duration) : 0
+    const resumeAt = recalledTime(meta.clip, knownDuration)
+    sessions.set(id, Object.assign({}, idle, { id, clip: meta.clip, sourceKind: meta.kind, active: true, status: 'loading', duration: knownDuration, time: resumeAt, expanded: previous.expanded, muted: previous.muted }))
     emit()
     const current = () => token === generation && activeId === id
     try {
@@ -251,8 +273,12 @@ function createVideoController(request, environment = {}) {
   }
   function seek(id, value) {
     const state = get(id)
-    if (!state.kind || state.status === 'loading' || state.status === 'error') return
-    const time = Math.max(0, Math.min(state.duration, Number(value) || 0))
+    if (!state.kind || state.status === 'loading' || state.status === 'error') {
+      return
+    }
+    // 时长未知（还没拿到元数据）时不要拿 0 去钳 —— 那会把任何一次点击/拖动都压回开头。
+    const wanted = Math.max(0, Number(value) || 0)
+    const time = state.duration > 0 ? Math.min(state.duration, wanted) : wanted
     patch(id, { time, index: state.kind === 'svg' ? frameIndexOf(state, time) : 0,
       status: state.status === 'ended' ? 'paused' : state.status })
     if (state.cache) loadSvgWindow(id, get(id).index).catch(() => {})
@@ -355,6 +381,8 @@ function createVideoController(request, environment = {}) {
       } else if (!elementPositioned) {
         return
       } else if (type === 'ended') {
+        // 播完就清除记忆：文档约定"播放结束后再次播放从头开始"。
+        if (typeof s.clip === 'string') positions.delete(s.clip)
         patch(id, { status: 'ended', time: video.currentTime })
       } else if (type === 'timeupdate' || type === 'pause' || type === 'play') {
         patch(id, { time: video.currentTime, status: type === 'pause' && s.status === 'playing' ? 'paused' : type === 'play' ? 'playing' : s.status })
@@ -368,7 +396,7 @@ function createVideoController(request, environment = {}) {
           (n.data.mediaKind === 'raster' ? 'raster' : 'svg') !== s.sourceKind) release(id)
       })
     },
-    reset() { Array.from(sessions.keys()).forEach(release); generation += 1 },
+    reset() { Array.from(sessions.keys()).forEach(release); positions.clear(); generation += 1 },
     expanded() { return Array.from(sessions.values()).find((s) => s.expanded) || null },
   }
 }
@@ -389,6 +417,20 @@ function useVideoSnapshot(controller, id) {
 function videoTime(seconds) {
   const value = Math.max(0, Math.floor(seconds || 0))
   return Math.floor(value / 60) + ':' + String(value % 60).padStart(2, '0')
+}
+
+/**
+ * 进度条该用的总时长：播放器实测优先，其次是节点数据里记的媒体时长。
+ *
+ * 还没起播的节点没有 `<video>`，实测时长是 0；只用它会让 `max=0`（受控 range 会把值钳回 0、
+ * 还会被 `disabled`），用户点/拖进度条就永远停在开头。节点数据里的 `mediaDuration` 是导入时就写好的，
+ * 拿它兜底才能让"点一下就跳到那一段"成立。
+ */
+function progressDuration(state, meta) {
+  const measured = Number(state.duration)
+  if (Number.isFinite(measured) && measured > 0) return measured
+  const declared = Number(meta && meta.duration)
+  return Number.isFinite(declared) && declared > 0 ? declared : 0
 }
 
 function VideoSurface(props) {
@@ -418,7 +460,17 @@ function VideoSurface(props) {
   }
   const loading = state.status === 'loading'
   const playing = state.status === 'playing'
-  const ready = !!state.kind && !['idle', 'loading', 'error'].includes(state.status)
+  const duration = progressDuration(state, meta)
+  // 点/拖进度条：有总时长就落位；还没起播、或还拿不到总时长（没有 <video> 元数据）就先起播。
+  // 绝不能在时长未知时把值当秒数 seek —— 那时 `max` 是 0，任何一次点击都会被当成 0。
+  const seekTo = (value) => {
+    const target = Math.max(0, Number(value) || 0)
+    if (!state.kind || state.status === 'idle' || duration <= 0) {
+      if (state.status !== 'playing') controller.play(node, meta)
+      return
+    }
+    controller.seek(node.id, target)
+  }
   // 中央播放/暂停与底部进度条均仅悬停时显示；加载中/出错时保留可点的中央按钮。
   const showCenter = preview ? !playing : (hovered || loading || !!state.error)
   const showChrome = !preview && hovered && state.status !== 'loading' && !state.error
@@ -455,11 +507,11 @@ function VideoSurface(props) {
       }, playing ? '❚❚' : '▶'),
       React.createElement('input', {
         type: 'range', className: 'drawai-video-chrome-progress',
-        min: 0, max: state.duration || 0, step: state.kind === 'svg' ? 1 / (state.fps || 1) : 0.01,
-        value: state.time || 0, disabled: !ready || !state.duration, 'aria-label': '播放进度',
-        onChange: (event) => controller.seek(node.id, event.target.value),
+        min: 0, max: duration, step: state.kind === 'svg' ? 1 / (state.fps || 1) : 0.01,
+        value: Math.min(state.time || 0, duration), disabled: !meta || !meta.clip || state.status === 'error', 'aria-label': '播放进度',
+        onChange: (event) => seekTo(event.target.value),
       }),
-      React.createElement('span', { className: 'drawai-video-chrome-time' }, videoTime(state.time) + ' / ' + videoTime(state.duration)),
+      React.createElement('span', { className: 'drawai-video-chrome-time' }, videoTime(state.time) + ' / ' + videoTime(duration)),
     ) : null,
     state.error ? React.createElement('div', { className: 'drawai-video-message', role: 'status' }, state.error) : null,
     !preview && state.expanded ? React.createElement('div', { className: 'drawai-video-message' }, '正在放大预览') : null,
@@ -470,6 +522,16 @@ function VideoControls(props) {
   const { controller, node, meta, actions } = props
   const state = useVideoSnapshot(controller, node.id)
   const ready = !!state.kind && !['idle', 'loading', 'error'].includes(state.status)
+  const duration = progressDuration(state, meta)
+  // 与节点悬停条同一套语义：有时长才落位；没有就先起播，别拿 0 当目标。
+  const seekTo = (value) => {
+    const target = Math.max(0, Number(value) || 0)
+    if (!state.kind || state.status === 'idle' || duration <= 0) {
+      if (state.status !== 'playing') controller.play(node, meta)
+      return
+    }
+    controller.seek(node.id, target)
+  }
   const button = (text, title, click, disabled = false) => React.createElement('button', { type: 'button', title, disabled, onClick: click }, text)
   if (props.compact) {
     const icon = (kind) => React.createElement('svg', { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
@@ -504,9 +566,9 @@ function VideoControls(props) {
   button(state.muted ? '开启声音' : '静音', '切换视频声音', () => controller.configure(node.id, { muted: !state.muted }), !ready),
   button('‹', '上一帧', () => controller.step(node.id, -1), !ready || state.kind !== 'svg'),
   button('›', '下一帧', () => controller.step(node.id, 1), !ready || state.kind !== 'svg'),
-  React.createElement('input', { type: 'range', min: 0, max: state.duration || 0, step: state.kind === 'svg' ? 1 / state.fps : 0.01,
-    value: state.time, disabled: !ready || !state.duration, 'aria-label': '播放进度', onChange: (event) => controller.seek(node.id, event.target.value) }),
-  React.createElement('span', { className: 'drawai-video-time' }, videoTime(state.time) + ' / ' + videoTime(state.duration)),
+  React.createElement('input', { type: 'range', min: 0, max: duration, step: state.kind === 'svg' ? 1 / state.fps : 0.01,
+    value: Math.min(state.time || 0, duration), disabled: !meta || !meta.clip || state.status === 'error', 'aria-label': '播放进度', onChange: (event) => seekTo(event.target.value) }),
+  React.createElement('span', { className: 'drawai-video-time' }, videoTime(state.time) + ' / ' + videoTime(duration)),
   React.createElement('label', null, React.createElement('input', { type: 'checkbox', checked: state.loop, disabled: !ready, onChange: (event) => controller.configure(node.id, { loop: event.target.checked }) }), '循环'),
   React.createElement('select', { value: state.fit, disabled: !ready, 'aria-label': '画面适配', onChange: (event) => controller.configure(node.id, { fit: event.target.value }) },
     ['contain', 'cover', 'fill'].map((fit, i) => React.createElement('option', { key: fit, value: fit }, ['等比适配', '裁切填满', '拉伸'][i]))),
