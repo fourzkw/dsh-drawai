@@ -132,6 +132,29 @@ if (!fs.existsSync(INDEX)) {
   if (!html.includes('href="#template"')) fail('页面里没有指向通用制作模板的入口链接');
   if (!exists('native/prompt-template.md')) fail('缺少 showcase/native/prompt-template.md');
 
+  // 开始使用：环境提示词、三步入口、模板与索引链接。
+  if (!/id="start"/.test(html)) fail('页面里没有开始使用区');
+  if (!/id="start-prompt"/.test(html)) fail('开始使用没有环境提示词正文');
+  if (!html.includes('data-copy="start-prompt"')) fail('开始使用缺少“复制提示词”按钮');
+  const startSteps = (html.match(/class="start-step"/g) || []).length;
+  if (startSteps !== 3) fail(`开始使用应为 3 步，实际 ${startSteps}`);
+  const startSection = html.match(/<section class="briefing start"[\s\S]*?<\/section>/);
+  if (!startSection) {
+    fail('开始使用区结构不对（缺少 section.briefing.start）');
+  } else {
+    if (!startSection[0].includes('href="#template"')) fail('开始使用区没有指向通用制作模板的入口');
+    if (!startSection[0].includes('href="#index"')) fail('开始使用区没有指向风格索引的入口');
+  }
+  if (!exists('native/start-prompt.txt')) {
+    fail('缺少 showcase/native/start-prompt.txt');
+  } else {
+    const startPrompt = fs.readFileSync(path.join(SHOWCASE, 'native', 'start-prompt.txt'), 'utf8').replace(/\r\n?/g, '\n').trim();
+    if (!startPrompt) fail('开始使用提示词为空');
+    else if (!html.includes(startPrompt.slice(0, 24)) || !html.includes(startPrompt.slice(-24))) {
+      fail('页面里的环境提示词与 native/start-prompt.txt 不一致（先跑 npm run showcase:build）');
+    }
+  }
+
   const sections = (html.match(/class="style(?: |")/g) || []).length;
   if (sections < styles.length) fail(`section 数量不足：${sections}，至少 ${styles.length}`);
 

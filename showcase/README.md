@@ -4,7 +4,9 @@
 
 页面编号按展示顺序编为 01–15；URL 深链仍使用风格库原始 slug（如 `#05-cel-boil`），所以页面编号和提示词文件名里的编号可能不同。
 
-英雄区之后是「通用制作模板」（`#template`），说明“一条片子怎么交”：左边是七项填空提示，右边是模板正文，默认只露出开头，可展开，可整段复制或只复制【本次内容】。每个带提示词的风格节优先提供「复制原提示词」，用于参考或修改对应样片；「用此风格创作」会把该节的风格名、画幅与帧率、时长填进模板后再复制，方便填写自己的主题。顶栏、英雄区和页脚都有指向模板的入口。
+英雄区之后先是「开始使用」（`#start`），讲第一次用要先做的事：第一步把一段整段可复制的提示词交给 DrawAI，让它自查缺什么、补齐视频运行时和 FFmpeg，顺手把动效字体、素材包和参考帧预取到位，最后回一份清单（装在哪、多大、哪些功能要联网）；第二步和第三步分别接向通用制作模板和风格索引，页面上的七项填空、环境清单表都在这节里。顶栏、英雄区和页脚都有指向本节的入口。
+
+再往下是「通用制作模板」（`#template`），说明“一条片子怎么交”：左边是七项填空提示，右边是模板正文，默认只露出开头，可展开，可整段复制或只复制【本次内容】。每个带提示词的风格节优先提供「复制原提示词」，用于参考或修改对应样片；「用此风格创作」会把该节的风格名、画幅与帧率、时长填进模板后再复制，方便填写自己的主题。顶栏、英雄区和页脚都有指向模板的入口。
 
 **当前有十五支本地样片和十五段本地提示词**：`01-flat-vector`（11 秒，声音修订版）、`02-line-art`（12.05 秒，一笔画）、`03-isometric`（12.05 秒，无闪修订版）、`05-cel-boil`（10 秒，Canvas2D 重制版）、`06-collage`（12 秒）、`08-morph`（10.1 秒，DrawAI Riso 版）、`22-hud`（10 秒）、`20-pixel`（12.1 秒）、`07-liquid`（10.05 秒）、`09-bauhaus`（10.1 秒）、`10-synthwave`（10.1 秒）、`23-ink-wash`（12.1 秒）、`12-aurora-glass`（10.6 秒）、`18-hanazi`（10.1 秒，竖屏）、`19-paperclip`（12.05 秒）。样片按作品实际长度播放，不强制 10 秒。
 
@@ -44,6 +46,7 @@ npm run showcase:check   # 结构、深链、提示词与移植说明检查
 | 风格清单、色板、字体、节奏 | `src/motion/mgstyles/catalog.json`；`22-hud`、`20-pixel`、`01-flat-vector`、`02-line-art`、`03-isometric`、`06-collage` 的本地参数用 `showcase/native/styles.json` 覆盖 |
 | 提示词 | `showcase/native/prompts/<slug>.md`（`01-flat-vector`、`02-line-art`、`03-isometric`、`05-cel-boil`、`06-collage`、`07-liquid`、`08-morph`、`09-bauhaus`、`10-synthwave`、`12-aurora-glass`、`18-hanazi`、`19-paperclip`、`20-pixel`、`22-hud`、`23-ink-wash`） |
 | 通用制作模板 | `showcase/native/prompt-template.md`；`## 提示词全文` 之后才是复制给 DrawAI 的正文，前面的说明只在仓库里看 |
+| 开始使用的环境提示词 | `showcase/native/start-prompt.txt`；原样渲染成页面上的复制条，一个字不改 |
 | 移植说明 | `src/motion/mgstyles/briefs/<slug>.md` |
 | 样片与封面 | `showcase/media/`（`manifest.json` + 十五支 DrawAI 样片与同尺寸封面） |
 
@@ -51,8 +54,8 @@ npm run showcase:check   # 结构、深链、提示词与移植说明检查
 
 ## 构建与部署
 
-- `tools/showcase-build.mjs`：把 catalog、brief、本地提示词和通用制作模板渲染成静态 HTML；不依赖浏览器运行时。只有 `showcase/native/prompts/` 里有文件的风格才显示提示词 tab，其余不显示提示词 tab。模板正文取 `## 提示词全文` 之后的部分，填空项和每节「用此风格创作」的数据（风格名、画幅帧率、时长）也在这里生成。
-- `tools/check-showcase.mjs`：15 个 section、深链、本地引用；按实际提示词数量计算 tab（当前 30 个）与提示词展示块（当前 15 个），并校验通用制作模板：`#template`、正文、7 个填空项、复制入口、`promptCount` 个「用此风格创作」按钮，以及指向它的入口链接。它要求当前列出的 15 段提示词和 15 支样片都存在，但不把数量或未展示的风格写成永久限制。
+- `tools/showcase-build.mjs`：把 catalog、brief、本地提示词和通用制作模板渲染成静态 HTML；不依赖浏览器运行时。只有 `showcase/native/prompts/` 里有文件的风格才显示提示词 tab，其余不显示提示词 tab。模板正文取 `## 提示词全文` 之后的部分，填空项和每节「用此风格创作」的数据（风格名、画幅帧率、时长）也在这里生成。「开始使用」节同样由这里渲染：环境提示词读 `showcase/native/start-prompt.txt`，七项填空复用模板的槽位。
+- `tools/check-showcase.mjs`：15 个 section、深链、本地引用；按实际提示词数量计算 tab（当前 30 个）与提示词展示块（当前 15 个），并校验通用制作模板：`#template`、正文、7 个填空项、复制入口、`promptCount` 个「用此风格创作」按钮，以及指向它的入口链接。它也校验「开始使用」：`#start` 存在、复制条与 `start-prompt.txt` 首尾一致、三个步骤编号齐全、并能链到模板与风格索引。它要求当前列出的 15 段提示词和 15 支样片都存在，但不把数量或未展示的风格写成永久限制。
 - `.github/workflows/pages.yml`：推 `develop` 或手动触发，构建后发布到 Pages 的 `/styles/`。仓库已在 **Settings → Pages → Build and deployment → Source** 启用 **GitHub Actions**（2026-11-14）；若 `configure-pages` 报 `Resource not accessible by integration`，先确认这里仍是 GitHub Actions，再重跑工作流。
 
 新增风格时只改 `src/motion/mgstyles/catalog.json` 和对应的 brief；需要提示词时把本地中文提示词放到 `showcase/native/prompts/<slug>.md`，并在 `showcase/native/styles.json` 里写本地色板/字体/节奏（可选）。以后有 DrawAI 样片时，把完整源片转成 H.264 MP4 放到 `showcase/media/`，按视频同尺寸生成 JPEG 封面，并在 `manifest.json` 里写实际宽高、容器时长、来源与 sha256；媒体文件随站点一起提交。
