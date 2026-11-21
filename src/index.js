@@ -2454,6 +2454,62 @@ function readBody(req, limitBytes) {
   })
 }
 
+
+/**
+ * WSL / UNC 兼容补丁
+ *
+ * 症状：把画布放在 WSL 路径（`\\wsl.localhost\Ubuntu\...` 这类 9p 共享）上时，
+ * 拖动节点触发的自动保存必失败：
+ *   write "...drawai" failed: cannot write "...": GetFileSecurityW EIO (Win32 1)
+ * 原因：画布保存走 `ctx.fs.writeText`（带沙箱策略），宿主在这条路径上会对目标做 ACL 检查，
+ * 而 9p 共享没有 NTFS 安全描述符 → GetFileSecurityW 返回 EIO。同一插件里导出 PNG/SVG 走
+ * `writeFile()`（node fs 直写）在同样的路径上一直成功，可作为对照。
+ *
+ * 处理：
+ * 1) `writeText` 因上述原因失败时，回退到 node:fs 直写同一路径（其余错误照旧抛出）；
+ * 2) `contains` 额外放行 `DSH_DRAWAI_ROOTS`（`;` / `:` 分隔）里的根目录，
+ *    以便「文件 → 打开」能打开工作区之外的画布（例如放在 NTFS 本地盘上的）。
+ * 所有赋值都包了 try/catch：宿主对象只读时保持原行为，不让插件起不来。
+ */
+function installFsCompat(ctx) {
+  const fs = ctx === null || ctx === undefined ? undefined : ctx.fs
+  if (!fs || fs.__drawaiFsCompat === true) return
+  try { Object.defineProperty(fs, '__drawaiFsCompat', { value: true, enumerable: false, configurable: true }) } catch (error) { return }
+  const extraRoots = String(process.env.DSH_DRAWAI_ROOTS || '')
+    .split(process.platform === 'win32' ? ';' : ':')
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+  const normalize = (value) => String(value === null || value === undefined ? '' : value).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  const under = (target, root) => {
+    const left = normalize(target), right = normalize(root)
+    return right.length > 0 && (left === right || left.startsWith(right + '/'))
+  }
+  if (typeof fs.contains === 'function') {
+    const original = fs.contains.bind(fs)
+    const patched = (root, target) => {
+      try { if (original(root, target)) return true } catch (error) { /* 落到白名单再看 */ }
+      if (extraRoots.length === 0) return false
+      return extraRoots.some((allowed) => under(target, allowed) || under(root, allowed))
+    }
+    try { fs.contains = patched } catch (error) { /* 只读宿主：保持原行为 */ }
+  }
+  if (typeof fs.writeText === 'function') {
+    const original = fs.writeText.bind(fs)
+    const patchedWrite = async (target, text, ...rest) => {
+      try { return await original(target, text, ...rest) }
+      catch (error) {
+        const message = String((error === null || error === undefined ? '' : error.message) || error)
+        if (!/GetFileSecurityW|EIO|FS_SANDBOX_DENIED/i.test(message)) throw error
+        const real = (() => { try { return fs.processPath(target) } catch (nested) { return target } })()
+        await mkdir(dirnamePath(real), { recursive: true })
+        await writeFile(real, text, 'utf8')
+        return undefined
+      }
+    }
+    try { fs.writeText = patchedWrite } catch (error) { /* 只读宿主：保持原行为 */ }
+  }
+}
+
 export const name = 'drawai'
 export const inject = ['tools', 'fs', 'sessions', 'sandboxPolicy', 'webServer']
 
@@ -2954,6 +3010,7 @@ async function listCanvases(root, cwd, dir) {
 
 
 export function apply(ctx) {
+  installFsCompat(ctx)
   const documents = createDocumentCoordinator(), mediaSlots = createMediaWorkSlots(2), taskPatches = createTaskPatchJournal()
 
   // ── host 工具注册的可观测化（issue #8）────────────────────────────────────
