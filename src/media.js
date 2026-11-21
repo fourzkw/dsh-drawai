@@ -606,7 +606,9 @@ export function unpackCanvasBundle(zipBuffer, destDir, preferredStem) {
     const m = /([^/]+)\.media\/(.+)$/i.exec(name)
     if (m === null) continue
     const rel = m[2]
-    if (rel.indexOf('..') >= 0) continue
+    // 只把"整段就是 .. 或 . "的路径段当穿越；文件名里的连续点（如 sheet..png）是合法名。
+    const segments = rel.split('/')
+    if (segments.some((seg) => seg === '..' || seg === '.')) continue
     const abs = join(mediaOut, rel)
     mkdirSync(dirname(abs), { recursive: true })
     writeFileSync(abs, entries[i].data)
