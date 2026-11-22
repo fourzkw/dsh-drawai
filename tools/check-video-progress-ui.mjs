@@ -42,6 +42,7 @@ globalThis.React = ReactRuntime
 
 const FPS = ${FPS}
 const params = new URLSearchParams(location.search)
+const svgFrameGate = new Promise((resolve) => { window.__allowSvgFrames = resolve })
 const request = () => async (action, extra) => {
   if (extra.clip === 'sourceclip') {
     if (action === 'media-manifest') return { hasSource: true, manifest: { frames: [] } }
@@ -52,7 +53,10 @@ const request = () => async (action, extra) => {
     version: 1, kind: 'svg', fps: FPS, width: 960, height: 540, source: null, sourceOffset: 0, duration: ${DURATION},
     frames: Array.from({ length: ${FRAMES} }, (_, i) => ({ file: 'frames/' + String(i + 1).padStart(4, '0') + '.svg', t: i / FPS })),
   } })
-  if (action === 'media-frame') return Promise.resolve({ svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 54"><rect width="96" height="54" fill="#0b0b0b"/><text x="10" y="34" fill="#fff" font-size="22" font-family="monospace">' + extra.index + '</text></svg>' })
+  if (action === 'media-frame') {
+    if (params.has('slowframes') && extra.index >= 12) await svgFrameGate
+    return { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 54"><rect width="96" height="54" fill="#0b0b0b"/><text x="10" y="34" fill="#fff" font-size="22" font-family="monospace">' + extra.index + '</text></svg>' }
+  }
   return Promise.reject(new Error('unexpected ' + action))
 }
 const clips = {
@@ -86,8 +90,13 @@ function App() {
 createRoot(document.getElementById('app')).render(ReactRuntime.createElement(App))
 
 window.__state = (id) => { const s = clips[id].controller.get(id); const video = document.querySelector('video')
+  const root = document.querySelector('[data-clip="' + id + '"]')
+  const img = root?.querySelector('img')
+  const frame = img?.complete && img.naturalWidth ? /<text [^>]+>([0-9]+)/.exec(decodeURIComponent(img.currentSrc))?.[1] : undefined
   return { status: s.status, time: Number((s.time || 0).toFixed(3)), duration: Number((s.duration || 0).toFixed(3)), index: s.index, kind: s.kind || null, error: s.error || '',
-    nativeTime: video?.currentTime, nativeSeeking: video?.seeking, readyState: video?.readyState } }
+    nativeTime: video?.currentTime, nativeSeeking: video?.seeking, readyState: video?.readyState,
+    presentedTime: window.__presentedTime, presentedFrame: frame === undefined ? undefined : Number(frame),
+    message: root?.querySelector('.drawai-video-message[role=status]')?.textContent } }
 window.__bar = (id) => { const root = document.querySelector('[data-clip="' + id + '"]')
   const el = root && root.querySelector('.drawai-video-chrome-progress,.drawai-video-controls input[type=range]'); if (!el) return null
   const r = el.getBoundingClientRect(); return { value: Number(el.value), max: Number(el.max), disabled: el.disabled, left: r.left, top: r.top, width: r.width, height: r.height } }
@@ -294,6 +303,53 @@ try {
   await warmDrag.release(0.34)
   const afterWarmDrag = await waitFor(() => state(page, 'sourceclip'), (value) => !value.nativeSeeking && near(value.nativeTime, metadata.duration * 0.34, metadata.duration * 0.025))
   check(afterWarmDrag.status === 'playing', '同一视频加载完成后可继续拖动跳转', afterWarmDrag)
+
+  await page.evaluate(() => {
+    const video = document.querySelector('video')
+    video.pause()
+    const frame = (_now, metadata) => {
+      window.__presentedTime = metadata.mediaTime
+      video.requestVideoFrameCallback(frame)
+    }
+    video.requestVideoFrameCallback(frame)
+    // MPEG 本身可跳转。临时限制浏览器报告的范围，复现媒体加载事件晚于跳转请求。
+    Object.defineProperty(video, 'seekable', { configurable: true, value: { length: 0 } })
+  })
+  await waitFor(() => state(page, 'sourceclip'), (value) => value.status === 'paused')
+  const deferredDrag = scrub(page, await bar(page, 'sourceclip'))
+  await deferredDrag.start(0.34)
+  await deferredDrag.move(0.82)
+  await deferredDrag.release(0.82)
+  const blocked = await state(page, 'sourceclip')
+  check(near(blocked.time, metadata.duration * 0.82, metadata.duration * 0.025) && blocked.nativeTime < metadata.duration * 0.55 &&
+    blocked.message === '正在定位视频…', '媒体暂不可跳转时保留松手目标并提示正在定位', blocked)
+  await page.evaluate(() => {
+    const video = document.querySelector('video')
+    delete video.seekable
+    video.dispatchEvent(new Event('progress'))
+  })
+  const target = blocked.time
+  const decoded = await waitFor(() => state(page, 'sourceclip'), (value) => near(value.presentedTime, target, 0.45))
+    .catch(() => state(page, 'sourceclip'))
+  check(near(decoded.presentedTime, target, 0.45) && !decoded.nativeSeeking && decoded.status === 'paused' && !decoded.message,
+    '收到加载通知后实际呈现目标位置的 MP4 帧并保持暂停', decoded)
+
+  await page.goto({ url: origin + '/?slowframes', timeout: 30000 })
+  await page._client().send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 200, y: 140, button: 'none' })
+  const startSvg = await waitFor(() => page.evaluate(() => window.__center('svgclip')), Boolean)
+  await click(page, startSvg.left, startSvg.top)
+  await waitFor(() => state(page, 'svgclip'), (value) => value.presentedFrame >= 0)
+  await clickBar(page, 'svgclip', 0.72)
+  const firstTarget = await state(page, 'svgclip')
+  await settle(page, 250)
+  const waitingSvg = await state(page, 'svgclip')
+  check(near(waitingSvg.time, firstTarget.time, 0.01) && waitingSvg.presentedFrame < waitingSvg.index &&
+    waitingSvg.message === '正在定位视频…',
+    'SVG 目标帧还没取回时将播放时钟留在拖动位置', waitingSvg)
+  await page.evaluate(() => window.__allowSvgFrames())
+  const shown = await waitFor(() => state(page, 'svgclip'), (value) => value.presentedFrame >= waitingSvg.index)
+    .catch(() => state(page, 'svgclip'))
+  check(near(shown.presentedFrame, firstTarget.index, 6) && shown.status === 'playing', 'SVG 目标帧实际显示并从目标位置继续播放', shown)
 
   console.log('\ncheck-video-progress-ui: ' + (failures ? failures + ' 项不通过 / ' + checks : 'OK（' + checks + ' 项）'))
 } finally {

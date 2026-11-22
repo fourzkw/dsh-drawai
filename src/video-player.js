@@ -1,3 +1,12 @@
+const VIDEO_READY_EVENTS = {
+  loadedmetadata: 'onLoadedMetadata', durationchange: 'onDurationChange', loadeddata: 'onLoadedData',
+  progress: 'onProgress', canplay: 'onCanPlay',
+}
+const VIDEO_EVENTS = {
+  ...VIDEO_READY_EVENTS, seeked: 'onSeeked',
+  timeupdate: 'onTimeUpdate', ended: 'onEnded', error: 'onError', pause: 'onPause', play: 'onPlay',
+}
+
 /** Playback is transient: no document mutations or undo entries. */
 function createVideoController(request, environment = {}) {
   const raf = environment.raf || ((fn) => requestAnimationFrame(fn))
@@ -18,7 +27,7 @@ function createVideoController(request, environment = {}) {
   let elementPositioned = false
   let anchor = 0
   let anchorTime = 0
-  const idle = Object.freeze({ status: 'idle', time: 0, duration: 0, index: 0, loop: true, muted: false, fit: 'contain', expanded: false })
+  const idle = Object.freeze({ status: 'idle', time: 0, duration: 0, index: 0, seeking: false, loop: true, muted: false, fit: 'contain', expanded: false })
   const get = (id) => sessions.get(id) || idle
   const emit = () => listeners.forEach((fn) => fn())
   /**
@@ -109,6 +118,19 @@ function createVideoController(request, environment = {}) {
     if (state.audio) { state.audio.pause(); state.audio.removeAttribute('src'); state.audio.load() }
     if (state.audioUrl) revoke(state.audioUrl)
   }
+  function syncSvgClock(id) {
+    if (id !== activeId) return
+    const state = get(id)
+    cancel()
+    if (state.seeking) {
+      if (state.audio) state.audio.pause()
+      return
+    }
+    anchor = now()
+    anchorTime = state.time
+    seekAudio(state, anchorTime)
+    if (state.status === 'playing') animation = raf(tick)
+  }
   // 长序列按播放位置预取，最多保留 48 帧 SVG 内容，避免全片驻留内存。
   function loadSvgWindow(id, index) {
     const state = get(id), cache = state.cache
@@ -122,7 +144,7 @@ function createVideoController(request, environment = {}) {
     if (!indices.length) return Promise.resolve()
     let cursor = 0
     cache.loading = Promise.all(Array.from({ length: Math.min(4, indices.length) }, async () => {
-      while (cursor < indices.length && valid()) {
+      while (cursor < indices.length && valid() && (!get(id).seeking || cache.wanted === index)) {
         const i = indices[cursor++]
         const frame = await request('media-frame', { clip: state.clip, index: i })
         if (!valid()) return
@@ -134,8 +156,12 @@ function createVideoController(request, environment = {}) {
           const remove = Array.from(cache.entries.keys()).sort((a, b) => Math.abs(b - currentIndex) - Math.abs(a - currentIndex))[0]
           cache.entries.delete(remove); delete state.frames[remove]
         }
-        const currentFrame = state.frames[get(id).index]
-        patch(id, currentFrame ? { lastFrame: currentFrame } : {})
+        const current = get(id)
+        const currentFrame = state.frames[current.index]
+        if (currentFrame) {
+          patch(id, { lastFrame: currentFrame, seeking: false })
+          if (current.seeking) syncSvgClock(id)
+        }
       }
     })).catch((error) => {
       if (valid()) { if (id === activeId) cancel(); if (state.audio) state.audio.pause(); patch(id, { status: 'error', error: error.message || String(error) }) }
@@ -155,7 +181,7 @@ function createVideoController(request, environment = {}) {
       if (elementPositioned) patch(id, { time: element.currentTime })
       element.pause()
     }
-    if (state.status === 'playing' && state.kind === 'svg') {
+    if (state.status === 'playing' && state.kind === 'svg' && !state.seeking) {
       const time = wrapSvgTime(state, svgTime(state))
       patch(id, { time, index: frameIndexOf(state, time) })
     }
@@ -187,17 +213,13 @@ function createVideoController(request, environment = {}) {
     animation = raf(tick)
   }
   function resume(id) {
-    const state = get(id)
-    if (state.status === 'ended') seek(id, 0)
+    if (get(id).status === 'ended') seek(id, 0)
     patch(id, { status: 'playing', error: '' })
+    const state = get(id)
     if (state.kind === 'svg') {
       if (state.cache) loadSvgWindow(id, state.index).catch(() => {})
-      cancel()
-      anchor = now()
-      anchorTime = get(id).time
       if (state.audio) state.audio.muted = state.muted
-      seekAudio(get(id), anchorTime)
-      animation = raf(tick)
+      syncSvgClock(id)
     } else if (element && elementPositioned) {
       playElement(id, element)
     }
@@ -226,7 +248,7 @@ function createVideoController(request, environment = {}) {
     const time = duration > 0 ? Math.min(wanted, duration) : wanted
     // 有元数据不代表目标已可跳转。过早写 currentTime 会被浏览器钳回可跳转范围的开头。
     if (!canSeekMedia(video, time)) {
-      if (time !== state.time || duration !== state.duration) patch(id, { duration, time })
+      if (!state.seeking || time !== state.time || duration !== state.duration) patch(id, { duration, time, seeking: true })
       return
     }
     if (time !== video.currentTime) video.currentTime = time
@@ -234,7 +256,7 @@ function createVideoController(request, environment = {}) {
     wants.delete(id)
     const status = ratio === 1 ? 'ended' : state.status
     if (status === 'ended' && !video.paused) video.pause()
-    patch(id, { duration, time, status })
+    patch(id, { duration, time, status, seeking: !!video.seeking })
     if (status === 'playing' && video.paused !== false) playElement(id, video)
   }
   async function play(node, meta) {
@@ -314,7 +336,7 @@ function createVideoController(request, environment = {}) {
           patch(id, { audio, audioUrl, sourceOffset: Number(manifest.sourceOffset) || 0 })
           const retryAudio = () => {
             const state = get(id)
-            if (state.audio !== audio || !pendingAudio.has(audio)) return
+            if (state.audio !== audio || state.seeking || !pendingAudio.has(audio)) return
             seekAudio(state, state.status === 'playing' ? wrapSvgTime(state, svgTime(state)) : state.time)
           }
           audio.onloadedmetadata = audio.onprogress = audio.oncanplay = retryAudio
@@ -343,13 +365,13 @@ function createVideoController(request, environment = {}) {
     const atEnd = state.duration > 0 && time === state.duration
     if (atEnd && state.status === 'playing') pause(id)
     wants.delete(id)
-    patch(id, { time, index: state.kind === 'svg' ? frameIndexOf(state, time) : 0,
+    const index = state.kind === 'svg' ? frameIndexOf(state, time) : 0
+    const seeking = !!state.cache && !state.frames[index]
+    patch(id, { time, index, seeking,
       status: atEnd ? 'ended' : state.status === 'ended' ? 'paused' : state.status })
-    if (state.cache) loadSvgWindow(id, get(id).index).catch(() => {})
+    if (state.cache) loadSvgWindow(id, index).catch(() => {})
     if (id === activeId) {
-      anchor = now()
-      anchorTime = time
-      seekAudio(get(id), time)
+      if (state.kind === 'svg') syncSvgClock(id)
       if (element) {
         elementPositioned = false
         positionElement(id, element)
@@ -463,12 +485,14 @@ function createVideoController(request, environment = {}) {
     mediaEvent(id, video, type) {
       if (id !== activeId || element !== video) return
       const s = get(id)
-      if (type === 'loadedmetadata' || type === 'durationchange' || type === 'progress' || type === 'canplay') {
+      if (Object.hasOwn(VIDEO_READY_EVENTS, type)) {
         positionElement(id, video)
       } else if (type === 'error') {
         patch(id, { status: 'error', error: '视频解码失败，请检查文件格式后重试' })
       } else if (!elementPositioned) {
         return
+      } else if (type === 'seeked') {
+        if (!video.seeking && s.seeking) patch(id, { time: video.currentTime, seeking: false })
       } else if (type === 'ended') {
         patch(id, { status: 'ended', time: video.currentTime })
       } else if (type === 'timeupdate' || type === 'pause' || (type === 'play' && !video.paused)) {
@@ -584,8 +608,7 @@ function VideoSurface(props) {
   const mediaStyle = { width: '100%', height: '100%', objectFit: state.fit, display: 'block', pointerEvents: 'none' }
   if (state.kind === 'raster' && state.url && (preview || !state.expanded)) {
     const events = {}
-    for (const type of ['loadedmetadata', 'timeupdate', 'ended', 'error', 'pause', 'play']) {
-      const name = { loadedmetadata: 'onLoadedMetadata', timeupdate: 'onTimeUpdate', ended: 'onEnded', error: 'onError', pause: 'onPause', play: 'onPlay' }[type]
+    for (const [type, name] of Object.entries(VIDEO_EVENTS)) {
       events[name] = (event) => controller.mediaEvent(node.id, event.currentTarget, type)
     }
     media = React.createElement('video', Object.assign({ ref: videoRef, src: state.url, muted: state.muted, playsInline: true,
@@ -634,7 +657,10 @@ function VideoSurface(props) {
       React.createElement('input', { ...progress, className: 'drawai-video-chrome-progress' }),
       React.createElement('span', { className: 'drawai-video-chrome-time' }, videoTime(state.time) + ' / ' + videoTime(duration)),
     ) : null,
-    state.error ? React.createElement('div', { className: 'drawai-video-message', role: 'status' }, state.error) : null,
+    state.error ? React.createElement('div', { className: 'drawai-video-message', role: 'status' }, state.error)
+      : state.seeking && (preview || !state.expanded) ? React.createElement('div', {
+        className: 'drawai-video-message', role: 'status', style: { top: 0, bottom: 'auto', textAlign: 'center' },
+      }, '正在定位视频…') : null,
     !preview && state.expanded ? React.createElement('div', { className: 'drawai-video-message' }, '正在放大预览') : null,
   )
 }
