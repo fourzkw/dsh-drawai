@@ -16,8 +16,8 @@ import { createServer } from 'node:http'
 import { openBrowser } from '@remotion/renderer'
 
 const FRAMES = 504
-const FPS = 24
-const DURATION = FRAMES / FPS // 21s，和 宣传片.drawai 的 promo 一致
+const FPS = 29.97
+const DURATION = FRAMES / FPS
 
 const css = `
 html,body{margin:0;background:#111}
@@ -139,7 +139,7 @@ try {
 
   // ---- 1. 时长已知（导入了源视频的节点）：还没起播就点 70% ----
   const beforeKnown = await clickBar(page, 'rasterclip', 0.7)
-  check(beforeKnown.max === 0 || beforeKnown.max === DURATION, '时长已知时进度条 max 是真实时长', beforeKnown)
+  check(beforeKnown.max === DURATION, '时长已知时进度条 max 是真实时长', beforeKnown)
   const afterKnown = await waitReady(page, 'rasterclip')
   check(afterKnown.status === 'playing', '起播前点进度条会起播', afterKnown)
   check(near(afterKnown.time, DURATION * 0.7), '起播前点 70% 落在 70% 处，而不是从头开始', { time: afterKnown.time, want: DURATION * 0.7 })
@@ -174,6 +174,19 @@ try {
   const pausedBar = await bar(page, 'svgclip')
   // range 的拇指有宽度，点到的实际值与"像素比例"差半个拇指；断言进度条与暂停位置一致即可。
   check(near(pausedBar.value, afterPaused.time, 0.05), '暂停中进度条停在落位处', { value: pausedBar.value, time: afterPaused.time })
+
+  // 手动跳到终点应停在最后一帧，自然播到终点仍按循环设置处理。
+  await click(page, center.left, center.top)
+  await clickBar(page, 'svgclip', 0.995)
+  const afterEnd = await state(page, 'svgclip')
+  check(afterEnd.status === 'ended' && near(afterEnd.time, DURATION, 0.001) && afterEnd.index === FRAMES - 1,
+    '播放中点击进度条最右端停在最后一帧', afterEnd)
+  await page.goto({ url: 'http://127.0.0.1:' + server.address().port, timeout: 30000 })
+  await settle(page, 80)
+  await clickBar(page, 'svgclip', 0.995)
+  const startAtEnd = await waitReady(page, 'svgclip')
+  check(startAtEnd.status === 'ended' && near(startAtEnd.time, DURATION, 0.001) && startAtEnd.index === FRAMES - 1,
+    '起播前点击最右端等时长读到后停在最后一帧', startAtEnd)
 
   console.log('\ncheck-video-progress-ui: ' + (failures ? failures + ' 项不通过 / ' + checks : 'OK（' + checks + ' 项）'))
 } finally {

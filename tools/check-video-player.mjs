@@ -461,13 +461,27 @@ function surfaceHarness(controller) {
   const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { base64: 'AA==' })
   const c = h.controller
   await c.play(node('ratio', 'raster'), meta('ratio', 'raster'))
-  const ratioEl = { currentTime: 0, duration: 10, readyState: 2, play: () => Promise.resolve(), pause() {} }
+  const ratioEl = { currentTime: 0, duration: 10.006, readyState: 2, paused: true,
+    play() { this.paused = false; return Promise.resolve() },
+    pause() { this.paused = true } }
   c.attach('ratio', ratioEl)
   c.mediaEvent('ratio', ratioEl, 'loadedmetadata')
   c.seekRatio('ratio', 0.4)
-  check(c.get('ratio').time === 4 && ratioEl.currentTime === 4, 'seekRatio seeks at once when the duration is known')
+  check(c.get('ratio').time === ratioEl.duration * 0.4 && ratioEl.currentTime === ratioEl.duration * 0.4,
+    'seekRatio seeks at once when the duration is known')
+  const ui = surfaceHarness(c)
+  ui.enter()
+  const bar = ui.bar({ controller: c, node: node('ratio', 'raster'), meta: meta('ratio', 'raster'), poster: '' })
+  const lastStep = Math.floor(bar.props.max / bar.props.step) * bar.props.step
+  bar.props.onChange({ target: { value: String(lastStep) } })
+  check(c.get('ratio').time === ratioEl.duration && ratioEl.currentTime === ratioEl.duration && ratioEl.paused && c.get('ratio').status === 'ended',
+    'seeking a playing raster clip to the end holds the last frame even with looping enabled')
+  c.mediaEvent('ratio', ratioEl, 'play')
+  check(c.get('ratio').status === 'ended', 'a delayed play event cannot resume a clip held at the end')
+  await c.play(node('ratio', 'raster'), meta('ratio', 'raster'))
+  check(c.get('ratio').time === 0 && ratioEl.currentTime === 0 && !ratioEl.paused, 'playing again after an end seek starts at zero')
   c.seekRatio('ratio', 2)
-  check(c.get('ratio').time === 10, 'seekRatio clamps a ratio above 1')
+  check(c.get('ratio').time === ratioEl.duration, 'seekRatio clamps a ratio above 1')
   c.reset()
 }
 {
@@ -479,9 +493,15 @@ function surfaceHarness(controller) {
   const declared = { clip: 'declared', kind: 'raster', fps: 10, duration: 20 }
   const bar = ui.bar({ controller: c, node: node('declared', 'raster'), meta: declared, poster: '', onPlay: () => {} })
   check(bar.props.max === 20 && bar.props.disabled === false, 'a declared media duration makes the bar usable before playback')
-  bar.props.onChange({ target: { value: '10' } })
+  bar.props.onChange({ target: { value: '20' } })
   check(c.get('declared').status !== 'idle' || h.calls.some((call) => call.action === 'media-manifest'),
     'clicking a declared-duration bar starts playback instead of dropping the position')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  let plays = 0
+  const el = { currentTime: 0, duration: 12, readyState: 2, play() { plays += 1; return Promise.resolve() }, pause() {} }
+  c.attach('declared', el)
+  check(c.get('declared').status === 'ended' && c.get('declared').time === 12 && el.currentTime === 12 && plays === 0,
+    'an end click before raster metadata uses the measured endpoint and stays paused there')
   c.reset()
 }
 console.log('\nAll ' + checks + ' video playback checks passed')
