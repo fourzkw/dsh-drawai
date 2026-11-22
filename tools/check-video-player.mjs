@@ -411,7 +411,9 @@ function surfaceHarness(controller) {
 }
 {
   // Regression: without a known duration the hover bar used to be disabled (max=0), so a click
-  // was swallowed; enabling it naively would have turned every click into seek(0).
+  // was swallowed — and `min=max=0` makes a range input produce no value change at all, so not
+  // even onChange fired. The bar now falls back to a 0..1 placeholder span and the click is
+  // remembered as a ratio, applied once the duration arrives (it must never restart at 0).
   const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { base64: 'AA==' })
   const c = h.controller
   const ui = surfaceHarness(c)
@@ -420,7 +422,7 @@ function surfaceHarness(controller) {
   const bar = ui.bar(props)
   check(bar !== undefined, 'hover chrome renders a progress bar')
   check(bar.props.disabled === false, 'progress bar stays clickable before the first play')
-  check(bar.props.max === 0 && bar.props.value === 0, 'unknown duration still paints the bar at the start')
+  check(bar.props.max === 1 && bar.props.value === 0, 'unknown duration paints a placeholder span instead of collapsing to 0')
   bar.props.onChange({ target: { value: '0' } })
   await new Promise((resolve) => setTimeout(resolve, 0))
   check(c.get('idle').status === 'playing', 'clicking the bar starts playback to obtain the duration')
@@ -436,6 +438,39 @@ function surfaceHarness(controller) {
   c.reset()
 }
 {
+  // The reported bug: clicking the bar before playback started threw the position away and
+  // started from 0 — it looked like "clicking the progress bar restarts the video".
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { base64: 'AA==' })
+  const c = h.controller
+  const ui = surfaceHarness(c)
+  ui.enter()
+  const props = { controller: c, node: node('lazy', 'raster'), meta: meta('lazy', 'raster'), poster: '', onPlay: () => {} }
+  // No duration anywhere yet: the click is a ratio on the placeholder span.
+  c.seekRatio('lazy', 0.75)
+  await c.play(node('lazy', 'raster'), meta('lazy', 'raster'))
+  check(c.get('lazy').status === 'playing', 'a click before playback still starts the clip')
+  const lazyEl = { currentTime: 0, duration: 12, readyState: 2, play: () => Promise.resolve(), pause() {} }
+  c.attach('lazy', lazyEl)
+  c.mediaEvent('lazy', lazyEl, 'loadedmetadata')
+  check(Math.abs(c.get('lazy').time - 9) < 1e-6 && Math.abs(lazyEl.currentTime - 9) < 1e-6,
+    'a click made before the duration was known lands on the clicked position once metadata arrives')
+  c.reset()
+}
+{
+  // seekRatio on an already-seekable session must seek immediately (no pending state left).
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { base64: 'AA==' })
+  const c = h.controller
+  await c.play(node('ratio', 'raster'), meta('ratio', 'raster'))
+  const ratioEl = { currentTime: 0, duration: 10, readyState: 2, play: () => Promise.resolve(), pause() {} }
+  c.attach('ratio', ratioEl)
+  c.mediaEvent('ratio', ratioEl, 'loadedmetadata')
+  c.seekRatio('ratio', 0.4)
+  check(c.get('ratio').time === 4 && ratioEl.currentTime === 4, 'seekRatio seeks at once when the duration is known')
+  c.seekRatio('ratio', 2)
+  check(c.get('ratio').time === 10, 'seekRatio clamps a ratio above 1')
+  c.reset()
+}
+{
   // Declared duration (node data) must unlock the bar before any <video> exists.
   const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { base64: 'AA==' })
   const c = h.controller
@@ -444,6 +479,9 @@ function surfaceHarness(controller) {
   const declared = { clip: 'declared', kind: 'raster', fps: 10, duration: 20 }
   const bar = ui.bar({ controller: c, node: node('declared', 'raster'), meta: declared, poster: '', onPlay: () => {} })
   check(bar.props.max === 20 && bar.props.disabled === false, 'a declared media duration makes the bar usable before playback')
+  bar.props.onChange({ target: { value: '10' } })
+  check(c.get('declared').status !== 'idle' || h.calls.some((call) => call.action === 'media-manifest'),
+    'clicking a declared-duration bar starts playback instead of dropping the position')
   c.reset()
 }
 console.log('\nAll ' + checks + ' video playback checks passed')
