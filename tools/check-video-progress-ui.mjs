@@ -11,6 +11,7 @@
  * 用法：node tools/check-video-progress-ui.mjs
  */
 import assert from 'node:assert/strict'
+import { createReadStream, statSync } from 'node:fs'
 import { build } from 'esbuild'
 import { createServer } from 'node:http'
 import { openBrowser } from '@remotion/renderer'
@@ -25,6 +26,9 @@ html,body{margin:0;background:#111}
 .drawai-video-play{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);min-width:44px;min-height:44px;border:1px solid #ffffff80;border-radius:999px;background:#101827bf;color:#fff;font-size:16px;cursor:pointer;z-index:1}
 .drawai-video-chrome{position:absolute;left:0;right:0;bottom:0;z-index:2;display:flex;align-items:center;gap:6px;background:linear-gradient(transparent,#0009)}
 .drawai-video-chrome-progress{flex:1 1 auto;min-width:0;height:4px;margin:0;accent-color:#fff;cursor:pointer}
+.drawai-video-preview{position:absolute;inset:0;background:#111}
+.drawai-video-preview-media{height:280px}
+.drawai-video-controls input[type=range]{width:400px}
 `
 
 // 海报占位：真机上 poster 是 SVG 片段，这里给一张 1x1 的，免得浏览器抱怨空 src。
@@ -33,11 +37,17 @@ const POSTER = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://ww
 const entry = `
 import ReactRuntime from 'react'
 import { createRoot } from 'react-dom/client'
-import { createVideoController, VideoSurface } from './src/video-player.js'
+import { createVideoController, VideoSurface, VideoPreview } from './src/video-player.js'
 globalThis.React = ReactRuntime
 
 const FPS = ${FPS}
-const request = () => (action, extra) => {
+const params = new URLSearchParams(location.search)
+const request = () => async (action, extra) => {
+  if (extra.clip === 'sourceclip') {
+    if (action === 'media-manifest') return { hasSource: true, manifest: { frames: [] } }
+    if (action === 'media-source-url') return { url: '/fixture.mp4' }
+  }
+  if (action === 'media-manifest' && params.has('slow')) await new Promise((resolve) => setTimeout(resolve, 350))
   if (action === 'media-manifest') return Promise.resolve({ hasSource: false, manifest: {
     version: 1, kind: 'svg', fps: FPS, width: 960, height: 540, source: null, sourceOffset: 0, duration: ${DURATION},
     frames: Array.from({ length: ${FRAMES} }, (_, i) => ({ file: 'frames/' + String(i + 1).padStart(4, '0') + '.svg', t: i / FPS })),
@@ -45,29 +55,41 @@ const request = () => (action, extra) => {
   if (action === 'media-frame') return Promise.resolve({ svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 54"><rect width="96" height="54" fill="#0b0b0b"/><text x="10" y="34" fill="#fff" font-size="22" font-family="monospace">' + extra.index + '</text></svg>' })
   return Promise.reject(new Error('unexpected ' + action))
 }
-// 两个 clip 对应画布上两种真实数据：
-//   'svgclip'  = SVG 复刻，文档里没有 mediaDuration（宣传片.drawai 就是这样）
-//   'rasterclip' = 导入的源视频，导入时写了 mediaDuration
 const clips = {
   svgclip: { id: 'svgclip', meta: { clip: 'svgclip', kind: 'svg', fps: FPS, duration: 0, posterFrame: 0 } },
   rasterclip: { id: 'rasterclip', meta: { clip: 'rasterclip', kind: 'svg', fps: FPS, duration: ${DURATION}, posterFrame: 0 } },
+  sourceclip: { id: 'sourceclip', meta: { clip: 'sourceclip', kind: 'raster', fps: FPS, duration: 0, posterFrame: 0 } },
 }
-for (const clip of Object.values(clips)) { clip.controller = createVideoController(request()) }
+for (const clip of Object.values(clips)) {
+  clip.controller = createVideoController(request())
+  clip.node = { id: clip.id, data: { drawaiMedia: '1', mediaClip: clip.id, mediaKind: clip.meta.kind } }
+}
 const surface = (clip) => ReactRuntime.createElement(VideoSurface, {
-  controller: clip.controller, node: { id: clip.id, data: { drawaiMedia: '1', mediaClip: clip.id } },
+  controller: clip.controller, node: clip.node,
   meta: clip.meta, poster: ${JSON.stringify(POSTER)},
 })
 function App() {
+  if (params.has('preview')) {
+    const clip = clips.sourceclip
+    return ReactRuntime.createElement('div', { 'data-clip': clip.id },
+      ReactRuntime.createElement('button', { id: 'open-preview', onClick: async () => {
+        await clip.controller.play(clip.node, clip.meta)
+        clip.controller.configure(clip.id, { expanded: true })
+      } }, '打开预览'),
+      ReactRuntime.createElement(VideoPreview, { controller: clip.controller, nodes: [clip.node],
+        metaOf: () => clip.meta, posterOf: () => ${JSON.stringify(POSTER)} }))
+  }
   return ReactRuntime.createElement('div', { style: { display: 'flex', gap: 20, padding: 20 } },
     ReactRuntime.createElement('div', { 'data-clip': 'svgclip', style: { width: 420, height: 236 } }, surface(clips.svgclip)),
     ReactRuntime.createElement('div', { 'data-clip': 'rasterclip', style: { width: 420, height: 236 } }, surface(clips.rasterclip)))
 }
 createRoot(document.getElementById('app')).render(ReactRuntime.createElement(App))
 
-window.__state = (id) => { const s = clips[id].controller.get(id)
-  return { status: s.status, time: Number((s.time || 0).toFixed(3)), duration: Number((s.duration || 0).toFixed(3)), index: s.index, kind: s.kind || null, error: s.error || '' } }
+window.__state = (id) => { const s = clips[id].controller.get(id); const video = document.querySelector('video')
+  return { status: s.status, time: Number((s.time || 0).toFixed(3)), duration: Number((s.duration || 0).toFixed(3)), index: s.index, kind: s.kind || null, error: s.error || '',
+    nativeTime: video?.currentTime, nativeSeeking: video?.seeking, readyState: video?.readyState } }
 window.__bar = (id) => { const root = document.querySelector('[data-clip="' + id + '"]')
-  const el = root && root.querySelector('.drawai-video-chrome-progress'); if (!el) return null
+  const el = root && root.querySelector('.drawai-video-chrome-progress,.drawai-video-controls input[type=range]'); if (!el) return null
   const r = el.getBoundingClientRect(); return { value: Number(el.value), max: Number(el.max), disabled: el.disabled, left: r.left, top: r.top, width: r.width, height: r.height } }
 window.__center = (id) => { const root = document.querySelector('[data-clip="' + id + '"]'); const b = root && root.querySelector('.drawai-video-play')
   if (!b) return null; const r = b.getBoundingClientRect(); return { left: r.left + r.width / 2, top: r.top + r.height / 2 } }
@@ -80,7 +102,25 @@ const result = await build({
   bundle: true, write: false, platform: 'browser', format: 'iife',
   logOverride: { 'duplicate-object-key': 'silent' },
 })
-const server = createServer((_req, res) => {
+const source = new URL('../docs/media/motion-showcase.mp4', import.meta.url)
+const sourceSize = statSync(source).size
+let allowMedia
+const mediaAllowed = new Promise((resolve) => { allowMedia = resolve })
+const server = createServer(async (req, res) => {
+  if (req.url === '/fixture.mp4') {
+    await mediaAllowed
+    if (res.destroyed) return
+    const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || '')
+    const start = range ? Number(range[1]) : 0
+    const end = range?.[2] ? Number(range[2]) : sourceSize - 1
+    const headers = { 'Content-Type': 'video/mp4', 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes' }
+    if (range) headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + sourceSize
+    res.writeHead(range ? 206 : 200, headers)
+    const stream = createReadStream(source, { start, end })
+    res.on('close', () => stream.destroy())
+    stream.pipe(res)
+    return
+  }
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
   res.end('<style>' + css + '</style><div id="app"></div><script>' + result.outputFiles[0].text.replaceAll('</script', '<\\/script') + '</script>')
 })
@@ -108,6 +148,19 @@ const settle = (page, ms) => page.evaluate((value) => window.__settle(value), ms
 const state = (page, id) => page.evaluate((clip) => window.__state(clip), id)
 const bar = (page, id) => page.evaluate((clip) => window.__bar(clip), id)
 
+function scrub(page, box) {
+  const send = (type, ratio, down, offsetY = 0) => page._client().send('Input.dispatchMouseEvent', {
+    type, x: box.left + box.width * ratio, y: box.top + box.height / 2 + offsetY,
+    button: type === 'mouseMoved' && !down ? 'none' : 'left', buttons: down ? 1 : 0,
+    clickCount: type === 'mouseMoved' ? 0 : 1,
+  })
+  return {
+    async start(ratio) { await send('mouseMoved', ratio, false); await send('mousePressed', ratio, true) },
+    move: (ratio) => send('mouseMoved', ratio, true),
+    release: (ratio, offsetY) => send('mouseReleased', ratio, false, offsetY),
+  }
+}
+
 /** 悬停到视频上（露出悬停 chrome），再点进度条 ratio 处。 */
 async function clickBar(page, id, ratio) {
   const box = await page.evaluate((clip) => { const root = document.querySelector('[data-clip="' + clip + '"]'); const r = root.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, top: r.top } }, id)
@@ -129,6 +182,14 @@ async function waitReady(page, id) {
   return state(page, id)
 }
 const near = (value, target, tolerance = 0.6) => Math.abs(value - target) <= tolerance
+async function waitFor(read, condition) {
+  for (let i = 0; i < 100; i++) {
+    const value = await read()
+    if (condition(value)) return value
+    await new Promise((resolve) => setTimeout(resolve, 40))
+  }
+  throw new Error('等待浏览器状态超时')
+}
 
 try {
   browser = await openBrowser('chrome', { browserExecutable: process.env.DRAWAI_CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe', logLevel: 'error' })
@@ -188,8 +249,55 @@ try {
   check(startAtEnd.status === 'ended' && near(startAtEnd.time, DURATION, 0.001) && startAtEnd.index === FRAMES - 1,
     '起播前点击最右端等时长读到后停在最后一帧', startAtEnd)
 
+  const origin = 'http://127.0.0.1:' + server.address().port
+  for (let open = 0; open < 2; open += 1) {
+    await page.goto({ url: origin + '/?slow', timeout: 30000 })
+    await page._client().send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 200, y: 140, button: 'none' })
+    const slider = await waitFor(() => bar(page, 'svgclip'), Boolean)
+    const drag = scrub(page, slider)
+    await drag.start(0.05)
+    await drag.move(0.3)
+    await settle(page, 100)
+    await drag.move(0.74)
+    const held = await bar(page, 'svgclip')
+    check(held && near(held.value, 0.74, 0.04) && (await state(page, 'svgclip')).status === 'idle',
+      '冷加载拖动时滑块跟手且松手前保持原播放状态', held)
+    await drag.release(0.74, 20)
+    const afterDrag = await waitReady(page, 'svgclip')
+    check(afterDrag.status === 'playing' && near(afterDrag.time, DURATION * 0.74),
+      open ? '重新打开画布后首次拖动仍落在松手位置' : '首次拖动从松手位置起播', afterDrag)
+  }
+
+  await page.goto({ url: origin + '/?preview', timeout: 30000 })
+  const openPreview = await waitFor(() => page.evaluate(() => {
+    const rect = document.getElementById('open-preview')?.getBoundingClientRect()
+    return rect && { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+  }), Boolean)
+  await click(page, openPreview.x, openPreview.y)
+  const previewBar = await waitFor(() => bar(page, 'sourceclip'), Boolean)
+  const previewDrag = scrub(page, previewBar)
+  await previewDrag.start(0.05)
+  await previewDrag.move(0.32)
+  const waiting = await state(page, 'sourceclip')
+  check(waiting.readyState === 0, '放大预览在源视频元数据到达前开始拖动', waiting)
+  allowMedia()
+  const metadata = await waitFor(() => state(page, 'sourceclip'), (value) => value.duration > 0)
+  const duringLoad = await bar(page, 'sourceclip')
+  check(duringLoad.max === 1 && near(duringLoad.value, 0.32, 0.04), '元数据在拖动中到达时保留滑块刻度和位置', duringLoad)
+  await previewDrag.move(0.68)
+  await previewDrag.release(0.68)
+  const afterPreview = await waitFor(() => state(page, 'sourceclip'), (value) => !value.nativeSeeking && near(value.nativeTime, metadata.duration * 0.68, metadata.duration * 0.025))
+  check(afterPreview.status === 'playing', '放大预览松手后源视频继续从目标位置播放', afterPreview)
+  const warmDrag = scrub(page, await bar(page, 'sourceclip'))
+  await warmDrag.start(0.68)
+  await warmDrag.move(0.34)
+  await warmDrag.release(0.34)
+  const afterWarmDrag = await waitFor(() => state(page, 'sourceclip'), (value) => !value.nativeSeeking && near(value.nativeTime, metadata.duration * 0.34, metadata.duration * 0.025))
+  check(afterWarmDrag.status === 'playing', '同一视频加载完成后可继续拖动跳转', afterWarmDrag)
+
   console.log('\ncheck-video-progress-ui: ' + (failures ? failures + ' 项不通过 / ' + checks : 'OK（' + checks + ' 项）'))
 } finally {
+  allowMedia()
   await browser?.close({ silent: true })
   await new Promise((resolve) => server.close(resolve))
 }

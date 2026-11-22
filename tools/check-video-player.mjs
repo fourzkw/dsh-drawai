@@ -56,6 +56,25 @@ const check = (condition, message) => { assert.ok(condition, message); checks +=
   check(audio.paused && audio.src === '' && h.revoked.length === 1, 'reset releases the owned audio element and blob URL')
 }
 {
+  let availableEnd = 2.2
+  const audio = { currentTime: 0, readyState: 2, paused: true,
+    seekable: { length: 1, start: () => 0, end: () => availableEnd },
+    play() { this.paused = false; return Promise.resolve() },
+    pause() { this.paused = true }, removeAttribute() {}, load() {} }
+  const h = harness((action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: Array(10).fill({}), fps: 10, sourceOffset: 2 } }
+    : action === 'media-source-url' ? { url: '/video/test' } : { svg }, { createAudio: () => audio })
+  await h.controller.play(node('buffered-audio'), meta('buffered-audio'))
+  h.controller.seek('buffered-audio', 0.6)
+  h.advance(100)
+  check(audio.paused && audio.currentTime === 2 && h.controller.get('buffered-audio').index === 7,
+    'a temporarily unavailable audio seek does not drag the SVG playback clock back to the start')
+  availableEnd = 3
+  audio.onprogress()
+  check(!audio.paused && Math.abs(audio.currentTime - 2.7) < 0.001,
+    'SVG audio joins the current playback position once the target range is available')
+  h.controller.reset()
+}
+{
   // 音频时钟略早于 sourceOffset 时，旧逻辑会 floor 出负帧号，错误文案变成「第 0/-n 帧」。
   const audio = { currentTime: 0, readyState: 2, paused: true, src: '', play() { this.paused = false; return Promise.resolve() },
     pause() { this.paused = true }, removeAttribute() { this.src = '' }, load() {} }
@@ -502,6 +521,41 @@ function surfaceHarness(controller) {
   c.attach('declared', el)
   check(c.get('declared').status === 'ended' && c.get('declared').time === 12 && el.currentTime === 12 && plays === 0,
     'an end click before raster metadata uses the measured endpoint and stays paused there')
+  c.reset()
+}
+{
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { url: '/video/test' })
+  const c = h.controller
+  const movie = node('buffering', 'raster')
+  const data = { ...meta('buffering', 'raster'), duration: 8 }
+  let end = 0
+  let plays = 0
+  const el = { currentTime: 0, duration: Infinity, readyState: 1, paused: true,
+    seekable: { length: 1, start: () => 0, end: () => end },
+    play() { plays += 1; this.paused = false; return Promise.resolve() },
+    pause() { this.paused = true } }
+  c.seekRatio('buffering', 0.7)
+  await c.play(movie, data)
+  c.attach('buffering', el)
+  check(el.currentTime === 0 && plays === 0, 'a cold seek waits for a measured duration before starting playback')
+  el.duration = 10
+  c.mediaEvent('buffering', el, 'durationchange')
+  c.mediaEvent('buffering', el, 'timeupdate')
+  check(el.currentTime === 0 && plays === 0 && c.get('buffering').time === 7,
+    'metadata alone does not apply a seek outside the available range or accept zero-time events')
+  end = 10
+  c.mediaEvent('buffering', el, 'progress')
+  check(el.currentTime === 7 && plays === 1 && c.get('buffering').time === 7,
+    'the saved seek starts playback at the requested ratio as soon as the range becomes available')
+  end = 7
+  c.seekRatio('buffering', 0.9)
+  c.mediaEvent('buffering', el, 'timeupdate')
+  check(el.currentTime === 7 && c.get('buffering').time === 9, 'a playing video keeps the latest seek while the native range is limited')
+  c.seekRatio('buffering', 0.8)
+  end = 10
+  c.mediaEvent('buffering', el, 'canplay')
+  check(el.currentTime === 8 && plays === 1 && c.get('buffering').time === 8,
+    'range recovery uses the latest requested position and does not restart an already playing element')
   c.reset()
 }
 console.log('\nAll ' + checks + ' video playback checks passed')
