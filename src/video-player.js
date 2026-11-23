@@ -1,8 +1,49 @@
+const VIDEO_READY_EVENTS = {
+  loadedmetadata: 'onLoadedMetadata', durationchange: 'onDurationChange', loadeddata: 'onLoadedData',
+  progress: 'onProgress', canplay: 'onCanPlay',
+}
+const VIDEO_EVENTS = {
+  ...VIDEO_READY_EVENTS, seeked: 'onSeeked',
+  timeupdate: 'onTimeUpdate', ended: 'onEnded', error: 'onError', pause: 'onPause', play: 'onPlay',
+}
+const SEEK_TOLERANCE = 0.1
+const MAX_SEEK_ATTEMPTS = 2
+const SEEK_TIMEOUT_MS = 10000
+const DESKTOP_SEEK_RESTART_MS = 1500
+const DESKTOP_BLOB_LIMIT = 32 * 1024 * 1024
+
+async function desktopRasterUrl(url, signal) {
+  // DSH Desktop removes Content-Length from forwarded responses. A media element can
+  // play these as streams while reporting no usable seek range. Probe a single byte
+  // before deciding whether the clip can be held as a size-bounded local Blob.
+  try {
+    const options = { signal: AbortSignal.any([signal, AbortSignal.timeout(SEEK_TIMEOUT_MS)]) }
+    const probe = await fetch(url, { ...options, headers: { Range: 'bytes=0-0' } })
+    const size = Number(/^bytes 0-0\/(\d+)$/i.exec(probe.headers.get('Content-Range') || '')?.[1])
+    await probe.body?.cancel()
+    if (probe.status !== 206 || !Number.isSafeInteger(size) ||
+      size < 1 || size > DESKTOP_BLOB_LIMIT) return url
+    const response = await fetch(url, { ...options, headers: { Range: 'bytes=0-' + (size - 1) } })
+    if (response.status !== 206 || response.headers.get('Content-Range') !== 'bytes 0-' + (size - 1) + '/' + size) {
+      await response.body?.cancel()
+      return url
+    }
+    const blob = await response.blob()
+    if (blob.size === size) return URL.createObjectURL(blob)
+  } catch (error) {
+    if (signal.aborted) throw error
+  }
+  return url
+}
+
 /** Playback is transient: no document mutations or undo entries. */
 function createVideoController(request, environment = {}) {
   const raf = environment.raf || ((fn) => requestAnimationFrame(fn))
   const caf = environment.caf || ((id) => cancelAnimationFrame(id))
   const now = environment.now || (() => performance.now())
+  const setSeekTimer = environment.setTimer || setTimeout
+  const clearSeekTimer = environment.clearTimer || clearTimeout
+  const desktop = (environment.protocol ?? globalThis.location?.protocol) === 'dsh-app:'
   const makeUrl = environment.makeUrl || ((source) => {
     if (!source || typeof source.url !== 'string') throw new Error('无法读取源视频地址')
     return source.url
@@ -10,14 +51,18 @@ function createVideoController(request, environment = {}) {
   const revoke = environment.revoke || ((url) => { if (url.startsWith('blob:')) URL.revokeObjectURL(url) })
   const sessions = new Map()
   const listeners = new Set()
+  const pendingAudio = new WeakSet()
   let activeId = null
   let generation = 0
   let animation = null
   let element = null
+  let elementTime = 0
   let elementPositioned = false
+  let elementSeek = null
+  let sourceLoad = null
   let anchor = 0
   let anchorTime = 0
-  const idle = Object.freeze({ status: 'idle', time: 0, duration: 0, index: 0, loop: true, muted: false, fit: 'contain', expanded: false })
+  const idle = Object.freeze({ status: 'idle', time: 0, duration: 0, index: 0, seeking: false, loop: true, muted: false, fit: 'contain', expanded: false })
   const get = (id) => sessions.get(id) || idle
   const emit = () => listeners.forEach((fn) => fn())
   /**
@@ -31,13 +76,29 @@ function createVideoController(request, environment = {}) {
   function remember(state) {
     if (!state || typeof state.clip !== 'string' || state.clip === '') return
     const time = Number(state.time)
-    if (Number.isFinite(time) && time > 0.01) positions.set(state.clip, time)
+    if (state.status !== 'ended' && Number.isFinite(time) && time > 0.01) positions.set(state.clip, time)
     else positions.delete(state.clip)
   }
   function recalledTime(clip, duration) {
     const time = Number(positions.get(clip))
     if (!Number.isFinite(time) || time <= 0) return 0
     return Number.isFinite(duration) && duration > 0 ? Math.min(time, duration) : time
+  }
+  /**
+   * 还没拿到时长时点下的进度条位置（0..1 的比例）。
+   *
+   * 视频刚打开、会话还没起播时没有实测时长，SVG 复刻的文档里也没有 `mediaDuration`，
+   * 进度条的 `max` 只能是占位值 —— 这时点出来的只是一个相对位置。把它扔掉的话，
+   * 用户看到的就是「点了进度条，它自己从头开始播」；所以先记下，等时长一到就落位。
+   */
+  const wants = new Map()
+  /** 取走待落位的比例；时长还不知道时先留着（`return null`）。 */
+  function takeSeek(id, duration) {
+    if (!wants.has(id)) return null
+    if (!(Number(duration) > 0)) return null
+    const ratio = wants.get(id)
+    wants.delete(id)
+    return ratio * Number(duration)
   }
   const patch = (id, values) => {
     if (!sessions.has(id)) return
@@ -49,7 +110,7 @@ function createVideoController(request, environment = {}) {
     if (animation !== null) caf(animation)
     animation = null
   }
-  const svgTime = (state, ts = now()) => Math.max(0, state.audio && state.audio.readyState >= 2 && !state.audio.paused
+  const svgTime = (state, ts = now()) => Math.max(0, state.audio && state.audio.readyState >= 2 && !state.audio.paused && !state.audio.seeking
     ? state.audio.currentTime - state.sourceOffset : anchorTime + (ts - anchor) / 1000)
   /** 时间 → 帧号：上下都钳制，避免负时间/空序列算出 -1 再显示成「第 0/-n 帧」。 */
   function frameIndexOf(state, time) {
@@ -66,12 +127,44 @@ function createVideoController(request, environment = {}) {
     if (!(state.duration > 0)) return 0
     return state.loop ? time % state.duration : Math.min(state.duration, time)
   }
+  function canSeekMedia(media, time) {
+    const seekable = media.seekable
+    if (time === media.currentTime || !seekable) return true
+    for (let i = 0; i < seekable.length; i += 1) {
+      if (time >= seekable.start(i) && time <= seekable.end(i)) return true
+    }
+    return false
+  }
   function seekAudio(state, time) {
-    if (state.audio) { try { state.audio.currentTime = state.sourceOffset + time } catch {} }
+    const audio = state.audio
+    if (!audio) return
+    const target = state.sourceOffset + time
+    // 跳转暂不可用时先用 SVG 的播放时钟，避免音轨旧位置覆盖画面。
+    if (audio.readyState < 1 || !canSeekMedia(audio, target)) {
+      pendingAudio.add(audio)
+      audio.pause()
+      return
+    }
+    pendingAudio.delete(audio)
+    if (target !== audio.currentTime) audio.currentTime = target
+    if (state.id === activeId && state.status === 'playing' && audio.paused) playElement(state.id, audio)
   }
   function disposeAudio(state) {
     if (state.audio) { state.audio.pause(); state.audio.removeAttribute('src'); state.audio.load() }
     if (state.audioUrl) revoke(state.audioUrl)
+  }
+  function syncSvgClock(id) {
+    if (id !== activeId) return
+    const state = get(id)
+    cancel()
+    if (state.seeking) {
+      if (state.audio) state.audio.pause()
+      return
+    }
+    anchor = now()
+    anchorTime = state.time
+    seekAudio(state, anchorTime)
+    if (state.status === 'playing') animation = raf(tick)
   }
   // 长序列按播放位置预取，最多保留 48 帧 SVG 内容，避免全片驻留内存。
   function loadSvgWindow(id, index) {
@@ -86,7 +179,7 @@ function createVideoController(request, environment = {}) {
     if (!indices.length) return Promise.resolve()
     let cursor = 0
     cache.loading = Promise.all(Array.from({ length: Math.min(4, indices.length) }, async () => {
-      while (cursor < indices.length && valid()) {
+      while (cursor < indices.length && valid() && (!get(id).seeking || cache.wanted === index)) {
         const i = indices[cursor++]
         const frame = await request('media-frame', { clip: state.clip, index: i })
         if (!valid()) return
@@ -98,8 +191,12 @@ function createVideoController(request, environment = {}) {
           const remove = Array.from(cache.entries.keys()).sort((a, b) => Math.abs(b - currentIndex) - Math.abs(a - currentIndex))[0]
           cache.entries.delete(remove); delete state.frames[remove]
         }
-        const currentFrame = state.frames[get(id).index]
-        patch(id, currentFrame ? { lastFrame: currentFrame } : {})
+        const current = get(id)
+        const currentFrame = state.frames[current.index]
+        if (currentFrame) {
+          patch(id, { lastFrame: currentFrame, seeking: false })
+          if (current.seeking) syncSvgClock(id)
+        }
       }
     })).catch((error) => {
       if (valid()) { if (id === activeId) cancel(); if (state.audio) state.audio.pause(); patch(id, { status: 'error', error: error.message || String(error) }) }
@@ -113,13 +210,15 @@ function createVideoController(request, environment = {}) {
   function pause(id = activeId) {
     if (id !== activeId) return
     generation += 1
+    sourceLoad?.abort()
+    sourceLoad = null
     cancel()
     const state = get(id)
     if (element) {
-      if (elementPositioned) patch(id, { time: element.currentTime })
+      if (elementPositioned) patch(id, { time: decodedElementTime(element) })
       element.pause()
     }
-    if (state.status === 'playing' && state.kind === 'svg') {
+    if (state.status === 'playing' && state.kind === 'svg' && !state.seeking) {
       const time = wrapSvgTime(state, svgTime(state))
       patch(id, { time, index: frameIndexOf(state, time) })
     }
@@ -144,7 +243,6 @@ function createVideoController(request, environment = {}) {
       anchor = ts
       anchorTime = time
       seekAudio(state, time)
-      if (state.audio) playElement(activeId, state.audio)
     }
     const index = frameIndexOf(state, time)
     if (index !== state.index || Math.abs(time - state.time) >= 0.1) patch(activeId, Object.assign({ time, index }, state.frames[index] ? { lastFrame: state.frames[index] } : {}))
@@ -152,17 +250,13 @@ function createVideoController(request, environment = {}) {
     animation = raf(tick)
   }
   function resume(id) {
-    const state = get(id)
-    if (state.status === 'ended') seek(id, 0)
+    if (get(id).status === 'ended') seek(id, 0)
     patch(id, { status: 'playing', error: '' })
+    const state = get(id)
     if (state.kind === 'svg') {
       if (state.cache) loadSvgWindow(id, state.index).catch(() => {})
-      cancel()
-      anchor = now()
-      anchorTime = get(id).time
-      seekAudio(state, anchorTime)
-      if (state.audio) { state.audio.muted = state.muted; playElement(id, state.audio) }
-      animation = raf(tick)
+      if (state.audio) state.audio.muted = state.muted
+      syncSvgClock(id)
     } else if (element && elementPositioned) {
       playElement(id, element)
     }
@@ -176,14 +270,101 @@ function createVideoController(request, environment = {}) {
       }
     })
   }
-  function positionElement(id, video) {
-    if (video.readyState < 1 || elementPositioned) return
-    const duration = Number.isFinite(video.duration) ? video.duration : 0
-    const time = duration > 0 ? Math.min(get(id).time, duration) : get(id).time
-    video.currentTime = time
+  function resetElementPosition() {
+    if (elementSeek?.timer !== undefined) clearSeekTimer(elementSeek.timer)
+    if (elementSeek?.restartTimer !== undefined) clearSeekTimer(elementSeek.restartTimer)
+    elementPositioned = false
+    elementSeek = null
+  }
+  function decodedElementTime(video) {
+    return video.seeking ? elementTime : video.currentTime
+  }
+  function finishElementPosition(id, video, duration, status, seekError = '') {
+    resetElementPosition()
     elementPositioned = true
-    patch(id, { duration, time })
-    if (get(id).status === 'playing') playElement(id, video)
+    wants.delete(id)
+    if (seekError && video.paused === false) video.pause()
+    elementTime = seekError ? decodedElementTime(video) : video.currentTime
+    const time = status === 'ended' ? duration : elementTime
+    patch(id, { duration, time, status, seeking: false, seekError })
+    if (status === 'playing' && video.paused !== false) playElement(id, video)
+  }
+  function positionElement(id, video, completed = false) {
+    if (video.readyState < 1) return
+    const state = get(id)
+    const measured = Number.isFinite(video.duration) ? video.duration : 0
+    const duration = measured || state.duration
+    if (elementPositioned) {
+      if (duration !== state.duration) patch(id, { duration })
+      return
+    }
+    const ratio = wants.get(id)
+    if (ratio !== undefined && measured <= 0) return
+    const wanted = ratio === undefined ? state.time : ratio * measured
+    const time = duration > 0 ? Math.min(wanted, duration) : wanted
+    const status = ratio === 1 ? 'ended' : state.status
+    if (elementSeek?.time !== time) {
+      elementTime = decodedElementTime(video)
+      resetElementPosition()
+      elementSeek = { time, attempts: 0, awaiting: false }
+    }
+    const seek = elementSeek
+    const landed = () => !video.seeking && (video.currentTime === time ||
+      (seek.attempts > 0 && Math.abs(video.currentTime - time) <= SEEK_TOLERANCE))
+    if (seek.restarting && video.readyState < 2) return
+    if (seek.awaiting && (video.seeking || video.readyState < 2 || (!completed && !landed()))) return
+    seek.awaiting = false
+    if (status === 'ended' && video.paused === false) video.pause()
+    if (landed()) {
+      finishElementPosition(id, video, duration, status)
+      return
+    }
+    if (!state.seeking || time !== state.time || duration !== state.duration || status !== state.status) {
+      patch(id, { duration, time, status, seeking: true, seekError: '' })
+    }
+    const failed = () => finishElementPosition(id, video, get(id).duration, 'paused',
+      '无法跳转到 ' + videoTime(time) + '，请重试')
+    if (seek.timer === undefined) {
+      seek.timer = setSeekTimer(() => {
+        if (activeId !== id || element !== video || elementSeek !== seek) return
+        if (seek.attempts && video.readyState >= 2 && landed()) {
+          const current = get(id)
+          finishElementPosition(id, video, current.duration, current.status)
+        } else failed()
+      }, SEEK_TIMEOUT_MS)
+    }
+    // 有元数据不代表目标已可跳转。过早写 currentTime 会被浏览器钳回可跳转范围的开头。
+    if (seek.attempts < MAX_SEEK_ATTEMPTS && !canSeekMedia(video, time)) {
+      if (video.paused === false) video.pause()
+      return
+    }
+    while (seek.attempts < MAX_SEEK_ATTEMPTS) {
+      seek.attempts += 1
+      try { video.currentTime = time } catch { break }
+      if (video.seeking) {
+        // 等片段解码并核对落点，再恢复播放。seeked 本身不保证跳到了目标。
+        seek.awaiting = true
+        if (video.paused === false) video.pause()
+        if (desktop && seek.restartTimer === undefined) {
+          seek.restartTimer = setSeekTimer(() => {
+            if (activeId !== id || element !== video || elementSeek !== seek || !video.seeking) return
+            // Reopen the same source at the target when the desktop decoder remains stuck
+            // in an in-place seek. Clamp the endpoint to a frame the player can decode.
+            seek.restarting = true
+            seek.awaiting = false
+            const start = time === duration ? Math.max(0, time - SEEK_TOLERANCE / 2) : time
+            video.src = state.url + '#t=' + start.toFixed(3)
+            video.load()
+          }, DESKTOP_SEEK_RESTART_MS)
+        }
+        return
+      }
+      if (landed()) {
+        finishElementPosition(id, video, duration, status)
+        return
+      }
+    }
+    failed()
   }
   async function play(node, meta) {
     const id = node.id
@@ -196,6 +377,7 @@ function createVideoController(request, environment = {}) {
       pause()
       if (activeId !== null) patch(activeId, { expanded: false, active: false })
       element = null
+      resetElementPosition()
       activeId = id
     }
     const previous = get(id)
@@ -226,7 +408,14 @@ function createVideoController(request, environment = {}) {
         const source = await request('media-source-url', { clip: meta.clip })
         if (!current()) return
         if (!source) throw new Error('无法读取源视频')
-        patch(id, { kind: 'raster', url: makeUrl(source), fps, status: 'ready' })
+        let url = makeUrl(source)
+        if (desktop && !url.startsWith('blob:')) {
+          const load = new AbortController()
+          sourceLoad = load
+          try { url = await desktopRasterUrl(url, load.signal) } finally { if (sourceLoad === load) sourceLoad = null }
+          if (!current()) { revoke(url); return }
+        }
+        patch(id, { kind: 'raster', url, fps, status: 'ready' })
       } else {
         if (!frames.length) throw new Error('还没有 SVG 帧，请导入媒体或添加帧')
         const svgs = new Array(frames.length)
@@ -259,11 +448,18 @@ function createVideoController(request, environment = {}) {
           const audioUrl = makeUrl(source)
           audio.preload = 'auto'; audio.src = audioUrl; audio.muted = get(id).muted
           patch(id, { audio, audioUrl, sourceOffset: Number(manifest.sourceOffset) || 0 })
-          audio.onloadedmetadata = () => { if (get(id).audio === audio) seekAudio(get(id), get(id).time) }
+          const retryAudio = () => {
+            const state = get(id)
+            if (state.audio !== audio || state.seeking || !pendingAudio.has(audio)) return
+            seekAudio(state, state.status === 'playing' ? wrapSvgTime(state, svgTime(state)) : state.time)
+          }
+          audio.onloadedmetadata = audio.onprogress = audio.oncanplay = retryAudio
           audio.onerror = () => { if (get(id).audio === audio) { pause(id); patch(id, { error: '音频解码失败，请检查原视频格式' }) } }
         }
+        const wanted = takeSeek(id, get(id).duration)
+        if (wanted !== null) seek(id, wanted)
       }
-      resume(id)
+      if (get(id).status !== 'ended') resume(id)
     } catch (error) {
       if (current()) {
         generation += 1
@@ -279,25 +475,57 @@ function createVideoController(request, environment = {}) {
     // 时长未知（还没拿到元数据）时不要拿 0 去钳 —— 那会把任何一次点击/拖动都压回开头。
     const wanted = Math.max(0, Number(value) || 0)
     const time = state.duration > 0 ? Math.min(state.duration, wanted) : wanted
-    patch(id, { time, index: state.kind === 'svg' ? frameIndexOf(state, time) : 0,
-      status: state.status === 'ended' ? 'paused' : state.status })
-    if (state.cache) loadSvgWindow(id, get(id).index).catch(() => {})
+    // 主动跳到终点时停住，避免播放时钟立刻触发循环。
+    const atEnd = state.duration > 0 && time === state.duration
+    if (atEnd && state.status === 'playing') pause(id)
+    wants.delete(id)
+    const index = state.kind === 'svg' ? frameIndexOf(state, time) : 0
+    const seeking = !!state.cache && !state.frames[index]
+    patch(id, { time, index, seeking, seekError: '',
+      status: atEnd ? 'ended' : state.status === 'ended' ? 'paused' : state.status })
+    if (state.cache) loadSvgWindow(id, index).catch(() => {})
     if (id === activeId) {
-      anchor = now()
-      anchorTime = time
-      seekAudio(state, time)
-      if (element && element.readyState >= 1) element.currentTime = time
+      if (state.kind === 'svg') syncSvgClock(id)
+      if (element) {
+        resetElementPosition()
+        positionElement(id, element)
+      }
+    }
+  }
+  /**
+   * 按进度条上的相对位置（0..1）落位。
+   *
+   * 会话已经能 seek 就直接换算成秒；否则（还没起播、还没有实测时长）先记下比例，
+   * 等时长一到再落位 —— 丢掉的点击会让用户以为「进度条点不动、只能从头播」。
+   */
+  function seekRatio(id, ratio) {
+    const value = Number(ratio)
+    const wanted = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0
+    const state = get(id)
+    const duration = Number(state.duration) > 0 ? Number(state.duration) : 0
+    const awaitingElement = state.kind === 'raster' && id === activeId && !elementPositioned
+    if (state.kind && duration > 0 && !awaitingElement && state.status !== 'loading' && state.status !== 'error') {
+      seek(id, wanted * duration)
+      return
+    }
+    const previous = wants.get(id)
+    wants.set(id, wanted)
+    if (awaitingElement && element && previous !== wanted) {
+      resetElementPosition()
+      positionElement(id, element)
     }
   }
   function release(id) {
     if (id === activeId) {
       pause(id)
       element = null
+      resetElementPosition()
       activeId = null
     }
     const state = get(id)
     if (state.url) revoke(state.url)
     disposeAudio(state)
+    wants.delete(id)
     sessions.delete(id)
     emit()
   }
@@ -308,7 +536,8 @@ function createVideoController(request, environment = {}) {
     pause,
     toggle(node, meta) { return get(node.id).status === 'playing' ? pause(node.id) : play(node, meta) },
     seek,
-    stop(id) { pause(id); seek(id, 0) },
+    seekRatio,
+    stop(id) { wants.delete(id); pause(id); seek(id, 0) },
     step(id, delta) { const s = get(id); if (s.kind === 'svg') { pause(id); seek(id, (s.index + delta) / s.fps) } },
     configure(id, values) {
       patch(id, values)
@@ -353,12 +582,13 @@ function createVideoController(request, environment = {}) {
       if (element === video) return
       if (element) {
         const previous = element
-        if (elementPositioned) patch(id, { time: previous.currentTime })
+        if (elementPositioned) patch(id, { time: decodedElementTime(previous) })
         element = null
         previous.pause()
       }
       element = video
-      elementPositioned = false
+      elementTime = 0
+      resetElementPosition()
       if (!video) return
       video.loop = get(id).loop
       video.muted = get(id).muted
@@ -366,26 +596,29 @@ function createVideoController(request, environment = {}) {
     },
     detach(id, video) {
       if (id !== activeId || element !== video || !video) return
-      if (elementPositioned) patch(id, { time: video.currentTime })
+      if (elementPositioned) patch(id, { time: decodedElementTime(video) })
       element = null
-      elementPositioned = false
+      resetElementPosition()
       video.pause()
     },
     mediaEvent(id, video, type) {
       if (id !== activeId || element !== video) return
       const s = get(id)
-      if (type === 'loadedmetadata') {
+      if (Object.hasOwn(VIDEO_READY_EVENTS, type)) {
         positionElement(id, video)
       } else if (type === 'error') {
+        resetElementPosition()
         patch(id, { status: 'error', error: '视频解码失败，请检查文件格式后重试' })
+      } else if (type === 'seeked' || (type === 'timeupdate' && elementSeek?.awaiting)) {
+        positionElement(id, video, type === 'seeked')
       } else if (!elementPositioned) {
         return
       } else if (type === 'ended') {
-        // 播完就清除记忆：文档约定"播放结束后再次播放从头开始"。
-        if (typeof s.clip === 'string') positions.delete(s.clip)
         patch(id, { status: 'ended', time: video.currentTime })
-      } else if (type === 'timeupdate' || type === 'pause' || type === 'play') {
-        patch(id, { time: video.currentTime, status: type === 'pause' && s.status === 'playing' ? 'paused' : type === 'play' ? 'playing' : s.status })
+      } else if (type === 'timeupdate' || (type === 'pause' && video.paused !== false) || (type === 'play' && !video.paused)) {
+        elementTime = decodedElementTime(video)
+        const time = s.status === 'ended' && type !== 'play' ? s.duration : elementTime
+        patch(id, { time, status: type === 'pause' && s.status === 'playing' ? 'paused' : type === 'play' ? 'playing' : s.status })
       }
     },
     suspend() { pause(); sessions.forEach((s, id) => { if (s.expanded) patch(id, { expanded: false }) }) },
@@ -396,7 +629,7 @@ function createVideoController(request, environment = {}) {
           (n.data.mediaKind === 'raster' ? 'raster' : 'svg') !== s.sourceKind) release(id)
       })
     },
-    reset() { Array.from(sessions.keys()).forEach(release); positions.clear(); generation += 1 },
+    reset() { Array.from(sessions.keys()).forEach(release); positions.clear(); wants.clear(); generation += 1 },
     expanded() { return Array.from(sessions.values()).find((s) => s.expanded) || null },
   }
 }
@@ -419,18 +652,65 @@ function videoTime(seconds) {
   return Math.floor(value / 60) + ':' + String(value % 60).padStart(2, '0')
 }
 
-/**
- * 进度条该用的总时长：播放器实测优先，其次是节点数据里记的媒体时长。
- *
- * 还没起播的节点没有 `<video>`，实测时长是 0；只用它会让 `max=0`（受控 range 会把值钳回 0、
- * 还会被 `disabled`），用户点/拖进度条就永远停在开头。节点数据里的 `mediaDuration` 是导入时就写好的，
- * 拿它兜底才能让"点一下就跳到那一段"成立。
- */
+/** 优先使用实测时长，媒体未加载时可先使用节点保存的时长。 */
 function progressDuration(state, meta) {
   const measured = Number(state.duration)
   if (Number.isFinite(measured) && measured > 0) return measured
   const declared = Number(meta && meta.duration)
   return Number.isFinite(declared) && declared > 0 ? declared : 0
+}
+
+function useProgressInput({ controller, node, meta }, state, duration) {
+  const gesture = React.useRef(null)
+  const [draft, setDraft] = React.useState(null)
+  React.useEffect(() => () => gesture.current?.cleanup(), [])
+  const span = gesture.current?.span ?? (duration || 1)
+  const nominalStep = state.kind === 'svg' ? 1 / (state.fps || 1) : 0.01
+  const intervals = Math.max(1, Math.round(span / nominalStep))
+  // 对齐到整段时长并稍向下舍入，避免浮点误差让最后一档超出 max。
+  const step = gesture.current?.step ?? span / intervals * (1 - 4 * Number.EPSILON)
+  const seekTo = (ratio) => {
+    controller.seekRatio(node.id, ratio)
+    const current = controller.get(node.id)
+    if (current.status === 'idle' || current.status === 'error') controller.play(node, meta)
+  }
+  const finish = (event, commit) => {
+    const active = gesture.current
+    if (!active || active.id !== event.pointerId) return
+    active.cleanup()
+    gesture.current = null
+    setDraft(null)
+    if (commit && active.ratio !== null) seekTo(active.ratio)
+  }
+  const input = {
+    type: 'range', min: 0, max: span, step,
+    value: draft ?? (duration > 0 ? Math.min(state.time, duration) : 0),
+    disabled: !meta || !meta.clip || state.status === 'error', 'aria-label': '播放进度',
+    onPointerDown: (event) => {
+      if (event.button !== 0 || gesture.current) return
+      const doc = event.currentTarget.ownerDocument
+      const finishGesture = (event) => finish(event, event.type === 'pointerup')
+      const cleanup = () => {
+        doc.removeEventListener('pointerup', finishGesture, true)
+        doc.removeEventListener('pointercancel', finishGesture, true)
+      }
+      gesture.current = { id: event.pointerId, span, step, ratio: null, cleanup }
+      setDraft(Number(event.currentTarget.value))
+      // Native range handles dragging. Listen on the document so releasing outside still commits.
+      doc.addEventListener('pointerup', finishGesture, true)
+      doc.addEventListener('pointercancel', finishGesture, true)
+    },
+    onChange: (event) => {
+      const value = Math.max(0, Number(event.target.value) || 0)
+      const target = span - value < step / 2 ? span : value
+      const ratio = target / span
+      if (!gesture.current) { seekTo(ratio); return }
+      // 拖动时仅更新滑块，松手后跳转一次。加载和播放进度变化不会覆盖拖动位置。
+      gesture.current.ratio = ratio
+      setDraft(target)
+    },
+  }
+  return { input, scrubbing: draft !== null }
 }
 
 function VideoSurface(props) {
@@ -450,30 +730,21 @@ function VideoSurface(props) {
   const mediaStyle = { width: '100%', height: '100%', objectFit: state.fit, display: 'block', pointerEvents: 'none' }
   if (state.kind === 'raster' && state.url && (preview || !state.expanded)) {
     const events = {}
-    for (const type of ['loadedmetadata', 'timeupdate', 'ended', 'error', 'pause', 'play']) {
-      const name = { loadedmetadata: 'onLoadedMetadata', timeupdate: 'onTimeUpdate', ended: 'onEnded', error: 'onError', pause: 'onPause', play: 'onPlay' }[type]
+    for (const [type, name] of Object.entries(VIDEO_EVENTS)) {
       events[name] = (event) => controller.mediaEvent(node.id, event.currentTarget, type)
     }
-    media = React.createElement('video', Object.assign({ ref: videoRef, src: state.url, muted: state.muted, playsInline: true, loop: state.loop, style: mediaStyle }, events))
+    media = React.createElement('video', Object.assign({ ref: videoRef, src: state.url, muted: state.muted, playsInline: true,
+      preload: state.active ? 'auto' : 'metadata', loop: state.loop, style: mediaStyle }, events))
   } else {
     media = React.createElement('img', { src: state.kind === 'svg' ? state.frames[state.index] || state.lastFrame || poster : poster, alt: '', draggable: false, style: mediaStyle })
   }
   const loading = state.status === 'loading'
   const playing = state.status === 'playing'
   const duration = progressDuration(state, meta)
-  // 点/拖进度条：有总时长就落位；还没起播、或还拿不到总时长（没有 <video> 元数据）就先起播。
-  // 绝不能在时长未知时把值当秒数 seek —— 那时 `max` 是 0，任何一次点击都会被当成 0。
-  const seekTo = (value) => {
-    const target = Math.max(0, Number(value) || 0)
-    if (!state.kind || state.status === 'idle' || duration <= 0) {
-      if (state.status !== 'playing') controller.play(node, meta)
-      return
-    }
-    controller.seek(node.id, target)
-  }
+  const { input: progress, scrubbing } = useProgressInput(props, state, duration)
   // 中央播放/暂停与底部进度条均仅悬停时显示；加载中/出错时保留可点的中央按钮。
   const showCenter = preview ? !playing : (hovered || loading || !!state.error)
-  const showChrome = !preview && hovered && state.status !== 'loading' && !state.error
+  const showChrome = !preview && (hovered || scrubbing) && !state.error
   const stopBubble = (event) => event.stopPropagation()
   const centerLabel = loading ? '正在加载视频' : state.error ? '重试播放' : playing ? '暂停视频' : '播放视频'
   const centerTitle = loading ? '正在加载' : state.error ? '重试播放' : playing ? '暂停视频' : '播放视频'
@@ -505,15 +776,13 @@ function VideoSurface(props) {
           controller.toggle(node, meta)
         },
       }, playing ? '❚❚' : '▶'),
-      React.createElement('input', {
-        type: 'range', className: 'drawai-video-chrome-progress',
-        min: 0, max: duration, step: state.kind === 'svg' ? 1 / (state.fps || 1) : 0.01,
-        value: Math.min(state.time || 0, duration), disabled: !meta || !meta.clip || state.status === 'error', 'aria-label': '播放进度',
-        onChange: (event) => seekTo(event.target.value),
-      }),
+      React.createElement('input', { ...progress, className: 'drawai-video-chrome-progress' }),
       React.createElement('span', { className: 'drawai-video-chrome-time' }, videoTime(state.time) + ' / ' + videoTime(duration)),
     ) : null,
-    state.error ? React.createElement('div', { className: 'drawai-video-message', role: 'status' }, state.error) : null,
+    state.error ? React.createElement('div', { className: 'drawai-video-message', role: 'status' }, state.error)
+      : (state.seeking || state.seekError) && (preview || !state.expanded) ? React.createElement('div', {
+        className: 'drawai-video-message', role: 'status', style: { top: 0, bottom: 'auto', textAlign: 'center' },
+      }, state.seeking ? '正在定位视频…' : state.seekError) : null,
     !preview && state.expanded ? React.createElement('div', { className: 'drawai-video-message' }, '正在放大预览') : null,
   )
 }
@@ -523,15 +792,7 @@ function VideoControls(props) {
   const state = useVideoSnapshot(controller, node.id)
   const ready = !!state.kind && !['idle', 'loading', 'error'].includes(state.status)
   const duration = progressDuration(state, meta)
-  // 与节点悬停条同一套语义：有时长才落位；没有就先起播，别拿 0 当目标。
-  const seekTo = (value) => {
-    const target = Math.max(0, Number(value) || 0)
-    if (!state.kind || state.status === 'idle' || duration <= 0) {
-      if (state.status !== 'playing') controller.play(node, meta)
-      return
-    }
-    controller.seek(node.id, target)
-  }
+  const { input: progress } = useProgressInput(props, state, duration)
   const button = (text, title, click, disabled = false) => React.createElement('button', { type: 'button', title, disabled, onClick: click }, text)
   if (props.compact) {
     const icon = (kind) => React.createElement('svg', { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
@@ -566,8 +827,7 @@ function VideoControls(props) {
   button(state.muted ? '开启声音' : '静音', '切换视频声音', () => controller.configure(node.id, { muted: !state.muted }), !ready),
   button('‹', '上一帧', () => controller.step(node.id, -1), !ready || state.kind !== 'svg'),
   button('›', '下一帧', () => controller.step(node.id, 1), !ready || state.kind !== 'svg'),
-  React.createElement('input', { type: 'range', min: 0, max: duration, step: state.kind === 'svg' ? 1 / state.fps : 0.01,
-    value: Math.min(state.time || 0, duration), disabled: !meta || !meta.clip || state.status === 'error', 'aria-label': '播放进度', onChange: (event) => seekTo(event.target.value) }),
+  React.createElement('input', progress),
   React.createElement('span', { className: 'drawai-video-time' }, videoTime(state.time) + ' / ' + videoTime(duration)),
   React.createElement('label', null, React.createElement('input', { type: 'checkbox', checked: state.loop, disabled: !ready, onChange: (event) => controller.configure(node.id, { loop: event.target.checked }) }), '循环'),
   React.createElement('select', { value: state.fit, disabled: !ready, 'aria-label': '画面适配', onChange: (event) => controller.configure(node.id, { fit: event.target.value }) },

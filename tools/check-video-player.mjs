@@ -56,6 +56,25 @@ const check = (condition, message) => { assert.ok(condition, message); checks +=
   check(audio.paused && audio.src === '' && h.revoked.length === 1, 'reset releases the owned audio element and blob URL')
 }
 {
+  let availableEnd = 2.2
+  const audio = { currentTime: 0, readyState: 2, paused: true,
+    seekable: { length: 1, start: () => 0, end: () => availableEnd },
+    play() { this.paused = false; return Promise.resolve() },
+    pause() { this.paused = true }, removeAttribute() {}, load() {} }
+  const h = harness((action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: Array(10).fill({}), fps: 10, sourceOffset: 2 } }
+    : action === 'media-source-url' ? { url: '/video/test' } : { svg }, { createAudio: () => audio })
+  await h.controller.play(node('buffered-audio'), meta('buffered-audio'))
+  h.controller.seek('buffered-audio', 0.6)
+  h.advance(100)
+  check(audio.paused && audio.currentTime === 2 && h.controller.get('buffered-audio').index === 7,
+    'a temporarily unavailable audio seek does not drag the SVG playback clock back to the start')
+  availableEnd = 3
+  audio.onprogress()
+  check(!audio.paused && Math.abs(audio.currentTime - 2.7) < 0.001,
+    'SVG audio joins the current playback position once the target range is available')
+  h.controller.reset()
+}
+{
   // 音频时钟略早于 sourceOffset 时，旧逻辑会 floor 出负帧号，错误文案变成「第 0/-n 帧」。
   const audio = { currentTime: 0, readyState: 2, paused: true, src: '', play() { this.paused = false; return Promise.resolve() },
     pause() { this.paused = true }, removeAttribute() { this.src = '' }, load() {} }
@@ -411,7 +430,9 @@ function surfaceHarness(controller) {
 }
 {
   // Regression: without a known duration the hover bar used to be disabled (max=0), so a click
-  // was swallowed; enabling it naively would have turned every click into seek(0).
+  // was swallowed — and `min=max=0` makes a range input produce no value change at all, so not
+  // even onChange fired. The bar now falls back to a 0..1 placeholder span and the click is
+  // remembered as a ratio, applied once the duration arrives (it must never restart at 0).
   const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { base64: 'AA==' })
   const c = h.controller
   const ui = surfaceHarness(c)
@@ -420,7 +441,7 @@ function surfaceHarness(controller) {
   const bar = ui.bar(props)
   check(bar !== undefined, 'hover chrome renders a progress bar')
   check(bar.props.disabled === false, 'progress bar stays clickable before the first play')
-  check(bar.props.max === 0 && bar.props.value === 0, 'unknown duration still paints the bar at the start')
+  check(bar.props.max === 1 && bar.props.value === 0, 'unknown duration paints a placeholder span instead of collapsing to 0')
   bar.props.onChange({ target: { value: '0' } })
   await new Promise((resolve) => setTimeout(resolve, 0))
   check(c.get('idle').status === 'playing', 'clicking the bar starts playback to obtain the duration')
@@ -436,6 +457,53 @@ function surfaceHarness(controller) {
   c.reset()
 }
 {
+  // The reported bug: clicking the bar before playback started threw the position away and
+  // started from 0 — it looked like "clicking the progress bar restarts the video".
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { base64: 'AA==' })
+  const c = h.controller
+  const ui = surfaceHarness(c)
+  ui.enter()
+  const props = { controller: c, node: node('lazy', 'raster'), meta: meta('lazy', 'raster'), poster: '', onPlay: () => {} }
+  // No duration anywhere yet: the click is a ratio on the placeholder span.
+  c.seekRatio('lazy', 0.75)
+  await c.play(node('lazy', 'raster'), meta('lazy', 'raster'))
+  check(c.get('lazy').status === 'playing', 'a click before playback still starts the clip')
+  const lazyEl = { currentTime: 0, duration: 12, readyState: 2, play: () => Promise.resolve(), pause() {} }
+  c.attach('lazy', lazyEl)
+  c.mediaEvent('lazy', lazyEl, 'loadedmetadata')
+  check(Math.abs(c.get('lazy').time - 9) < 1e-6 && Math.abs(lazyEl.currentTime - 9) < 1e-6,
+    'a click made before the duration was known lands on the clicked position once metadata arrives')
+  c.reset()
+}
+{
+  // seekRatio on an already-seekable session must seek immediately (no pending state left).
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { base64: 'AA==' })
+  const c = h.controller
+  await c.play(node('ratio', 'raster'), meta('ratio', 'raster'))
+  const ratioEl = { currentTime: 0, duration: 10.006, readyState: 2, paused: true,
+    play() { this.paused = false; return Promise.resolve() },
+    pause() { this.paused = true } }
+  c.attach('ratio', ratioEl)
+  c.mediaEvent('ratio', ratioEl, 'loadedmetadata')
+  c.seekRatio('ratio', 0.4)
+  check(c.get('ratio').time === ratioEl.duration * 0.4 && ratioEl.currentTime === ratioEl.duration * 0.4,
+    'seekRatio seeks at once when the duration is known')
+  const ui = surfaceHarness(c)
+  ui.enter()
+  const bar = ui.bar({ controller: c, node: node('ratio', 'raster'), meta: meta('ratio', 'raster'), poster: '' })
+  const lastStep = Math.floor(bar.props.max / bar.props.step) * bar.props.step
+  bar.props.onChange({ target: { value: String(lastStep) } })
+  check(c.get('ratio').time === ratioEl.duration && ratioEl.currentTime === ratioEl.duration && ratioEl.paused && c.get('ratio').status === 'ended',
+    'seeking a playing raster clip to the end holds the last frame even with looping enabled')
+  c.mediaEvent('ratio', ratioEl, 'play')
+  check(c.get('ratio').status === 'ended', 'a delayed play event cannot resume a clip held at the end')
+  await c.play(node('ratio', 'raster'), meta('ratio', 'raster'))
+  check(c.get('ratio').time === 0 && ratioEl.currentTime === 0 && !ratioEl.paused, 'playing again after an end seek starts at zero')
+  c.seekRatio('ratio', 2)
+  check(c.get('ratio').time === ratioEl.duration, 'seekRatio clamps a ratio above 1')
+  c.reset()
+}
+{
   // Declared duration (node data) must unlock the bar before any <video> exists.
   const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { base64: 'AA==' })
   const c = h.controller
@@ -444,6 +512,163 @@ function surfaceHarness(controller) {
   const declared = { clip: 'declared', kind: 'raster', fps: 10, duration: 20 }
   const bar = ui.bar({ controller: c, node: node('declared', 'raster'), meta: declared, poster: '', onPlay: () => {} })
   check(bar.props.max === 20 && bar.props.disabled === false, 'a declared media duration makes the bar usable before playback')
+  bar.props.onChange({ target: { value: '20' } })
+  check(c.get('declared').status !== 'idle' || h.calls.some((call) => call.action === 'media-manifest'),
+    'clicking a declared-duration bar starts playback instead of dropping the position')
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  let plays = 0
+  const el = { currentTime: 0, duration: 12, readyState: 2, play() { plays += 1; return Promise.resolve() }, pause() {} }
+  c.attach('declared', el)
+  check(c.get('declared').status === 'ended' && c.get('declared').time === 12 && el.currentTime === 12 && plays === 0,
+    'an end click before raster metadata uses the measured endpoint and stays paused there')
+  c.reset()
+}
+{
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { url: '/video/test' })
+  const c = h.controller
+  const movie = node('buffering', 'raster')
+  const data = { ...meta('buffering', 'raster'), duration: 8 }
+  let end = 0
+  let plays = 0
+  const el = { currentTime: 0, duration: Infinity, readyState: 1, paused: true,
+    seekable: { length: 1, start: () => 0, end: () => end },
+    play() { plays += 1; this.paused = false; return Promise.resolve() },
+    pause() { this.paused = true } }
+  c.seekRatio('buffering', 0.7)
+  await c.play(movie, data)
+  c.attach('buffering', el)
+  check(el.currentTime === 0 && plays === 0, 'a cold seek waits for a measured duration before starting playback')
+  el.duration = 10
+  c.mediaEvent('buffering', el, 'durationchange')
+  c.mediaEvent('buffering', el, 'timeupdate')
+  check(el.currentTime === 0 && plays === 0 && c.get('buffering').time === 7,
+    'metadata alone does not apply a seek outside the available range or accept zero-time events')
+  end = 10
+  c.mediaEvent('buffering', el, 'progress')
+  check(el.currentTime === 7 && plays === 1 && c.get('buffering').time === 7,
+    'the saved seek starts playback at the requested ratio as soon as the range becomes available')
+  end = 7
+  c.seekRatio('buffering', 0.9)
+  c.mediaEvent('buffering', el, 'timeupdate')
+  check(el.currentTime === 7 && c.get('buffering').time === 9, 'a playing video keeps the latest seek while the native range is limited')
+  c.seekRatio('buffering', 0.8)
+  end = 10
+  c.mediaEvent('buffering', el, 'canplay')
+  check(el.currentTime === 8 && plays === 2 && !el.paused && c.get('buffering').time === 8,
+    'range recovery resumes at the latest requested position after holding the previous frame')
+  c.reset()
+}
+{
+  const pending = new Map()
+  let timerId = 0
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { url: '/video/test' }, {
+    setTimer(fn) { const id = ++timerId; pending.set(id, fn); return id },
+    clearTimer(id) { pending.delete(id) },
+  })
+  const c = h.controller
+  const video = { currentTime: 0, duration: 10, readyState: 3, paused: true, seekable: { length: 0 },
+    play() { this.paused = false; return Promise.resolve() }, pause() { this.paused = true } }
+  await c.play(node('no-range', 'raster'), meta('no-range', 'raster'))
+  c.attach('no-range', video)
+  video.currentTime = 2
+  c.seek('no-range', 7)
+  check(video.paused && c.get('no-range').seeking && c.get('no-range').time === 7 && pending.size === 1,
+    'while the requested range is unavailable the video holds its frame instead of playing the old position')
+  pending.values().next().value()
+  const expired = c.get('no-range')
+  check(!expired.seeking && expired.status === 'paused' && expired.time === 2 && /0:07/.test(expired.seekError) && pending.size === 0,
+    'an unavailable range has a deadline that clears locating and reports the requested time')
+  c.seek('no-range', 8)
+  c.reset()
+  check(pending.size === 0, 'closing the canvas cancels the pending seek deadline')
+}
+{
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push([url, options.headers.Range])
+    return new Response(Uint8Array.of(0), { status: 206, headers: { 'Content-Range': 'bytes 0-0/56623121' } })
+  }
+  try {
+    const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { url: '/video/large' }, {
+      protocol: 'dsh-app:', makeUrl: (source) => source.url,
+    })
+    await h.controller.play(node('large-desktop', 'raster'), meta('large-desktop', 'raster'))
+    check(h.controller.get('large-desktop').url === '/video/large' &&
+      requests.length === 1 && requests[0][1] === 'bytes=0-0',
+    'desktop videos above the local Blob limit stay on the range-streaming URL')
+    h.controller.reset()
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+}
+{
+  const timers = new Map()
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { url: '/video/test' }, {
+    protocol: 'dsh-app:',
+    setTimer(fn, delay) { const id = Symbol(); timers.set(id, { fn, delay }); return id },
+    clearTimer(id) { timers.delete(id) },
+  })
+  const c = h.controller
+  const id = 'desktop-stall'
+  let actualTime = 0
+  let reloads = 0
+  await c.play(node(id, 'raster'), meta(id, 'raster'))
+  const url = c.get(id).url
+  const video = { duration: 12, readyState: 2, paused: true, seeking: false, src: url,
+    get currentTime() { return actualTime },
+    set currentTime(time) { actualTime = time; this.seeking = true; this.readyState = 1 },
+    play() { this.paused = false; return Promise.resolve() },
+    pause() { this.paused = true },
+    load() { reloads += 1; actualTime = Number(this.src.split('#t=')[1]); this.seeking = false },
+  }
+  const restart = () => [...timers.values()].sort((first, second) => first.delay - second.delay)[0].fn()
+  c.attach(id, video)
+  c.seek(id, 6.5)
+  c.mediaEvent(id, video, 'timeupdate')
+  check(c.get(id).seeking && video.paused && reloads === 0, 'a stuck desktop seek pauses at the last decoded frame')
+  restart()
+  c.mediaEvent(id, video, 'loadedmetadata')
+  check(video.src === url + '#t=6.500' && c.get(id).seeking && reloads === 1,
+    'a stuck desktop seek reopens the same URL at the target and waits for a frame')
+  video.readyState = 2
+  c.mediaEvent(id, video, 'loadeddata')
+  check(c.get(id).time === 6.5 && !c.get(id).seeking && !video.paused && timers.size === 0,
+    'a decoded frame after reopening clears the pending seek and resumes from the target')
+  c.seekRatio(id, 1)
+  restart()
+  video.readyState = 2
+  c.mediaEvent(id, video, 'loadeddata')
+  c.mediaEvent(id, video, 'timeupdate')
+  check(actualTime < 12 && actualTime > 11.9 && c.get(id).time === 12 && c.get(id).status === 'ended' && video.paused,
+    'a stalled end seek loads the final playable frame and stays paused at the end')
+  c.reset()
+}
+{
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { url: '/video/test' })
+  const c = h.controller
+  let actualTime = 0
+  let plays = 0
+  const attempts = []
+  const video = { duration: 10, readyState: 3, paused: true, seeking: false,
+    get currentTime() { return actualTime },
+    set currentTime(time) { attempts.push(time); this.seeking = true },
+    play() { plays += 1; this.paused = false; return Promise.resolve() },
+    pause() { this.paused = true } }
+  await c.play(node('bad-landing', 'raster'), meta('bad-landing', 'raster'))
+  c.attach('bad-landing', video)
+  actualTime = 2
+  c.seek('bad-landing', 7)
+  video.seeking = false
+  c.mediaEvent('bad-landing', video, 'seeked')
+  c.mediaEvent('bad-landing', video, 'timeupdate')
+  check(c.get('bad-landing').time === 7 && c.get('bad-landing').seeking && attempts.length === 2 && video.paused && plays === 1,
+    'a wrong native landing retries the same target without resuming old playback')
+  video.seeking = false
+  c.mediaEvent('bad-landing', video, 'seeked')
+  check(!c.get('bad-landing').seeking && c.get('bad-landing').time === 2 && c.get('bad-landing').status === 'paused' &&
+    /0:07/.test(c.get('bad-landing').seekError) && attempts.length === 2 && video.paused && plays === 1,
+    'repeated native seek failures report the requested time and leave the video paused at its actual position')
   c.reset()
 }
 console.log('\nAll ' + checks + ' video playback checks passed')
