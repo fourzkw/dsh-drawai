@@ -554,8 +554,94 @@ function surfaceHarness(controller) {
   c.seekRatio('buffering', 0.8)
   end = 10
   c.mediaEvent('buffering', el, 'canplay')
-  check(el.currentTime === 8 && plays === 1 && c.get('buffering').time === 8,
-    'range recovery uses the latest requested position and does not restart an already playing element')
+  check(el.currentTime === 8 && plays === 2 && !el.paused && c.get('buffering').time === 8,
+    'range recovery resumes at the latest requested position after holding the previous frame')
+  c.reset()
+}
+{
+  const pending = new Map()
+  let timerId = 0
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { url: '/video/test' }, {
+    setTimer(fn) { const id = ++timerId; pending.set(id, fn); return id },
+    clearTimer(id) { pending.delete(id) },
+  })
+  const c = h.controller
+  const video = { currentTime: 0, duration: 10, readyState: 3, paused: true, seekable: { length: 0 },
+    play() { this.paused = false; return Promise.resolve() }, pause() { this.paused = true } }
+  await c.play(node('no-range', 'raster'), meta('no-range', 'raster'))
+  c.attach('no-range', video)
+  video.currentTime = 2
+  c.seek('no-range', 7)
+  check(video.paused && c.get('no-range').seeking && c.get('no-range').time === 7 && pending.size === 1,
+    'while the requested range is unavailable the video holds its frame instead of playing the old position')
+  pending.values().next().value()
+  const expired = c.get('no-range')
+  check(!expired.seeking && expired.status === 'paused' && expired.time === 2 && /0:07/.test(expired.seekError) && pending.size === 0,
+    'an unavailable range has a deadline that clears locating and reports the requested time')
+  c.seek('no-range', 8)
+  c.reset()
+  check(pending.size === 0, 'closing the canvas cancels the pending seek deadline')
+}
+{
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (url, options) => {
+    requests.push([url, options.headers.Range])
+    return new Response(Uint8Array.of(0), { status: 206, headers: { 'Content-Range': 'bytes 0-0/56623121' } })
+  }
+  try {
+    const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { url: '/video/large' }, {
+      protocol: 'dsh-app:', makeUrl: (source) => source.url,
+    })
+    await h.controller.play(node('large-desktop', 'raster'), meta('large-desktop', 'raster'))
+    check(h.controller.get('large-desktop').url === '/video/large' &&
+      requests.length === 1 && requests[0][1] === 'bytes=0-0',
+    'desktop videos above the local Blob limit stay on the range-streaming URL')
+    h.controller.reset()
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+}
+{
+  const timers = new Map()
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { url: '/video/test' }, {
+    protocol: 'dsh-app:',
+    setTimer(fn, delay) { const id = Symbol(); timers.set(id, { fn, delay }); return id },
+    clearTimer(id) { timers.delete(id) },
+  })
+  const c = h.controller
+  const id = 'desktop-stall'
+  let actualTime = 0
+  let reloads = 0
+  await c.play(node(id, 'raster'), meta(id, 'raster'))
+  const url = c.get(id).url
+  const video = { duration: 12, readyState: 2, paused: true, seeking: false, src: url,
+    get currentTime() { return actualTime },
+    set currentTime(time) { actualTime = time; this.seeking = true; this.readyState = 1 },
+    play() { this.paused = false; return Promise.resolve() },
+    pause() { this.paused = true },
+    load() { reloads += 1; actualTime = Number(this.src.split('#t=')[1]); this.seeking = false },
+  }
+  const restart = () => [...timers.values()].sort((first, second) => first.delay - second.delay)[0].fn()
+  c.attach(id, video)
+  c.seek(id, 6.5)
+  c.mediaEvent(id, video, 'timeupdate')
+  check(c.get(id).seeking && video.paused && reloads === 0, 'a stuck desktop seek pauses at the last decoded frame')
+  restart()
+  c.mediaEvent(id, video, 'loadedmetadata')
+  check(video.src === url + '#t=6.500' && c.get(id).seeking && reloads === 1,
+    'a stuck desktop seek reopens the same URL at the target and waits for a frame')
+  video.readyState = 2
+  c.mediaEvent(id, video, 'loadeddata')
+  check(c.get(id).time === 6.5 && !c.get(id).seeking && !video.paused && timers.size === 0,
+    'a decoded frame after reopening clears the pending seek and resumes from the target')
+  c.seekRatio(id, 1)
+  restart()
+  video.readyState = 2
+  c.mediaEvent(id, video, 'loadeddata')
+  c.mediaEvent(id, video, 'timeupdate')
+  check(actualTime < 12 && actualTime > 11.9 && c.get(id).time === 12 && c.get(id).status === 'ended' && video.paused,
+    'a stalled end seek loads the final playable frame and stays paused at the end')
   c.reset()
 }
 {

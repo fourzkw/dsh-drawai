@@ -46,7 +46,7 @@ const svgFrameGate = new Promise((resolve) => { window.__allowSvgFrames = resolv
 const request = () => async (action, extra) => {
   if (extra.clip === 'sourceclip') {
     if (action === 'media-manifest') return { hasSource: true, manifest: { frames: [] } }
-    if (action === 'media-source-url') return { url: '/fixture.mp4' }
+    if (action === 'media-source-url') return { url: '/fixture.mp4' + (params.has('desktop') ? '?desktop' : '') }
   }
   if (action === 'media-manifest' && params.has('slow')) await new Promise((resolve) => setTimeout(resolve, 350))
   if (action === 'media-manifest') return Promise.resolve({ hasSource: false, manifest: {
@@ -65,7 +65,7 @@ const clips = {
   sourceclip: { id: 'sourceclip', meta: { clip: 'sourceclip', kind: 'raster', fps: FPS, duration: 0, posterFrame: 0 } },
 }
 for (const clip of Object.values(clips)) {
-  clip.controller = createVideoController(request())
+  clip.controller = createVideoController(request(), { protocol: params.has('desktop') ? 'dsh-app:' : location.protocol })
   clip.node = { id: clip.id, data: { drawaiMedia: '1', mediaClip: clip.id, mediaKind: clip.meta.kind } }
   let previous = clip.controller.get(clip.id)
   clip.controller.subscribe(() => {
@@ -82,6 +82,9 @@ const surface = (clip) => ReactRuntime.createElement(VideoSurface, {
   meta: clip.meta, poster: ${JSON.stringify(POSTER)},
 })
 function App() {
+  if (params.has('desktop')) {
+    return ReactRuntime.createElement('div', { 'data-clip': 'sourceclip', style: { width: 520, height: 292, margin: 20 } }, surface(clips.sourceclip))
+  }
   if (params.has('preview')) {
     const clip = clips.sourceclip
     return ReactRuntime.createElement('div', { 'data-clip': clip.id },
@@ -103,7 +106,7 @@ window.__state = (id) => { const s = clips[id].controller.get(id); const video =
   const img = root?.querySelector('img')
   const frame = img?.complete && img.naturalWidth ? /<text [^>]+>([0-9]+)/.exec(decodeURIComponent(img.currentSrc))?.[1] : undefined
   return { status: s.status, time: Number((s.time || 0).toFixed(3)), duration: Number((s.duration || 0).toFixed(3)), index: s.index, kind: s.kind || null, error: s.error || '',
-    nativeTime: video?.currentTime, nativeSeeking: video?.seeking, readyState: video?.readyState,
+    nativeTime: video?.currentTime, nativeSeeking: video?.seeking, readyState: video?.readyState, nativeBlob: video?.currentSrc.startsWith('blob:'),
     svgLanding: clips[id].svgLanding,
     presentedTime: window.__presentedTime, presentedFrame: frame === undefined ? undefined : Number(frame),
     message: root?.querySelector('.drawai-video-message[role=status]')?.textContent } }
@@ -123,16 +126,20 @@ const result = await build({
 })
 const source = new URL('../docs/media/motion-showcase.mp4', import.meta.url)
 const sourceSize = statSync(source).size
+const desktopRanges = []
 let allowMedia
 const mediaAllowed = new Promise((resolve) => { allowMedia = resolve })
 const server = createServer(async (req, res) => {
-  if (req.url === '/fixture.mp4') {
+  if (req.url === '/fixture.mp4' || req.url === '/fixture.mp4?desktop') {
     await mediaAllowed
     if (res.destroyed) return
+    const desktop = req.url.endsWith('?desktop')
+    if (desktop) desktopRanges.push({ range: req.headers.range, destination: req.headers['sec-fetch-dest'] })
     const range = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range || '')
     const start = range ? Number(range[1]) : 0
     const end = range?.[2] ? Number(range[2]) : sourceSize - 1
     const headers = { 'Content-Type': 'video/mp4', 'Content-Length': end - start + 1, 'Accept-Ranges': 'bytes' }
+    if (desktop) delete headers['Content-Length']
     if (range) headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + sourceSize
     res.writeHead(range ? 206 : 200, headers)
     const stream = createReadStream(source, { start, end })
@@ -388,6 +395,27 @@ try {
   const shown = await waitFor(() => state(page, 'svgclip'), (value) => value.presentedFrame >= waitingSvg.index)
     .catch(() => state(page, 'svgclip'))
   check(near(shown.presentedFrame, firstTarget.index, 6) && shown.status === 'playing', 'SVG 目标帧实际显示并从目标位置继续播放', shown)
+
+  for (let open = 0; open < 2; open += 1) {
+    const requestStart = desktopRanges.length
+    await page.goto({ url: origin + '/?desktop', timeout: 30000 })
+    await page._client().send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 240, y: 120, button: 'none' })
+    const desktopBar = await waitFor(() => bar(page, 'sourceclip'), Boolean)
+    const desktopDrag = scrub(page, desktopBar)
+    await desktopDrag.start(0.025)
+    await desktopDrag.move(0.68)
+    await desktopDrag.release(0.68)
+    const landed = await waitFor(() => state(page, 'sourceclip'), (value) => value.nativeBlob && value.readyState >= 2 &&
+      !value.nativeSeeking && !value.message && near(value.nativeTime, value.duration * 0.68, 0.45))
+      .catch(() => state(page, 'sourceclip'))
+    const requests = desktopRanges.slice(requestStart)
+    check(landed.status === 'playing' && landed.nativeBlob && landed.readyState >= 2 && !landed.nativeSeeking &&
+      !landed.message && near(landed.nativeTime, landed.duration * 0.68, 0.45) &&
+      requests.length === 2 && requests[0].range === 'bytes=0-0' &&
+      requests[1].range === 'bytes=0-' + (sourceSize - 1) && requests.every((request) => request.destination !== 'video'),
+    open ? '桌面重新打开画布后首次拖动仍从目标帧起播' : '桌面代理省略长度时，首个画布定位用本地媒体地址完成',
+    { landed, requests })
+  }
 
   console.log('\ncheck-video-progress-ui: ' + (failures ? failures + ' 项不通过 / ' + checks : 'OK（' + checks + ' 项）'))
 } finally {
