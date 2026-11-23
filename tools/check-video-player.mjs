@@ -558,4 +558,31 @@ function surfaceHarness(controller) {
     'range recovery uses the latest requested position and does not restart an already playing element')
   c.reset()
 }
+{
+  const h = harness(async (action) => action === 'media-manifest' ? { hasSource: true, manifest: { frames: [] } } : { url: '/video/test' })
+  const c = h.controller
+  let actualTime = 0
+  let plays = 0
+  const attempts = []
+  const video = { duration: 10, readyState: 3, paused: true, seeking: false,
+    get currentTime() { return actualTime },
+    set currentTime(time) { attempts.push(time); this.seeking = true },
+    play() { plays += 1; this.paused = false; return Promise.resolve() },
+    pause() { this.paused = true } }
+  await c.play(node('bad-landing', 'raster'), meta('bad-landing', 'raster'))
+  c.attach('bad-landing', video)
+  actualTime = 2
+  c.seek('bad-landing', 7)
+  video.seeking = false
+  c.mediaEvent('bad-landing', video, 'seeked')
+  c.mediaEvent('bad-landing', video, 'timeupdate')
+  check(c.get('bad-landing').time === 7 && c.get('bad-landing').seeking && attempts.length === 2 && video.paused && plays === 1,
+    'a wrong native landing retries the same target without resuming old playback')
+  video.seeking = false
+  c.mediaEvent('bad-landing', video, 'seeked')
+  check(!c.get('bad-landing').seeking && c.get('bad-landing').time === 2 && c.get('bad-landing').status === 'paused' &&
+    /0:07/.test(c.get('bad-landing').seekError) && attempts.length === 2 && video.paused && plays === 1,
+    'repeated native seek failures report the requested time and leave the video paused at its actual position')
+  c.reset()
+}
 console.log('\nAll ' + checks + ' video playback checks passed')

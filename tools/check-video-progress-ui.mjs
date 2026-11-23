@@ -67,6 +67,15 @@ const clips = {
 for (const clip of Object.values(clips)) {
   clip.controller = createVideoController(request())
   clip.node = { id: clip.id, data: { drawaiMedia: '1', mediaClip: clip.id, mediaKind: clip.meta.kind } }
+  let previous = clip.controller.get(clip.id)
+  clip.controller.subscribe(() => {
+    const current = clip.controller.get(clip.id)
+    // Capture the landing before playback advances. Wall time here depends on browser load.
+    if (current.kind === 'svg' && !current.seeking && (previous.seeking || Math.abs(current.time - previous.time) >= 2)) {
+      clip.svgLanding = current.time
+    }
+    previous = current
+  })
 }
 const surface = (clip) => ReactRuntime.createElement(VideoSurface, {
   controller: clip.controller, node: clip.node,
@@ -95,6 +104,7 @@ window.__state = (id) => { const s = clips[id].controller.get(id); const video =
   const frame = img?.complete && img.naturalWidth ? /<text [^>]+>([0-9]+)/.exec(decodeURIComponent(img.currentSrc))?.[1] : undefined
   return { status: s.status, time: Number((s.time || 0).toFixed(3)), duration: Number((s.duration || 0).toFixed(3)), index: s.index, kind: s.kind || null, error: s.error || '',
     nativeTime: video?.currentTime, nativeSeeking: video?.seeking, readyState: video?.readyState,
+    svgLanding: clips[id].svgLanding,
     presentedTime: window.__presentedTime, presentedFrame: frame === undefined ? undefined : Number(frame),
     message: root?.querySelector('.drawai-video-message[role=status]')?.textContent } }
 window.__bar = (id) => { const root = document.querySelector('[data-clip="' + id + '"]')
@@ -210,9 +220,9 @@ try {
   // ---- 1. 时长已知（导入了源视频的节点）：还没起播就点 70% ----
   const beforeKnown = await clickBar(page, 'rasterclip', 0.7)
   check(beforeKnown.max === DURATION, '时长已知时进度条 max 是真实时长', beforeKnown)
-  const afterKnown = await waitReady(page, 'rasterclip')
+  const afterKnown = await waitFor(() => state(page, 'rasterclip'), (value) => value.svgLanding !== undefined)
   check(afterKnown.status === 'playing', '起播前点进度条会起播', afterKnown)
-  check(near(afterKnown.time, DURATION * 0.7), '起播前点 70% 落在 70% 处，而不是从头开始', { time: afterKnown.time, want: DURATION * 0.7 })
+  check(near(afterKnown.svgLanding, DURATION * 0.7), '起播前点 70% 落在 70% 处，而不是从头开始', afterKnown)
   await settle(page, 400)
   const laterKnown = await state(page, 'rasterclip')
   check(laterKnown.time > afterKnown.time, '落位之后继续往前走，没有被拉回开头', { from: afterKnown.time, to: laterKnown.time })
@@ -220,15 +230,15 @@ try {
   // ---- 2. 时长未知（SVG 复刻，文档没写 mediaDuration）：还没起播就点 70% ----
   const beforeUnknown = await clickBar(page, 'svgclip', 0.7)
   check(beforeUnknown.disabled === false, '时长未知时进度条仍然可点', beforeUnknown)
-  const afterUnknown = await waitReady(page, 'svgclip')
+  const afterUnknown = await waitFor(() => state(page, 'svgclip'), (value) => value.svgLanding !== undefined)
   check(afterUnknown.status === 'playing', '时长未知时点进度条会起播', afterUnknown)
-  check(near(afterUnknown.time, DURATION * 0.7), '时长未知时点 70% 也在 70% 处起播，而不是从头开始', { time: afterUnknown.time, want: DURATION * 0.7 })
+  check(near(afterUnknown.svgLanding, DURATION * 0.7), '时长未知时点 70% 也在 70% 处起播，而不是从头开始', afterUnknown)
   check(afterUnknown.index > 0, '画面直接落到目标帧，而不是从第 0 帧开始', { index: afterUnknown.index, time: afterUnknown.time })
 
   // ---- 3. 播放中点 25% ----
   await clickBar(page, 'svgclip', 0.25)
-  const midPlay = await state(page, 'svgclip')
-  check(near(midPlay.time, DURATION * 0.25), '播放中点 25% 落位', { time: midPlay.time, want: DURATION * 0.25 })
+  const midPlay = await waitFor(() => state(page, 'svgclip'), (value) => value.svgLanding !== afterUnknown.svgLanding)
+  check(near(midPlay.svgLanding, DURATION * 0.25), '播放中点 25% 落位', midPlay)
   check(midPlay.status === 'playing', '播放中 seek 不打断播放', midPlay)
 
   // ---- 4. 暂停中点 80% ----
@@ -272,8 +282,8 @@ try {
     check(held && near(held.value, 0.74, 0.04) && (await state(page, 'svgclip')).status === 'idle',
       '冷加载拖动时滑块跟手且松手前保持原播放状态', held)
     await drag.release(0.74, 20)
-    const afterDrag = await waitReady(page, 'svgclip')
-    check(afterDrag.status === 'playing' && near(afterDrag.time, DURATION * 0.74),
+    const afterDrag = await waitFor(() => state(page, 'svgclip'), (value) => value.svgLanding !== undefined)
+    check(afterDrag.status === 'playing' && near(afterDrag.svgLanding, DURATION * 0.74),
       open ? '重新打开画布后首次拖动仍落在松手位置' : '首次拖动从松手位置起播', afterDrag)
   }
 
@@ -333,6 +343,34 @@ try {
     .catch(() => state(page, 'sourceclip'))
   check(near(decoded.presentedTime, target, 0.45) && !decoded.nativeSeeking && decoded.status === 'paused' && !decoded.message,
     '收到加载通知后实际呈现目标位置的 MP4 帧并保持暂停', decoded)
+
+  await page.evaluate(async () => {
+    const video = document.querySelector('video')
+    await video.play()
+    const currentTime = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'currentTime')
+    window.__seekAttempts = []
+    Object.defineProperty(video, 'currentTime', {
+      configurable: true,
+      get() { return currentTime.get.call(video) },
+      set(time) {
+        const requested = window.__seekAttempts
+        requested.push(time)
+        // 让真实解码器第一次完成一次错误的跳转并发出 seeked，第二次才接收目标秒数。
+        const landed = requested.length === 1 ? Math.max(0, currentTime.get.call(video) - 0.25) : time
+        currentTime.set.call(video, landed)
+      },
+    })
+  })
+  const verifyDrag = scrub(page, await bar(page, 'sourceclip'))
+  await verifyDrag.start(0.82)
+  await verifyDrag.move(0.5)
+  await verifyDrag.release(0.5)
+  const recovered = await waitFor(() => state(page, 'sourceclip'),
+    (value) => value.status === 'playing' && !value.message && near(value.presentedTime, metadata.duration * 0.5, 0.35))
+    .catch(() => state(page, 'sourceclip'))
+  const attempts = await page.evaluate(() => window.__seekAttempts)
+  check(recovered.status === 'playing' && !recovered.message && near(recovered.presentedTime, metadata.duration * 0.5, 0.35) &&
+    attempts.length === 2 && attempts[0] === attempts[1], '浏览器错报落点后重试同一目标，显示目标帧再继续播放', { ...recovered, attempts })
 
   await page.goto({ url: origin + '/?slowframes', timeout: 30000 })
   await page._client().send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 200, y: 140, button: 'none' })
