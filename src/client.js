@@ -474,8 +474,8 @@ async function* openWorkspaceFileChanges(workspaceFiles, sessionId, path, signal
  * 300ms 足够让 AI 在下一次 `diagram_read` 里看到"用户刚选了什么"，又不会刷请求。
  */
 const SELECTION_REPORT_MS = 300
-/** 人工编辑的写回端点（宿主半边注册，见 src/index.js）。 */
-const SAVE_ENDPOINT = '/drawai/api/save'
+/** 以 DSH 页面基址解析，支持根路径和反向代理的子路径。 */
+const SAVE_ENDPOINT = 'drawai/api/save'
 /** 自定义请求头，宿主用它做 CSRF 围栏。 */
 const SAVE_HEADER = 'x-drawai-save'
 /** 节点移动/缩放的吸附网格（px）：**一格 = 10px**。 */
