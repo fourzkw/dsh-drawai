@@ -45,44 +45,6 @@ function overlayTrackOf(timeline) {
 function sourceMapOf(timeline) {
   return new Map((timeline.shots || []).map((shot) => [shot.id, shot]))
 }
-function planOf(timeline, fontFaces) {
-  const sources = sourceMapOf(timeline)
-  const shots = []
-  for (const [layer, track] of (timeline.tracks || []).entries()) {
-    for (const clip of track.clips) {
-      const source = sources.get(clip.shotId)
-      if (!source) continue
-      const sourceDuration = Math.max(1, Number(source.sourceDurationFrames) || Number(source.durationFrames) || 1)
-      const duration = Math.max(1, Number(clip.durationFrames) || 1)
-      shots.push({
-        ...source,
-        id: clip.id,
-        clipId: clip.id,
-        sourceId: clip.shotId,
-        sceneFile: source.file,
-        recipeId: 'scene',
-        startFrame: clip.startFrame,
-        durationFrames: duration,
-        sourceDurationFrames: sourceDuration,
-        sceneDurationFrames: Math.max(sourceDuration, Number(clip.inOffset) + duration),
-        inOffset: Number(clip.inOffset) || 0,
-        opacity: clip.opacity === undefined ? 1 : clip.opacity,
-        trackId: track.id,
-        trackRole: track.role,
-        layer,
-      })
-    }
-  }
-  return {
-    width: timeline.width, height: timeline.height, fps: timeline.fps,
-    durationFrames: timeline.durationInFrames,
-    bundledFonts: false,
-    fontFaces,
-    shots,
-    audio: timeline.audio || [],
-    render: timeline.render || {},
-  }
-}
 
 function timecode(frame, fps) {
   const total = Math.max(0, frame) / fps
@@ -94,10 +56,8 @@ function timecode(frame, fps) {
 }
 
 function bindingsOf(timeline, bindings) {
-  const cuts = new Map()
-  for (const item of bindings?.cuts || []) cuts.set(frameOf(item.frame), item)
-  const sfx = new Set(bindings?.sfxCueIds || [])
-  return { cuts, sfx, musicCueId: bindings?.musicCueId || '' }
+  void timeline
+  return OPS.cueBindingsOf(bindings)
 }
 
 function cueColor(role) {
@@ -231,6 +191,8 @@ function App({ scenes }) {
   const [future, setFuture] = React.useState([])
   const [dirty, setDirty] = React.useState(false)
   const [revision, setRevision] = React.useState(BOOT.revision)
+  const revisionRef = React.useRef(BOOT.revision)
+  revisionRef.current = revision
   const [bindings, setBindings] = React.useState(BOOT.bindings || {})
   const [selected, setSelected] = React.useState(null)
   const [playhead, setPlayhead] = React.useState(0)
@@ -253,7 +215,10 @@ function App({ scenes }) {
   const rootRef = React.useRef(null)
   const readOnly = BOOT.project?.readOnly === true
   const sources = React.useMemo(() => sourceMapOf(timeline), [timeline])
-  const resolution = React.useMemo(() => ({ cuts: bindingsOf(timeline, bindings), sfxIds: new Set(bindings?.sfxCueIds || []) }), [timeline, bindings])
+  const resolution = React.useMemo(() => {
+    const cueBindings = bindingsOf(timeline, bindings)
+    return { cuts: cueBindings.cuts, sfxIds: cueBindings.sfx, musicCueId: cueBindings.musicCueId }
+  }, [timeline, bindings])
   const total = durationOf(timeline)
   const fps = fpsOf(timeline)
 
@@ -410,12 +375,13 @@ function App({ scenes }) {
     if (saving) return false
     setSaving(true)
     try {
-      const result = await request('save', { timeline: timelineRef.current, baseRevision: revision, force })
+      const result = await request('save', { timeline: timelineRef.current, baseRevision: revisionRef.current, force })
       if (result.conflict) {
         setConflict({ revision: result.revision, error: result.error || '工程已被其他编辑修改' })
-        return false
+        return null
       }
       setRevision(result.revision)
+      revisionRef.current = result.revision
       if (result.bindings) setBindings(result.bindings)
       setTimeline(result.timeline || timelineRef.current)
       timelineRef.current = result.timeline || timelineRef.current
@@ -424,12 +390,12 @@ function App({ scenes }) {
       setConflict(null)
       setBundleStale(result.bundleStale === true)
       setMessage('已保存')
-      return true
+      return { revision: result.revision }
     } catch (error) {
       setMessage('保存失败：' + error.message)
-      return false
+      return null
     } finally { setSaving(false) }
-  }, [revision, saving])
+  }, [saving])
 
   const reload = React.useCallback(async () => {
     try {
@@ -438,6 +404,7 @@ function App({ scenes }) {
       timelineRef.current = result.timeline
       LIVE_TIMELINE = result.timeline
       setRevision(result.revision)
+      revisionRef.current = result.revision
       setBindings(result.bindings || {})
       setPast([]); setFuture([]); setDirty(false); setConflict(null); setSelected(null)
       setMessage('已载入磁盘版本')
@@ -460,11 +427,13 @@ function App({ scenes }) {
     if (renderBusy) return
     setRenderBusy(true)
     try {
+      let baseRevision = revisionRef.current
       if (dirty || conflict) {
         const saved = await save(false)
         if (!saved) return
+        baseRevision = saved.revision
       }
-      const result = await request('render')
+      const result = await request('render', { baseRevision })
       if (result.conflict) {
         setConflict({ revision: result.revision, error: result.error || '工程已保存为更新版本' })
         return
@@ -502,8 +471,22 @@ function App({ scenes }) {
   }, [dirty])
 
   React.useEffect(() => {
+    const onMessage = (event) => {
+      if (event.origin !== window.location.origin || event.source !== window.parent) return
+      if (event.data?.type === 'drawai-workbench-request-close') close()
+    }
+    window.addEventListener('message', onMessage)
+    // 外壳与运行时同窗：外壳只能用这个同步标记判断运行时已接管关闭确认。
+    // 只给 parent 发 ready 的话，外壳永远收不到自己的消息，会抢在确认前关掉 iframe。
+    window.__DRAWAI_WORKBENCH_RUNTIME_READY__ = true
+    try { window.parent.postMessage({ type: 'drawai-workbench-ready' }, window.location.origin) } catch { /* 不在 iframe 里 */ }
+    return () => window.removeEventListener('message', onMessage)
+  }, [close])
+
+  React.useEffect(() => {
     const onKey = (event) => {
       const tag = event.target?.tagName?.toLowerCase()
+      if (event.key === 'Escape') { event.preventDefault(); close(); return }
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault(); if (event.shiftKey) redo(); else undo(); return
@@ -517,9 +500,9 @@ function App({ scenes }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [playhead, redo, removeSelected, save, seek, splitSelected, togglePlay, undo])
+  }, [close, playhead, redo, removeSelected, save, seek, splitSelected, togglePlay, undo])
 
-  const plan = React.useMemo(() => planOf(timeline, BOOT.fontFaces || []), [timeline])
+  const plan = React.useMemo(() => OPS.workbenchPlanOf(timeline, BOOT.fontFaces || []), [timeline])
   const inputProps = React.useMemo(() => ({ plan }), [plan])
   const Movie = React.useMemo(() => function MovieView(props) {
     return <MotionMovie plan={props.plan} scenes={scenes} />
@@ -718,6 +701,7 @@ function CueInspector({ timeline, cue, resolution, onBegin, onApply, onMessage }
 function JobCard({ job, currentRevision, dirty, onCancel, onApply, applying, active }) {
   const terminal = ['done', 'failed', 'error', 'canceled', 'cancelled', 'interrupted'].includes(job.status)
   const done = job.status === 'done'
+  const owned = job.outputOwned === true
   const percent = Math.round((Number(job.progress) || 0) * 100)
   const stale = job.timelineRevision && currentRevision && job.timelineRevision !== currentRevision
   return (
@@ -729,7 +713,8 @@ function JobCard({ job, currentRevision, dirty, onCancel, onApply, applying, act
       {dirty && job.timelineRevision && job.timelineRevision === currentRevision ? <div className="stale">当前草稿在提交后又改过；这个结果对应上次保存的版本。</div> : null}
       {job.error ? <div className="wb-error">{job.error}</div> : null}
       {!terminal && onCancel ? <button className="wb-btn" onClick={onCancel}>取消</button> : null}
-      {done && job.kind === 'film' && onApply ? <button className="wb-btn primary" onClick={() => onApply(job)} disabled={applying}>{applying ? '回填中…' : '回填所选版本'}</button> : null}
+      {done && job.kind === 'film' && onApply && owned ? <button className="wb-btn primary" onClick={() => onApply(job)} disabled={applying}>{applying ? '回填中…' : '回填所选版本'}</button> : null}
+      {done && job.kind === 'film' && !owned ? <div className="stale">旧任务没有独立成片文件，无法确认文件归属；请重新导出后再回填。</div> : null}
       {done && job.kind === 'pilot' ? <div className="wb-mini">样片不会回填主节点；回填请选整片任务。</div> : null}
     </div>
   )

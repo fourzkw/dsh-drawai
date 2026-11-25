@@ -25,8 +25,16 @@ function VideoNodeToolbar(props) {
       React.createElement('small', null, props.node.id)) : null)
 }
 
+function requestWorkbenchClose(frame, onClose) {
+  if (!frame?.contentWindow) { onClose?.(); return false }
+  try { frame.contentWindow.postMessage({ type: 'drawai-workbench-request-close' }, window.location.origin); return true }
+  catch { onClose?.(); return false }
+}
+
 function MotionWorkbenchDialog(props) {
   const ref = React.useRef(null)
+  const frameRef = React.useRef(null)
+  const requestClose = React.useCallback(() => requestWorkbenchClose(frameRef.current, props.onClose), [props.onClose])
   React.useEffect(() => {
     const dialog = ref.current
     if (!dialog) return
@@ -46,7 +54,7 @@ function MotionWorkbenchDialog(props) {
     return () => window.removeEventListener('message', onMessage)
   }, [])
   return React.createElement('dialog', { ref, className: 'drawai-workbench-dialog', 'aria-label': '剪辑工作台',
-    onCancel: (event) => { event.preventDefault(); props.onClose?.() },
+    onCancel: (event) => { event.preventDefault(); requestClose() },
     onPointerDown: (event) => event.stopPropagation(), onKeyDown: (event) => event.stopPropagation(),
     style: { width: '96vw', maxWidth: '96vw', height: '92vh', maxHeight: '92vh', padding: 0, border: '1px solid #333640',
       borderRadius: 14, background: '#141519', color: '#e8e9ee', overflow: 'hidden', boxShadow: '0 30px 120px #0008' } },
@@ -54,8 +62,8 @@ function MotionWorkbenchDialog(props) {
       React.createElement('strong', { style: { fontSize: 13 } }, '剪辑工作台'),
       React.createElement('span', { style: { fontSize: 12, opacity: .6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, props.label || ''),
       React.createElement('span', { style: { flex: 1 } }),
-      React.createElement('button', { type: 'button', className: 'drawai-btn', onClick: props.onClose }, '关闭')),
-    React.createElement('iframe', { src: props.url, title: 'DrawAI 剪辑工作台', allow: 'autoplay; fullscreen', style: { width: '100%', height: 'calc(100% - 41px)', border: 0, display: 'block', background: '#141519' } }))
+      React.createElement('button', { type: 'button', className: 'drawai-btn', onClick: requestClose }, '关闭')),
+    React.createElement('iframe', { ref: frameRef, src: props.url, title: 'DrawAI 剪辑工作台', allow: 'autoplay; fullscreen', style: { width: '100%', height: 'calc(100% - 41px)', border: 0, display: 'block', background: '#141519' } }))
 }
 
 function MotionFilmReview({job,onLoad,onSave,onRevise}){

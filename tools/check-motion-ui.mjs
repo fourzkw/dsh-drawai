@@ -92,4 +92,14 @@ assert.match(menu.get('max-height') || '', /min\(/, '矮侧栏里浮层高度要
 assert.notEqual(effectiveDecls('.drawai-video-settings').get('position'), 'relative', '定位上下文要交给 footer，不能是 chip 那一格')
 assert.equal(effectiveDecls('.drawai-video-composer-footer').get('position'), 'relative', 'footer 必须是浮层的定位上下文')
 assert.equal(effectiveDecls('.drawai-video-settings-menu>label').get('flex-wrap'), 'wrap', '窄宽度下标签与控件要能换行')
+
+const panelSource = readFileSync('src/motion-panel.js', 'utf8')
+const requestWorkbenchClose = new Function('React', 'motionCore', panelSource + '\nreturn requestWorkbenchClose')(React, motionCore)
+let closeRequest = null, directClose = false
+globalThis.window = { location: { origin: 'http://drawai.test' } }
+assert.equal(requestWorkbenchClose({ contentWindow: { postMessage: (message, origin) => { closeRequest = { message, origin } } } }, () => { directClose = true }), true)
+assert.deepEqual(closeRequest, { message: { type: 'drawai-workbench-request-close' }, origin: 'http://drawai.test' })
+assert.equal(directClose, false, '外层关闭按钮必须先请求 iframe 内的统一确认')
+assert.equal(requestWorkbenchClose(null, () => { directClose = true }), false)
+assert.equal(directClose, true, 'iframe 尚未挂载时外层仍要能关闭')
 console.log('Motion UI: description, settings, references, task ownership, cancellation and scene editing passed.')

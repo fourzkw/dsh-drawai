@@ -54,7 +54,7 @@ import { createProject, readTimeline, writeTimeline, saveTimelineChecked, buildC
 import { renderProject, outputPath, outputInfo } from './motion/render.js'
 import { describeRenderSettings } from './motion/render-settings.js'
 import { previewProject } from './motion/preview.js'
-import { RenderJobs, applyJobKind } from './motion/jobs.js'
+import { RenderJobs, applyJobKind, jobFilmPath } from './motion/jobs.js'
 import { assetsDirectory, captureAsset, cropAsset, fetchAsset, listAssets, colorsOf, probeAudio } from './motion/assets.js'
 import { listMediaLibrary, importMediaLibrary } from './motion/media-catalog.js'
 import { assetsSummary, ensureAssets, installStyleFramesFromFile, requireAssets, requireStyleFrames, styleFramesSummary } from './motion/asset-pack.js'
@@ -5112,6 +5112,12 @@ function sanitizeNewName(raw) {
   const WORKBENCH_MEDIA = '/drawai/workbench/media'
   const WORKBENCH_BUNDLE = '/drawai/workbench/bundle'
   const WORKBENCH_MAX_BODY = 8 * 1024 * 1024
+  // 宿主测试用同一条路由注入确定性的运行时/渲染实现；生产环境没有这个服务时全走真实实现。
+  const workbenchDeps = () => ctx.get?.('drawai.motion-workbench') || {}
+  const workbenchRuntimeState = () => (workbenchDeps().videoRuntimeState || videoRuntimeState)()
+  const workbenchEnsureBundle = (options) => (workbenchDeps().ensureWorkbenchBundle || ensureWorkbenchBundle)(options)
+  const workbenchRenderProject = (dir, options) => (workbenchDeps().renderProject || renderProject)(dir, options)
+  const workbenchApplyFilm = (options) => (workbenchDeps().applyFilm || applyFilm)(options)
   const newWorkbenchToken = () => {
     const now = Date.now()
     for (const [key, value] of workbenchSessions) if (now - value.at > 6 * 3600 * 1000) workbenchSessions.delete(key)
@@ -6767,6 +6773,7 @@ function sanitizeNewName(raw) {
       'function fail(error){var b=document.getElementById("boot"),r=document.getElementById("root");if(b)b.style.display="flex";if(r)r.style.display="none";statusEl.textContent="工作台打开失败";detail.hidden=false;detail.textContent=String(error&&error.message||error);retry.hidden=false;}',
       'retry.onclick=function(){location.reload()};',
       'close.onclick=function(){try{parent.postMessage({type:"drawai-workbench-close"},location.origin)}catch(e){}};',
+      'addEventListener("message",function(e){if(e.origin!==location.origin)return;var data=e.data||{};if(data.type==="drawai-workbench-request-close"&&!window.__DRAWAI_WORKBENCH_RUNTIME_READY__){try{parent.postMessage({type:"drawai-workbench-close"},location.origin)}catch(error){}}});',
       'async function boot(){try{',
       'var response=await fetch("/drawai/workbench/api",{method:"POST",headers:{"content-type":"application/json","x-drawai-save":"1"},body:JSON.stringify({token:token,action:"open"})});',
       'var data=await response.json();if(!response.ok||data.ok===false)throw new Error(data.error||("HTTP "+response.status));',
@@ -6813,11 +6820,11 @@ function sanitizeNewName(raw) {
     const sources = (editable.shots || []).map((shot) => ({ id: shot.id, file: shot.file, label: shot.card || shot.id,
       sourceDurationFrames: Number(shot.sourceDurationFrames) || Number(shot.durationFrames) || 1, anchors: shot.anchors || {} }))
     let bundleUrl = '', bundleKey = '', bundleError = ''
-    const runtime = videoRuntimeState()
+    const runtime = workbenchRuntimeState()
     if (!runtime.ready) bundleError = '视频运行时未安装。先让 AI 调用 motion_setup {action:"prepare"}（首次约 260MB），完成后再打开工作台。'
     else {
       try {
-        const built = await ensureWorkbenchBundle({ dir, composition, timeline })
+        const built = await workbenchEnsureBundle({ dir, composition, timeline })
         bundleKey = built.key
         session.bundleKey = built.key
         bundleUrl = WORKBENCH_BUNDLE + '/' + token + '/bundle.js?v=' + built.key
@@ -6867,10 +6874,10 @@ function sanitizeNewName(raw) {
       }
       if (action === 'bundle') {
         if (readOnly()) throw new Error('当前画布是只读的，不能重新打包预览')
-        if (!videoRuntimeState().ready) throw new Error('视频运行时未安装：先调用 motion_setup {action:"prepare"}')
+        if (!workbenchRuntimeState().ready) throw new Error('视频运行时未安装：先调用 motion_setup {action:"prepare"}')
         const composition = buildComposition(session.dir)
         const timeline = readTimeline(session.dir)
-        const built = await ensureWorkbenchBundle({ dir: session.dir, composition, timeline, force: body.force === true })
+        const built = await workbenchEnsureBundle({ dir: session.dir, composition, timeline, force: body.force === true })
         session.bundleKey = built.key
         sendJson(res, 200, { ok: true, bundleKey: built.key, bundleUrl: WORKBENCH_BUNDLE + '/' + body.token + '/bundle.js?v=' + built.key, reused: built.reused })
         return
@@ -6879,7 +6886,8 @@ function sanitizeNewName(raw) {
         if (readOnly()) throw new Error('当前画布是只读的，不能渲染')
         const timeline = readTimeline(session.dir)
         const revision = timelineRevision(timeline)
-        if (body.baseRevision && body.baseRevision !== revision) {
+        if (typeof body.baseRevision !== 'string' || !body.baseRevision) throw new Error('导出请求缺少已保存的时间轴版本')
+        if (body.baseRevision !== revision) {
           sendJson(res, 200, { ok: false, conflict: true, revision, error: '工程已保存为更新版本，请先重新载入或保存当前草稿' }); return
         }
         const running = motionJobs.list(session.dir).find((job) => ['queued', 'running'].includes(job.status))
@@ -6897,9 +6905,17 @@ function sanitizeNewName(raw) {
         assertEngineFidelity(session.dir, styleForGate)
         assertQualityEvidence(session.dir, styleForGate)
         const job = motionJobs.create({ kind: 'film', dir: session.dir, nodeId: session.nodeId })
-        motionJobs.update(job, { timelineRevision: revision, source: 'workbench', revision })
-        const handle = renderProject(session.dir, { operation: 'full', output: outputPath(session.dir, 'film.mp4'),
-          onProgress: (message) => motionJobs.progress(job, message.phase, message.progress, message.message) })
+        const output = jobFilmPath(session.dir, job.id)
+        mkdirSync(dirnamePath(output), { recursive: true })
+        motionJobs.update(job, { timelineRevision: revision, source: 'workbench', revision, output, outputOwned: true })
+        let handle
+        try {
+          handle = workbenchRenderProject(session.dir, { operation: 'full', output,
+            onProgress: (message) => motionJobs.progress(job, message.phase, message.progress, message.message) })
+        } catch (error) {
+          motionJobs.update(job, { status: 'failed', phase: 'failed', endedAt: new Date().toISOString(), error: messageOf(error) })
+          throw error
+        }
         motionJobs.attach(job, handle)
         sendJson(res, 200, { ok: true, job: { ...job, _cancel: undefined } })
         return
@@ -6925,14 +6941,18 @@ function sanitizeNewName(raw) {
         if (!job) throw new Error('找不到渲染任务：' + body.jobId)
         if (job.kind !== 'film') throw new Error('这是样片任务，不能回填主视频节点；请选整片任务')
         if (job.status !== 'done' && !job.output) throw new Error('任务还没成功完成：' + job.status)
-        const film = job.output || outputPath(session.dir, 'film.mp4')
+        if (job.outputOwned !== true) throw new Error('这个旧任务没有独立成片文件，无法确认文件归属；请重新导出后再回填')
+        const expectedFilm = jobFilmPath(session.dir, job.id)
+        if (!job.output || resolvePath(job.output) !== resolvePath(expectedFilm))
+          throw new Error('这个任务的成片路径与任务编号不一致，无法确认文件归属；请重新导出后再回填')
+        const film = job.output
         if (!existsSync(film)) throw new Error('成片文件不在了：' + film)
         const applied = await documents.run(session.drawioAbs, async () => {
           const live = await loadDoc(session.path, session.sessionId, session.page)
           const target = live.doc.nodes.find((item) => item.id === session.nodeId)
           if (!target) throw new Error('要回填的视频节点已被删除')
           const before = { data: JSON.parse(JSON.stringify(target.data)), style: target.style }
-          const result = await applyFilm({ drawioAbs: session.drawioAbs, doc: live.doc, node: target, film, fpsFallback: readTimeline(session.dir).fps })
+          const result = await workbenchApplyFilm({ drawioAbs: session.drawioAbs, doc: live.doc, node: target, film, fpsFallback: readTimeline(session.dir).fps })
           target.data = { ...target.data, ...result.attrs }
           if (result.poster) target.style = styleWithMediaMarkup(target.style || '', result.poster, '0')
           if (!target.label) target.label = '成片'

@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path'
 import {
   normalizeTimeline, splitClipAt, trimClipAt, reorderMainClip, addOverlayClip,
   removeClip, moveClipAt, updateClipAt, editShotsOf, timelineRevision, serializeTimeline,
-  mainClipsOf, overlayTracksOf,
+  mainClipsOf, overlayTracksOf, cueBindingsOf, workbenchPlanOf,
 } from '../src/motion/timeline.js'
 import { readTimeline, writeTimeline, saveTimelineChecked, buildComposition } from '../src/motion/project.js'
 import { resolveSync } from '../src/motion/sync.js'
@@ -189,6 +189,32 @@ try {
     assert.equal(resolved.tracks[1].clips[0].startFrame, 7)
     assert.equal(resolved.tracks[1].clips[0].opacity, 0.6)
   })
+  check('工作台绑定回执是 Map/Set，画面和音效绑定都能直接查', () => {
+    const index = cueBindingsOf({
+      cuts: [{ id: 'cut-2', frame: 45, shotId: 'shot-2', clipId: 'clip-shot-2' }],
+      sfxCueIds: ['hit'], musicCueId: 'music',
+    })
+    assert.ok(index.cuts instanceof Map)
+    assert.equal(index.cuts.get(45).id, 'cut-2')
+    assert.deepEqual([...index.cuts.values()].map((cut) => cut.frame), [45])
+    assert.ok(index.sfx instanceof Set)
+    assert.equal(index.sfx.has('hit'), true)
+    assert.equal(index.musicCueId, 'music')
+  })
+  check('工作台预览计划与成片 composition 的轨道、裁点和音轨一致', () => {
+    const plan = workbenchPlanOf(resolved, [])
+    const composition = buildCompositionIn(root, resolved)
+    const contract = (shot) => ({
+      id: shot.id, sourceId: shot.sourceId, file: shot.sceneFile || shot.file,
+      startFrame: shot.startFrame, durationFrames: shot.durationFrames,
+      sourceDurationFrames: shot.sourceDurationFrames, sceneDurationFrames: shot.sceneDurationFrames,
+      inOffset: shot.inOffset, opacity: shot.opacity ?? 1, trackRole: shot.trackRole, layer: shot.layer,
+    })
+    assert.deepEqual(plan.shots.map(contract), composition.shots.map(contract))
+    assert.deepEqual(plan.audio.map((cue) => [cue.id, cue.from, cue.durationInFrames, cue.gainDb]),
+      composition.audio.map((cue) => [cue.id, cue.from, cue.durationInFrames, cue.gainDb]))
+    assert.equal(plan.shots.find((shot) => shot.trackRole === 'overlay').opacity, 0.6)
+  })
 
   // 24fps：同样的整数帧规则，不出现秒转帧的累计误差。
   const palette = normalizeTimeline({ ...legacy, fps: 24, durationInFrames: 144, shots: [
@@ -201,6 +227,15 @@ try {
     assert.equal(clips[0].durationFrames, 17)
     assert.equal(clips[1].startFrame, 17)
     assert.equal(clips[1].inOffset, 17)
+  })
+  check('24fps 分割前后按源局部帧连续推进，收尾动画长度不变', () => {
+    const plan = workbenchPlanOf(split24)
+    const [left, right] = plan.shots.filter((shot) => shot.sourceId === 'shot-1')
+    const local = (frame, shot) => frame - shot.startFrame + shot.inOffset
+    assert.equal(local(16, left), 16)
+    assert.equal(local(17, right), 17)
+    assert.equal(left.sceneDurationFrames, 72)
+    assert.equal(right.sceneDurationFrames, 72)
   })
 
   // prepareMotionProject：同一场景出现多次时只 import 一次，入口按片段 id 映射。
