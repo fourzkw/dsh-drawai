@@ -22,6 +22,7 @@ import { join, resolve as resolvePath } from 'node:path'
 import { runFfmpeg } from './ffmpeg.js'
 import { pixelQuality } from './pixelqa.js'
 import { parseProjectJson } from './json.js'
+import { editShotsOf } from './timeline.js'
 
 const DEFAULTS = {
   freezeSeconds: 1.2,     // 静止超过这个时长就记一笔
@@ -95,6 +96,7 @@ export async function runFrameQa({ dir, file, timeline, options = {} }) {
   const source = resolvePath(file || join(dir, '.out', 'film.mp4'))
   if (!existsSync(source)) throw new Error('没有成片可检：先 motion_render start 出一版（' + source + '）')
   if (!timeline || !Array.isArray(timeline.shots)) throw new Error('缺少 timeline，无法把发现问题归到镜头')
+  const shots = editShotsOf(timeline)
   const fps = Number(timeline.fps) || 30
   const work = qaDir(dir)
   rmSync(work, { recursive: true, force: true })
@@ -160,12 +162,12 @@ export async function runFrameQa({ dir, file, timeline, options = {} }) {
 
   const shotAt = (time) => {
     const frame = Math.round(time * fps)
-    const shot = timeline.shots.find((item) => frame >= item.startFrame && frame < item.startFrame + item.durationFrames)
+    const shot = shots.find((item) => frame >= item.startFrame && frame < item.startFrame + item.durationFrames)
     return shot ? shot.id : '(镜头之间)'
   }
 
   // 逐镜动能量。差帧流比原片少一帧，所以按帧号切片时尾巴会短一个——不影响中位。
-  const energies = timeline.shots.map((shot) => {
+  const energies = shots.map((shot) => {
     const values = diffs.slice(shot.startFrame, shot.startFrame + shot.durationFrames)
     const { median, p90 } = profile(values)
     if (median === null) return null
@@ -247,8 +249,8 @@ export async function runFrameQa({ dir, file, timeline, options = {} }) {
   // 每帧都在动、永远触发不了 freeze，但整镜没有一次加速——那正是翻页感的来源。
   for (const [index, energy] of energies.entries()) {
     if (!slides[index]) continue
-    add('warn', 'energy', '第 ' + (index + 1) + ' 镜 ' + timeline.shots[index].id + ' 整镜动能量偏低：中位 '
-      + energy.median + '、低动帧占 ' + Math.round(energy.low * 100) + '% —— 像翻页，不像动画', timeline.shots[index].id)
+    add('warn', 'energy', '第 ' + (index + 1) + ' 镜 ' + shots[index].id + ' 整镜动能量偏低：中位 '
+      + energy.median + '、低动帧占 ' + Math.round(energy.low * 100) + '% —— 像翻页，不像动画', shots[index].id)
   }
   const slideRun = longestRun(slides)
   if (slideRun >= 2)
@@ -323,7 +325,7 @@ export async function runFrameQa({ dir, file, timeline, options = {} }) {
     if (audio.silence.length > 2) add('info', 'audio-silence', '有 ' + audio.silence.length + ' 处静音起点（设计上的空拍请忽略）', audio.silence)
   } else add('info', 'audio', '成片没有音轨')
 
-  const byShot = timeline.shots.map((shot, index) => {
+  const byShot = shots.map((shot, index) => {
     const from = shot.startFrame / fps, to = (shot.startFrame + shot.durationFrames) / fps
     const inside = (time) => time >= from - 0.02 && time < to - 0.02
     return {

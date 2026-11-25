@@ -57,11 +57,15 @@ state.length=0;cursor=0
 const toolbarProps={node:{...node,w:320,h:180},onDelete:()=>events.push(['delete']),onEdit:()=>events.push(['edit']),onUpload:()=>events.push(['upload'])}
 tree=VideoNodeToolbar(toolbarProps)
 for(const [label,action] of [['删除','delete'],['编辑','edit'],['上传视频','upload']]){byLabel(tree,label).props.onClick();assert.equal(events.at(-1)[0],action)}
+state.length=0;cursor=0
+const projectToolbar=VideoNodeToolbar({...toolbarProps,hasProject:true,onWorkbench:()=>events.push(['workbench'])})
+byLabel(projectToolbar,'剪辑').props.onClick();assert.deepEqual(events.at(-1),['workbench'])
 assert.equal(byLabel(tree,'信息').props['aria-expanded'],false)
 byLabel(tree,'信息').props.onClick();cursor=0;tree=VideoNodeToolbar(toolbarProps)
 assert.equal(byLabel(tree,'信息').props['aria-expanded'],true)
 assert.ok(all(tree).some(item=>item.props.role==='status'))
 assert.ok(all(tree).some(item=>item.children.includes('空视频节点')))
+node.data.motion.project='.drawai-motion/v2/x';tree=render();assert.ok(button(tree,'剪辑工作台'),'有工程的视频节点在面板里显示剪辑工作台入口');delete node.data.motion.project
 // ── issue #39：视频参数浮层必须锚在整条 footer 上、左右贴边 ──────────────────
 // 以前浮层挂在 chip 那一格（footer 的 auto 列，约 150px 宽）上，右锚 + 固定 200px 宽
 // 且没有 box-sizing，实际 226px 必然向左越出 composer 边框，被侧栏裁掉一半（标签全丢）。
