@@ -8324,8 +8324,10 @@ function CanvasView(props) {
   const setPrefs = prefsState[1]
   const [shotLibrary, setShotLibrary] = React.useState(null)
   const [mgLibrary, setMgLibrary] = React.useState(null)
+  const [motionWorkbench, setMotionWorkbench] = React.useState(null)
   React.useEffect(() => { setShotLibrary(null) }, [target, pageIndex])
   React.useEffect(() => { setMgLibrary(null) }, [target, pageIndex])
+  React.useEffect(() => { setMotionWorkbench(null) }, [target, pageIndex])
   const [motionJobs, setMotionJobs] = React.useState([])
   const motionFocusRef = React.useRef('')
   React.useEffect(() => {
@@ -8952,10 +8954,24 @@ function CanvasView(props) {
     setSaveNote('视频绘制已开始，可在节点或任务列表查看进度')
   }
 
+  /** 打开多轨剪辑工作台：先把画布存盘，宿主用一次性 token 把页面绑定到节点工程。 */
+  async function openMotionWorkbench(node) {
+    try {
+      await saveNow()
+      if (dirtyRef.current) throw new Error('请先保存画布')
+      const result = await mediaAction('workbench-session', { nodeId: node.id, page: pageIndex }, { throwOnError: true })
+      if (!result || !result.url) throw new Error('宿主没有返回工作台地址')
+      setMotionWorkbench({ url: result.url, nodeId: node.id, label: node.label || node.id })
+    } catch (error) {
+      setSaveNote('打开剪辑工作台失败：' + (error && error.message ? error.message : String(error)))
+    }
+  }
+
   function renderMotionPanel(node) {
     return React.createElement(MotionPanel, { key: node.id, node, doc: docRef.current, jobs: motionJobs, page: pageIndex,
       onChange: (patch) => updateMotion(node.id, patch), onGenerate: (composition) => generateMotion(node.id, composition),
       onShotLibrary: () => setShotLibrary({ targetId: node.id }),
+      onWorkbench: () => openMotionWorkbench(node),
       onAddAudio:()=>addAudioForVideo(node.id),
       onRemix:async taskId=>{await saveNow();if(dirtyRef.current)throw new Error('请先保存画布');await mediaAction('motion-task-remix',{taskId},{throwOnError:true});setNonce(v=>v+1)},
       mode, previewOf: (source) => imageValueFromStyle(source.style || ''),
@@ -13376,17 +13392,24 @@ function CanvasView(props) {
       const meta = videoMetaOf(node)
       const motionNode = motionCore.isMotionNode(node)
       const mediaWidth = !meta && motionNode ? 352 : meta && meta.kind === 'raster' ? 340 : 260
-      const position = { width: mediaWidth + 'px',
-        left: center - mediaWidth / 2 + 'px',
+      const hasMotionProject = motionNode && typeof node.data.motion?.project === 'string' && !!node.data.motion.project
+      const toolbarWidth = mediaWidth + (hasMotionProject ? 72 : 0)
+      const position = { width: toolbarWidth + 'px',
+        left: center - toolbarWidth / 2 + 'px',
         top: top - 72 + 'px' }
       if (!meta && motionNode) {
+        const hasProject = typeof node.data.motion?.project === 'string' && !!node.data.motion.project
+        const cardWidth = hasProject ? 430 : 360
         return React.createElement(NodeToolCard, { key: 'video-actions-' + node.id, canvasRef, className: 'drawai-selection-toolbar drawai-video-action-toolbar',
-          fallbackTop: bottom + 12, style: { width: '360px', left: center - 180 + 'px', top: top - 72 + 'px' } },
+          fallbackTop: bottom + 12, style: { width: cardWidth + 'px', left: center - cardWidth / 2 + 'px', top: top - 72 + 'px' } },
           React.createElement(ToolbarPopover, { label: '编辑', group: 'drawai-video-' + uid, icon: videoWorkbenchIcon('edit'), renderPanel: () => renderMotionPanel(node) }),
-          React.createElement(VideoNodeToolbar, { node, hideEdit: true, onDelete: () => { deleteById(node.id); setSelectedIds([]) },
+          React.createElement(VideoNodeToolbar, { node, hideEdit: true, hasProject, onWorkbench: () => openMotionWorkbench(node),
+            onDelete: () => { deleteById(node.id); setSelectedIds([]) },
             onUpload: () => openVideoFilePicker(node.id) }))
       }
       const motionControl = motionNode ? React.createElement(ToolbarPopover, { label: '绘制视频', group: 'drawai-video-' + uid, icon: railIcon('video'), renderPanel: () => renderMotionPanel(node) }) : null
+      const workbenchControl = hasMotionProject ? React.createElement('button', { type: 'button', className: 'drawai-toolbar-button', title: '剪辑工作台：多轨时间轴与实时预览',
+        'aria-label': '剪辑工作台', onClick: () => openMotionWorkbench(node) }, videoWorkbenchIcon('edit'), React.createElement('span', null, '剪辑')) : null
       const reportError = (error) => setSaveNote('媒体操作失败：' + (error.message || String(error)))
       const actions = [
         { label: '绘制复刻…', primary: true, mediaKind: 'raster', disabled: () => !hasPath || !meta || meta.kind !== 'raster',
@@ -13408,7 +13431,7 @@ function CanvasView(props) {
         } },
       ]
       return React.createElement(NodeToolCard, { canvasRef, className: 'drawai-selection-toolbar drawai-video-toolbar', fallbackTop: bottom + 12, style: position },
-        motionControl, React.createElement(VideoControls, { compact: true, controller: videoController, node, meta, actions, onError: reportError,
+        workbenchControl, motionControl, React.createElement(VideoControls, { compact: true, controller: videoController, node, meta, actions, onError: reportError,
           renderDraw: (action, state, icon) => React.createElement(ToolbarPopover, {
             key: 'video-draw-' + node.id, label: '绘制复刻', icon, group: 'drawai-video-' + uid,
 
@@ -13771,7 +13794,10 @@ function CanvasView(props) {
 
     return React.createElement('div', { className: 'drawai-rail-wrap' }, rail, panel,
       shotLibrary ? React.createElement(ShotCardLibrary, { mode, ...shotLibrary, onClose: () => setShotLibrary(null), onAdd: addShotCards }) : null,
-      mgLibrary ? React.createElement(MgStyleLibrary, { mode, ...mgLibrary, onClose: () => setMgLibrary(null), onAdd: addMgStyle }) : null)
+      mgLibrary ? React.createElement(MgStyleLibrary, { mode, ...mgLibrary, onClose: () => setMgLibrary(null), onAdd: addMgStyle }) : null,
+      motionWorkbench ? React.createElement(MotionWorkbenchDialog, { ...motionWorkbench,
+        onClose: () => { setMotionWorkbench(null); setNonce((value) => value + 1) },
+        onEvent: (data) => { if (data.type === 'drawai-workbench-applied') { setSaveNote('成片已回填到视频节点 ' + (data.nodeId || '') + '，正在刷新画布'); setNonce((value) => value + 1) } } }) : null)
   }
 
   /**

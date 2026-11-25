@@ -15,6 +15,7 @@ function VideoNodeToolbar(props) {
   const button = (icon, text, onClick, extra) => React.createElement('button', { type: 'button', className: 'drawai-toolbar-button',
     title: text, 'aria-label': text, onClick, ...extra }, videoWorkbenchIcon(icon), React.createElement('span', null, text))
   return React.createElement('div', { className: 'drawai-video-actions', role: 'toolbar', 'aria-label': '视频节点操作' },
+    props.hasProject && props.onWorkbench ? button('edit', '剪辑', props.onWorkbench) : null,
     props.hideEdit ? null : button('edit', '编辑', props.onEdit), button('video', '上传视频', props.onUpload),
     button('info', '信息', () => setInfo(!info), { 'aria-expanded': info }), button('delete', '删除', props.onDelete),
     info ? React.createElement('div', { className: 'drawai-video-info', role: 'status' },
@@ -22,6 +23,47 @@ function VideoNodeToolbar(props) {
       React.createElement('div', null, props.node.data.mediaClip ? '已添加视频内容' : '空视频节点'),
       React.createElement('div', null, Math.round(props.node.w) + ' × ' + Math.round(props.node.h)),
       React.createElement('small', null, props.node.id)) : null)
+}
+
+function requestWorkbenchClose(frame, onClose) {
+  if (!frame?.contentWindow) { onClose?.(); return false }
+  try { frame.contentWindow.postMessage({ type: 'drawai-workbench-request-close' }, window.location.origin); return true }
+  catch { onClose?.(); return false }
+}
+
+function MotionWorkbenchDialog(props) {
+  const ref = React.useRef(null)
+  const frameRef = React.useRef(null)
+  const requestClose = React.useCallback(() => requestWorkbenchClose(frameRef.current, props.onClose), [props.onClose])
+  React.useEffect(() => {
+    const dialog = ref.current
+    if (!dialog) return
+    if (!dialog.open) dialog.showModal()
+    const onClose = () => props.onClose?.()
+    dialog.addEventListener('close', onClose)
+    return () => { dialog.removeEventListener('close', onClose); if (dialog.open) dialog.close() }
+  }, [])
+  React.useEffect(() => {
+    const onMessage = (event) => {
+      if (event.origin !== window.location.origin) return
+      const data = event.data || {}
+      if (data.type === 'drawai-workbench-close') props.onClose?.()
+      if (data.type === 'drawai-workbench-applied') props.onEvent?.(data)
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [])
+  return React.createElement('dialog', { ref, className: 'drawai-workbench-dialog', 'aria-label': '剪辑工作台',
+    onCancel: (event) => { event.preventDefault(); requestClose() },
+    onPointerDown: (event) => event.stopPropagation(), onKeyDown: (event) => event.stopPropagation(),
+    style: { width: '96vw', maxWidth: '96vw', height: '92vh', maxHeight: '92vh', padding: 0, border: '1px solid #333640',
+      borderRadius: 14, background: '#141519', color: '#e8e9ee', overflow: 'hidden', boxShadow: '0 30px 120px #0008' } },
+    React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid #2a2c33', background: '#191a20' } },
+      React.createElement('strong', { style: { fontSize: 13 } }, '剪辑工作台'),
+      React.createElement('span', { style: { fontSize: 12, opacity: .6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, props.label || ''),
+      React.createElement('span', { style: { flex: 1 } }),
+      React.createElement('button', { type: 'button', className: 'drawai-btn', onClick: requestClose }, '关闭')),
+    React.createElement('iframe', { ref: frameRef, src: props.url, title: 'DrawAI 剪辑工作台', allow: 'autoplay; fullscreen', style: { width: '100%', height: 'calc(100% - 41px)', border: 0, display: 'block', background: '#141519' } }))
 }
 
 function MotionFilmReview({job,onLoad,onSave,onRevise}){
@@ -92,6 +134,9 @@ function MotionPanel(props) {
   const candidates = props.doc.nodes.filter((node) => node.id !== props.node.id && !refs.some((edge) => edge.from === node.id))
   return React.createElement('div', { className: 'drawai-motion-panel drawai-video-composer', 'data-tone': props.mode || 'light', 'aria-label': '视频设置',
     onPointerDown: (event) => event.stopPropagation(), onDoubleClick: (event) => event.stopPropagation(), onKeyDown: (event) => event.stopPropagation() },
+    motion.project ? React.createElement('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 } },
+      React.createElement('button', { type: 'button', className: 'drawai-btn', onClick: props.onWorkbench }, '剪辑工作台'),
+      React.createElement('span', { className: 'drawai-export-info', style: { fontSize: 11 } }, '实时预览、多轨时间轴、导出成片')) : null,
     React.createElement('div', { className: 'drawai-video-reference-heading' }, '参考内容', props.onShotLibrary ? React.createElement('button', { type: 'button', className: 'drawai-btn', onClick: props.onShotLibrary }, '添加镜头卡') : null),
     React.createElement('div', { className: 'drawai-video-references' },
       refs.map((edge) => {

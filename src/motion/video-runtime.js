@@ -15,6 +15,15 @@ const spec = JSON.parse(readFileSync(MANIFEST, 'utf8'))
 const key = `v1-${process.platform}-${process.arch}-node${process.versions.node.split('.')[0]}-${fingerprint.slice(0, 12)}`
 const pending = new Map()
 
+/** 测试/诊断只读：缓存键和依赖清单指纹由构建时的 lock 决定。 */
+export function videoRuntimeCacheKey() {
+  return key
+}
+
+export function videoRuntimeFingerprint() {
+  return fingerprint
+}
+
 function waitForInitialization(work, signal) {
   if (!signal) return work
   signal.throwIfAborted()

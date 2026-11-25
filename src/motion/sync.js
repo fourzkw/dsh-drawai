@@ -5,6 +5,7 @@ import { join, resolve, relative, isAbsolute } from 'node:path'
 import { decodePcm } from './beats.js'
 import { runFfmpeg } from './ffmpeg.js'
 import { parseProjectJson } from './json.js'
+import { normalizeTimeline, sourceDurationOf } from './timeline.js'
 
 const number = (value, name) => {
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(name + ' 必须是有限数字')
@@ -42,7 +43,7 @@ export function syncRevision(dir, timeline) {
 export const filmHash = (file) => createHash('sha256').update(readFileSync(file)).digest('hex')
 
 export function resolveSync(input) {
-  const timeline = structuredClone(input), sync = timeline.sync
+  const timeline = normalizeTimeline(input), sync = timeline.sync
   if (!sync) return timeline
   const fps = number(timeline.fps, 'fps')
   if (sync.toleranceFrames !== undefined && (number(sync.toleranceFrames, 'toleranceFrames') < 0 || sync.toleranceFrames > 3)) throw new Error('toleranceFrames 必须在0–3内')
@@ -52,6 +53,7 @@ export function resolveSync(input) {
   const offset = sync.outputOffsetSeconds === undefined ? 0 : number(sync.outputOffsetSeconds, 'outputOffsetSeconds')
   if (Math.abs(offset) > 1) throw new Error('输出偏移超出 ±1 秒')
   const ids = new Set(), targets = new Set(), cueIds = new Set()
+  const main = timeline.tracks[0]
   const rows = sync.anchors.map((anchor) => {
     if (typeof anchor.id !== 'string' || !anchor.id || ids.has(anchor.id)) throw new Error('anchor.id 必须唯一')
     ids.add(anchor.id)
@@ -79,19 +81,34 @@ export function resolveSync(input) {
     const seconds = music.from / fps + musicLocal + offset
     const frame = Math.round(seconds * fps)
     if (frame < 0 || frame >= timeline.durationInFrames) throw new Error('锚点超出影片范围：' + anchor.id)
-    if (anchor.type === 'cut') shot.startFrame = frame
-    return { ...anchor, sourceSeconds, seconds, frame, quantizationMs: (frame / fps - seconds) * 1000 }
+    const clip = anchor.type === 'cut' ? main.clips.find((item) => item.shotId === anchor.shotId) : null
+    if (anchor.type === 'cut' && !clip) throw new Error('切镜锚点没有对应的主镜头片段：' + anchor.shotId)
+    return { ...anchor, sourceSeconds, seconds, frame, quantizationMs: (frame / fps - seconds) * 1000, ...(clip ? { clipId: clip.id } : {}) }
   })
-  for (let i = 0; i < timeline.shots.length; i++) {
-    const shot = timeline.shots[i], end = timeline.shots[i + 1]?.startFrame ?? timeline.durationInFrames
-    if (shot.startFrame < 0 || end <= shot.startFrame) throw new Error('切镜绑定导致镜头倒序或长度为零')
-    shot.durationFrames = end - shot.startFrame
-    shot.anchors = Object.create(null)
+
+  // 切点只移动它绑定的主镜头片段和相邻片段边界，其他未绑定片段的裁剪/空隙原样保留。
+  // 旧工程（没有 tracks）打开时也走这一条，结果与旧版“按下一镜起点反推时长”一致。
+  const cuts = rows.filter((row) => row.type === 'cut').sort((a, b) => a.frame - b.frame)
+  for (const row of cuts) {
+    const clip = main.clips.find((item) => item.id === row.clipId)
+    const index = main.clips.indexOf(clip)
+    const previous = main.clips[index - 1], next = main.clips[index + 1]
+    if (previous && row.frame <= previous.startFrame) throw new Error('切镜绑定导致镜头倒序或长度为零')
+    if (next && row.frame >= next.startFrame) throw new Error('切镜绑定导致镜头倒序或长度为零')
+    if (previous) previous.durationFrames = row.frame - previous.startFrame
+    clip.startFrame = row.frame
+    clip.durationFrames = (next ? next.startFrame : timeline.durationInFrames) - row.frame
   }
+
   for (const row of rows) {
+    if (row.type !== 'action') continue
     const shot = timeline.shots.find((item) => item.id === row.shotId)
-    if (row.frame < shot.startFrame || row.frame >= shot.startFrame + shot.durationFrames) throw new Error('动作锚点不在所属镜头内：' + row.id)
-    if (row.type === 'action') shot.anchors[row.name] = row.frame - shot.startFrame
+    const clip = main.clips.find((item) => item.shotId === row.shotId && row.frame >= item.startFrame && row.frame < item.startFrame + item.durationFrames)
+    if (!clip) throw new Error('动作锚点不在所属镜头的可见片段内：' + row.id)
+    const local = row.frame - clip.startFrame + clip.inOffset
+    if (local < 0 || local >= sourceDurationOf(shot)) throw new Error('动作锚点超出场景来源长度：' + row.id)
+    shot.anchors[row.name] = local
+    row.clipId = clip.id
     for (const sfx of row.sfx || []) {
       if (cueIds.has(sfx.cueId) || sfx.cueId === music.id) throw new Error('音效轨不能重复绑定或绑定音乐自身')
       cueIds.add(sfx.cueId)
@@ -105,7 +122,7 @@ export function resolveSync(input) {
     }
   }
   sync.resolved = rows
-  return timeline
+  return normalizeTimeline(timeline)
 }
 
 // Normalized waveform matching around an expected transient. Low/ambiguous
