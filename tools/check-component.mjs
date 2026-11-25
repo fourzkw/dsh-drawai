@@ -129,6 +129,7 @@ function renderOnce(seed) {
       },
     },
     sidebarRightTabs: { register: () => () => {} },
+    sidebarRight: { registerCloseHandler: () => () => {} },
     timeout: () => () => {},
     interval: () => () => {},
     get: () => undefined,
@@ -1212,6 +1213,7 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
     createMotionFromSelection: () => {},
     ImageTraceControl: 'image-trace-control',
     ToolbarPopover: 'toolbar-popover', NodeToolCard: 'node-tool-card', canvasRef: { current: null }, active: true,
+    motionWorkbenchVisible: false,
     exportNodeImage: (node, format) => { lineChange = { node, format } },
     nodeImageExportInfo: new Function('isVideoNodeData', 'imageValueFromStyle', 'isRasterDataUri', 'isSvgDataUri', 'node', bodyOf('nodeImageExportInfo')).bind(null,
       styleKernel.isVideoNodeData, styleKernel.imageValueFromStyle, styleKernel.isRasterDataUri, styleKernel.isSvgDataUri),
@@ -1229,6 +1231,9 @@ console.log('\n浮动工具栏：批量改样式保留各对象其余属性')
   const flatten = (node) => Array.isArray(node) ? node.flatMap(flatten) : node && typeof node === 'object' ? [node].concat(flatten(node.children || [])) : []
   const tree = render()
   ok(tree.props.role === 'toolbar' && tree.props.style.width === '460px', '普通选区使用一致的工具栏宽度')
+  context.motionWorkbenchVisible = true
+  ok(render() === null, '剪辑页打开时卸载选区工具栏，避免顶层浮层盖住 iframe')
+  context.motionWorkbenchVisible = false
   const controls = flatten(tree)
   const control = (label) => controls.find((el) => el.props.label === label || el.props['aria-label'] === label)
   ok(control('字号').props.value === '', '节点与边字号不同，显示混合状态')
