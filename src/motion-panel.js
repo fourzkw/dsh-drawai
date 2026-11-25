@@ -31,6 +31,144 @@ function requestWorkbenchClose(frame, onClose) {
   catch { onClose?.(); return false }
 }
 
+function workbenchToneOfHost() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return 'dark'
+  let style = null
+  try { style = window.getComputedStyle(document.documentElement) } catch { style = null }
+  const read = (name) => {
+    if (!style || typeof style.getPropertyValue !== 'function') return ''
+    const value = String(style.getPropertyValue(name) || '').trim()
+    return value.startsWith('var(') ? '' : value
+  }
+  const raw = read('--dsw-alias-bg-base') || read('--dsw-alias-bg-layer-1') || read('--dsw-alias-bg-overlay')
+  let rgb = null
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(raw)
+  if (hex) {
+    const value = hex[1].length === 3 ? hex[1].split('').map((part) => part + part).join('') : hex[1]
+    rgb = [parseInt(value.slice(0, 2), 16), parseInt(value.slice(2, 4), 16), parseInt(value.slice(4, 6), 16)]
+  } else {
+    const match = /^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i.exec(raw)
+    if (match) rgb = [Number(match[1]), Number(match[2]), Number(match[3])]
+  }
+  if (rgb !== null) return (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000 < 142 ? 'dark' : 'light'
+  try { if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark' } catch { /* 老环境 */ }
+  return 'light'
+}
+
+function hostWorkbenchTheme() {
+  const tone = workbenchToneOfHost()
+  const fallback = tone === 'dark'
+    ? { bg: '#141519', panel: '#191a20', border: '#2a2c33', text: '#e8e9ee', muted: '#a4a7b2', accent: '#7d6ae0' }
+    : { bg: '#f7f8fa', panel: '#ffffff', border: '#e1e3e8', text: '#282c35', muted: '#737a86', accent: '#2f6fed' }
+  let style = null
+  try { style = typeof window === 'undefined' ? null : window.getComputedStyle(document.documentElement) } catch { style = null }
+  const read = (name, fallbackValue) => {
+    if (!style || typeof style.getPropertyValue !== 'function') return fallbackValue
+    const value = String(style.getPropertyValue(name) || '').trim()
+    return value.length > 0 && !value.startsWith('var(') ? value : fallbackValue
+  }
+  return {
+    tone,
+    bg: read('--dsw-alias-bg-base', fallback.bg),
+    panel: read('--dsw-alias-bg-overlay', read('--dsw-alias-bg-layer-1', fallback.panel)),
+    border: read('--dsw-alias-border-l2', read('--dsw-alias-border-l1', fallback.border)),
+    text: read('--dsw-alias-label-primary', fallback.text),
+    muted: read('--dsw-alias-label-secondary', fallback.muted),
+    accent: read('--dsw-alias-brand-primary', read('--drawai-accent', fallback.accent)),
+  }
+}
+
+function sameWorkbenchTheme(a, b) {
+  if (!a || !b) return false
+  return a.tone === b.tone && a.bg === b.bg && a.panel === b.panel && a.border === b.border
+    && a.text === b.text && a.muted === b.muted && a.accent === b.accent
+}
+
+function useHostWorkbenchTheme() {
+  const [theme, setTheme] = React.useState(hostWorkbenchTheme)
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return undefined
+    let frameRequested = false
+    const refresh = () => {
+      frameRequested = false
+      const next = hostWorkbenchTheme()
+      setTheme((current) => (sameWorkbenchTheme(current, next) ? current : next))
+    }
+    const schedule = () => {
+      if (frameRequested) return
+      frameRequested = true
+      if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(refresh)
+      else setTimeout(refresh, 16)
+    }
+    let observer = null
+    if (typeof MutationObserver === 'function') {
+      observer = new MutationObserver(schedule)
+      observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-color-mode'] })
+      if (document.body) observer.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class', 'data-theme', 'data-color-mode'] })
+    }
+    let media = null
+    try {
+      media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
+      media?.addEventListener?.('change', schedule)
+    } catch { media = null }
+    const timer = setInterval(refresh, 1500)
+    return () => {
+      if (observer) observer.disconnect()
+      try { media?.removeEventListener?.('change', schedule) } catch { /* 老环境 */ }
+      clearInterval(timer)
+    }
+  }, [])
+  return theme
+}
+
+function workbenchUrlWithTheme(url, tone) {
+  const raw = String(url || '')
+  if (!raw) return raw
+  const separator = raw.includes('?') ? '&' : '?'
+  return raw + separator + 'theme=' + (tone === 'light' ? 'light' : 'dark')
+}
+
+function MotionWorkbenchInline(props) {
+  const localFrameRef = React.useRef(null)
+  const frameRef = props.frameRef || localFrameRef
+  const theme = useHostWorkbenchTheme()
+  const visible = props.visible !== false
+  const post = React.useCallback((message) => {
+    const frame = frameRef.current
+    if (!frame || !frame.contentWindow) return false
+    try { frame.contentWindow.postMessage(message, window.location.origin); return true }
+    catch { return false }
+  }, [frameRef])
+  React.useEffect(() => {
+    const frame = frameRef.current
+    if (frame) frame.__drawaiTheme = theme
+  }, [frameRef, theme])
+  React.useEffect(() => { post({ type: 'drawai-workbench-theme', theme }) }, [post, theme])
+  React.useEffect(() => {
+    post({ type: visible ? 'drawai-workbench-resume' : 'drawai-workbench-suspend' })
+  }, [post, visible])
+  React.useEffect(() => {
+    const onMessage = (event) => {
+      if (event.origin !== window.location.origin) return
+      const frame = frameRef.current
+      if (frame && event.source && event.source !== frame.contentWindow) return
+      const data = event.data || {}
+      if (data.type === 'drawai-workbench-back') props.onBack?.()
+      else if (data.type === 'drawai-workbench-close') props.onClose?.()
+      else if (data.type === 'drawai-workbench-applied') props.onApplied?.(data)
+      else if (data.type === 'drawai-workbench-dirty') props.onDirtyChange?.(data.dirty === true)
+      else if (data.type === 'drawai-workbench-ready') post({ type: 'drawai-workbench-theme', theme })
+    }
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [frameRef, props.onApplied, props.onBack, props.onClose, props.onDirtyChange, post, theme])
+  return React.createElement('div', { className: 'drawai-workbench-inline', 'data-visible': visible ? 'true' : 'false',
+    style: { display: visible ? 'flex' : 'none' }, 'aria-hidden': visible ? undefined : 'true' },
+  React.createElement('iframe', { ref: frameRef, src: props.url, title: 'DrawAI 剪辑工作台', allow: 'autoplay; fullscreen',
+    'data-drawai-workbench-frame': '1', onLoad: () => post({ type: 'drawai-workbench-theme', theme }),
+    style: { width: '100%', height: '100%', border: 0, display: 'block', background: theme.bg } }))
+}
+
 function MotionWorkbenchDialog(props) {
   const ref = React.useRef(null)
   const frameRef = React.useRef(null)

@@ -23,6 +23,15 @@ const frameOf = (value) => Math.round(Number(value) || 0)
 const fpsOf = (timeline) => Number(timeline?.fps) || 30
 const durationOf = (timeline) => Number(timeline?.durationInFrames) || 1
 
+function postToParent(message) {
+  try {
+    window.parent.postMessage(message, window.location.origin)
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function request(action, payload = {}) {
   const response = await fetch(API, {
     method: 'POST',
@@ -69,80 +78,106 @@ function cueColor(role) {
 const css = `
 *{box-sizing:border-box}
 html,body,#root{height:100%;margin:0}
-body{background:#141519;color:#e8e9ee;font-family:Inter,"Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;overflow:hidden}
-.wb-root{height:100%;display:flex;flex-direction:column;background:#141519}
-.wb-header{display:flex;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid #2a2c33;background:#191a20;flex-wrap:wrap}
-.wb-title{font-weight:650;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42vw}
-.wb-meta{font-size:12px;color:#8e919c;white-space:nowrap}
+:root{color-scheme:dark;--wb-bg:var(--wb-host-bg,#141519);--wb-bg-elev:var(--wb-host-panel,#191a20);--wb-bg-panel:var(--wb-host-panel,#18191f);--wb-bg-control:var(--wb-host-button,#23252c);--wb-bg-control-hover:color-mix(in srgb,var(--wb-bg-control) 82%,var(--wb-text));--wb-bg-input:color-mix(in srgb,var(--wb-bg-panel) 86%,var(--wb-text) 14%);--wb-bg-stage:#0b0c0f;--wb-bg-timeline:color-mix(in srgb,var(--wb-bg) 86%,var(--wb-bg-panel) 14%);--wb-bg-track-head:var(--wb-bg-panel);--wb-bg-lane-a:#191b21;--wb-bg-lane-b:#17191e;--wb-bg-lane-main-a:#1b1d24;--wb-bg-lane-main-b:#181a20;--wb-bg-clip-a:#2b2f3a;--wb-bg-clip-b:#242833;--wb-bg-overlay-a:#1d1a25;--wb-bg-overlay-b:#191720;--wb-bg-audio-a:#20312c;--wb-bg-audio-b:#1d2926;--wb-bg-voice-a:#1d2838;--wb-bg-voice-b:#1a2331;--wb-bg-bgm-a:#271f38;--wb-bg-bgm-b:#211b2f;--wb-text:var(--wb-host-text,#e8e9ee);--wb-text-strong:#fff;--wb-muted:var(--wb-host-muted,#a4a7b2);--wb-dim:#767a86;--wb-faint:#717582;--wb-border:var(--wb-host-border,#2a2c33);--wb-border-strong:#353842;--wb-border-input:color-mix(in srgb,var(--wb-border) 73%,var(--wb-text));--wb-accent:var(--wb-host-accent,#7d6ae0);--wb-accent-soft:#a18cff;--wb-accent-bg:color-mix(in srgb,var(--wb-accent) 84%,#000);--wb-danger:#ffb4bd;--wb-warn:#ffcf7a;--wb-warn-bg:#2a2317;--wb-warn-border:#5b4826;--wb-danger-bg:#2b1a1d;--wb-danger-border:#5d2a31;--wb-toast:#2a2c35;--wb-playhead:#ff5d6c;--wb-shadow:0 10px 30px #0007}
+:root[data-drawai-theme=light]{color-scheme:light;--wb-bg:var(--wb-host-bg,#f7f8fa);--wb-bg-elev:var(--wb-host-panel,#fff);--wb-bg-panel:var(--wb-host-panel,#f2f3f5);--wb-bg-control:var(--wb-host-button,#fff);--wb-bg-control-hover:#eef1f5;--wb-bg-input:#fff;--wb-bg-stage:#e9ebef;--wb-bg-timeline:#fafbfc;--wb-bg-track-head:#f2f3f5;--wb-bg-lane-a:#fff;--wb-bg-lane-b:#f7f8fa;--wb-bg-lane-main-a:#f4f6f9;--wb-bg-lane-main-b:#eef1f5;--wb-bg-clip-a:#e8edf5;--wb-bg-clip-b:#dfe6ef;--wb-bg-overlay-a:#f2edf9;--wb-bg-overlay-b:#ebe4f5;--wb-bg-audio-a:#e6f3ee;--wb-bg-audio-b:#dcece5;--wb-bg-voice-a:#e7effb;--wb-bg-voice-b:#dce7f7;--wb-bg-bgm-a:#eee8fb;--wb-bg-bgm-b:#e6def7;--wb-text:var(--wb-host-text,#282c35);--wb-text-strong:#111318;--wb-muted:var(--wb-host-muted,#737a86);--wb-dim:#8a919c;--wb-faint:#9aa0aa;--wb-border:var(--wb-host-border,#e1e3e8);--wb-border-strong:#cfd4dc;--wb-border-input:#d5dae2;--wb-accent:var(--wb-host-accent,#2f6fed);--wb-accent-soft:#2f6fed;--wb-accent-bg:#2f6fed;--wb-danger:#b42318;--wb-warn:#8a5a00;--wb-warn-bg:#fff7e6;--wb-warn-border:#f0d49a;--wb-danger-bg:#fff2f0;--wb-danger-border:#f2b8b5;--wb-toast:#fff;--wb-playhead:#e5484d;--wb-shadow:0 10px 30px #1b23330f}
+body{background:var(--wb-bg);color:var(--wb-text);font-family:Inter,"Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;overflow:hidden}
+.wb-root{height:100%;display:flex;flex-direction:column;background:var(--wb-bg)}
+.wb-root:focus{outline:none}
+.wb-header{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--wb-border);background:var(--wb-bg-elev);flex-wrap:wrap;min-height:46px}
+.wb-heading{display:flex;align-items:center;gap:7px;min-width:120px;max-width:min(46vw,460px);overflow:hidden}
+.wb-title{font-weight:650;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wb-page{flex:0 0 auto;border:1px solid var(--wb-border);border-radius:999px;padding:1px 7px;color:var(--wb-muted);font-size:10.5px;white-space:nowrap}
+.wb-meta{font-size:11.5px;color:var(--wb-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:28vw}
 .wb-spacer{flex:1}
-.wb-btn{appearance:none;border:1px solid #353842;background:#23252c;color:#e8e9ee;border-radius:8px;padding:7px 12px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
-.wb-btn:hover{border-color:#4c4f5b;background:#2a2c35}
+.wb-btn{appearance:none;border:1px solid var(--wb-border-strong);background:var(--wb-bg-control);color:var(--wb-text);border-radius:8px;padding:6px 10px;font:inherit;font-size:12px;cursor:pointer;white-space:nowrap}
+.wb-btn:hover{border-color:color-mix(in srgb,var(--wb-border-strong) 72%,var(--wb-text));background:var(--wb-bg-control-hover)}
 .wb-btn:disabled{opacity:.42;cursor:default}
-.wb-btn.primary{background:#6f5bd6;border-color:#7d6ae0}
-.wb-btn.primary:hover{background:#7d6ae0}
-.wb-btn.danger{color:#ffb4b4;border-color:#5a3434}
-.wb-main{flex:1;min-height:0;display:flex}
-.wb-preview-col{flex:1;min-width:0;display:flex;flex-direction:column;padding:12px 14px 8px;gap:8px;border-right:1px solid #2a2c33}
-.wb-stage{flex:1;min-height:120px;background:#0b0c0f;border:1px solid #2a2c33;border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
+.wb-btn.primary{background:var(--wb-accent-bg);border-color:var(--wb-accent);color:#fff}
+.wb-btn.primary:hover{background:color-mix(in srgb,var(--wb-accent-bg) 82%,#fff)}
+.wb-btn.danger{color:var(--wb-danger);border-color:var(--wb-danger-border)}
+.wb-btn.back{font-weight:600}
+.wb-btn.icon{padding:5px 8px}
+.wb-save{font-variant-numeric:tabular-nums}
+.wb-save.dirty{color:var(--wb-warn);border-color:var(--wb-warn-border);background:var(--wb-warn-bg)}
+.wb-main{flex:1;min-height:0;display:flex;position:relative}
+.wb-preview-col{flex:1;min-width:0;display:flex;flex-direction:column;padding:10px 12px 8px;gap:8px}
+.wb-stage{flex:1;min-height:120px;background:var(--wb-bg-stage);border:1px solid var(--wb-border);border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative}
 .wb-stage .player{width:100%;height:100%}
-.wb-stage-empty{color:#767a86;font-size:13px;text-align:center;padding:24px;line-height:1.8;max-width:560px}
-.wb-transport{display:flex;align-items:center;gap:8px;font-size:12px;color:#a4a7b2}
-.wb-transport .tc{font-variant-numeric:tabular-nums;color:#fff;letter-spacing:.2px}
-.wb-inspector{width:292px;flex-shrink:0;overflow:auto;padding:14px;background:#18191f}
-.wb-inspector h3{margin:0 0 10px;font-size:12px;letter-spacing:.06em;color:#9a9eaa;text-transform:uppercase}
-.wb-field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;font-size:12px;color:#a4a7b2}
-.wb-field input,.wb-field select{height:30px;border:1px solid #343741;border-radius:7px;background:#202229;color:#e8e9ee;padding:0 8px;font:inherit;font-size:12px;min-width:0}
-.wb-field input[type=range]{height:22px;padding:0;accent-color:#7d6ae0}
+.wb-stage-empty{color:var(--wb-dim);font-size:13px;text-align:center;padding:24px;line-height:1.8;max-width:560px}
+.wb-transport{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--wb-muted);flex-wrap:wrap}
+.wb-transport .tc{font-variant-numeric:tabular-nums;color:var(--wb-text-strong);letter-spacing:.2px}
+.wb-inspector{width:292px;flex-shrink:0;overflow:auto;padding:14px;background:var(--wb-bg-panel);border-left:1px solid var(--wb-border)}
+.wb-inspector-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.wb-inspector h3{margin:0 0 10px;font-size:12px;letter-spacing:.06em;color:var(--wb-muted);text-transform:uppercase}
+.wb-inspector-head h3{margin:0}
+.wb-inspector-close{display:none}
+.wb-inspector-toggle{display:none}
+.wb-inspector-backdrop{display:none}
+.wb-field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;font-size:12px;color:var(--wb-muted)}
+.wb-field input,.wb-field select{height:30px;border:1px solid var(--wb-border-input);border-radius:7px;background:var(--wb-bg-input);color:var(--wb-text);padding:0 8px;font:inherit;font-size:12px;min-width:0}
+.wb-field input[type=range]{height:22px;padding:0;accent-color:var(--wb-accent)}
 .wb-field .row{display:flex;gap:6px}
 .wb-field .row>*{flex:1}
-.wb-hint{font-size:11.5px;line-height:1.65;color:#7f8490;margin:0 0 10px}
-.wb-pill{display:inline-flex;align-items:center;gap:5px;border:1px solid #353842;border-radius:999px;padding:2px 8px;font-size:11px;color:#b9bdc8;margin:0 5px 6px 0}
-.wb-pill.lock{color:#ffcf7a;border-color:#5b4826;background:#2a2317}
-.wb-timeline{border-top:1px solid #2a2c33;background:#17181d;flex-shrink:0}
-.wb-tl-toolbar{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid #262830;flex-wrap:wrap}
+.wb-hint{font-size:11.5px;line-height:1.65;color:var(--wb-dim);margin:0 0 10px}
+.wb-pill{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--wb-border);border-radius:999px;padding:2px 8px;font-size:11px;color:var(--wb-muted);margin:0 5px 6px 0}
+.wb-pill.lock{color:var(--wb-warn);border-color:var(--wb-warn-border);background:var(--wb-warn-bg)}
+.wb-timeline{border-top:1px solid var(--wb-border);background:var(--wb-bg-timeline);flex-shrink:0}
+.wb-tl-toolbar{display:flex;align-items:center;gap:6px;padding:7px 10px;border-bottom:1px solid var(--wb-border);flex-wrap:wrap}
 .wb-tl-toolbar .wb-btn{padding:5px 9px}
-.wb-tl-scroll{overflow:auto;max-height:44vh;min-height:180px}
+.wb-tl-scroll{overflow:auto;max-height:46vh;min-height:180px}
 .wb-tl-content{position:relative;min-width:100%}
-.wb-ruler-row{display:flex;height:28px;border-bottom:1px solid #262830;position:sticky;top:0;background:#17181d;z-index:3}
-.wb-track-head{width:152px;flex-shrink:0;padding:0 10px;display:flex;align-items:center;gap:7px;font-size:12px;color:#b9bdc8;border-right:1px solid #262830;position:sticky;left:0;background:#18191f;z-index:2}
-.wb-track-head small{color:#717582;font-size:10.5px}
-.wb-track-row{display:flex;border-bottom:1px solid #23252c;min-height:48px}
+.wb-ruler-row{display:flex;height:28px;border-bottom:1px solid var(--wb-border);position:sticky;top:0;background:var(--wb-bg-timeline);z-index:3}
+.wb-track-head{width:152px;flex-shrink:0;padding:0 10px;display:flex;align-items:center;gap:7px;font-size:12px;color:var(--wb-muted);border-right:1px solid var(--wb-border);position:sticky;left:0;background:var(--wb-bg-track-head);z-index:2}
+.wb-track-head small{color:var(--wb-faint);font-size:10.5px}
+.wb-track-row{display:flex;border-bottom:1px solid var(--wb-border);min-height:48px}
 .wb-track-row.audio{min-height:38px}
-.wb-lane{position:relative;flex:1;min-width:0;background:linear-gradient(180deg,#191b21,#17191e)}
-.wb-lane.main{background:linear-gradient(180deg,#1b1d24,#181a20)}
-.wb-lane.overlay{background:linear-gradient(180deg,#1d1a25,#191720)}
+.wb-lane{position:relative;flex:1;min-width:0;background:linear-gradient(180deg,var(--wb-bg-lane-a),var(--wb-bg-lane-b))}
+.wb-lane.main{background:linear-gradient(180deg,var(--wb-bg-lane-main-a),var(--wb-bg-lane-main-b))}
+.wb-lane.overlay{background:linear-gradient(180deg,var(--wb-bg-overlay-a),var(--wb-bg-overlay-b))}
 .wb-ruler{position:relative;flex:1;cursor:pointer;user-select:none}
-.wb-tick{position:absolute;top:0;bottom:0;border-left:1px solid #2d3039;font-size:10px;color:#6f7480;padding-left:4px;white-space:nowrap}
-.wb-tick.major{border-color:#3d414c;color:#a0a4af}
-.wb-clip{position:absolute;top:5px;bottom:5px;border-radius:6px;border:1px solid #3a3e4a;border-left:3px solid #7d6ae0;background:linear-gradient(180deg,#2b2f3a,#242833);overflow:hidden;cursor:grab;user-select:none;min-width:10px}
-.wb-clip.selected{outline:2px solid #a18cff;outline-offset:0;box-shadow:0 0 0 3px #7d6ae033}
-.wb-clip .label{position:absolute;inset:4px 8px auto 8px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#e7e8ee}
-.wb-clip .meta{position:absolute;left:8px;bottom:3px;font-size:10px;color:#9ba0ad;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;right:8px}
-.wb-clip .trim{position:absolute;top:0;bottom:0;width:7px;cursor:ew-resize;background:#ffffff0c}
-.wb-clip .trim:hover{background:#a18cff44}
+.wb-tick{position:absolute;top:0;bottom:0;border-left:1px solid var(--wb-border);font-size:10px;color:var(--wb-faint);padding-left:4px;white-space:nowrap}
+.wb-tick.major{border-color:var(--wb-border-strong);color:var(--wb-muted)}
+.wb-clip{position:absolute;top:5px;bottom:5px;border-radius:6px;border:1px solid var(--wb-border-strong);border-left:3px solid var(--wb-accent);background:linear-gradient(180deg,var(--wb-bg-clip-a),var(--wb-bg-clip-b));overflow:hidden;cursor:grab;user-select:none;min-width:10px}
+.wb-clip.selected{outline:2px solid var(--wb-accent-soft);outline-offset:0;box-shadow:0 0 0 3px color-mix(in srgb,var(--wb-accent) 22%,transparent)}
+.wb-clip .label{position:absolute;inset:4px 8px auto 8px;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--wb-text)}
+.wb-clip .meta{position:absolute;left:8px;bottom:3px;font-size:10px;color:var(--wb-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;right:8px}
+.wb-clip .trim{position:absolute;top:0;bottom:0;width:7px;cursor:ew-resize;background:color-mix(in srgb,var(--wb-text) 5%,transparent)}
+.wb-clip .trim:hover{background:color-mix(in srgb,var(--wb-accent) 27%,transparent)}
 .wb-clip .trim.l{left:0}.wb-clip .trim.r{right:0}
 .wb-clip.bound{border-left-color:#e0a94b}
-.wb-clip.audio{border-left-color:#28b487;background:linear-gradient(180deg,#20312c,#1d2926);cursor:grab}
-.wb-clip.audio.voice{border-left-color:#3f8cff;background:linear-gradient(180deg,#1d2838,#1a2331)}
-.wb-clip.audio.bgm{border-left-color:#9b7bff;background:linear-gradient(180deg,#271f38,#211b2f)}
-.wb-playhead{position:absolute;top:0;bottom:0;width:1px;background:#ff5d6c;z-index:6;pointer-events:none}
-.wb-playhead::before{content:"";position:absolute;top:0;left:-5px;border:5px solid transparent;border-top:7px solid #ff5d6c}
+.wb-clip.audio{border-left-color:#28b487;background:linear-gradient(180deg,var(--wb-bg-audio-a),var(--wb-bg-audio-b));cursor:grab}
+.wb-clip.audio.voice{border-left-color:#3f8cff;background:linear-gradient(180deg,var(--wb-bg-voice-a),var(--wb-bg-voice-b))}
+.wb-clip.audio.bgm{border-left-color:#9b7bff;background:linear-gradient(180deg,var(--wb-bg-bgm-a),var(--wb-bg-bgm-b))}
+.wb-playhead{position:absolute;top:0;bottom:0;width:1px;background:var(--wb-playhead);z-index:6;pointer-events:none}
+.wb-playhead::before{content:"";position:absolute;top:0;left:-5px;border:5px solid transparent;border-top:7px solid var(--wb-playhead)}
 .wb-bound{position:absolute;top:0;bottom:0;width:0;border-left:1px dashed #e0a94b;z-index:4;pointer-events:none}
 .wb-bound::after{content:"";position:absolute;top:2px;left:-4px;width:7px;height:7px;background:#e0a94b;transform:rotate(45deg)}
-.wb-banner{display:flex;align-items:center;gap:10px;padding:8px 14px;background:#2a2317;border-bottom:1px solid #5b4826;color:#ffd993;font-size:12px}
-.wb-banner.error{background:#2b1a1d;border-color:#5d2a31;color:#ffb4bd}
+.wb-banner{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--wb-warn-bg);border-bottom:1px solid var(--wb-warn-border);color:var(--wb-warn);font-size:12px;flex-wrap:wrap}
+.wb-banner.error{background:var(--wb-danger-bg);border-color:var(--wb-danger-border);color:var(--wb-danger)}
 .wb-banner .wb-btn{padding:4px 9px}
-.wb-render{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid #2b2d35}
-.wb-progress{height:6px;border-radius:4px;background:#24262e;overflow:hidden}
-.wb-progress>div{height:100%;background:linear-gradient(90deg,#6f5bd6,#a18cff);transition:width .25s}
-.wb-job{border:1px solid #2e313a;border-radius:8px;padding:8px;margin-bottom:6px;font-size:11.5px;color:#a4a7b2;line-height:1.55}
-.wb-job strong{color:#e8e9ee;font-weight:600}
-.wb-job .stale{color:#ffcf7a}
-.wb-empty{color:#717582;font-size:12px;line-height:1.7;padding:8px 2px}
-.wb-toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#2a2c35;border:1px solid #454955;color:#f0f1f5;padding:8px 14px;border-radius:9px;font-size:12px;z-index:30;box-shadow:0 10px 30px #0007;max-width:80vw}
-.wb-error{color:#ffb4bd;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
-.wb-mini{font-size:10.5px;color:#7f8490;line-height:1.5}
-@media (max-width:900px){.wb-inspector{width:244px}.wb-title{max-width:30vw}}
+.wb-render{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--wb-border)}
+.wb-progress{height:6px;border-radius:4px;background:var(--wb-border);overflow:hidden}
+.wb-progress>div{height:100%;background:linear-gradient(90deg,var(--wb-accent-bg),var(--wb-accent-soft));transition:width .25s}
+.wb-job{border:1px solid var(--wb-border);border-radius:8px;padding:8px;margin-bottom:6px;font-size:11.5px;color:var(--wb-muted);line-height:1.55}
+.wb-job strong{color:var(--wb-text);font-weight:600}
+.wb-job .stale{color:var(--wb-warn)}
+.wb-empty{color:var(--wb-faint);font-size:12px;line-height:1.7;padding:8px 2px}
+.wb-toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:var(--wb-toast);border:1px solid var(--wb-border-strong);color:var(--wb-text);padding:8px 14px;border-radius:9px;font-size:12px;z-index:30;box-shadow:var(--wb-shadow);max-width:80vw}
+.wb-error{color:var(--wb-danger);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.wb-mini{font-size:10.5px;color:var(--wb-dim);line-height:1.5}
+@media (max-width:900px){.wb-meta{display:none}.wb-title{max-width:36vw}}
+@media (max-width:760px){
+  .wb-header{gap:5px;padding:6px 8px}
+  .wb-heading{max-width:44vw;min-width:0}
+  .wb-btn.optional{display:none}
+  .wb-inspector-toggle{display:inline-flex}
+  .wb-inspector{position:absolute;right:0;top:0;bottom:0;width:min(320px,92%);transform:translateX(102%);transition:transform .18s ease;z-index:24;box-shadow:var(--wb-shadow);border-left:1px solid var(--wb-border)}
+  .wb-inspector.open{transform:translateX(0)}
+  .wb-inspector-close{display:inline-flex}
+  .wb-inspector-backdrop{display:block;position:absolute;inset:0;background:#0004;z-index:23}
+  .wb-preview-col{padding:8px 8px 6px}
+  .wb-tl-scroll{max-height:42vh}
+}
 `
 
 class PlayerBoundary extends React.Component {
@@ -209,6 +244,7 @@ function App({ scenes }) {
   const [renderBusy, setRenderBusy] = React.useState(false)
   const [applying, setApplying] = React.useState(false)
   const [overlaySource, setOverlaySource] = React.useState(BOOT.sources?.[0]?.id || '')
+  const [inspectorOpen, setInspectorOpen] = React.useState(false)
   const [drag, setDrag] = React.useState(null)
   const [fontsReady, setFontsReady] = React.useState(!(BOOT.fontFaces || []).length)
   const playerRef = React.useRef(null)
@@ -270,6 +306,14 @@ function App({ scenes }) {
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [dirty])
+
+  React.useEffect(() => {
+    postToParent({ type: 'drawai-workbench-dirty', dirty, nodeId: BOOT.project?.nodeId || '', revision })
+  }, [dirty, revision])
+
+  React.useEffect(() => {
+    if (!selected) setInspectorOpen(false)
+  }, [selected])
 
   React.useEffect(() => {
     if (!renderJob?.id) return
@@ -460,34 +504,61 @@ function App({ scenes }) {
     try {
       const result = await request('apply', { jobId: job.id })
       setMessage('已回填到画布节点：' + result.nodeId)
-      try { window.parent.postMessage({ type: 'drawai-workbench-applied', nodeId: result.nodeId, jobId: job.id }, window.location.origin) } catch { /* 不在 iframe 里 */ }
+      postToParent({ type: 'drawai-workbench-applied', nodeId: result.nodeId, jobId: job.id })
     } catch (error) { setMessage('回填失败：' + error.message) }
     finally { setApplying(false) }
   }, [applying])
 
+  const backToCanvas = React.useCallback(() => {
+    try { playerRef.current?.pause() } catch { /* 预览还没挂载 */ }
+    setInspectorOpen(false)
+    if (!postToParent({ type: 'drawai-workbench-back' })) window.close()
+  }, [])
+
   const close = React.useCallback(() => {
     if (dirty && !window.confirm('时间轴还有未保存的修改，确定关闭工作台？')) return
-    try { window.parent.postMessage({ type: 'drawai-workbench-close' }, window.location.origin) } catch { window.close() }
+    if (!postToParent({ type: 'drawai-workbench-close' })) window.close()
   }, [dirty])
 
   React.useEffect(() => {
     const onMessage = (event) => {
       if (event.origin !== window.location.origin || event.source !== window.parent) return
-      if (event.data?.type === 'drawai-workbench-request-close') close()
+      const type = event.data?.type
+      if (type === 'drawai-workbench-request-close') close()
+      else if (type === 'drawai-workbench-suspend') {
+        try { playerRef.current?.pause() } catch { /* 预览还没挂载 */ }
+      } else if (type === 'drawai-workbench-resume') {
+        if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
+      } else if (type === 'drawai-workbench-theme') {
+        const theme = event.data?.theme
+        const tone = theme?.tone === 'light' ? 'light' : 'dark'
+        document.documentElement.setAttribute('data-drawai-theme', tone)
+        document.documentElement.style.colorScheme = tone
+        for (const key of ['bg', 'panel', 'border', 'text', 'muted', 'accent']) {
+          const name = '--wb-host-' + key
+          if (typeof theme?.[key] === 'string' && theme[key]) document.documentElement.style.setProperty(name, theme[key])
+          else document.documentElement.style.removeProperty(name)
+        }
+      }
     }
     window.addEventListener('message', onMessage)
     // 外壳与运行时同窗：外壳只能用这个同步标记判断运行时已接管关闭确认。
     // 只给 parent 发 ready 的话，外壳永远收不到自己的消息，会抢在确认前关掉 iframe。
     window.__DRAWAI_WORKBENCH_RUNTIME_READY__ = true
-    try { window.parent.postMessage({ type: 'drawai-workbench-ready' }, window.location.origin) } catch { /* 不在 iframe 里 */ }
+    postToParent({ type: 'drawai-workbench-ready', nodeId: BOOT.project?.nodeId || '' })
     return () => window.removeEventListener('message', onMessage)
   }, [close])
 
   React.useEffect(() => {
     const onKey = (event) => {
       const tag = event.target?.tagName?.toLowerCase()
-      if (event.key === 'Escape') { event.preventDefault(); close(); return }
-      if (tag === 'input' || tag === 'textarea' || tag === 'select') return
+      const typing = tag === 'input' || tag === 'textarea' || tag === 'select' || event.target?.isContentEditable === true
+      if (event.key === 'Escape') {
+        if (event.isComposing) return
+        if (typing && typeof event.target?.blur === 'function') { event.preventDefault(); event.target.blur(); return }
+        event.preventDefault(); backToCanvas(); return
+      }
+      if (typing) return
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
         event.preventDefault(); if (event.shiftKey) redo(); else undo(); return
       }
@@ -500,7 +571,18 @@ function App({ scenes }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [close, playhead, redo, removeSelected, save, seek, splitSelected, togglePlay, undo])
+  }, [backToCanvas, playhead, redo, removeSelected, save, seek, splitSelected, togglePlay, undo])
+
+  // 时间轴片段会在 pointerdown 里 preventDefault（拖拽时避免选中文本），
+  // 那会连带阻止 iframe 取得键盘焦点。点击剪辑区任意非输入控件时显式聚焦根节点，
+  // 否则快捷键会落回 DSH 对话框或画布。
+  const focusWorkbench = React.useCallback((event) => {
+    const target = event.target
+    const tag = target?.tagName?.toLowerCase()
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable === true) return
+    try { window.focus() } catch { /* sandbox 可能拒绝 */ }
+    try { rootRef.current?.focus({ preventScroll: true }) } catch { /* 老浏览器 */ }
+  }, [])
 
   const plan = React.useMemo(() => OPS.workbenchPlanOf(timeline, BOOT.fontFaces || []), [timeline])
   const inputProps = React.useMemo(() => ({ plan }), [plan])
@@ -522,17 +604,22 @@ function App({ scenes }) {
   const someActive = renderJob && ['queued', 'running'].includes(renderJob.status)
 
   return (
-    <div className="wb-root" ref={rootRef}>
+    <div className="wb-root" ref={rootRef} tabIndex={-1} onPointerDownCapture={focusWorkbench} onPointerUpCapture={focusWorkbench}>
       <header className="wb-header">
-        <div className="wb-title" title={BOOT.project?.dir || ''}>{BOOT.project?.name || '剪辑工作台'}</div>
+        <button type="button" className="wb-btn back" onClick={backToCanvas} title="返回画布；草稿、播放头和撤销历史都会保留" aria-label="返回画布">← 返回画布</button>
+        <div className="wb-heading" title={BOOT.project?.canvas || BOOT.project?.dir || ''}>
+          <div className="wb-title">{BOOT.project?.name || '剪辑工作台'}</div>
+          {BOOT.project?.page ? <span className="wb-page">第 {BOOT.project.page} 页</span> : null}
+        </div>
         <div className="wb-meta">{timeline.width}×{timeline.height} · {fps}fps · {(total / fps).toFixed(2)}s · {main.clips.length} 镜{overlay.clips.length ? ' · 叠加 ' + overlay.clips.length : ''}</div>
         <div className="wb-spacer" />
-        <button className="wb-btn" onClick={undo} disabled={!past.length} title="撤销 Ctrl+Z">撤销</button>
-        <button className="wb-btn" onClick={redo} disabled={!future.length} title="重做 Ctrl+Shift+Z">重做</button>
-        <button className="wb-btn" onClick={() => save()} disabled={readOnly || saving || !dirty}>{saving ? '保存中…' : dirty ? '保存*' : '已保存'}</button>
-        <button className="wb-btn primary" onClick={refreshPreview} title="场景源码或素材变了之后重新打包">刷新预览</button>
+        <button type="button" className="wb-btn icon optional" onClick={undo} disabled={!past.length} title="撤销 Ctrl+Z" aria-label="撤销">撤销</button>
+        <button type="button" className="wb-btn icon optional" onClick={redo} disabled={!future.length} title="重做 Ctrl+Shift+Z" aria-label="重做">重做</button>
+        <button type="button" className={'wb-btn wb-save' + (dirty ? ' dirty' : '')} onClick={() => save()} disabled={readOnly || saving || !dirty}
+          title={dirty ? '保存时间轴修改' : '时间轴已保存'} aria-label={dirty ? '保存时间轴，当前有未保存修改' : '时间轴已保存'}>{saving ? '保存中…' : dirty ? '未保存' : '已保存'}</button>
+        <button type="button" className="wb-btn optional" onClick={refreshPreview} title="场景源码或素材变了之后重新打包" aria-label="刷新预览">刷新预览</button>
+        <button type="button" className="wb-btn inspector-toggle" onClick={() => setInspectorOpen((open) => !open)} aria-expanded={inspectorOpen} aria-controls="wb-inspector" title="展开或收起片段属性">属性</button>
         <button className="wb-btn primary" onClick={startRender} disabled={readOnly || renderBusy || someActive}>{someActive ? '渲染中…' : '导出成片'}</button>
-        <button className="wb-btn" onClick={close}>关闭</button>
       </header>
 
       {readOnly ? <div className="wb-banner">当前画布是只读的：可以查看和试编，保存与导出会被宿主拒绝。</div> : null}
@@ -582,8 +669,9 @@ function App({ scenes }) {
           </div>
         </div>
 
-        <aside className="wb-inspector">
-          <h3>属性</h3>
+        {inspectorOpen ? <button type="button" className="wb-inspector-backdrop" aria-label="收起片段属性" onClick={() => setInspectorOpen(false)} /> : null}
+        <aside id="wb-inspector" className={'wb-inspector' + (inspectorOpen ? ' open' : '')} aria-label="片段属性">
+          <div className="wb-inspector-head"><h3>属性</h3><button type="button" className="wb-btn icon inspector-close" onClick={() => setInspectorOpen(false)} aria-label="收起片段属性">收起</button></div>
           {selectedClip ? (
             <ClipInspector
               timeline={timeline} track={selectedClip.track} clip={selectedClip.clip} source={sources.get(selectedClip.clip.shotId)}
