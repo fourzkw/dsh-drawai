@@ -169,6 +169,41 @@ function bodyOf(name) {
   return null
 }
 
+// DSH 的文档基址可以位于站点根目录，也可以由反向代理挂在子路径。
+{
+  const endpoint = src.match(/^const SAVE_ENDPOINT = '([^']+)'$/m)[1]
+  const create = bodyOf('createCanvasNamed')
+  for (const prefix of ['/', '/harness/web/']) {
+    const base = new URL(prefix, 'https://example.test')
+    const path = '检查.drawai'
+    let opened
+    let failure
+    const context = {
+      client: {},
+      sessionId: 'session',
+      SAVE_ENDPOINT: endpoint,
+      SAVE_HEADER: 'x-drawai-save',
+      setSaveNote() {},
+      setDocMenu() {},
+      setNewName() {},
+      setFileList(result) { failure = result?.error },
+      onOpenTab(value) { opened = value },
+      async fetch(url, options) {
+        if (new URL(url, base).pathname !== prefix + 'drawai/api/save') {
+          return new Response('Forbidden', { status: 403 })
+        }
+        const body = JSON.parse(options.body)
+        ok(options.method === 'POST' && options.headers['x-drawai-save'] === '1' && body.action === 'create' && body.name === path,
+          `新建画布请求使用原有宿主协议（${prefix}）`)
+        return Response.json({ ok: true, path })
+      },
+    }
+    const run = new Function(...Object.keys(context), 'return async function(name) ' + create)(...Object.values(context))
+    await run('检查')
+    ok(opened === path && failure === undefined, `新建画布按文档基址发出请求（${prefix}）${failure ? '：' + failure : ''}`)
+  }
+}
+
 console.log('整组件渲染：状态形状不对时也不能整块降级\n')
 {
   const cases = [
